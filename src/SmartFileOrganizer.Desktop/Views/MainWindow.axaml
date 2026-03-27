@@ -1,0 +1,138 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:SmartFileOrganizer.Desktop.ViewModels"
+        xmlns:views="using:SmartFileOrganizer.Desktop.Views"
+        x:Class="SmartFileOrganizer.Desktop.Views.MainWindow"
+        x:DataType="vm:MainViewModel"
+        Title="Smart File Organizer"
+        Width="1280" Height="800"
+        MinWidth="900" MinHeight="600">
+
+    <DockPanel>
+
+        <!-- ===== Toolbar ===== -->
+        <Border DockPanel.Dock="Top"
+                Background="{DynamicResource SystemControlBackgroundChromeMediumBrush}"
+                Padding="8,4">
+            <WrapPanel Orientation="Horizontal" VerticalAlignment="Center">
+
+                <Button Content="📁 Choose Folder"
+                        Command="{Binding PickFolderCommand}"
+                        Margin="0,0,4,0" />
+
+                <TextBlock Text="{Binding RootPath}"
+                           VerticalAlignment="Center"
+                           Margin="0,0,12,0"
+                           MaxWidth="400"
+                           TextTrimming="CharacterEllipsis"
+                           Foreground="{DynamicResource SystemControlForegroundBaseHighBrush}" />
+
+                <Button Content="▶ Start Scan"
+                        Command="{Binding StartScanCommand}"
+                        Margin="0,0,4,0" />
+
+                <Button Content="⏸ Pause"
+                        Command="{Binding PauseScanCommand}"
+                        IsEnabled="{Binding IsScanRunning}"
+                        Margin="0,0,4,0" />
+
+                <Button Content="⏹ Cancel"
+                        Command="{Binding CancelScanCommand}"
+                        IsEnabled="{Binding IsScanRunning}"
+                        Margin="0,0,12,0" />
+
+                <!-- Progress -->
+                <StackPanel Orientation="Vertical" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding ScanProgress.StatusText}"
+                               FontSize="11"
+                               Margin="0,0,0,2"/>
+                    <ProgressBar Value="{Binding ScanProgress.ProgressPercent}"
+                                 Minimum="0" Maximum="100"
+                                 Width="200" Height="6" />
+                </StackPanel>
+
+            </WrapPanel>
+        </Border>
+
+        <!-- ===== Status Bar ===== -->
+        <Border DockPanel.Dock="Bottom"
+                Background="{DynamicResource SystemControlBackgroundChromeLowBrush}"
+                Padding="8,2">
+            <TextBlock Text="{Binding ScanProgress.CurrentPath}"
+                       FontSize="11"
+                       TextTrimming="CharacterEllipsis" />
+        </Border>
+
+        <!-- ===== Main area ===== -->
+        <Grid ColumnDefinitions="260,4,*">
+
+            <!-- Left: Folder Tree -->
+            <Border Grid.Column="0"
+                    BorderThickness="0,0,1,0"
+                    BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}">
+                <DockPanel>
+                    <TextBlock DockPanel.Dock="Top"
+                               Text="Folder Tree"
+                               FontWeight="SemiBold"
+                               Margin="8,6,8,4" />
+                    <ScrollViewer>
+                        <TreeView ItemsSource="{Binding FolderTree.Roots}"
+                                  SelectedItem="{Binding FolderTree.SelectedItem, Mode=TwoWay}">
+                            <TreeView.ItemTemplate>
+                                <TreeDataTemplate ItemsSource="{Binding Children}"
+                                                  x:DataType="vm:FolderTreeItemViewModel">
+                                    <StackPanel Orientation="Horizontal" Spacing="4">
+                                        <TextBlock Text="📁" FontSize="12"/>
+                                        <TextBlock Text="{Binding DisplayName}" />
+                                        <TextBlock Text="{Binding StatusBadge}"
+                                                   FontSize="10"
+                                                   Foreground="Gray"
+                                                   VerticalAlignment="Center"/>
+                                    </StackPanel>
+                                </TreeDataTemplate>
+                            </TreeView.ItemTemplate>
+                        </TreeView>
+                    </ScrollViewer>
+                </DockPanel>
+            </Border>
+
+            <!-- Splitter -->
+            <GridSplitter Grid.Column="1" ResizeDirection="Columns" />
+
+            <!-- Right: File Table + Detail panel -->
+            <Grid Grid.Column="2" RowDefinitions="*,4,200">
+
+                <!-- File Table -->
+                <DataGrid Grid.Row="0"
+                          ItemsSource="{Binding FileTable.Rows}"
+                          SelectedItem="{Binding FileTable.SelectedRow, Mode=TwoWay}"
+                          AutoGenerateColumns="False"
+                          IsReadOnly="True"
+                          GridLinesVisibility="Horizontal"
+                          CanUserReorderColumns="True"
+                          CanUserResizeColumns="True"
+                          CanUserSortColumns="True">
+                    <DataGrid.Columns>
+                        <DataGridTextColumn Header="Name"           Binding="{Binding Name}"          Width="200" />
+                        <DataGridTextColumn Header="Type"           Binding="{Binding FileType}"       Width="80"  />
+                        <DataGridTextColumn Header="Category"       Binding="{Binding Category}"       Width="140" />
+                        <DataGridTextColumn Header="Size"           Binding="{Binding SizeText}"       Width="80"  />
+                        <DataGridTextColumn Header="Modified"       Binding="{Binding LastModified}"   Width="100" />
+                        <DataGridTextColumn Header="Confidence"     Binding="{Binding Confidence}"     Width="80"  />
+                        <DataGridTextColumn Header="Suggested Target" Binding="{Binding SuggestedTarget}" Width="140" />
+                        <DataGridTextColumn Header="Status"         Binding="{Binding Status}"         Width="100" />
+                    </DataGrid.Columns>
+                </DataGrid>
+
+                <GridSplitter Grid.Row="1" ResizeDirection="Rows" />
+
+                <!-- Detail Panel -->
+                <views:FileDetailView Grid.Row="2"
+                                      DataContext="{Binding FileDetail}" />
+
+            </Grid>
+
+        </Grid>
+
+    </DockPanel>
+</Window>

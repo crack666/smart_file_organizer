@@ -1,0 +1,13 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/SmartFileOrganizer.Application/SmartFileOrganizer.Application.csproj" />
+    <Project Path="src/SmartFileOrganizer.Desktop/SmartFileOrganizer.Desktop.csproj" />
+    <Project Path="src/SmartFileOrganizer.Domain/SmartFileOrganizer.Domain.csproj" />
+    <Project Path="src/SmartFileOrganizer.Infrastructure/SmartFileOrganizer.Infrastructure.csproj" />
+    <Project Path="src/SmartFileOrganizer.Scanning/SmartFileOrganizer.Scanning.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/SmartFileOrganizer.Application.Tests/SmartFileOrganizer.Application.Tests.csproj" />
+    <Project Path="tests/SmartFileOrganizer.Domain.Tests/SmartFileOrganizer.Domain.Tests.csproj" />
+  </Folder>
+</Solution>
