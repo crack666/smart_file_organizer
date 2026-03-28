@@ -5,11 +5,14 @@
              x:DataType="vm:FileDetailViewModel"
              Background="#252526">
 
-    <ScrollViewer Padding="8"
-                  Background="#252526">
-        <Grid ColumnDefinitions="320,6,*">
+    <Grid Background="#252526"
+          Margin="8"
+          ColumnDefinitions="320,6,*">
 
-            <StackPanel Grid.Column="0" Spacing="4">
+            <ScrollViewer Grid.Column="0"
+                          HorizontalScrollBarVisibility="Disabled"
+                          VerticalScrollBarVisibility="Auto">
+                <StackPanel Spacing="4">
                 <TextBlock Text="File Details"
                            FontWeight="SemiBold"
                            FontSize="13"
@@ -67,7 +70,8 @@
                                IsVisible="{Binding HasOverride}" />
 
                 </Grid>
-            </StackPanel>
+                </StackPanel>
+            </ScrollViewer>
 
             <GridSplitter Grid.Column="1"
                           ResizeDirection="Columns"
@@ -83,16 +87,19 @@
                                FontWeight="SemiBold"
                                FontSize="13" />
 
-                    <ScrollViewer Grid.Row="1"
-                                  HorizontalScrollBarVisibility="Auto"
-                                  VerticalScrollBarVisibility="Auto">
-                        <StackPanel Spacing="6">
+                    <Grid Grid.Row="1">
+                        <Border Background="#1E1E1E"
+                                IsVisible="{Binding HasImagePreview}">
                             <Image Source="{Binding ImagePreview}"
                                    Stretch="Uniform"
-                                   MaxHeight="700"
+                                   VerticalAlignment="Stretch"
                                    HorizontalAlignment="Stretch"
                                    IsVisible="{Binding HasImagePreview}" />
+                        </Border>
 
+                        <ScrollViewer HorizontalScrollBarVisibility="Auto"
+                                      VerticalScrollBarVisibility="Auto"
+                                      IsVisible="{Binding HasTextPreview}">
                             <TextBox Text="{Binding TextPreview}"
                                      IsReadOnly="True"
                                      AcceptsReturn="True"
@@ -101,18 +108,20 @@
                                      Background="#1E1E1E"
                                      Foreground="White"
                                      BorderThickness="0"
-                                     MinHeight="180"
                                      IsVisible="{Binding HasTextPreview}" />
+                        </ScrollViewer>
 
+                        <ScrollViewer HorizontalScrollBarVisibility="Disabled"
+                                      VerticalScrollBarVisibility="Auto"
+                                      IsVisible="{Binding HasPreviewMessage}">
                             <TextBlock Text="{Binding PreviewMessage}"
                                        TextWrapping="Wrap"
                                        Foreground="#DCDCDC"
                                        IsVisible="{Binding HasPreviewMessage}" />
-                        </StackPanel>
-                    </ScrollViewer>
+                        </ScrollViewer>
+                    </Grid>
                 </Grid>
             </Border>
         </Grid>
-    </ScrollViewer>
 
 </UserControl>
