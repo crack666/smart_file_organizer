@@ -108,7 +108,7 @@
 
             <!-- Right: File Table + Detail panel -->
             <Grid Grid.Column="2"
-                RowDefinitions="*,4,200"
+                RowDefinitions="3*,4,2*"
                 Background="#252526">
 
                 <!-- File Table -->
@@ -117,6 +117,7 @@
                           SelectedItem="{Binding FileTable.SelectedRow, Mode=TwoWay}"
                           AutoGenerateColumns="False"
                           IsReadOnly="True"
+                          MinHeight="180"
                           GridLinesVisibility="Horizontal"
                           CanUserReorderColumns="True"
                           CanUserResizeColumns="True"
@@ -160,7 +161,8 @@
                 <Border Grid.Row="2"
                         Background="#252526"
                         BorderBrush="#3E3E42"
-                        BorderThickness="1,1,0,0">
+                        BorderThickness="1,1,0,0"
+                        MinHeight="180">
                     <views:FileDetailView DataContext="{Binding FileDetail}" />
                 </Border>
 

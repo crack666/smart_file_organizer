@@ -7,7 +7,7 @@
 
     <ScrollViewer Padding="8"
                   Background="#252526">
-        <Grid ColumnDefinitions="360,12,*">
+        <Grid ColumnDefinitions="320,6,*">
 
             <StackPanel Grid.Column="0" Spacing="4">
                 <TextBlock Text="File Details"
@@ -69,36 +69,48 @@
                 </Grid>
             </StackPanel>
 
+            <GridSplitter Grid.Column="1"
+                          ResizeDirection="Columns"
+                          Background="#2D2D30" />
+
             <Border Grid.Column="2"
                     Background="#1E1E1E"
                     BorderBrush="#3E3E42"
                     BorderThickness="1"
                     Padding="8">
-                <StackPanel Spacing="6">
+                <Grid RowDefinitions="Auto,*" RowSpacing="6">
                     <TextBlock Text="Preview"
                                FontWeight="SemiBold"
                                FontSize="13" />
 
-                    <Image Source="{Binding ImagePreview}"
-                           Stretch="Uniform"
-                           MaxHeight="220"
-                           IsVisible="{Binding HasImagePreview}" />
+                    <ScrollViewer Grid.Row="1"
+                                  HorizontalScrollBarVisibility="Auto"
+                                  VerticalScrollBarVisibility="Auto">
+                        <StackPanel Spacing="6">
+                            <Image Source="{Binding ImagePreview}"
+                                   Stretch="Uniform"
+                                   MaxHeight="700"
+                                   HorizontalAlignment="Stretch"
+                                   IsVisible="{Binding HasImagePreview}" />
 
-                    <TextBox Text="{Binding TextPreview}"
-                             IsReadOnly="True"
-                             AcceptsReturn="True"
-                             TextWrapping="Wrap"
-                             FontFamily="Consolas"
-                             Background="#1E1E1E"
-                             Foreground="White"
-                             BorderThickness="0"
-                             IsVisible="{Binding HasTextPreview}" />
+                            <TextBox Text="{Binding TextPreview}"
+                                     IsReadOnly="True"
+                                     AcceptsReturn="True"
+                                     TextWrapping="Wrap"
+                                     FontFamily="Consolas"
+                                     Background="#1E1E1E"
+                                     Foreground="White"
+                                     BorderThickness="0"
+                                     MinHeight="180"
+                                     IsVisible="{Binding HasTextPreview}" />
 
-                    <TextBlock Text="{Binding PreviewMessage}"
-                               TextWrapping="Wrap"
-                               Foreground="#DCDCDC"
-                               IsVisible="{Binding HasPreviewMessage}" />
-                </StackPanel>
+                            <TextBlock Text="{Binding PreviewMessage}"
+                                       TextWrapping="Wrap"
+                                       Foreground="#DCDCDC"
+                                       IsVisible="{Binding HasPreviewMessage}" />
+                        </StackPanel>
+                    </ScrollViewer>
+                </Grid>
             </Border>
         </Grid>
     </ScrollViewer>
