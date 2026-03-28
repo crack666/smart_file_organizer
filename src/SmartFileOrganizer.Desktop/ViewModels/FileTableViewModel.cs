@@ -27,8 +27,10 @@ public partial class FileTableViewModel : ViewModelBase
         try
         {
             var files = await _fileQuery.GetFilesInDirectoryAsync(jobId, directoryPath, ct);
+            System.Diagnostics.Debug.WriteLine($"[FILE TABLE] jobId={jobId} path='{directoryPath}' → {files.Count} file(s) returned");
             foreach (var f in files)
                 Rows.Add(FileRowViewModel.From(f));
+            System.Diagnostics.Debug.WriteLine($"[FILE TABLE] Rows.Count after add = {Rows.Count}");
         }
         finally
         {

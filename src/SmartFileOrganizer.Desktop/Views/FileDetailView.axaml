@@ -2,70 +2,105 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:SmartFileOrganizer.Desktop.ViewModels"
              x:Class="SmartFileOrganizer.Desktop.Views.FileDetailView"
-             x:DataType="vm:FileDetailViewModel">
+             x:DataType="vm:FileDetailViewModel"
+             Background="#252526">
 
-    <ScrollViewer Padding="8">
-        <StackPanel Spacing="4">
+    <ScrollViewer Padding="8"
+                  Background="#252526">
+        <Grid ColumnDefinitions="360,12,*">
 
-            <TextBlock Text="File Details"
-                       FontWeight="SemiBold"
-                       FontSize="13"
-                       Margin="0,0,0,6" />
+            <StackPanel Grid.Column="0" Spacing="4">
+                <TextBlock Text="File Details"
+                           FontWeight="SemiBold"
+                           FontSize="13"
+                           Margin="0,0,0,6" />
 
-            <Grid ColumnDefinitions="Auto,8,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
+                <Grid ColumnDefinitions="Auto,8,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
 
-                <TextBlock Grid.Row="0" Grid.Column="0" Text="Name:"          FontWeight="SemiBold" />
-                <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding Name}" TextWrapping="Wrap" />
+                    <TextBlock Grid.Row="0" Grid.Column="0" Text="Name:"          FontWeight="SemiBold" />
+                    <TextBlock Grid.Row="0" Grid.Column="2" Text="{Binding Name}" TextWrapping="Wrap" />
 
-                <TextBlock Grid.Row="1" Grid.Column="0" Text="Path:"          FontWeight="SemiBold" />
-                <TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding FullPath}" TextWrapping="Wrap" FontSize="11" />
+                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Path:"          FontWeight="SemiBold" />
+                    <TextBlock Grid.Row="1" Grid.Column="2" Text="{Binding FullPath}" TextWrapping="Wrap" FontSize="11" />
 
-                <TextBlock Grid.Row="2" Grid.Column="0" Text="Type:"          FontWeight="SemiBold" />
-                <TextBlock Grid.Row="2" Grid.Column="2" Text="{Binding FileType}" />
+                    <TextBlock Grid.Row="2" Grid.Column="0" Text="Type:"          FontWeight="SemiBold" />
+                    <TextBlock Grid.Row="2" Grid.Column="2" Text="{Binding FileType}" />
 
-                <TextBlock Grid.Row="3" Grid.Column="0" Text="Size:"          FontWeight="SemiBold" />
-                <TextBlock Grid.Row="3" Grid.Column="2" Text="{Binding SizeText}" />
+                    <TextBlock Grid.Row="3" Grid.Column="0" Text="Size:"          FontWeight="SemiBold" />
+                    <TextBlock Grid.Row="3" Grid.Column="2" Text="{Binding SizeText}" />
 
-                <TextBlock Grid.Row="4" Grid.Column="0" Text="Modified:"      FontWeight="SemiBold" />
-                <TextBlock Grid.Row="4" Grid.Column="2" Text="{Binding LastModified}" />
+                    <TextBlock Grid.Row="4" Grid.Column="0" Text="Modified:"      FontWeight="SemiBold" />
+                    <TextBlock Grid.Row="4" Grid.Column="2" Text="{Binding LastModified}" />
 
-                <TextBlock Grid.Row="5" Grid.Column="0" Text="Category:"      FontWeight="SemiBold"
-                           IsVisible="{Binding HasClassification}" />
-                <TextBlock Grid.Row="5" Grid.Column="2" Text="{Binding Category}"
-                           IsVisible="{Binding HasClassification}" />
+                    <TextBlock Grid.Row="5" Grid.Column="0" Text="Category:"      FontWeight="SemiBold"
+                               IsVisible="{Binding HasClassification}" />
+                    <TextBlock Grid.Row="5" Grid.Column="2" Text="{Binding Category}"
+                               IsVisible="{Binding HasClassification}" />
 
-                <TextBlock Grid.Row="6" Grid.Column="0" Text="Importance:"    FontWeight="SemiBold"
-                           IsVisible="{Binding HasClassification}" />
-                <TextBlock Grid.Row="6" Grid.Column="2" Text="{Binding Importance}"
-                           IsVisible="{Binding HasClassification}" />
+                    <TextBlock Grid.Row="6" Grid.Column="0" Text="Importance:"    FontWeight="SemiBold"
+                               IsVisible="{Binding HasClassification}" />
+                    <TextBlock Grid.Row="6" Grid.Column="2" Text="{Binding Importance}"
+                               IsVisible="{Binding HasClassification}" />
 
-                <TextBlock Grid.Row="7" Grid.Column="0" Text="Confidence:"    FontWeight="SemiBold"
-                           IsVisible="{Binding HasClassification}" />
-                <TextBlock Grid.Row="7" Grid.Column="2" Text="{Binding Confidence}"
-                           IsVisible="{Binding HasClassification}" />
+                    <TextBlock Grid.Row="7" Grid.Column="0" Text="Confidence:"    FontWeight="SemiBold"
+                               IsVisible="{Binding HasClassification}" />
+                    <TextBlock Grid.Row="7" Grid.Column="2" Text="{Binding Confidence}"
+                               IsVisible="{Binding HasClassification}" />
 
-                <TextBlock Grid.Row="8" Grid.Column="0" Text="Target:"        FontWeight="SemiBold"
-                           IsVisible="{Binding HasClassification}" />
-                <TextBlock Grid.Row="8" Grid.Column="2" Text="{Binding SuggestedTarget}"
-                           IsVisible="{Binding HasClassification}" />
+                    <TextBlock Grid.Row="8" Grid.Column="0" Text="Target:"        FontWeight="SemiBold"
+                               IsVisible="{Binding HasClassification}" />
+                    <TextBlock Grid.Row="8" Grid.Column="2" Text="{Binding SuggestedTarget}"
+                               IsVisible="{Binding HasClassification}" />
 
-                <TextBlock Grid.Row="9" Grid.Column="0" Text="Summary:"       FontWeight="SemiBold"
-                           IsVisible="{Binding HasClassification}" />
-                <TextBlock Grid.Row="9" Grid.Column="2" Text="{Binding Summary}"
-                           TextWrapping="Wrap"
-                           IsVisible="{Binding HasClassification}" />
+                    <TextBlock Grid.Row="9" Grid.Column="0" Text="Summary:"       FontWeight="SemiBold"
+                               IsVisible="{Binding HasClassification}" />
+                    <TextBlock Grid.Row="9" Grid.Column="2" Text="{Binding Summary}"
+                               TextWrapping="Wrap"
+                               IsVisible="{Binding HasClassification}" />
 
-                <TextBlock Grid.Row="10" Grid.Column="0" Text="Override:"     FontWeight="SemiBold"
-                           Foreground="OrangeRed"
-                           IsVisible="{Binding HasOverride}" />
-                <TextBlock Grid.Row="10" Grid.Column="2"
-                           Text="{Binding OverrideCategory}"
-                           Foreground="OrangeRed"
-                           IsVisible="{Binding HasOverride}" />
+                    <TextBlock Grid.Row="10" Grid.Column="0" Text="Override:"     FontWeight="SemiBold"
+                               Foreground="OrangeRed"
+                               IsVisible="{Binding HasOverride}" />
+                    <TextBlock Grid.Row="10" Grid.Column="2"
+                               Text="{Binding OverrideCategory}"
+                               Foreground="OrangeRed"
+                               IsVisible="{Binding HasOverride}" />
 
-            </Grid>
+                </Grid>
+            </StackPanel>
 
-        </StackPanel>
+            <Border Grid.Column="2"
+                    Background="#1E1E1E"
+                    BorderBrush="#3E3E42"
+                    BorderThickness="1"
+                    Padding="8">
+                <StackPanel Spacing="6">
+                    <TextBlock Text="Preview"
+                               FontWeight="SemiBold"
+                               FontSize="13" />
+
+                    <Image Source="{Binding ImagePreview}"
+                           Stretch="Uniform"
+                           MaxHeight="220"
+                           IsVisible="{Binding HasImagePreview}" />
+
+                    <TextBox Text="{Binding TextPreview}"
+                             IsReadOnly="True"
+                             AcceptsReturn="True"
+                             TextWrapping="Wrap"
+                             FontFamily="Consolas"
+                             Background="#1E1E1E"
+                             Foreground="White"
+                             BorderThickness="0"
+                             IsVisible="{Binding HasTextPreview}" />
+
+                    <TextBlock Text="{Binding PreviewMessage}"
+                               TextWrapping="Wrap"
+                               Foreground="#DCDCDC"
+                               IsVisible="{Binding HasPreviewMessage}" />
+                </StackPanel>
+            </Border>
+        </Grid>
     </ScrollViewer>
 
 </UserControl>

@@ -1,6 +1,8 @@
+using Dapper;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using SmartFileOrganizer.Application.Services;
+using SmartFileOrganizer.Desktop.Services;
 using SmartFileOrganizer.Desktop.ViewModels;
 using SmartFileOrganizer.Domain.Interfaces;
 using SmartFileOrganizer.Infrastructure;
@@ -14,6 +16,9 @@ public static class ServiceConfigurator
 {
     public static IServiceProvider Build()
     {
+        // Dapper: map snake_case column names to PascalCase C# properties
+        DefaultTypeMap.MatchNamesWithUnderscores = true;
+
         var services = new ServiceCollection();
 
         // Logging
@@ -58,6 +63,7 @@ public static class ServiceConfigurator
         services.AddSingleton<DirectoryQueryService>();
         services.AddSingleton<ClassificationService>();
         services.AddSingleton<ReviewService>();
+        services.AddSingleton<FilePreviewService>();
 
         // ViewModels
         services.AddTransient<MainViewModel>();

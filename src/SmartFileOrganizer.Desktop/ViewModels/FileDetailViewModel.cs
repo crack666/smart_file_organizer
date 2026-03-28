@@ -1,10 +1,14 @@
+using Avalonia.Media.Imaging;
 using CommunityToolkit.Mvvm.ComponentModel;
+using SmartFileOrganizer.Desktop.Services;
 using SmartFileOrganizer.Domain.Models;
 
 namespace SmartFileOrganizer.Desktop.ViewModels;
 
 public partial class FileDetailViewModel : ViewModelBase
 {
+    private readonly FilePreviewService _previewService;
+
     [ObservableProperty] private string _name = string.Empty;
     [ObservableProperty] private string _fullPath = string.Empty;
     [ObservableProperty] private string _extension = string.Empty;
@@ -18,10 +22,22 @@ public partial class FileDetailViewModel : ViewModelBase
     [ObservableProperty] private string _suggestedTarget = string.Empty;
     [ObservableProperty] private string _overrideCategory = string.Empty;
     [ObservableProperty] private string _overrideTarget = string.Empty;
+    [ObservableProperty] private Bitmap? _imagePreview;
+    [ObservableProperty] private string _textPreview = string.Empty;
+    [ObservableProperty] private string _previewMessage = string.Empty;
     [ObservableProperty] private bool _hasOverride;
     [ObservableProperty] private bool _hasClassification;
 
-    public void Apply(FileNode file)
+    public bool HasImagePreview => ImagePreview != null;
+    public bool HasTextPreview => !string.IsNullOrWhiteSpace(TextPreview);
+    public bool HasPreviewMessage => !string.IsNullOrWhiteSpace(PreviewMessage);
+
+    public FileDetailViewModel(FilePreviewService previewService)
+    {
+        _previewService = previewService;
+    }
+
+    public async Task ApplyAsync(FileNode file, CancellationToken ct = default)
     {
         Name = file.Name;
         FullPath = file.FullPath;
@@ -56,14 +72,40 @@ public partial class FileDetailViewModel : ViewModelBase
             HasOverride = false;
             OverrideCategory = OverrideTarget = string.Empty;
         }
+
+        await LoadPreviewAsync(file, ct);
     }
 
     public void Clear()
     {
+        ImagePreview?.Dispose();
         Name = FullPath = Extension = FileType = SizeText = LastModified = string.Empty;
         Category = Importance = Confidence = Summary = SuggestedTarget = string.Empty;
         OverrideCategory = OverrideTarget = string.Empty;
+        ImagePreview = null;
+        TextPreview = PreviewMessage = string.Empty;
         HasClassification = HasOverride = false;
+
+        OnPropertyChanged(nameof(HasImagePreview));
+        OnPropertyChanged(nameof(HasTextPreview));
+        OnPropertyChanged(nameof(HasPreviewMessage));
+    }
+
+    private async Task LoadPreviewAsync(FileNode file, CancellationToken ct)
+    {
+        ImagePreview?.Dispose();
+        ImagePreview = null;
+        TextPreview = string.Empty;
+        PreviewMessage = string.Empty;
+
+        var preview = await _previewService.BuildAsync(file, ct);
+        ImagePreview = preview.ImagePreview;
+        TextPreview = preview.TextPreview;
+        PreviewMessage = preview.Message;
+
+        OnPropertyChanged(nameof(HasImagePreview));
+        OnPropertyChanged(nameof(HasTextPreview));
+        OnPropertyChanged(nameof(HasPreviewMessage));
     }
 
     private static string FormatSize(long bytes) => bytes switch

@@ -11,6 +11,7 @@ namespace SmartFileOrganizer.Desktop.ViewModels;
 public partial class MainViewModel : ViewModelBase
 {
     private readonly ScanJobService _scanJobService;
+    private readonly FileQueryService _fileQueryService;
     private readonly FolderTreeViewModel _folderTree;
     private readonly FileTableViewModel _fileTable;
     private readonly FileDetailViewModel _fileDetail;
@@ -27,7 +28,9 @@ public partial class MainViewModel : ViewModelBase
 
     [ObservableProperty] private string _rootPath = string.Empty;
     [ObservableProperty] private bool _isScanRunning;
-    [ObservableProperty] private bool _canStartScan;
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(StartScanCommand))]
+    private bool _canStartScan;
     [ObservableProperty] private ObservableCollection<ScanJob> _jobs = [];
     [ObservableProperty] private ScanJob? _selectedJob;
 
@@ -36,12 +39,14 @@ public partial class MainViewModel : ViewModelBase
 
     public MainViewModel(
         ScanJobService scanJobService,
+        FileQueryService fileQueryService,
         FolderTreeViewModel folderTree,
         FileTableViewModel fileTable,
         FileDetailViewModel fileDetail,
         ScanProgressViewModel scanProgress)
     {
         _scanJobService = scanJobService;
+        _fileQueryService = fileQueryService;
         _folderTree = folderTree;
         _fileTable = fileTable;
         _fileDetail = fileDetail;
@@ -141,26 +146,30 @@ public partial class MainViewModel : ViewModelBase
 
     private async void OnDirectorySelected(object? sender, string path)
     {
-        if (_activeJobId > 0)
+        System.Diagnostics.Debug.WriteLine($"[DIR SELECT] _activeJobId={_activeJobId}  path='{path}'");
+        if (_activeJobId <= 0) return;
+        try
+        {
             await _fileTable.LoadAsync(_activeJobId, path);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[DIR SELECT ERROR] {ex}");
+        }
         _fileDetail.Clear();
     }
 
     private async Task LoadFileDetailAsync(long fileId)
     {
-        // In future: load full file with classification from service
-        // For now just show from the already-loaded row
-        var row = _fileTable.Rows.FirstOrDefault(r => r.Id == fileId);
-        if (row == null) return;
-
-        // Build a minimal FileNode for the detail view
-        // (full detail load would call FileQueryService.GetFileByIdAsync)
-        var node = new Domain.Models.FileNode
+        try
         {
-            Id = row.Id,
-            Name = row.Name,
-            FullPath = row.FullPath
-        };
-        _fileDetail.Apply(node);
+            var file = await _fileQueryService.GetFileByIdAsync(fileId);
+            if (file == null) return;
+            await _fileDetail.ApplyAsync(file);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[LoadFileDetailAsync] {ex}");
+        }
     }
 }

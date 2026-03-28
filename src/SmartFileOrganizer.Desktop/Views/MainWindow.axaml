@@ -6,9 +6,10 @@
         x:DataType="vm:MainViewModel"
         Title="Smart File Organizer"
         Width="1280" Height="800"
-        MinWidth="900" MinHeight="600">
+        MinWidth="900" MinHeight="600"
+        Background="#1E1E1E">
 
-    <DockPanel>
+    <DockPanel Background="#1E1E1E">
 
         <!-- ===== Toolbar ===== -->
         <Border DockPanel.Dock="Top"
@@ -64,10 +65,11 @@
         </Border>
 
         <!-- ===== Main area ===== -->
-        <Grid ColumnDefinitions="260,4,*">
+        <Grid ColumnDefinitions="260,4,*" Background="#1E1E1E">
 
             <!-- Left: Folder Tree -->
             <Border Grid.Column="0"
+                    Background="#1E1E1E"
                     BorderThickness="0,0,1,0"
                     BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}">
                 <DockPanel>
@@ -78,16 +80,19 @@
                     <ScrollViewer>
                         <TreeView ItemsSource="{Binding FolderTree.Roots}"
                                   SelectedItem="{Binding FolderTree.SelectedItem, Mode=TwoWay}">
+                            <!-- Bind IsExpanded/IsSelected on each container so lazy-load fires -->
+                            <TreeView.Styles>
+                                <Style Selector="TreeViewItem">
+                                    <Setter Property="IsExpanded" Value="{ReflectionBinding IsExpanded, Mode=TwoWay}" />
+                                    <Setter Property="IsSelected" Value="{ReflectionBinding IsSelected, Mode=TwoWay}" />
+                                </Style>
+                            </TreeView.Styles>
                             <TreeView.ItemTemplate>
                                 <TreeDataTemplate ItemsSource="{Binding Children}"
                                                   x:DataType="vm:FolderTreeItemViewModel">
                                     <StackPanel Orientation="Horizontal" Spacing="4">
                                         <TextBlock Text="📁" FontSize="12"/>
                                         <TextBlock Text="{Binding DisplayName}" />
-                                        <TextBlock Text="{Binding StatusBadge}"
-                                                   FontSize="10"
-                                                   Foreground="Gray"
-                                                   VerticalAlignment="Center"/>
                                     </StackPanel>
                                 </TreeDataTemplate>
                             </TreeView.ItemTemplate>
@@ -97,10 +102,14 @@
             </Border>
 
             <!-- Splitter -->
-            <GridSplitter Grid.Column="1" ResizeDirection="Columns" />
+            <GridSplitter Grid.Column="1"
+                          ResizeDirection="Columns"
+                          Background="#2D2D30" />
 
             <!-- Right: File Table + Detail panel -->
-            <Grid Grid.Column="2" RowDefinitions="*,4,200">
+            <Grid Grid.Column="2"
+                RowDefinitions="*,4,200"
+                Background="#252526">
 
                 <!-- File Table -->
                 <DataGrid Grid.Row="0"
@@ -111,24 +120,49 @@
                           GridLinesVisibility="Horizontal"
                           CanUserReorderColumns="True"
                           CanUserResizeColumns="True"
-                          CanUserSortColumns="True">
+                          CanUserSortColumns="True"
+                          Background="#1E1E1E"
+                          Foreground="White"
+                          RowBackground="#1E1E1E"
+                          BorderBrush="#3E3E42"
+                          BorderThickness="1"
+                          HeadersVisibility="All">
+                    <DataGrid.Styles>
+                        <Style Selector="DataGridRow">
+                            <Setter Property="Foreground" Value="White" />
+                            <Setter Property="Background" Value="#1E1E1E" />
+                        </Style>
+                        <Style Selector="DataGridCell TextBlock">
+                            <Setter Property="Foreground" Value="White" />
+                        </Style>
+                        <Style Selector="DataGridColumnHeader">
+                            <Setter Property="Background" Value="#2D2D30" />
+                            <Setter Property="Foreground" Value="White" />
+                        </Style>
+                    </DataGrid.Styles>
                     <DataGrid.Columns>
-                        <DataGridTextColumn Header="Name"           Binding="{Binding Name}"          Width="200" />
-                        <DataGridTextColumn Header="Type"           Binding="{Binding FileType}"       Width="80"  />
-                        <DataGridTextColumn Header="Category"       Binding="{Binding Category}"       Width="140" />
-                        <DataGridTextColumn Header="Size"           Binding="{Binding SizeText}"       Width="80"  />
-                        <DataGridTextColumn Header="Modified"       Binding="{Binding LastModified}"   Width="100" />
-                        <DataGridTextColumn Header="Confidence"     Binding="{Binding Confidence}"     Width="80"  />
-                        <DataGridTextColumn Header="Suggested Target" Binding="{Binding SuggestedTarget}" Width="140" />
-                        <DataGridTextColumn Header="Status"         Binding="{Binding Status}"         Width="100" />
+                        <DataGridTextColumn Header="Name"             Binding="{Binding Name}"            Width="2*" />
+                        <DataGridTextColumn Header="Type"             Binding="{Binding FileType}"        Width="110" />
+                        <DataGridTextColumn Header="Category"         Binding="{Binding Category}"        Width="160" />
+                        <DataGridTextColumn Header="Size"             Binding="{Binding SizeText}"        Width="110" />
+                        <DataGridTextColumn Header="Modified"         Binding="{Binding LastModified}"    Width="140" />
+                        <DataGridTextColumn Header="Confidence"       Binding="{Binding Confidence}"      Width="120" />
+                        <DataGridTextColumn Header="Suggested Target" Binding="{Binding SuggestedTarget}" Width="2*" />
+                        <DataGridTextColumn Header="Status"           Binding="{Binding Status}"          Width="130" />
                     </DataGrid.Columns>
                 </DataGrid>
 
-                <GridSplitter Grid.Row="1" ResizeDirection="Rows" />
+                <GridSplitter Grid.Row="1"
+                              ResizeDirection="Rows"
+                              Background="#2D2D30" />
 
                 <!-- Detail Panel -->
-                <views:FileDetailView Grid.Row="2"
-                                      DataContext="{Binding FileDetail}" />
+                <Border Grid.Row="2"
+                        Background="#252526"
+                        BorderBrush="#3E3E42"
+                        BorderThickness="1,1,0,0">
+                    <views:FileDetailView DataContext="{Binding FileDetail}" />
+                </Border>
 
             </Grid>
 

@@ -93,6 +93,8 @@ public partial class FolderTreeViewModel : ViewModelBase
                 var item = new FolderTreeItemViewModel(d, _dirQuery, jobId);
                 item.AddPlaceholder();
                 Roots.Add(item);
+                // Auto-expand root so its subdirectories are immediately visible
+                item.IsExpanded = true;
             }
         }
         finally
@@ -103,6 +105,7 @@ public partial class FolderTreeViewModel : ViewModelBase
 
     partial void OnSelectedItemChanged(FolderTreeItemViewModel? value)
     {
+        System.Diagnostics.Debug.WriteLine($"[TREE SELECT] value='{value?.FullPath ?? "(null)"}'  subscribers={DirectorySelected?.GetInvocationList().Length ?? 0}");
         if (value != null)
             DirectorySelected?.Invoke(this, value.FullPath);
     }

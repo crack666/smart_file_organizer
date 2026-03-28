@@ -36,8 +36,15 @@ public class FileRepository : IFileRepository
     {
         await using var conn = _db.CreateConnection();
         await conn.OpenAsync(ct);
-        return await conn.QuerySingleOrDefaultAsync<FileNode>(
+        var node = await conn.QuerySingleOrDefaultAsync<FileNode>(
             "SELECT * FROM file_nodes WHERE id = @id", new { id });
+        if (node == null) return null;
+
+        node.Classification = await conn.QuerySingleOrDefaultAsync<FileClassification>(
+            "SELECT * FROM ai_results WHERE file_node_id = @id", new { id });
+        node.Override = await conn.QuerySingleOrDefaultAsync<UserOverride>(
+            "SELECT * FROM user_overrides WHERE file_node_id = @id", new { id });
+        return node;
     }
 
     public async Task<IReadOnlyList<FileNode>> GetByDirectoryAsync(
@@ -46,21 +53,34 @@ public class FileRepository : IFileRepository
         await using var conn = _db.CreateConnection();
         await conn.OpenAsync(ct);
 
-        var nodes = await conn.QueryAsync<FileNode>(
-            """
-            SELECT f.*, a.id as ai_id, a.category, a.importance, a.confidence,
-                   a.summary, a.suggested_target, a.model_used, a.analyzed_at,
-                   a.raw_response, a.error, a.is_ai_result,
-                   u.id as uo_id, u.overridden_category, u.overridden_target, u.note, u.overridden_at
-            FROM file_nodes f
-            LEFT JOIN ai_results a ON a.file_node_id = f.id
-            LEFT JOIN user_overrides u ON u.file_node_id = f.id
-            WHERE f.job_id = @jobId AND f.parent_path = @parentPath
-            ORDER BY f.name
-            """,
-            new { jobId, parentPath });
+        // Step 1: load file nodes (plain, no ambiguous JOINs)
+        System.Diagnostics.Debug.WriteLine($"[DB QUERY] GetByDirectoryAsync jobId={jobId} parentPath='{parentPath}'");
+        var nodes = (await conn.QueryAsync<FileNode>(
+            """SELECT * FROM file_nodes WHERE job_id = @jobId AND parent_path = @parentPath ORDER BY name""",
+            new { jobId, parentPath })).AsList();
+        System.Diagnostics.Debug.WriteLine($"[DB QUERY] → {nodes.Count} row(s) found");
 
-        return nodes.AsList();
+        if (nodes.Count == 0) return nodes;
+
+        // Step 2: load classifications for these files in one query
+        var ids = nodes.Select(n => n.Id).ToList();
+        var classifications = (await conn.QueryAsync<FileClassification>(
+            "SELECT * FROM ai_results WHERE file_node_id IN @ids",
+            new { ids })).ToDictionary(c => c.FileNodeId);
+
+        // Step 3: load user overrides
+        var overrides = (await conn.QueryAsync<UserOverride>(
+            "SELECT * FROM user_overrides WHERE file_node_id IN @ids",
+            new { ids })).ToDictionary(u => u.FileNodeId);
+
+        // Step 4: attach
+        foreach (var node in nodes)
+        {
+            if (classifications.TryGetValue(node.Id, out var cls)) node.Classification = cls;
+            if (overrides.TryGetValue(node.Id, out var uo)) node.Override = uo;
+        }
+
+        return nodes;
     }
 
     public async Task<IReadOnlyList<FileNode>> GetPendingAiAnalysisAsync(
