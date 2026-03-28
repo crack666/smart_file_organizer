@@ -1,5 +1,11 @@
+using System.Runtime.InteropServices;
 using System.Text;
+using Avalonia;
 using Avalonia.Media.Imaging;
+using Avalonia.Platform;
+using Docnet.Core;
+using Docnet.Core.Converters;
+using Docnet.Core.Models;
 using SmartFileOrganizer.Domain.Enums;
 using SmartFileOrganizer.Domain.Models;
 
@@ -19,6 +25,8 @@ public sealed class FilePreviewData
 public class FilePreviewService
 {
     private const int MaxTextChars = 12_000;
+    private static readonly object PdfRenderLock = new();
+    private static readonly Lazy<IDocLib> PdfLib = new(() => DocLib.Instance);
 
     private static readonly HashSet<string> TextExtensions =
     [
@@ -40,12 +48,7 @@ public class FilePreviewService
                 return BuildImagePreview(file.FullPath);
 
             if (string.Equals(file.Extension, ".pdf", StringComparison.OrdinalIgnoreCase))
-            {
-                return new FilePreviewData
-                {
-                    Message = "PDF preview needs an additional renderer library (for example PDFium/Docnet/WebView). Metadata is available now; embedded PDF rendering can be added next."
-                };
-            }
+                return BuildPdfPreview(file.FullPath);
 
             if (IsTextLike(file))
                 return await BuildTextPreviewAsync(file.FullPath, ct);
@@ -70,6 +73,44 @@ public class FilePreviewService
         {
             ImagePreview = new Bitmap(path)
         };
+    }
+
+    private static FilePreviewData BuildPdfPreview(string path)
+    {
+        const int targetWidth = 1200;
+        const int targetHeight = 1600;
+
+        lock (PdfRenderLock)
+        {
+            using var docReader = PdfLib.Value.GetDocReader(path, new PageDimensions(targetWidth, targetHeight));
+            using var pageReader = docReader.GetPageReader(0);
+
+            var width = pageReader.GetPageWidth();
+            var height = pageReader.GetPageHeight();
+            var rawBytes = pageReader.GetImage(new NaiveTransparencyRemover(255, 255, 255));
+
+            var bitmap = new WriteableBitmap(
+                new PixelSize(width, height),
+                new Vector(96, 96),
+                PixelFormat.Bgra8888,
+                AlphaFormat.Unpremul);
+
+            using (var locked = bitmap.Lock())
+            {
+                var srcStride = width * 4;
+                for (var y = 0; y < height; y++)
+                {
+                    var srcOffset = y * srcStride;
+                    var dest = IntPtr.Add(locked.Address, y * locked.RowBytes);
+                    Marshal.Copy(rawBytes, srcOffset, dest, srcStride);
+                }
+            }
+
+            return new FilePreviewData
+            {
+                ImagePreview = bitmap
+            };
+        }
     }
 
     private static async Task<FilePreviewData> BuildTextPreviewAsync(string path, CancellationToken ct)
