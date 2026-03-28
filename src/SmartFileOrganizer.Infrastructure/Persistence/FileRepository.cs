@@ -103,6 +103,33 @@ public class FileRepository : IFileRepository
         return nodes.AsList();
     }
 
+        public async Task<long> CountAiEligibleAsync(long jobId, CancellationToken ct = default)
+        {
+                await using var conn = _db.CreateConnection();
+                await conn.OpenAsync(ct);
+                return await conn.ExecuteScalarAsync<long>(
+                        """
+                        SELECT COUNT(*) FROM file_nodes
+                        WHERE job_id = @jobId
+                            AND file_type IN (1, 2, 4)
+                        """,
+                        new { jobId });
+        }
+
+        public async Task<long> CountPendingAiAnalysisAsync(long jobId, CancellationToken ct = default)
+        {
+                await using var conn = _db.CreateConnection();
+                await conn.OpenAsync(ct);
+                return await conn.ExecuteScalarAsync<long>(
+                        """
+                        SELECT COUNT(*) FROM file_nodes
+                        WHERE job_id = @jobId
+                            AND status = @status
+                            AND file_type IN (1, 2, 4)
+                        """,
+                        new { jobId, status = (int)FileNodeStatus.Discovered });
+        }
+
     public async Task UpdateStatusAsync(long id, FileNodeStatus status, CancellationToken ct = default)
     {
         await using var conn = _db.CreateConnection();

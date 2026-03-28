@@ -1,4 +1,5 @@
 using Dapper;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using SmartFileOrganizer.Application.Services;
@@ -21,13 +22,25 @@ public static class ServiceConfigurator
 
         var services = new ServiceCollection();
 
+        var appDataDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+            "SmartFileOrganizer");
+        Directory.CreateDirectory(appDataDir);
+        var settingsPath = Path.Combine(appDataDir, "settings.json");
+
+        var configuration = new ConfigurationBuilder()
+            .SetBasePath(AppContext.BaseDirectory)
+            .AddJsonFile("appsettings.json", optional: true, reloadOnChange: true)
+            .AddJsonFile(settingsPath, optional: true, reloadOnChange: true)
+            .Build();
+
+        services.AddSingleton<IConfiguration>(configuration);
+
         // Logging
         services.AddLogging(b => b.AddConsole().SetMinimumLevel(LogLevel.Debug));
 
         // Database
-        var dbPath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "SmartFileOrganizer", "data.db");
+        var dbPath = Path.Combine(appDataDir, "data.db");
         Directory.CreateDirectory(Path.GetDirectoryName(dbPath)!);
 
         services.AddSingleton(sp =>
@@ -44,12 +57,22 @@ public static class ServiceConfigurator
         services.AddSingleton<IFileSystemAccessor, FileSystemAccessor>();
 
         // Ollama
-        services.AddSingleton<OllamaOptions>();
+        services.AddSingleton(sp =>
+        {
+            var configured = sp.GetRequiredService<IConfiguration>()
+                .GetSection("Ollama")
+                .Get<OllamaOptions>();
+
+            return configured ?? new OllamaOptions();
+        });
         services.AddHttpClient<IOllamaService, OllamaService>((sp, client) =>
         {
             var opts = sp.GetRequiredService<OllamaOptions>();
             client.BaseAddress = new Uri(opts.BaseUrl);
         });
+        services.AddSingleton(sp => new OllamaSettingsService(
+            sp.GetRequiredService<OllamaOptions>(),
+            settingsPath));
 
         // Scanning
         services.AddSingleton<HeuristicsOptions>();
@@ -62,8 +85,10 @@ public static class ServiceConfigurator
         services.AddSingleton<FileQueryService>();
         services.AddSingleton<DirectoryQueryService>();
         services.AddSingleton<ClassificationService>();
+        services.AddSingleton<AiClassificationCoordinator>();
         services.AddSingleton<ReviewService>();
         services.AddSingleton<FilePreviewService>();
+        services.AddSingleton<IClassificationInputPreparer, AiClassificationInputPreparer>();
 
         // ViewModels
         services.AddTransient<MainViewModel>();
@@ -71,6 +96,7 @@ public static class ServiceConfigurator
         services.AddTransient<FileTableViewModel>();
         services.AddTransient<FileDetailViewModel>();
         services.AddTransient<ScanProgressViewModel>();
+        services.AddTransient<AiProgressViewModel>();
 
         var provider = services.BuildServiceProvider();
 

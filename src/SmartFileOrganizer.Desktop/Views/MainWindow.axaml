@@ -52,6 +52,69 @@
                                  Width="200" Height="6" />
                 </StackPanel>
 
+                <Separator Margin="12,0" Width="1" Height="28" />
+
+                <StackPanel Orientation="Vertical" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding AiProgress.StatusText}"
+                           FontSize="11"
+                           Margin="0,0,0,2"/>
+                    <ProgressBar Value="{Binding AiProgress.ProgressPercent}"
+                         Minimum="0" Maximum="100"
+                         Width="220" Height="6" />
+                </StackPanel>
+
+                <Button Content="▶ Resume AI"
+                    Command="{Binding ResumeAiCommand}"
+                    Margin="12,0,4,0" />
+
+                <Button Content="⏸ Pause AI"
+                    Command="{Binding PauseAiCommand}"
+                    Margin="0,0,4,0" />
+
+                <Button Content="⏹ Stop AI"
+                    Command="{Binding CancelAiCommand}" />
+
+                <Separator Margin="12,0" Width="1" Height="28" />
+
+                <StackPanel Orientation="Vertical" VerticalAlignment="Center" Margin="0,0,8,0">
+                    <TextBlock Text="Ollama URL" FontSize="11" Margin="0,0,0,2"/>
+                    <TextBox Text="{Binding OllamaBaseUrl, Mode=TwoWay}"
+                             Width="180"
+                             Watermark="http://localhost:11434" />
+                </StackPanel>
+
+                <StackPanel Orientation="Vertical" VerticalAlignment="Center" Margin="0,0,8,0">
+                    <TextBlock Text="Vision model" FontSize="11" Margin="0,0,0,2"/>
+                    <ComboBox ItemsSource="{Binding AvailableOllamaModels}"
+                              SelectedItem="{Binding SelectedOllamaModel, Mode=TwoWay}"
+                              Width="260">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate x:DataType="vm:OllamaModelViewModel">
+                                <TextBlock Text="{Binding DisplayLabel}" TextTrimming="CharacterEllipsis" />
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
+                </StackPanel>
+
+                <StackPanel Orientation="Vertical" VerticalAlignment="Center" Margin="0,0,8,0">
+                    <TextBlock Text="Keep alive" FontSize="11" Margin="0,0,0,2"/>
+                    <TextBox Text="{Binding OllamaKeepAlive, Mode=TwoWay}"
+                             Width="90"
+                             Watermark="60m" />
+                </StackPanel>
+
+                <Button Content="🔄 Models"
+                        Command="{Binding RefreshOllamaModelsCommand}"
+                        Margin="0,18,4,0" />
+
+                <Button Content="💾 Save AI"
+                        Command="{Binding SaveOllamaSettingsCommand}"
+                        Margin="0,18,4,0" />
+
+                <Button Content="🔥 Warm"
+                        Command="{Binding WarmOllamaModelCommand}"
+                        Margin="0,18,0,0" />
+
             </WrapPanel>
         </Border>
 
@@ -59,9 +122,15 @@
         <Border DockPanel.Dock="Bottom"
                 Background="{DynamicResource SystemControlBackgroundChromeLowBrush}"
                 Padding="8,2">
-            <TextBlock Text="{Binding ScanProgress.CurrentPath}"
-                       FontSize="11"
-                       TextTrimming="CharacterEllipsis" />
+            <StackPanel Spacing="2">
+                <TextBlock Text="{Binding OllamaStatusText}"
+                           FontSize="11"
+                           TextTrimming="CharacterEllipsis" />
+                <TextBlock Text="{Binding ScanProgress.CurrentPath}"
+                           FontSize="11"
+                           TextTrimming="CharacterEllipsis"
+                           Opacity="0.8" />
+            </StackPanel>
         </Border>
 
         <!-- ===== Main area ===== -->
