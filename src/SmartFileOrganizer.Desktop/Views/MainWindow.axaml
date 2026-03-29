@@ -213,16 +213,95 @@
                             <Setter Property="Background" Value="#2D2D30" />
                             <Setter Property="Foreground" Value="White" />
                         </Style>
+                        <!-- Remove default cell padding so color strip fills flush -->
+                        <Style Selector="DataGridCell.color-strip">
+                            <Setter Property="Padding" Value="0" />
+                        </Style>
                     </DataGrid.Styles>
                     <DataGrid.Columns>
-                        <DataGridTextColumn Header="Name"             Binding="{Binding Name}"            Width="2*" />
-                        <DataGridTextColumn Header="Type"             Binding="{Binding FileType}"        Width="110" />
-                        <DataGridTextColumn Header="Category"         Binding="{Binding Category}"        Width="160" />
-                        <DataGridTextColumn Header="Size"             Binding="{Binding SizeText}"        Width="110" />
-                        <DataGridTextColumn Header="Modified"         Binding="{Binding LastModified}"    Width="140" />
-                        <DataGridTextColumn Header="Confidence"       Binding="{Binding Confidence}"      Width="120" />
-                        <DataGridTextColumn Header="Suggested Target" Binding="{Binding SuggestedTarget}" Width="2*" />
-                        <DataGridTextColumn Header="Status"           Binding="{Binding Status}"          Width="130" />
+
+                        <!-- 4 px category color strip -->
+                        <DataGridTemplateColumn Width="4" CanUserResize="False" CanUserReorder="False" CanUserSort="False">
+                            <DataGridTemplateColumn.CellTemplate>
+                                <DataTemplate x:DataType="vm:FileRowViewModel">
+                                    <Rectangle Fill="{Binding CategoryColor}" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" />
+                                </DataTemplate>
+                            </DataGridTemplateColumn.CellTemplate>
+                        </DataGridTemplateColumn>
+
+                        <DataGridTextColumn Header="Dateiname"     Binding="{Binding Name}"        Width="2*"  IsReadOnly="True" />
+                        <DataGridTextColumn Header="Typ"           Binding="{Binding Extension}"   Width="55"  IsReadOnly="True" />
+                        <DataGridTextColumn Header="Größe"         Binding="{Binding SizeText}"    Width="85"  IsReadOnly="True" />
+                        <DataGridTextColumn Header="Art"           Binding="{Binding FileType}"    Width="85"  IsReadOnly="True" />
+                        <DataGridTextColumn Header="Konfidenz"     Binding="{Binding Confidence}"  Width="80"  IsReadOnly="True" />
+
+                        <!-- Zusammenfassung -->
+                        <DataGridTextColumn Header="Zusammenfassung" Binding="{Binding Summary}"  Width="3*"  IsReadOnly="True" />
+
+                        <!-- Kategorie — inline ComboBox, auto-saves on change -->
+                        <DataGridTemplateColumn Header="Kategorie" Width="155" CanUserSort="False">
+                            <DataGridTemplateColumn.CellTemplate>
+                                <DataTemplate x:DataType="vm:FileRowViewModel">
+                                    <Border Background="{Binding CategoryColor}"
+                                            CornerRadius="4"
+                                            Padding="2,1"
+                                            Margin="2,1">
+                                        <ComboBox ItemsSource="{Binding AllCategories}"
+                                                  SelectedItem="{Binding SelectedCategory, Mode=TwoWay}"
+                                                  HorizontalAlignment="Stretch"
+                                                  Background="Transparent"
+                                                  Foreground="White"
+                                                  BorderThickness="0"
+                                                  Padding="4,1"
+                                                  FontSize="11" />
+                                    </Border>
+                                </DataTemplate>
+                            </DataGridTemplateColumn.CellTemplate>
+                        </DataGridTemplateColumn>
+
+                        <!-- Zielordner — inline TextBox, saves on Enter -->
+                        <DataGridTemplateColumn Header="Zielordner" Width="170" CanUserSort="False">
+                            <DataGridTemplateColumn.CellTemplate>
+                                <DataTemplate x:DataType="vm:FileRowViewModel">
+                                    <Border Background="#2A2A2A"
+                                            CornerRadius="4"
+                                            Padding="2,1"
+                                            Margin="2,1">
+                                        <TextBox Text="{Binding EditTarget, Mode=TwoWay}"
+                                                 Background="Transparent"
+                                                 Foreground="White"
+                                                 BorderThickness="0"
+                                                 Padding="4,1"
+                                                 FontSize="11"
+                                                 Watermark="Zielordner…">
+                                            <TextBox.KeyBindings>
+                                                <KeyBinding Gesture="Return" Command="{Binding CommitTargetCommand}" />
+                                            </TextBox.KeyBindings>
+                                        </TextBox>
+                                    </Border>
+                                </DataTemplate>
+                            </DataGridTemplateColumn.CellTemplate>
+                        </DataGridTemplateColumn>
+
+                        <!-- Review — ○ / ✓ / ✎ toggle -->
+                        <DataGridTemplateColumn Header="Review" Width="65" CanUserSort="False">
+                            <DataGridTemplateColumn.CellTemplate>
+                                <DataTemplate x:DataType="vm:FileRowViewModel">
+                                    <Button Content="{Binding ReviewStatusDisplay}"
+                                            Foreground="{Binding ReviewStatusColor}"
+                                            Command="{Binding ToggleAcceptCommand}"
+                                            ToolTip.Tip="{Binding ReviewStatusTooltip}"
+                                            Background="Transparent"
+                                            BorderThickness="0"
+                                            FontWeight="Bold"
+                                            FontSize="15"
+                                            HorizontalAlignment="Center"
+                                            VerticalAlignment="Center"
+                                            Padding="8,2" />
+                                </DataTemplate>
+                            </DataGridTemplateColumn.CellTemplate>
+                        </DataGridTemplateColumn>
+
                     </DataGrid.Columns>
                 </DataGrid>
 
