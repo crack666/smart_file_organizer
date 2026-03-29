@@ -111,6 +111,10 @@
                         Command="{Binding SaveOllamaSettingsCommand}"
                         Margin="0,18,4,0" />
 
+                <Button Content="📝 Prompt…"
+                        Command="{Binding OpenPromptSettingsCommand}"
+                        Margin="0,18,4,0" />
+
                 <Button Content="🔥 Warm"
                         Command="{Binding WarmOllamaModelCommand}"
                         Margin="0,18,0,0" />

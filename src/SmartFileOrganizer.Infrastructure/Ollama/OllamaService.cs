@@ -95,7 +95,7 @@ public class OllamaService : IOllamaService
 
         try
         {
-            var prompt = BuildPrompt(input);
+            var prompt = BuildPrompt(input, _options.SummaryLanguage);
             var requestBody = new
             {
                 model = _options.Model,
@@ -107,7 +107,7 @@ public class OllamaService : IOllamaService
                     new
                     {
                         role = "system",
-                        content = "You classify user files for cleanup and organization. Prefer preserving valuable user data, personal records, family media, and important documents. Return only JSON that matches the schema."
+                        content = _options.SystemPrompt
                     },
                     new
                     {
@@ -158,11 +158,11 @@ public class OllamaService : IOllamaService
         return result;
     }
 
-    private static string BuildPrompt(OllamaClassificationInput input)
+    private static string BuildPrompt(OllamaClassificationInput input, string summaryLanguage = "English")
     {
         var file = input.File;
         var sb = new StringBuilder();
-        sb.AppendLine("Analyze this file to decide whether it is valuable user data, an important document/media file, or likely trash/system clutter.");
+        sb.AppendLine("Classify the following file. Choose the most accurate category and importance.");
         sb.AppendLine();
         sb.AppendLine($"File name: {file.Name}");
         sb.AppendLine($"Extension: {file.Extension}");
@@ -182,12 +182,24 @@ public class OllamaService : IOllamaService
             sb.AppendLine();
         }
 
-        sb.AppendLine("Consider whether this is likely:");
-        sb.AppendLine("- private photos or memories");
-        sb.AppendLine("- personal, financial, legal, medical, or identity documents");
-        sb.AppendLine("- meaningful user-created work");
-        sb.AppendLine("- duplicates, software artifacts, scans of low value, system files, or cleanup candidates");
+        sb.AppendLine("Classification guidance:");
+        sb.AppendLine("- Personal documents (CVs, tax returns, contracts, letters, medical records): PersonalDocument or Letter, importance High or Critical");
+        sb.AppendLine("- Family or personal photos and videos: Photo or Video, importance High");
+        sb.AppendLine("- Scanned documents (receipts, official letters, forms): DocumentScan, importance Medium or High");
+        sb.AppendLine("- Financial records (invoices, bank statements): Invoice or Document, importance High");
+        sb.AppendLine("- Software installers, update packages, build artifacts: SoftwareInstaller or SystemFile, importance Low");
+        sb.AppendLine("- Temporary files, logs, crash dumps, cache: TrashCandidate, importance Low");
+        sb.AppendLine("- Anything personal or user-created but hard to categorize: ReviewNeeded");
         sb.AppendLine();
+        sb.AppendLine("Do NOT use TrashCandidate for personal documents, even if they appear old or superseded.");
+        sb.AppendLine("Use ReviewNeeded if you are uncertain — do not guess TrashCandidate.");
+        sb.AppendLine();
+        if (!string.IsNullOrWhiteSpace(summaryLanguage) &&
+            !string.Equals(summaryLanguage, "English", StringComparison.OrdinalIgnoreCase))
+        {
+            sb.AppendLine($"Write the summary field in: {summaryLanguage}.");
+        }
+
         sb.AppendLine("Return only JSON matching the provided schema.");
         return sb.ToString();
     }

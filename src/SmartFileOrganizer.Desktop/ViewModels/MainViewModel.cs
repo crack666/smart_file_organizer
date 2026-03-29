@@ -54,6 +54,10 @@ public partial class MainViewModel : ViewModelBase
     // Injected by the view for folder-picker dialog
     public Func<Task<string?>>? PickFolderDialog { get; set; }
 
+    // Injected by the view to open the AI prompt settings dialog;
+    // receives the pre-populated VM and returns true when the user confirms
+    public Func<AiPromptSettingsViewModel, Task<bool>>? OpenPromptSettingsDialog { get; set; }
+
     public MainViewModel(
         ScanJobService scanJobService,
         FileQueryService fileQueryService,
@@ -243,6 +247,25 @@ public partial class MainViewModel : ViewModelBase
         finally
         {
             IsSavingOllamaSettings = false;
+        }
+    }
+
+    [RelayCommand]
+    private async Task OpenPromptSettingsAsync()
+    {
+        if (OpenPromptSettingsDialog == null) return;
+
+        var dialogVm = new AiPromptSettingsViewModel();
+        dialogVm.Load(_ollamaOptions);
+
+        var saved = await OpenPromptSettingsDialog(dialogVm);
+        if (saved)
+        {
+            _ollamaOptions.SystemPrompt = dialogVm.SystemPrompt;
+            _ollamaOptions.SummaryLanguage = dialogVm.SelectedLanguage;
+
+            await _ollamaSettingsService.SaveAsync();
+            OllamaStatusText = $"Prompt settings saved. Language: {_ollamaOptions.SummaryLanguage}";
         }
     }
 

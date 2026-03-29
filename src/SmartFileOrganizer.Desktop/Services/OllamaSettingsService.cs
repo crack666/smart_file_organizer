@@ -24,7 +24,9 @@ public class OllamaSettingsService
                 _options.Model,
                 _options.TimeoutSeconds,
                 _options.MaxRetries,
-                _options.KeepAlive
+                _options.KeepAlive,
+                _options.SummaryLanguage,
+                _options.SystemPrompt
             }
         };
 

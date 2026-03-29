@@ -1,0 +1,75 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:SmartFileOrganizer.Desktop.ViewModels"
+        x:Class="SmartFileOrganizer.Desktop.Views.AiPromptSettingsWindow"
+        x:DataType="vm:AiPromptSettingsViewModel"
+        Title="AI Prompt Settings"
+        Width="740" Height="580"
+        MinWidth="500" MinHeight="400"
+        WindowStartupLocation="CenterOwner"
+        Background="#1E1E1E"
+        CanResize="True">
+
+    <DockPanel Margin="16">
+
+        <!-- Header -->
+        <TextBlock DockPanel.Dock="Top"
+                   Text="AI Classification Settings"
+                   FontSize="16" FontWeight="SemiBold"
+                   Margin="0,0,0,12" />
+
+        <!-- Footer buttons -->
+        <StackPanel DockPanel.Dock="Bottom"
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Right"
+                    Spacing="8"
+                    Margin="0,12,0,0">
+            <Button Content="Reset to Default"
+                    Command="{Binding ResetToDefaultCommand}"
+                    HorizontalAlignment="Left" />
+            <Button Content="Cancel"
+                    Command="{Binding CancelCommand}" />
+            <Button Content="Save"
+                    Command="{Binding ConfirmCommand}"
+                    Classes="accent" />
+        </StackPanel>
+
+        <!-- Body -->
+        <StackPanel Spacing="10">
+
+            <!-- Language -->
+            <StackPanel Spacing="4">
+                <TextBlock Text="Summary language"
+                           FontSize="12"
+                           Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" />
+                <ComboBox ItemsSource="{Binding AvailableLanguages}"
+                          SelectedItem="{Binding SelectedLanguage, Mode=TwoWay}"
+                          Width="200"
+                          HorizontalAlignment="Left" />
+            </StackPanel>
+
+            <!-- System Prompt -->
+            <StackPanel Spacing="4">
+                <TextBlock Text="System prompt"
+                           FontSize="12"
+                           Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" />
+                <TextBlock Text="The system prompt is sent to the AI model before every classification request. Edit freely — use Reset to Default to restore the built-in version."
+                           FontSize="11"
+                           Opacity="0.7"
+                           TextWrapping="Wrap" />
+                <ScrollViewer Height="360"
+                              VerticalScrollBarVisibility="Auto"
+                              HorizontalScrollBarVisibility="Disabled">
+                    <TextBox Text="{Binding SystemPrompt, Mode=TwoWay}"
+                             AcceptsReturn="True"
+                             TextWrapping="Wrap"
+                             FontFamily="Cascadia Mono,Consolas,Courier New,monospace"
+                             FontSize="12"
+                             VerticalContentAlignment="Top" />
+                </ScrollViewer>
+            </StackPanel>
+
+        </StackPanel>
+
+    </DockPanel>
+</Window>
