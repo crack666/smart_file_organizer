@@ -47,17 +47,31 @@ The UI must not own scanning, SQL generation, or Ollama HTTP logic. Those respon
 - text-like files are read as truncated text previews
 - PDFs render page 1 via Docnet/PDFium to an Avalonia bitmap
 
-## AI flow (target architecture)
+## AI flow (current architecture)
 
-The intended future flow is:
+The current implemented flow is:
 
 1. scan job identifies AI-eligible files
-2. `ClassificationService` consumes eligible files in batches
-3. `IOllamaService` classifies content via local Ollama HTTP API
-4. results persist to `ai_results`
-5. UI refreshes and shows category, confidence, summary, and suggested target
+2. when the scan completes, `MainViewModel` starts `AiClassificationCoordinator`
+3. `AiClassificationCoordinator` runs separately from the scan engine and supports pause/resume/cancel
+4. `ClassificationService` consumes AI-eligible files in batches and prepares evidence for each file
+5. `IClassificationInputPreparer` converts files into multimodal inputs:
+  - images → base64 original image
+  - PDFs → rendered first-page image
+  - text-like files → truncated extracted text
+6. `IOllamaService` sends structured multimodal `/api/chat` requests to Ollama
+7. results persist to `ai_results`
+8. the desktop UI refreshes file rows/details as classifications arrive
 
-This flow is **partially implemented in code but not yet fully connected to the active UI/job lifecycle**.
+This flow is now **real and connected**, but still intentionally conservative in throughput and evidence depth.
+
+## Ollama configuration flow
+
+1. default settings come from `src/SmartFileOrganizer.Desktop/appsettings.json`
+2. user overrides are saved to `%AppData%\SmartFileOrganizer\settings.json`
+3. `MainViewModel` can refresh the live model list from Ollama via `/api/tags`
+4. the selected model, base URL, and `keep_alive` are applied to subsequent requests
+5. a warm-up action can preload the selected model via an empty `/api/chat` request
 
 ## Key domain entities
 
@@ -102,6 +116,7 @@ Important tables:
 The current architecture leaves room for:
 
 - richer review workflows
+- more complete multimodal document understanding (multi-page PDF, OCR, Office formats)
 - configurable scan rules
 - additional preview providers
 - more advanced AI pipelines

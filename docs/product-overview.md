@@ -29,7 +29,7 @@ A user selects a root directory and lets the app:
 - persistent scan results in SQLite
 - folder tree + file table + detail/preview UI
 - directory/file metadata inspection
-- future AI-assisted classification via Ollama
+- local AI-assisted classification via Ollama, including multimodal evidence where available
 - future review workflow and action execution
 
 ## Explicit non-goals

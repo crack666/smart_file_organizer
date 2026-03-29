@@ -64,9 +64,27 @@ Benefits:
 - flexible model selection
 - good fit for offline-ish desktop workflows
 
-Current caveat:
+Current state:
 
-- the service exists, but the product flow is not fully wired yet
+- the product now queries available local models from Ollama
+- the chosen model can be warmed explicitly and kept loaded longer via `keep_alive`
+- classification uses multimodal `/api/chat` requests instead of metadata-only `/api/generate`
+
+### Important design choice
+
+The AI classification path is intentionally **not** embedded into the scan loop.
+
+Reason:
+
+- scanning local files and calling a large multimodal model have very different performance characteristics
+- the scan engine should remain fast and predictable even if model inference is slow
+- pause/resume/cancel semantics are easier to reason about in a separate post-scan pipeline
+
+Current posture:
+
+- scan first
+- classify afterward in a separate coordinator
+- keep the AI path sequential/bounded until profiling proves a more parallel design is necessary
 
 ## Important caveats encountered so far
 
@@ -131,6 +149,38 @@ Recommended posture:
 - keep runtime selection explicit where possible
 - validate on target environments early
 - document native dependencies clearly
+
+## 6. Ollama model warm-up and VRAM residency
+
+Large local vision models can take a long time to load into VRAM on the first request.
+
+Resolution/approach:
+
+- exposed model warm-up in the UI
+- pass `keep_alive` to Ollama requests
+- allow the operator to choose a longer residency window for local workflows
+
+Trade-off:
+
+- keeping big models resident improves responsiveness
+- but it also reserves GPU memory longer and may conflict with other GPU workloads
+
+## 7. Multimodal evidence is intentionally incremental
+
+The current multimodal evidence path is practical rather than complete:
+
+- original image bytes for image files
+- first-page rendered image for PDFs
+- preview-sized extracted text for text-like files
+
+Reason:
+
+- this gives real vision capability quickly without waiting for a full document/OCR subsystem
+- it reuses the preview/rendering work already present in the desktop app
+
+Known limitation:
+
+- long or multi-page documents are not yet fully understood
 
 ## Design stance going forward
 
