@@ -38,6 +38,12 @@ public class ReviewService
         await _fileRepo.UpdateStatusAsync(fileNodeId, FileNodeStatus.Approved, ct);
     }
 
+    /// <summary>
+    /// Accepts the AI suggestion without changes — just marks the file as Approved.
+    /// </summary>
+    public Task AcceptAsync(long fileNodeId, CancellationToken ct = default)
+        => _fileRepo.UpdateStatusAsync(fileNodeId, FileNodeStatus.Approved, ct);
+
     public Task<UserOverride?> GetOverrideAsync(long fileNodeId, CancellationToken ct = default)
         => _overrideRepo.GetByFileNodeIdAsync(fileNodeId, ct);
 }

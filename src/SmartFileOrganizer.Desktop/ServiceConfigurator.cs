@@ -94,7 +94,9 @@ public static class ServiceConfigurator
         services.AddTransient<MainViewModel>();
         services.AddTransient<FolderTreeViewModel>();
         services.AddTransient<FileTableViewModel>();
-        services.AddTransient<FileDetailViewModel>();
+        services.AddTransient<FileDetailViewModel>(sp => new FileDetailViewModel(
+            sp.GetRequiredService<FilePreviewService>(),
+            sp.GetRequiredService<ReviewService>()));
         services.AddTransient<ScanProgressViewModel>();
         services.AddTransient<AiProgressViewModel>();
 

@@ -89,6 +89,7 @@ public partial class MainViewModel : ViewModelBase
         _aiCoordinator.StateChanged += OnAiStateChanged;
 
         _folderTree.DirectorySelected += OnDirectorySelected;
+        _fileDetail.ReviewApplied += OnReviewApplied;
 
         _fileTable.PropertyChanged += (_, e) =>
         {
@@ -379,6 +380,15 @@ public partial class MainViewModel : ViewModelBase
 
         if (_selectedFileId is long selectedFileId)
             await LoadFileDetailAsync(selectedFileId);
+    }
+
+    private void OnReviewApplied(object? sender, EventArgs e)
+    {
+        Avalonia.Threading.Dispatcher.UIThread.Post(async () =>
+        {
+            if (!string.IsNullOrWhiteSpace(_selectedDirectoryPath) && _activeJobId > 0)
+                await _fileTable.LoadAsync(_activeJobId, _selectedDirectoryPath);
+        });
     }
 
     private bool CanPauseAi() => _aiProgress.CanPause;

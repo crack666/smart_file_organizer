@@ -70,6 +70,57 @@
                                IsVisible="{Binding HasOverride}" />
 
                 </Grid>
+
+                <!-- Review section -->
+                <Border IsVisible="{Binding HasClassification}"
+                        BorderThickness="0,1,0,0"
+                        BorderBrush="#3E3E42"
+                        Margin="0,10,0,0"
+                        Padding="0,10,0,0">
+                    <StackPanel Spacing="8">
+
+                        <!-- Status badge -->
+                        <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                            <TextBlock Text="Review:"
+                                       FontWeight="SemiBold"
+                                       VerticalAlignment="Center" />
+                            <TextBlock Text="{Binding ReviewStatusText}"
+                                       Foreground="{Binding ReviewStatusColor}"
+                                       FontWeight="SemiBold"
+                                       VerticalAlignment="Center" />
+                        </StackPanel>
+
+                        <!-- Category -->
+                        <StackPanel Spacing="3">
+                            <TextBlock Text="Category" FontSize="11"
+                                       Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" />
+                            <ComboBox ItemsSource="{Binding AvailableCategories}"
+                                      SelectedItem="{Binding SelectedCategory, Mode=TwoWay}"
+                                      HorizontalAlignment="Stretch" />
+                        </StackPanel>
+
+                        <!-- Target folder -->
+                        <StackPanel Spacing="3">
+                            <TextBlock Text="Target folder" FontSize="11"
+                                       Foreground="{DynamicResource SystemControlForegroundBaseMediumBrush}" />
+                            <TextBox Text="{Binding EditTarget, Mode=TwoWay}"
+                                     Watermark="e.g. Personal/Documents"
+                                     HorizontalAlignment="Stretch" />
+                        </StackPanel>
+
+                        <!-- Action buttons -->
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <Button Content="✓ Accept"
+                                    Command="{Binding AcceptCommand}"
+                                    ToolTip.Tip="Accept the AI suggestion as-is" />
+                            <Button Content="💾 Save Override"
+                                    Command="{Binding SaveOverrideCommand}"
+                                    ToolTip.Tip="Save your category and target as an override" />
+                        </StackPanel>
+
+                    </StackPanel>
+                </Border>
+
                 </StackPanel>
             </ScrollViewer>
 
