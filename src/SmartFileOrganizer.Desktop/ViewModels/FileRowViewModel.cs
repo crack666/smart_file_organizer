@@ -50,8 +50,11 @@ public partial class FileRowViewModel : ViewModelBase
         if (Id <= 0) return;
         if (ReviewStatus is "accepted" or "overridden")
         {
-            // Reset to pending (no DB call needed — just local state)
+            await _reviewService.ResetReviewAsync(Id);
             ReviewStatus = "pending";
+            // Restore editable fields to original AI suggestion values
+            // (SelectedCategory and EditTarget stay as-is visually —
+            //  the override record is gone, so next load will show AI values)
         }
         else
         {

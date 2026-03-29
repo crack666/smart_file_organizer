@@ -30,6 +30,15 @@ public class UserOverrideRepository : IUserOverrideRepository
         await conn.ExecuteAsync(sql, uo);
     }
 
+    public async Task DeleteByFileNodeIdAsync(long fileNodeId, CancellationToken ct = default)
+    {
+        await using var conn = _db.CreateConnection();
+        await conn.OpenAsync(ct);
+        await conn.ExecuteAsync(
+            "DELETE FROM user_overrides WHERE file_node_id = @fileNodeId",
+            new { fileNodeId });
+    }
+
     public async Task<UserOverride?> GetByFileNodeIdAsync(long fileNodeId, CancellationToken ct = default)
     {
         await using var conn = _db.CreateConnection();

@@ -44,6 +44,15 @@ public class ReviewService
     public Task AcceptAsync(long fileNodeId, CancellationToken ct = default)
         => _fileRepo.UpdateStatusAsync(fileNodeId, FileNodeStatus.Approved, ct);
 
+    /// <summary>
+    /// Resets any manual review: deletes the override record and sets status back to AiAnalyzed.
+    /// </summary>
+    public async Task ResetReviewAsync(long fileNodeId, CancellationToken ct = default)
+    {
+        await _overrideRepo.DeleteByFileNodeIdAsync(fileNodeId, ct);
+        await _fileRepo.UpdateStatusAsync(fileNodeId, FileNodeStatus.AiAnalyzed, ct);
+    }
+
     public Task<UserOverride?> GetOverrideAsync(long fileNodeId, CancellationToken ct = default)
         => _overrideRepo.GetByFileNodeIdAsync(fileNodeId, ct);
 }
