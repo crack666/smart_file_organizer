@@ -41,6 +41,8 @@ public partial class MainViewModel : ViewModelBase
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(StartScanCommand))]
     private bool _canStartScan;
+    [ObservableProperty] private bool _isShowingWelcome;
+    [ObservableProperty] private ObservableCollection<RecentScanItemViewModel> _recentScans = [];
     [ObservableProperty] private ObservableCollection<ScanJob> _jobs = [];
     [ObservableProperty] private ScanJob? _selectedJob;
     [ObservableProperty] private ObservableCollection<OllamaModelViewModel> _availableOllamaModels = [];
@@ -110,7 +112,7 @@ public partial class MainViewModel : ViewModelBase
         OllamaStatusText = $"Default model: {_ollamaOptions.Model}";
 
         UpdateCanStartScan();
-        _ = RefreshOllamaModelsAsync();
+        _ = InitializeAsync();
     }
 
     [RelayCommand]
@@ -122,7 +124,29 @@ public partial class MainViewModel : ViewModelBase
         {
             RootPath = path;
             CanStartScan = true;
+            IsShowingWelcome = false;
         }
+    }
+
+    private async Task InitializeAsync()
+    {
+        await RefreshOllamaModelsAsync();
+        var all = await _scanJobService.GetAllJobsAsync();
+        RecentScans.Clear();
+        foreach (var j in all)
+            RecentScans.Add(new RecentScanItemViewModel(j));
+        IsShowingWelcome = RecentScans.Count > 0;
+    }
+
+    [RelayCommand]
+    private async Task OpenRecentScanAsync(ScanJob job)
+    {
+        _activeJobId = job.Id;
+        RootPath = job.RootPath;
+        IsShowingWelcome = false;
+        _scanProgress.Apply(job);
+        await _folderTree.LoadJobAsync(job.Id);
+        UpdateCanStartScan();
     }
 
     [RelayCommand(CanExecute = nameof(CanStartScan))]
@@ -130,6 +154,7 @@ public partial class MainViewModel : ViewModelBase
     {
         if (string.IsNullOrWhiteSpace(RootPath)) return;
 
+        IsShowingWelcome = false;
         IsScanRunning = true;
         UpdateCanStartScan();
         _scanProgress.StatusText = "Starting…";

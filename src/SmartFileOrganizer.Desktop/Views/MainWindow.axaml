@@ -138,7 +138,107 @@
         </Border>
 
         <!-- ===== Main area ===== -->
-        <Grid ColumnDefinitions="260,4,*" Background="#1E1E1E">
+        <Panel Background="#1E1E1E">
+
+        <!-- Welcome / recent scans screen -->
+        <Grid Background="#1E1E1E"
+              IsVisible="{Binding IsShowingWelcome}"
+              VerticalAlignment="Stretch"
+              HorizontalAlignment="Stretch">
+            <StackPanel HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        Spacing="24"
+                        MaxWidth="660">
+
+                <StackPanel Spacing="4" HorizontalAlignment="Center">
+                    <TextBlock Text="Smart File Organizer"
+                               FontSize="28"
+                               FontWeight="Bold"
+                               HorizontalAlignment="Center"
+                               Foreground="White" />
+                    <TextBlock Text="Einen vorherigen Scan öffnen oder einen neuen starten."
+                               FontSize="13"
+                               HorizontalAlignment="Center"
+                               Opacity="0.7"
+                               Foreground="White" />
+                </StackPanel>
+
+                <Border Background="#252526"
+                        CornerRadius="8"
+                        Padding="0"
+                        BorderBrush="#3E3E42"
+                        BorderThickness="1">
+                    <DockPanel>
+                        <TextBlock DockPanel.Dock="Top"
+                                   Text="Letzte Scans"
+                                   FontWeight="SemiBold"
+                                   FontSize="13"
+                                   Padding="16,12,16,8"
+                                   Foreground="White" />
+                        <ListBox ItemsSource="{Binding RecentScans}"
+                                 Background="Transparent"
+                                 BorderThickness="0"
+                                 MaxHeight="340"
+                                 ScrollViewer.VerticalScrollBarVisibility="Auto">
+                            <ListBox.ItemTemplate>
+                                <DataTemplate x:DataType="vm:RecentScanItemViewModel">
+                                    <Grid ColumnDefinitions="8,*,Auto"
+                                          Margin="0,2"
+                                          Background="#2D2D30">
+                                        <!-- Status color strip -->
+                                        <Rectangle Grid.Column="0"
+                                                   Fill="{Binding StatusColor}"
+                                                   HorizontalAlignment="Stretch"
+                                                   VerticalAlignment="Stretch" />
+                                        <!-- Info -->
+                                        <StackPanel Grid.Column="1"
+                                                    Spacing="2"
+                                                    Margin="12,8">
+                                            <TextBlock Text="{Binding RootPathDisplay}"
+                                                       FontWeight="SemiBold"
+                                                       FontSize="13"
+                                                       Foreground="White"
+                                                       TextTrimming="CharacterEllipsis" />
+                                            <StackPanel Orientation="Horizontal" Spacing="12">
+                                                <TextBlock Text="{Binding FileCountDisplay}"
+                                                           FontSize="11"
+                                                           Opacity="0.7"
+                                                           Foreground="White" />
+                                                <TextBlock Text="{Binding StatusDisplay}"
+                                                           FontSize="11"
+                                                           Foreground="{Binding StatusColor}" />
+                                                <TextBlock Text="{Binding DateDisplay}"
+                                                           FontSize="11"
+                                                           Opacity="0.5"
+                                                           Foreground="White" />
+                                            </StackPanel>
+                                        </StackPanel>
+                                        <!-- Open button -->
+                                        <Button Grid.Column="2"
+                                                Content="Öffnen"
+                                                Margin="8,0,12,0"
+                                                VerticalAlignment="Center"
+                                                Command="{Binding $parent[ListBox].DataContext.OpenRecentScanCommand}"
+                                                CommandParameter="{Binding Job}" />
+                                    </Grid>
+                                </DataTemplate>
+                            </ListBox.ItemTemplate>
+                        </ListBox>
+                    </DockPanel>
+                </Border>
+
+                <Button Content="📁  Neuen Scan starten…"
+                        Command="{Binding PickFolderCommand}"
+                        HorizontalAlignment="Center"
+                        FontSize="14"
+                        Padding="20,10" />
+
+            </StackPanel>
+        </Grid>
+
+        <!-- Browser (tree + table + detail) -->
+        <Grid ColumnDefinitions="260,4,*" Background="#1E1E1E"
+              IsVisible="{Binding !IsShowingWelcome}">
 
             <!-- Left: Folder Tree -->
             <Border Grid.Column="0"
@@ -321,6 +421,8 @@
             </Grid>
 
         </Grid>
+
+        </Panel>
 
     </DockPanel>
 </Window>
