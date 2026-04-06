@@ -1,8 +1,152 @@
 # Status and Roadmap
 
-## Current implementation status
+_Last updated: April 2026_
 
-## Implemented and working
+---
+
+## ✅ Implemented and working
+
+### Scan and persistence
+
+- Layered solution structure (Domain / Application / Infrastructure / Scanning / Desktop)
+- Recursive scan engine with iterative queue (no stack overflow on deep trees)
+- SQLite persistence for scan jobs, directory nodes, file nodes, AI results, user overrides
+- File type detection (`FileTypeDetector`) by extension
+- Heuristic scan pruning: skip dot-dirs, `AppData`, `Windows`, `node_modules`, `$Recycle.Bin`, etc.
+- Resume support: already-scanned directories are skipped on restart
+- Tests for scan heuristics, file type detection, and scan pipeline persistence
+
+### Desktop UI
+
+- Root folder selection, scan start/pause/cancel
+- AI classification start/pause/resume/cancel (independent of scan)
+- Folder tree with lazy child loading and expand/collapse
+- **Right-click → "Im Explorer öffnen"** on any folder node
+- File table for the selected directory (color-coded category strip, confidence, summary)
+- **Directory AI summary banner** above the file table (green bar with folder-level description)
+- File detail panel with metadata, image preview, text preview, PDF first-page preview
+- Resizable splitters for tree / table / detail areas
+- Ollama settings (base URL, model, keep-alive) editable and persisted in toolbar
+- Local Ollama models loaded from `/api/tags` and selectable in UI
+- Manual model warm-up action
+- Recent scan history shown on welcome screen
+
+### AI pipeline (3-phase)
+
+**Phase 1 — Directory Pre-Assessment**
+- Runs for every directory before per-file analysis
+- Sends file list (names, types, sizes) to Ollama
+- Determines sampling strategy: `analyze_all`, `random_sample`, or `skip`
+- Marks non-sampled files as `Skipped` so Phase 2 ignores them
+- Result stored in `ai_directory_results` (phase = `pre_assessment`)
+
+**Phase 2 — Per-File Deep Classification**
+- Processes `Discovered` files of type Image / Video / Document in batches
+- Images: uploaded as base64 (≤ 10 MB), visual AI analysis
+- Documents: text extraction + semantic classification (≤ 5 MB)
+- Videos: filename + path heuristics only (no bytes uploaded)
+- Returns: `category`, `importance`, `confidence`, `summary`, `suggested_target`
+- Handles gemma4's non-standard field aliases (`classification` → `category`)
+- Result stored in `ai_results`
+
+**Phase 3 — Directory Summaries**
+- Bottom-up: deepest directories first
+- Builds `summaryLines` from Phase 2 results (falls back to `name — FileType` if no summary)
+- Calls Ollama once per directory for a human-readable folder description
+- Result shown as a banner in the UI when the folder is selected
+- Result stored in `ai_directory_results` (phase = `summary`)
+
+**Pipeline runtime behavior**
+- Single Ollama availability check at pipeline start (not once per phase)
+- `think: false` sent in all Ollama requests (prevents gemma4 reasoning tokens from inflating response time)
+- Detailed prompt + truncated response logged at `Information` level (visible in VS Output → Debug channel)
+- `Microsoft.Extensions.Logging.Debug` provider active in desktop app
+
+### Manual review
+
+- `UserOverride` model and `ReviewService` exist
+- Override persistence implemented
+- UI for overrides: **done** (category correction visible in file detail panel)
+
+---
+
+## ⚠️ Implemented but limited
+
+### Document understanding
+
+- PDFs: first rendered page only — no multi-page reasoning
+- Text extraction: preview-sized only (not full-document ingestion)
+- No OCR beyond what the vision model infers from rendered images
+- Office formats (`.docx`, `.xlsx`) not deeply parsed
+
+### AI quality / robustness
+
+- Confidence derivation: if model omits `confidence` but gives a valid category, defaults to `0.85`
+- Prompt schema field names are often ignored by gemma4 — alias parsing handles this but other models may behave differently
+- No adaptive throttling — pipeline is strictly sequential per-file
+
+### Review workflow
+
+- Override UI exists but is minimal
+- No confirm/reject bulk workflow
+- No review filters
+- Approval-driven action planning not yet built
+
+---
+
+## 🔜 Planned next priorities
+
+### 1 — Action pipeline
+- Generate file operation plans from approved classifications
+- Preview actions (move / copy / archive) before execution
+- Execute with per-file logging and rollback-friendly design
+
+### 2 — Richer document understanding
+- Multi-page PDF support
+- OCR / text extraction for more binary formats
+- Improved prompts for "valuable personal data vs. trash" distinction
+
+### 3 — Review UX improvements
+- Bulk approve / reject
+- Filter by category, confidence, trash candidates
+- Surface AI errors and model info per file
+
+### 4 — Performance and scale
+- Profile on large datasets (100k+ files)
+- Evaluate bounded concurrency for Phase 2
+- Improve tree virtualization for very large directory trees
+
+### 5 — Polish and packaging
+- Custom skip-pattern editor in UI
+- Export scan results (CSV / JSON)
+- macOS / Linux packaging
+
+---
+
+## 📋 Known caveats
+
+- Avalonia `DataGrid` requires explicit theme include or renders as a black slab
+- Dark theme defaults caused black panels until explicit backgrounds were set
+- PDF previews initially rendered transparent — fixed with forced white background
+- Large Ollama vision models need time for initial VRAM load — warm-up + `keep_alive` mitigates this
+- `think: false` is required for gemma4 — without it, responses take 90–150 s even for trivial prompts
+- `%APPDATA%\SmartFileOrganizer\settings.json` overrides `appsettings.json` — check it first when debugging unexpected behavior
+- Ollama continues processing after a client-side timeout; the next request queues behind it — this was the root cause of Phase 3 hanging on video files
+- PDFium native runtimes may interact with Windows application control policies in enterprise environments
+
+---
+
+## 🏁 MVP definition
+
+MVP is complete when:
+
+- [x] Scan + persist + browse works reliably
+- [x] 3-phase AI pipeline runs end-to-end with real results
+- [x] Configurable Ollama settings
+- [x] Directory summaries visible in UI
+- [ ] Review and override workflow fully exposed
+- [ ] Basic file action (move/copy) executable after approval
+
 
 ### Scan and persistence
 

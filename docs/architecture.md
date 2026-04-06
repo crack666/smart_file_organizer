@@ -49,21 +49,46 @@ The UI must not own scanning, SQL generation, or Ollama HTTP logic. Those respon
 
 ## AI flow (current architecture)
 
-The current implemented flow is:
+The post-scan AI pipeline runs as three sequential phases coordinated by `AiClassificationCoordinator`:
 
-1. scan job identifies AI-eligible files
-2. when the scan completes, `MainViewModel` starts `AiClassificationCoordinator`
-3. `AiClassificationCoordinator` runs separately from the scan engine and supports pause/resume/cancel
-4. `ClassificationService` consumes AI-eligible files in batches and prepares evidence for each file
-5. `IClassificationInputPreparer` converts files into multimodal inputs:
-  - images → base64 original image
-  - PDFs → rendered first-page image
-  - text-like files → truncated extracted text
-6. `IOllamaService` sends structured multimodal `/api/chat` requests to Ollama
-7. results persist to `ai_results`
-8. the desktop UI refreshes file rows/details as classifications arrive
+### Phase 1 — Directory Pre-Assessment (`DirectoryPreAssessmentService`)
 
-This flow is now **real and connected**, but still intentionally conservative in throughput and evidence depth.
+1. All `directory_nodes` for the job are loaded, ordered by depth
+2. Directories already in `ai_directory_results` (phase=`pre_assessment`) are skipped (resume support)
+3. For each pending directory, `GetFileInfoForDirectoryAsync` returns all direct files (all types)
+4. A file list prompt is sent to Ollama via `PreAssessDirectoryAsync`
+5. Ollama returns: `sampling_strategy`, `sample_size`, `anomalous_file_ids`, `homogeneity`, `suggested_area`
+6. `ApplySamplingAsync` marks non-sampled `FileNode` rows as `Skipped`
+7. Result stored in `ai_directory_results` (phase=`pre_assessment`)
+
+### Phase 2 — Per-File Classification (`ClassificationService`)
+
+1. `GetPendingAiAnalysisAsync` selects `Discovered` files with `file_type IN (1, 2, 4)` — Image, Video, Document
+2. `IClassificationInputPreparer` builds evidence per file type:
+   - **Image** (≤ `MaxImageUploadBytes`): base64 image payload
+   - **Image** (oversized): text-only note about size
+   - **Video**: `[Video file. Classify based on the filename and directory name only.]` — no bytes
+   - **Document** (≤ `MaxDocumentUploadBytes`): rendered page image or extracted text preview
+3. `ClassifyAsync` sends a structured `/api/chat` request with `think: false`
+4. `ParseResponse` handles gemma4's field aliasing (`classification` → `category`, missing `confidence` → 0.85)
+5. Result stored in `ai_results`; file status updated to `AiAnalyzed` or `Error`
+
+### Phase 3 — Directory Summaries (`DirectorySummaryService`)
+
+1. All directories ordered deepest-first (bottom-up synthesis)
+2. Directories already in `ai_directory_results` (phase=`summary`) are skipped
+3. For each directory: fetch pre-assessment + all file nodes via `GetByDirectoryAsync`
+4. Build `summaryLines`: for each file, use `Classification.Summary` if available, else `name — FileType`
+5. If `summaryLines` or `anomalyDescriptions` non-empty → call `SummarizeDirectoryAsync`
+6. Result stored in `ai_directory_results` (phase=`summary`)
+7. Displayed as a banner in the UI via `MainViewModel.SelectedDirSummary`
+
+### Pipeline coordination
+
+- Single `IsAvailableAsync` check at start of `AiClassificationCoordinator.StartOrResumeAsync`
+- `think: false` in all three phase request bodies
+- Full prompt + truncated response logged at `Information` level per Ollama call
+- Pause/resume/cancel supported at any phase boundary via `WaitIfPausedAsync`
 
 ## Ollama configuration flow
 
@@ -96,11 +121,12 @@ SQLite is the local source of truth. It stores both operational state and review
 
 Important tables:
 
-- `scan_jobs`
-- `directory_nodes`
-- `file_nodes`
-- `ai_results`
-- `user_overrides`
+- `scan_jobs` — job lifecycle, counters, status
+- `directory_nodes` — scanned directories with heuristic metadata and stats
+- `file_nodes` — scanned files with metadata, type, AI status
+- `ai_results` — Phase 2 per-file classification results
+- `ai_directory_results` — Phase 1 pre-assessment + Phase 3 directory summaries (distinguished by `phase` column)
+- `user_overrides` — manual category/target corrections
 
 ## Architectural rules
 
