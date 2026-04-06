@@ -275,6 +275,12 @@
                                 <TreeDataTemplate ItemsSource="{Binding Children}"
                                                   x:DataType="vm:FolderTreeItemViewModel">
                                     <StackPanel Orientation="Horizontal" Spacing="4">
+                                        <StackPanel.ContextMenu>
+                                            <ContextMenu>
+                                                <MenuItem Header="Im Explorer öffnen"
+                                                          Command="{Binding RevealInExplorerCommand}" />
+                                            </ContextMenu>
+                                        </StackPanel.ContextMenu>
                                         <TextBlock Text="📁" FontSize="12"/>
                                         <TextBlock Text="{Binding DisplayName}" />
                                     </StackPanel>

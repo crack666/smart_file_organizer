@@ -11,7 +11,7 @@ public class HeuristicsOptions
         "bin", "obj", "__pycache__", ".mypy_cache",
         "Windows", "System32", "SysWOW64",
         "$Recycle.Bin", "System Volume Information",
-        "AppData\\Local\\Temp", "AppData\\LocalLow",
+        "AppData",
         "ProgramData\\Microsoft", "ProgramData\\Package Cache",
         "Program Files", "Program Files (x86)",
         ".nuget", "packages",

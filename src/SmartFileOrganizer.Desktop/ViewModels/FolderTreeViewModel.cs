@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 using SmartFileOrganizer.Application.Services;
 using SmartFileOrganizer.Domain.Models;
 
@@ -35,7 +36,18 @@ public partial class FolderTreeItemViewModel : ViewModelBase
     public string DisplayName => Node?.Name ?? "…";
     public string FullPath => Node?.FullPath ?? string.Empty;
     public string StatusBadge => Node?.DirStatus.ToString()[0..1] ?? "";
-
+    [RelayCommand]
+    private void RevealInExplorer()
+    {
+        var path = Node?.FullPath;
+        if (string.IsNullOrEmpty(path) || !Directory.Exists(path)) return;
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = "explorer.exe",
+            Arguments = $"\"{path}\"",
+            UseShellExecute = false
+        });
+    }
     public bool HasPlaceholder => Children.Count == 1 && Children[0] == Placeholder;
 
     public void AddPlaceholder()
