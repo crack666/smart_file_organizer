@@ -68,4 +68,22 @@ public class ScanJobRepository : IScanJobRepository
 
         await conn.ExecuteAsync(sql, job);
     }
+
+    public async Task DeleteAsync(long id, CancellationToken ct = default)
+    {
+        await using var conn = _db.CreateConnection();
+        await conn.OpenAsync(ct);
+
+        // Cascade manually (SQLite FK cascade requires ON DELETE CASCADE in DDL;
+        // we delete in dependency order instead).
+        const string sql = """
+            DELETE FROM user_overrides  WHERE file_node_id IN (SELECT id FROM file_nodes WHERE job_id = @id);
+            DELETE FROM ai_results      WHERE file_node_id IN (SELECT id FROM file_nodes WHERE job_id = @id);
+            DELETE FROM file_nodes      WHERE job_id = @id;
+            DELETE FROM directory_nodes WHERE job_id = @id;
+            DELETE FROM scan_jobs       WHERE id = @id;
+            """;
+
+        await conn.ExecuteAsync(sql, new { id });
+    }
 }

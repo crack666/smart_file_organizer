@@ -213,13 +213,24 @@
                                                            Foreground="White" />
                                             </StackPanel>
                                         </StackPanel>
-                                        <!-- Open button -->
-                                        <Button Grid.Column="2"
-                                                Content="Öffnen"
-                                                Margin="8,0,12,0"
-                                                VerticalAlignment="Center"
-                                                Command="{Binding $parent[ListBox].DataContext.OpenRecentScanCommand}"
-                                                CommandParameter="{Binding Job}" />
+                                        <!-- Open / Delete buttons -->
+                                        <StackPanel Grid.Column="2"
+                                                    Orientation="Horizontal"
+                                                    Spacing="4"
+                                                    Margin="8,0,12,0"
+                                                    VerticalAlignment="Center">
+                                            <Button Content="Öffnen"
+                                                    Command="{Binding $parent[ListBox].DataContext.OpenRecentScanCommand}"
+                                                    CommandParameter="{Binding Job}" />
+                                            <Button Content="🗑"
+                                                    ToolTip.Tip="Scan restlos löschen"
+                                                    Foreground="#FF5722"
+                                                    Background="Transparent"
+                                                    BorderThickness="1"
+                                                    BorderBrush="#FF5722"
+                                                    Command="{Binding $parent[ListBox].DataContext.DeleteRecentScanCommand}"
+                                                    CommandParameter="{Binding Job}" />
+                                        </StackPanel>
                                     </Grid>
                                 </DataTemplate>
                             </ListBox.ItemTemplate>

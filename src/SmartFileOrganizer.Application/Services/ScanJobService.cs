@@ -48,6 +48,9 @@ public class ScanJobService
     public async Task<IReadOnlyList<ScanJob>> GetAllJobsAsync(CancellationToken ct = default)
         => await _jobRepo.GetAllAsync(ct);
 
+    public async Task DeleteJobAsync(long id, CancellationToken ct = default)
+        => await _jobRepo.DeleteAsync(id, ct);
+
     public async Task<ScanJob?> GetJobAsync(long id, CancellationToken ct = default)
         => await _jobRepo.GetByIdAsync(id, ct);
 

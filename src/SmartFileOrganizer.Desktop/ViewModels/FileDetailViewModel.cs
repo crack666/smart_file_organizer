@@ -29,6 +29,7 @@ public partial class FileDetailViewModel : ViewModelBase
     [ObservableProperty] private string _confidence = string.Empty;
     [ObservableProperty] private string _summary = string.Empty;
     [ObservableProperty] private string _suggestedTarget = string.Empty;
+    [ObservableProperty] private string _modelUsed = string.Empty;
     [ObservableProperty] private bool _hasClassification;
 
     // ── Existing override (read-only display) ─────────────────────────────
@@ -84,11 +85,12 @@ public partial class FileDetailViewModel : ViewModelBase
             Confidence = $"{cls.Confidence:P0}";
             Summary = cls.Summary ?? string.Empty;
             SuggestedTarget = cls.SuggestedTarget ?? string.Empty;
+            ModelUsed = cls.ModelUsed ?? string.Empty;
         }
         else
         {
             HasClassification = false;
-            Category = Importance = Confidence = Summary = SuggestedTarget = string.Empty;
+            Category = Importance = Confidence = Summary = SuggestedTarget = ModelUsed = string.Empty;
         }
 
         if (file.Override is { } uo)
@@ -116,7 +118,7 @@ public partial class FileDetailViewModel : ViewModelBase
         _fileNodeId = 0;
         ImagePreview?.Dispose();
         Name = FullPath = Extension = FileType = SizeText = LastModified = string.Empty;
-        Category = Importance = Confidence = Summary = SuggestedTarget = string.Empty;
+        Category = Importance = Confidence = Summary = SuggestedTarget = ModelUsed = string.Empty;
         OverrideCategory = OverrideTarget = string.Empty;
         EditTarget = string.Empty;
         SelectedCategory = FileCategory.Unknown;

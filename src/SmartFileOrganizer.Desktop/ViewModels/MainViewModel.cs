@@ -47,6 +47,15 @@ public partial class MainViewModel : ViewModelBase
     [ObservableProperty] private ScanJob? _selectedJob;
     [ObservableProperty] private ObservableCollection<OllamaModelViewModel> _availableOllamaModels = [];
     [ObservableProperty] private OllamaModelViewModel? _selectedOllamaModel;
+
+    partial void OnSelectedOllamaModelChanged(OllamaModelViewModel? value)
+    {
+        if (value != null)
+        {
+            _ollamaOptions.Model = value.Name;
+            OllamaStatusText = $"Active model: {value.Name}";
+        }
+    }
     [ObservableProperty] private string _ollamaBaseUrl = string.Empty;
     [ObservableProperty] private string _ollamaKeepAlive = string.Empty;
     [ObservableProperty] private string _ollamaStatusText = "Ollama settings loaded.";
@@ -136,6 +145,15 @@ public partial class MainViewModel : ViewModelBase
         foreach (var j in all)
             RecentScans.Add(new RecentScanItemViewModel(j));
         IsShowingWelcome = RecentScans.Count > 0;
+    }
+
+    [RelayCommand]
+    private async Task DeleteRecentScanAsync(ScanJob job)
+    {
+        await _scanJobService.DeleteJobAsync(job.Id);
+        var item = RecentScans.FirstOrDefault(r => r.Job.Id == job.Id);
+        if (item != null) RecentScans.Remove(item);
+        if (RecentScans.Count == 0) IsShowingWelcome = false;
     }
 
     [RelayCommand]

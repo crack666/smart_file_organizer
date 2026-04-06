@@ -4,7 +4,7 @@ public class OllamaOptions
 {
     public string BaseUrl { get; set; } = "http://localhost:11434";
     public string Model { get; set; } = "qwen3-vl:30b";
-    public int TimeoutSeconds { get; set; } = 60;
+    public int TimeoutSeconds { get; set; } = 180;
     public int MaxRetries { get; set; } = 2;
     public string KeepAlive { get; set; } = "60m";
     public string SystemPrompt { get; set; } = DefaultSystemPrompt;
