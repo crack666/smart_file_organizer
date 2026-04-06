@@ -9,6 +9,9 @@ public class OllamaOptions
     public string KeepAlive { get; set; } = "60m";
     public string SystemPrompt { get; set; } = DefaultSystemPrompt;
     public string SummaryLanguage { get; set; } = "English";
+    public long MaxImageUploadBytes { get; set; } = 10 * 1024 * 1024;   // 10 MB
+    public long MaxDocumentUploadBytes { get; set; } = 5 * 1024 * 1024; // 5 MB
+    public int MaxSamplesPerDirectory { get; set; } = 15;
 
     public const string DefaultSystemPrompt =
         """

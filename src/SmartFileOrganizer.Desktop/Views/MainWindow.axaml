@@ -292,11 +292,24 @@
 
             <!-- Right: File Table + Detail panel -->
             <Grid Grid.Column="2"
-                RowDefinitions="3*,4,2*"
+                RowDefinitions="Auto,3*,4,2*"
                 Background="#252526">
 
+                <!-- Directory AI summary banner -->
+                <Border Grid.Row="0"
+                        Background="#1A2A1A"
+                        BorderBrush="#3A5A3A"
+                        BorderThickness="0,0,0,1"
+                        Padding="10,5"
+                        IsVisible="{Binding SelectedDirSummary, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                    <TextBlock Text="{Binding SelectedDirSummary}"
+                               Foreground="#90C090"
+                               FontSize="12"
+                               TextWrapping="Wrap" />
+                </Border>
+
                 <!-- File Table -->
-                <DataGrid Grid.Row="0"
+                <DataGrid Grid.Row="1"
                           ItemsSource="{Binding FileTable.Rows}"
                           SelectedItem="{Binding FileTable.SelectedRow, Mode=TwoWay}"
                           AutoGenerateColumns="False"
@@ -416,12 +429,12 @@
                     </DataGrid.Columns>
                 </DataGrid>
 
-                <GridSplitter Grid.Row="1"
+                <GridSplitter Grid.Row="2"
                               ResizeDirection="Rows"
                               Background="#2D2D30" />
 
                 <!-- Detail Panel -->
-                <Border Grid.Row="2"
+                <Border Grid.Row="3"
                         Background="#252526"
                         BorderBrush="#3E3E42"
                         BorderThickness="1,1,0,0"

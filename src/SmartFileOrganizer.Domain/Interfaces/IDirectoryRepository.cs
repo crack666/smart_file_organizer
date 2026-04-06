@@ -9,4 +9,5 @@ public interface IDirectoryRepository
     Task<IReadOnlyList<DirectoryNode>> GetChildrenAsync(long jobId, string parentPath, CancellationToken ct = default);
     Task<IReadOnlyList<DirectoryNode>> GetRootsAsync(long jobId, CancellationToken ct = default);
     Task UpdateAsync(DirectoryNode node, CancellationToken ct = default);
+    Task<IReadOnlyList<DirectoryNode>> GetAllForJobOrderedByDepthAsync(long jobId, CancellationToken ct = default);
 }

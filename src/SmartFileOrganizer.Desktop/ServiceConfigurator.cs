@@ -36,8 +36,8 @@ public static class ServiceConfigurator
 
         services.AddSingleton<IConfiguration>(configuration);
 
-        // Logging
-        services.AddLogging(b => b.AddConsole().SetMinimumLevel(LogLevel.Debug));
+        // Logging — AddDebug() writes to the VS "Output > Debug" channel (works with WinExe)
+        services.AddLogging(b => b.AddConsole().AddDebug().SetMinimumLevel(LogLevel.Debug));
 
         // Database
         var dbPath = Path.Combine(appDataDir, "data.db");
@@ -52,6 +52,7 @@ public static class ServiceConfigurator
         services.AddSingleton<IDirectoryRepository, DirectoryRepository>();
         services.AddSingleton<IClassificationRepository, ClassificationRepository>();
         services.AddSingleton<IUserOverrideRepository, UserOverrideRepository>();
+        services.AddSingleton<IDirectoryClassificationRepository, DirectoryClassificationRepository>();
 
         // Infrastructure
         services.AddSingleton<IFileSystemAccessor, FileSystemAccessor>();
@@ -85,13 +86,31 @@ public static class ServiceConfigurator
         services.AddSingleton<FileQueryService>();
         services.AddSingleton<DirectoryQueryService>();
         services.AddSingleton<ClassificationService>();
+        services.AddSingleton(sp => new DirectoryAnalysisOptions
+        {
+            MaxSamplesPerDirectory = sp.GetRequiredService<OllamaOptions>().MaxSamplesPerDirectory
+        });
+        services.AddSingleton<DirectoryPreAssessmentService>();
+        services.AddSingleton<DirectorySummaryService>();
         services.AddSingleton<AiClassificationCoordinator>();
         services.AddSingleton<ReviewService>();
         services.AddSingleton<FilePreviewService>();
         services.AddSingleton<IClassificationInputPreparer, AiClassificationInputPreparer>();
 
         // ViewModels
-        services.AddTransient<MainViewModel>();
+        services.AddTransient<MainViewModel>(sp => new MainViewModel(
+            sp.GetRequiredService<ScanJobService>(),
+            sp.GetRequiredService<FileQueryService>(),
+            sp.GetRequiredService<AiClassificationCoordinator>(),
+            sp.GetRequiredService<IOllamaService>(),
+            sp.GetRequiredService<OllamaOptions>(),
+            sp.GetRequiredService<OllamaSettingsService>(),
+            sp.GetRequiredService<FolderTreeViewModel>(),
+            sp.GetRequiredService<FileTableViewModel>(),
+            sp.GetRequiredService<FileDetailViewModel>(),
+            sp.GetRequiredService<ScanProgressViewModel>(),
+            sp.GetRequiredService<AiProgressViewModel>(),
+            sp.GetRequiredService<IDirectoryClassificationRepository>()));
         services.AddTransient<FolderTreeViewModel>();
         services.AddTransient<FileTableViewModel>(sp => new FileTableViewModel(
             sp.GetRequiredService<FileQueryService>(),

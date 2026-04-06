@@ -102,5 +102,23 @@ internal static class Schema
             note                TEXT,
             overridden_at       TEXT NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS ai_directory_results (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            directory_node_id   INTEGER NOT NULL REFERENCES directory_nodes(id),
+            phase               TEXT NOT NULL,
+            summary             TEXT,
+            theme               TEXT,
+            homogeneity         TEXT,
+            dominant_type       TEXT,
+            anomalous_file_ids  TEXT,
+            sampling_strategy   TEXT,
+            sample_size         INTEGER NOT NULL DEFAULT 0,
+            model_used          TEXT,
+            analyzed_at         TEXT NOT NULL,
+            error               TEXT
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_dir_results_node_phase
+            ON ai_directory_results(directory_node_id, phase);
         """;
 }

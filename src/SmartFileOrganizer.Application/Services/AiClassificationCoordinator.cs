@@ -1,10 +1,14 @@
 using Microsoft.Extensions.Logging;
+using SmartFileOrganizer.Domain.Interfaces;
 
 namespace SmartFileOrganizer.Application.Services;
 
 public class AiClassificationCoordinator
 {
     private readonly ClassificationService _classificationService;
+    private readonly DirectoryPreAssessmentService _preAssessmentService;
+    private readonly DirectorySummaryService _directorySummaryService;
+    private readonly IOllamaService _ollama;
     private readonly ILogger<AiClassificationCoordinator> _logger;
 
     private readonly object _sync = new();
@@ -22,9 +26,15 @@ public class AiClassificationCoordinator
 
     public AiClassificationCoordinator(
         ClassificationService classificationService,
+        DirectoryPreAssessmentService preAssessmentService,
+        DirectorySummaryService directorySummaryService,
+        IOllamaService ollama,
         ILogger<AiClassificationCoordinator> logger)
     {
         _classificationService = classificationService;
+        _preAssessmentService = preAssessmentService;
+        _directorySummaryService = directorySummaryService;
+        _ollama = ollama;
         _logger = logger;
     }
 
@@ -56,15 +66,31 @@ public class AiClassificationCoordinator
                 {
                     StateChanged?.Invoke(this, new AiProcessingStateChanged(jobId, AiProcessingState.Running, "AI classification running…"));
 
-                    var result = await _classificationService.RunAsync(jobId, progress, WaitIfPausedAsync, _cts.Token);
-
-                    if (!result.OllamaAvailable)
+                    // Single availability check — avoids 3x /api/tags calls
+                    if (!await _ollama.IsAvailableAsync(_cts.Token))
                     {
-                        StateChanged?.Invoke(this, new AiProcessingStateChanged(jobId, AiProcessingState.Unavailable, result.StatusText));
+                        StateChanged?.Invoke(this, new AiProcessingStateChanged(jobId, AiProcessingState.Unavailable, "Ollama is not available."));
                         return;
                     }
 
-                    StateChanged?.Invoke(this, new AiProcessingStateChanged(jobId, AiProcessingState.Completed, result.StatusText));
+                    // ── Phase 1: Directory reconnaissance ──────────────────
+                    StateChanged?.Invoke(this, new AiProcessingStateChanged(jobId, AiProcessingState.Running, "Phase 1/3: Directory reconnaissance…"));
+                    var phase1 = await _preAssessmentService.RunAsync(jobId, progress, WaitIfPausedAsync, _cts.Token);
+
+                    // ── Phase 2: Targeted per-file deep analysis ────────────
+                    StateChanged?.Invoke(this, new AiProcessingStateChanged(jobId, AiProcessingState.Running, "Phase 2/3: Deep file analysis…"));
+                    var result = await _classificationService.RunAsync(jobId, progress, WaitIfPausedAsync, _cts.Token);
+
+                    // ── Phase 3: Directory summaries ────────────────────────
+                    StateChanged?.Invoke(this, new AiProcessingStateChanged(jobId, AiProcessingState.Running, "Phase 3/3: Directory summaries…"));
+                    var phase3 = await _directorySummaryService.RunAsync(jobId, progress, WaitIfPausedAsync, _cts.Token);
+
+                    var totalErrors = phase1.ErrorCount + result.ErrorCount + phase3.ErrorCount;
+                    var finalMsg = totalErrors > 0
+                        ? $"AI classification finished with {totalErrors} error(s)."
+                        : "AI classification completed.";
+
+                    StateChanged?.Invoke(this, new AiProcessingStateChanged(jobId, AiProcessingState.Completed, finalMsg));
                 }
                 catch (OperationCanceledException)
                 {

@@ -94,7 +94,7 @@ public class FileRepository : IFileRepository
             SELECT * FROM file_nodes
             WHERE job_id = @jobId
               AND status = @status
-              AND file_type IN (1, 2, 4)  -- Image=1, Video=2, Document=4
+              AND file_type IN (1, 2, 4)  -- Image=1, Video=2, Document=4 (heuristic path for video: no bytes uploaded)
             ORDER BY id
             LIMIT @batchSize
             """,
@@ -145,5 +145,36 @@ public class FileRepository : IFileRepository
         await conn.OpenAsync(ct);
         return await conn.ExecuteScalarAsync<long>(
             "SELECT COUNT(*) FROM file_nodes WHERE job_id = @jobId", new { jobId });
+    }
+
+    public async Task<IReadOnlyList<DirectoryFileInfo>> GetFileInfoForDirectoryAsync(
+        long jobId, string parentPath, CancellationToken ct = default)
+    {
+        await using var conn = _db.CreateConnection();
+        await conn.OpenAsync(ct);
+        var result = await conn.QueryAsync<DirectoryFileInfo>(
+            """
+            SELECT id, name, size, file_type
+            FROM file_nodes
+            WHERE job_id = @jobId AND parent_path = @parentPath
+            ORDER BY name
+            """,
+            new { jobId, parentPath });
+        return result.AsList();
+    }
+
+    public async Task MarkAsSkippedAsync(IReadOnlyList<long> ids, CancellationToken ct = default)
+    {
+        if (ids.Count == 0) return;
+        await using var conn = _db.CreateConnection();
+        await conn.OpenAsync(ct);
+        await conn.ExecuteAsync(
+            "UPDATE file_nodes SET status = @skipped WHERE id IN @ids AND status = @discovered",
+            new
+            {
+                skipped = (int)FileNodeStatus.Skipped,
+                ids,
+                discovered = (int)FileNodeStatus.Discovered
+            });
     }
 }

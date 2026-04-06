@@ -54,14 +54,6 @@ public class ClassificationService
             return new AiClassificationRunResult(true, 0, 0, 0, noEligibleMessage);
         }
 
-        if (!await _ollama.IsAvailableAsync(ct))
-        {
-            const string unavailableMessage = "Ollama is not available. Skipping AI classification.";
-            _logger.LogWarning(unavailableMessage);
-            progress?.Report(new AiClassificationProgress(jobId, processed, totalEligible, 0, string.Empty, unavailableMessage));
-            return new AiClassificationRunResult(false, totalEligible, processed, 0, unavailableMessage);
-        }
-
         progress?.Report(new AiClassificationProgress(
             jobId,
             processed,

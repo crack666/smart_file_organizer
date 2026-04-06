@@ -12,4 +12,8 @@ public interface IFileRepository
     Task<long> CountPendingAiAnalysisAsync(long jobId, CancellationToken ct = default);
     Task UpdateStatusAsync(long id, Enums.FileNodeStatus status, CancellationToken ct = default);
     Task<long> CountByJobAsync(long jobId, CancellationToken ct = default);
+    /// <summary>Returns lightweight name+size info for ALL files in a directory (used for Phase 1 prompt building).</summary>
+    Task<IReadOnlyList<DirectoryFileInfo>> GetFileInfoForDirectoryAsync(long jobId, string parentPath, CancellationToken ct = default);
+    /// <summary>Marks the given file IDs as Skipped if they are still in Discovered state.</summary>
+    Task MarkAsSkippedAsync(IReadOnlyList<long> ids, CancellationToken ct = default);
 }

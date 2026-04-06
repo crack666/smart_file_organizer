@@ -90,4 +90,15 @@ public class DirectoryRepository : IDirectoryRepository
 
         await conn.ExecuteAsync(sql, node);
     }
+
+    public async Task<IReadOnlyList<DirectoryNode>> GetAllForJobOrderedByDepthAsync(
+        long jobId, CancellationToken ct = default)
+    {
+        await using var conn = _db.CreateConnection();
+        await conn.OpenAsync(ct);
+        var result = await conn.QueryAsync<DirectoryNode>(
+            "SELECT * FROM directory_nodes WHERE job_id = @jobId ORDER BY depth ASC, full_path ASC",
+            new { jobId });
+        return result.AsList();
+    }
 }

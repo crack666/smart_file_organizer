@@ -22,6 +22,7 @@ public partial class MainViewModel : ViewModelBase
     private readonly FileDetailViewModel _fileDetail;
     private readonly ScanProgressViewModel _scanProgress;
     private readonly AiProgressViewModel _aiProgress;
+    private readonly IDirectoryClassificationRepository _dirClassRepo;
 
     private long _activeJobId;
     private CancellationTokenSource? _uiCts;
@@ -47,6 +48,7 @@ public partial class MainViewModel : ViewModelBase
     [ObservableProperty] private ScanJob? _selectedJob;
     [ObservableProperty] private ObservableCollection<OllamaModelViewModel> _availableOllamaModels = [];
     [ObservableProperty] private OllamaModelViewModel? _selectedOllamaModel;
+    [ObservableProperty] private string _selectedDirSummary = string.Empty;
 
     partial void OnSelectedOllamaModelChanged(OllamaModelViewModel? value)
     {
@@ -80,7 +82,8 @@ public partial class MainViewModel : ViewModelBase
         FileTableViewModel fileTable,
         FileDetailViewModel fileDetail,
         ScanProgressViewModel scanProgress,
-        AiProgressViewModel aiProgress)
+        AiProgressViewModel aiProgress,
+        IDirectoryClassificationRepository dirClassRepo)
     {
         _scanJobService = scanJobService;
         _fileQueryService = fileQueryService;
@@ -93,6 +96,7 @@ public partial class MainViewModel : ViewModelBase
         _fileDetail = fileDetail;
         _scanProgress = scanProgress;
         _aiProgress = aiProgress;
+        _dirClassRepo = dirClassRepo;
 
         _scanJobService.ProgressChanged += OnProgressChanged;
         _scanJobService.JobStateChanged += OnJobStateChanged;
@@ -363,12 +367,27 @@ public partial class MainViewModel : ViewModelBase
         try
         {
             await _fileTable.LoadAsync(_activeJobId, path);
+            await LoadDirectorySummaryAsync(path);
         }
         catch (Exception ex)
         {
             System.Diagnostics.Debug.WriteLine($"[DIR SELECT ERROR] {ex}");
         }
         _fileDetail.Clear();
+    }
+
+    private async Task LoadDirectorySummaryAsync(string path)
+    {
+        if (_activeJobId <= 0) { SelectedDirSummary = string.Empty; return; }
+        try
+        {
+            var dir = await _dirClassRepo.GetByDirectoryPathAsync(_activeJobId, path);
+            SelectedDirSummary = dir?.Summary ?? string.Empty;
+        }
+        catch
+        {
+            SelectedDirSummary = string.Empty;
+        }
     }
 
     private async Task LoadFileDetailAsync(long fileId)
