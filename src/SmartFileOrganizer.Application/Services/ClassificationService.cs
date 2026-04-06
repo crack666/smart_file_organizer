@@ -1,3 +1,4 @@
+using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
 using SmartFileOrganizer.Domain.Enums;
 using SmartFileOrganizer.Domain.Interfaces;
@@ -6,8 +7,9 @@ using SmartFileOrganizer.Domain.Models;
 namespace SmartFileOrganizer.Application.Services;
 
 /// <summary>
-/// Orchestrates AI classification for file nodes.
-/// Picks up discovered files in batches and sends them to Ollama.
+/// Orchestrates AI classification for file nodes using a producer-consumer pipeline.
+/// The producer fetches + prepares file inputs (IO-bound) concurrently with the consumer
+/// sending requests to Ollama (GPU-bound), eliminating the idle gap between inferences.
 /// </summary>
 public class ClassificationService
 {
@@ -17,7 +19,14 @@ public class ClassificationService
     private readonly IOllamaService _ollama;
     private readonly ILogger<ClassificationService> _logger;
 
-    private const int BatchSize = 10;
+    /// <summary>How many files to fetch from DB per producer iteration.</summary>
+    private const int FetchBatchSize = 30;
+
+    /// <summary>
+    /// Prepared inputs buffered ahead of the Ollama consumer.
+    /// 4–6 is enough to hide all IO latency without wasting memory on large image batches.
+    /// </summary>
+    private const int ChannelCapacity = 6;
 
     public ClassificationService(
         IFileRepository fileRepo,
@@ -33,9 +42,6 @@ public class ClassificationService
         _logger = logger;
     }
 
-    /// <summary>
-    /// Processes pending files for AI classification until cancelled or no more pending.
-    /// </summary>
     public async Task<AiClassificationRunResult> RunAsync(
         long jobId,
         IProgress<AiClassificationProgress>? progress = null,
@@ -43,6 +49,8 @@ public class ClassificationService
         CancellationToken ct = default)
     {
         var totalEligible = await _fileRepo.CountAiEligibleAsync(jobId, ct);
+        // Reset any files stuck in Processing from a previous cancelled/crashed run
+        await _fileRepo.ResetStaleProcessingAsync(jobId, ct);
         var pendingAtStart = await _fileRepo.CountPendingAiAnalysisAsync(jobId, ct);
         var processed = Math.Max(0, totalEligible - pendingAtStart);
         var errorCount = 0;
@@ -55,80 +63,92 @@ public class ClassificationService
         }
 
         progress?.Report(new AiClassificationProgress(
-            jobId,
-            processed,
-            totalEligible,
-            errorCount,
-            string.Empty,
-            $"AI classifying… {processed:N0} / {totalEligible:N0}"));
+            jobId, processed, totalEligible, errorCount, string.Empty,
+            $"AI classifying\u2026 {processed:N0} / {totalEligible:N0}"));
 
-        while (!ct.IsCancellationRequested)
-        {
-            if (waitIfPausedAsync != null)
-                await waitIfPausedAsync(ct);
-
-            var batch = await _fileRepo.GetPendingAiAnalysisAsync(jobId, BatchSize, ct);
-            if (batch.Count == 0) break;
-
-            foreach (var file in batch)
+        // Bounded channel: producer writes, consumer reads.
+        // BoundedChannelFullMode.Wait makes producer block when consumer is busy — natural backpressure.
+        var channel = Channel.CreateBounded<(FileNode File, OllamaClassificationInput Input)>(
+            new BoundedChannelOptions(ChannelCapacity)
             {
-                ct.ThrowIfCancellationRequested();
+                FullMode = BoundedChannelFullMode.Wait,
+                SingleReader = true,
+                SingleWriter = true
+            });
 
-                if (waitIfPausedAsync != null)
-                    await waitIfPausedAsync(ct);
+        // ── Producer ──────────────────────────────────────────────────────────
+        var producerTask = Task.Run(async () =>
+        {
+            try
+            {
+                while (!ct.IsCancellationRequested)
+                {
+                    if (waitIfPausedAsync != null) await waitIfPausedAsync(ct);
 
-                progress?.Report(new AiClassificationProgress(
-                    jobId,
-                    processed,
-                    totalEligible,
-                    errorCount,
-                    file.FullPath,
-                    $"AI classifying… {processed:N0} / {totalEligible:N0}"));
+                    var batch = await _fileRepo.GetPendingAiAnalysisAsync(jobId, FetchBatchSize, ct);
+                    if (batch.Count == 0) break;
 
-                _logger.LogDebug("Classifying: {Path}", file.FullPath);
+                    // Mark as Processing immediately so a resume run won't re-fetch these
+                    await _fileRepo.MarkAsProcessingAsync(batch.Select(f => f.Id).ToList(), ct);
 
-                var input = await _inputPreparer.PrepareAsync(file, ct);
-                var result = await _ollama.ClassifyAsync(input, ct);
-                result.FileNodeId = file.Id;
-
-                await _classRepo.UpsertAsync(result, ct);
-
-                var newStatus = result.Error != null
-                    ? FileNodeStatus.Error
-                    : FileNodeStatus.AiAnalyzed;
-
-                await _fileRepo.UpdateStatusAsync(file.Id, newStatus, ct);
-
-                if (result.Error != null)
-                    errorCount++;
-
-                processed++;
-
-                progress?.Report(new AiClassificationProgress(
-                    jobId,
-                    processed,
-                    totalEligible,
-                    errorCount,
-                    file.FullPath,
-                    $"AI classifying… {processed:N0} / {totalEligible:N0}"));
-
-                _logger.LogDebug(
-                    "Classified {Path}: {Category} (confidence: {Confidence:P0})",
-                    file.FullPath, result.Category, result.Confidence);
+                    foreach (var file in batch)
+                    {
+                        ct.ThrowIfCancellationRequested();
+                        var input = await _inputPreparer.PrepareAsync(file, ct);
+                        await channel.Writer.WriteAsync((file, input), ct);
+                    }
+                }
             }
+            catch (OperationCanceledException) { /* expected on cancel */ }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Producer failed for job {JobId}", jobId);
+            }
+            finally
+            {
+                channel.Writer.Complete();
+            }
+        }, ct);
+
+        // ── Consumer (Ollama — one request at a time) ─────────────────────────
+        await foreach (var (file, input) in channel.Reader.ReadAllAsync(ct))
+        {
+            if (waitIfPausedAsync != null) await waitIfPausedAsync(ct);
+
+            progress?.Report(new AiClassificationProgress(
+                jobId, processed, totalEligible, errorCount, file.FullPath,
+                $"AI classifying\u2026 {processed:N0} / {totalEligible:N0}"));
+
+            _logger.LogDebug("Classifying: {Path}", file.FullPath);
+
+            var result = await _ollama.ClassifyAsync(input, ct);
+            result.FileNodeId = file.Id;
+
+            await _classRepo.UpsertAsync(result, ct);
+
+            var newStatus = result.Error != null ? FileNodeStatus.Error : FileNodeStatus.AiAnalyzed;
+            await _fileRepo.UpdateStatusAsync(file.Id, newStatus, ct);
+
+            if (result.Error != null) errorCount++;
+            processed++;
+
+            progress?.Report(new AiClassificationProgress(
+                jobId, processed, totalEligible, errorCount, file.FullPath,
+                $"AI classifying\u2026 {processed:N0} / {totalEligible:N0}"));
+
+            _logger.LogDebug(
+                "Classified {Path}: {Category} (confidence: {Confidence:P0})",
+                file.FullPath, result.Category, result.Confidence);
         }
+
+        await producerTask; // propagate any producer exception
 
         var completedMessage = errorCount > 0
             ? $"AI classification finished with {errorCount} error(s)."
             : "AI classification completed.";
 
         progress?.Report(new AiClassificationProgress(
-            jobId,
-            processed,
-            totalEligible,
-            errorCount,
-            string.Empty,
-            completedMessage));
+            jobId, processed, totalEligible, errorCount, string.Empty, completedMessage));
 
         return new AiClassificationRunResult(true, totalEligible, processed, errorCount, completedMessage);
     }

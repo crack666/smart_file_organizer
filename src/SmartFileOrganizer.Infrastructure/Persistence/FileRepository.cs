@@ -177,4 +177,33 @@ public class FileRepository : IFileRepository
                 discovered = (int)FileNodeStatus.Discovered
             });
     }
+
+    public async Task MarkAsProcessingAsync(IReadOnlyList<long> ids, CancellationToken ct = default)
+    {
+        if (ids.Count == 0) return;
+        await using var conn = _db.CreateConnection();
+        await conn.OpenAsync(ct);
+        await conn.ExecuteAsync(
+            "UPDATE file_nodes SET status = @processing WHERE id IN @ids AND status = @discovered",
+            new
+            {
+                processing = (int)FileNodeStatus.Processing,
+                ids,
+                discovered = (int)FileNodeStatus.Discovered
+            });
+    }
+
+    public async Task ResetStaleProcessingAsync(long jobId, CancellationToken ct = default)
+    {
+        await using var conn = _db.CreateConnection();
+        await conn.OpenAsync(ct);
+        await conn.ExecuteAsync(
+            "UPDATE file_nodes SET status = @discovered WHERE job_id = @jobId AND status = @processing",
+            new
+            {
+                discovered = (int)FileNodeStatus.Discovered,
+                jobId,
+                processing = (int)FileNodeStatus.Processing
+            });
+    }
 }

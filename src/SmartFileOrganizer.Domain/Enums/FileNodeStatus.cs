@@ -8,5 +8,6 @@ public enum FileNodeStatus
     ReviewNeeded,
     Approved,
     Skipped,
-    Error
+    Error,
+    Processing   // reserved by producer — prevents double-fetch
 }

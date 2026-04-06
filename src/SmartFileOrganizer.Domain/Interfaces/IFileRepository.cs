@@ -16,4 +16,7 @@ public interface IFileRepository
     Task<IReadOnlyList<DirectoryFileInfo>> GetFileInfoForDirectoryAsync(long jobId, string parentPath, CancellationToken ct = default);
     /// <summary>Marks the given file IDs as Skipped if they are still in Discovered state.</summary>
     Task MarkAsSkippedAsync(IReadOnlyList<long> ids, CancellationToken ct = default);
+    Task MarkAsProcessingAsync(IReadOnlyList<long> ids, CancellationToken ct = default);
+    /// <summary>Resets any files stuck in Processing (e.g. from a previous cancelled run) back to Discovered.</summary>
+    Task ResetStaleProcessingAsync(long jobId, CancellationToken ct = default);
 }
