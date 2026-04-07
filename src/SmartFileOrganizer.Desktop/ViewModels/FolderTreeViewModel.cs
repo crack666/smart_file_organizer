@@ -13,6 +13,7 @@ namespace SmartFileOrganizer.Desktop.ViewModels;
 public partial class FolderTreeItemViewModel : ViewModelBase
 {
     private readonly DirectoryQueryService _dirQuery;
+    private readonly Func<string, Task>? _rescanDirectoryAction;
     private readonly long _jobId;
     private bool _childrenLoaded;
 
@@ -24,13 +25,14 @@ public partial class FolderTreeItemViewModel : ViewModelBase
 
     // Placeholder to make tree show expand arrow before children are loaded
     private static readonly FolderTreeItemViewModel Placeholder =
-        new(null!, null!, 0);
+        new(null!, null!, 0, null);
 
-    public FolderTreeItemViewModel(DirectoryNode node, DirectoryQueryService dirQuery, long jobId)
+    public FolderTreeItemViewModel(DirectoryNode node, DirectoryQueryService dirQuery, long jobId, Func<string, Task>? rescanDirectoryAction)
     {
         Node = node;
         _dirQuery = dirQuery;
         _jobId = jobId;
+        _rescanDirectoryAction = rescanDirectoryAction;
     }
 
     public string DisplayName => Node?.Name ?? "…";
@@ -48,6 +50,14 @@ public partial class FolderTreeItemViewModel : ViewModelBase
             UseShellExecute = false
         });
     }
+
+    [RelayCommand]
+    private async Task RescanDirectoryAsync()
+    {
+        if (_rescanDirectoryAction == null || string.IsNullOrWhiteSpace(FullPath)) return;
+        await _rescanDirectoryAction(FullPath);
+    }
+
     public bool HasPlaceholder => Children.Count == 1 && Children[0] == Placeholder;
 
     public void AddPlaceholder()
@@ -70,7 +80,7 @@ public partial class FolderTreeItemViewModel : ViewModelBase
         var dirs = await _dirQuery.GetChildrenAsync(_jobId, Node.FullPath);
         foreach (var d in dirs)
         {
-            var item = new FolderTreeItemViewModel(d, _dirQuery, _jobId);
+            var item = new FolderTreeItemViewModel(d, _dirQuery, _jobId, _rescanDirectoryAction);
             item.AddPlaceholder();
             Children.Add(item);
         }
@@ -84,6 +94,8 @@ public partial class FolderTreeViewModel : ViewModelBase
     [ObservableProperty] private ObservableCollection<FolderTreeItemViewModel> _roots = [];
     [ObservableProperty] private FolderTreeItemViewModel? _selectedItem;
     [ObservableProperty] private bool _isLoading;
+
+    public Func<string, Task>? RescanDirectoryAction { get; set; }
 
     public event EventHandler<string>? DirectorySelected;
 
@@ -102,7 +114,7 @@ public partial class FolderTreeViewModel : ViewModelBase
             var roots = await _dirQuery.GetRootsAsync(jobId, ct);
             foreach (var d in roots)
             {
-                var item = new FolderTreeItemViewModel(d, _dirQuery, jobId);
+                var item = new FolderTreeItemViewModel(d, _dirQuery, jobId, RescanDirectoryAction);
                 item.AddPlaceholder();
                 Roots.Add(item);
                 // Auto-expand root so its subdirectories are immediately visible

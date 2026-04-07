@@ -5,11 +5,13 @@ namespace SmartFileOrganizer.Domain.Interfaces;
 public interface IFileRepository
 {
     Task InsertBatchAsync(IEnumerable<FileNode> nodes, CancellationToken ct = default);
+    Task ReplaceDirectoryFilesAsync(long jobId, string parentPath, IEnumerable<FileNode> nodes, CancellationToken ct = default);
     Task<FileNode?> GetByIdAsync(long id, CancellationToken ct = default);
     Task<IReadOnlyList<FileNode>> GetByDirectoryAsync(long jobId, string parentPath, CancellationToken ct = default);
     Task<IReadOnlyList<FileNode>> GetPendingAiAnalysisAsync(long jobId, int batchSize, CancellationToken ct = default);
     Task<long> CountAiEligibleAsync(long jobId, CancellationToken ct = default);
     Task<long> CountPendingAiAnalysisAsync(long jobId, CancellationToken ct = default);
+    Task UpdateMetadataAsync(FileNode node, CancellationToken ct = default);
     Task UpdateStatusAsync(long id, Enums.FileNodeStatus status, CancellationToken ct = default);
     Task<long> CountByJobAsync(long jobId, CancellationToken ct = default);
     /// <summary>Returns lightweight name+size info for ALL files in a directory (used for Phase 1 prompt building).</summary>

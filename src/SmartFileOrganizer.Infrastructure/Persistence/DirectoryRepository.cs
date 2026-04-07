@@ -95,7 +95,8 @@ public class DirectoryRepository : IDirectoryRepository
                 subdir_count = @SubdirCount,
                 dominant_file_types = @DominantFileTypes,
                 dominant_categories = @DominantCategories,
-                suggested_area = @SuggestedArea
+                suggested_area = @SuggestedArea,
+                scanned_at = @ScannedAt
             WHERE id = @Id
             """;
 

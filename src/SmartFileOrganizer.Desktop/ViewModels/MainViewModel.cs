@@ -23,6 +23,7 @@ public partial class MainViewModel : ViewModelBase
     private readonly ScanProgressViewModel _scanProgress;
     private readonly AiProgressViewModel _aiProgress;
     private readonly IDirectoryClassificationRepository _dirClassRepo;
+    private readonly FocusedRescanService _focusedRescanService;
 
     private long _activeJobId;
     private CancellationTokenSource? _uiCts;
@@ -85,7 +86,8 @@ public partial class MainViewModel : ViewModelBase
         FileDetailViewModel fileDetail,
         ScanProgressViewModel scanProgress,
         AiProgressViewModel aiProgress,
-        IDirectoryClassificationRepository dirClassRepo)
+        IDirectoryClassificationRepository dirClassRepo,
+        FocusedRescanService focusedRescanService)
     {
         _scanJobService = scanJobService;
         _fileQueryService = fileQueryService;
@@ -99,6 +101,7 @@ public partial class MainViewModel : ViewModelBase
         _scanProgress = scanProgress;
         _aiProgress = aiProgress;
         _dirClassRepo = dirClassRepo;
+        _focusedRescanService = focusedRescanService;
 
         _scanJobService.ProgressChanged += OnProgressChanged;
         _scanJobService.JobStateChanged += OnJobStateChanged;
@@ -106,7 +109,9 @@ public partial class MainViewModel : ViewModelBase
         _aiCoordinator.StateChanged += OnAiStateChanged;
 
         _folderTree.DirectorySelected += OnDirectorySelected;
+        _folderTree.RescanDirectoryAction = RescanDirectoryAsync;
         _fileDetail.ReviewApplied += OnReviewApplied;
+        _fileTable.ReanalyzeFileAction = ReanalyzeFileAsync;
 
         _fileTable.PropertyChanged += (_, e) =>
         {
@@ -528,6 +533,71 @@ public partial class MainViewModel : ViewModelBase
     private bool CanCancelAi() => _aiProgress.CanCancel;
 
     private bool CanResumeScan() => _activeJobId > 0 && !IsScanRunning;
+
+    private bool CanRunFocusedRescan() => _activeJobId > 0 && !IsScanRunning && !_aiProgress.IsBusy;
+
+    private async Task RescanDirectoryAsync(string directoryPath)
+    {
+        if (!CanRunFocusedRescan() || string.IsNullOrWhiteSpace(directoryPath))
+        {
+            _scanProgress.StatusText = "Rescan is only available while scan and AI are idle.";
+            return;
+        }
+
+        try
+        {
+            _scanProgress.StatusText = $"Rescanning directory: {directoryPath}";
+            await _focusedRescanService.RescanDirectoryAsync(_activeJobId, directoryPath);
+
+            _selectedDirectoryPath = directoryPath;
+            _selectedFileId = null;
+
+            await _folderTree.LoadJobAsync(_activeJobId);
+            await _fileTable.LoadAsync(_activeJobId, directoryPath);
+            await LoadDirectorySummaryAsync(directoryPath);
+            _fileDetail.Clear();
+
+            _scanProgress.StatusText = "Directory rescanned and reanalyzed.";
+        }
+        catch (Exception ex)
+        {
+            _scanProgress.StatusText = $"Directory rescan failed: {ex.Message}";
+        }
+    }
+
+    private async Task ReanalyzeFileAsync(FileRowViewModel row)
+    {
+        if (!CanRunFocusedRescan())
+        {
+            _scanProgress.StatusText = "Reanalysis is only available while scan and AI are idle.";
+            return;
+        }
+
+        try
+        {
+            _scanProgress.StatusText = $"Reanalyzing file: {row.Name}";
+            await _focusedRescanService.ReanalyzeFileAsync(_activeJobId, row.Id);
+
+            var directoryPath = string.IsNullOrWhiteSpace(row.ParentPath)
+                ? _selectedDirectoryPath
+                : row.ParentPath;
+
+            if (!string.IsNullOrWhiteSpace(directoryPath))
+            {
+                _selectedDirectoryPath = directoryPath;
+                await _fileTable.LoadAsync(_activeJobId, directoryPath);
+                _fileTable.SelectedRow = _fileTable.Rows.FirstOrDefault(r => r.Id == row.Id);
+                await LoadDirectorySummaryAsync(directoryPath);
+            }
+
+            await LoadFileDetailAsync(row.Id);
+            _scanProgress.StatusText = "File reanalyzed.";
+        }
+        catch (Exception ex)
+        {
+            _scanProgress.StatusText = $"File reanalysis failed: {ex.Message}";
+        }
+    }
 
     private void UpdateCanStartScan()
     {

@@ -294,6 +294,8 @@
                                             <ContextMenu>
                                                 <MenuItem Header="Im Explorer öffnen"
                                                           Command="{Binding RevealInExplorerCommand}" />
+                                                <MenuItem Header="Diesen Ordner neu scannen &amp; bewerten"
+                                                          Command="{Binding RescanDirectoryCommand}" />
                                             </ContextMenu>
                                         </StackPanel.ContextMenu>
                                         <TextBlock Text="📁" FontSize="12"/>
@@ -374,7 +376,20 @@
                             </DataGridTemplateColumn.CellTemplate>
                         </DataGridTemplateColumn>
 
-                        <DataGridTextColumn Header="Dateiname"     Binding="{Binding Name}"        Width="2*"  IsReadOnly="True" />
+                        <DataGridTemplateColumn Header="Dateiname" Width="2*" IsReadOnly="True">
+                            <DataGridTemplateColumn.CellTemplate>
+                                <DataTemplate x:DataType="vm:FileRowViewModel">
+                                    <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis">
+                                        <TextBlock.ContextMenu>
+                                            <ContextMenu>
+                                                <MenuItem Header="Datei neu analysieren"
+                                                          Command="{Binding ReanalyzeCommand}" />
+                                            </ContextMenu>
+                                        </TextBlock.ContextMenu>
+                                    </TextBlock>
+                                </DataTemplate>
+                            </DataGridTemplateColumn.CellTemplate>
+                        </DataGridTemplateColumn>
                         <DataGridTextColumn Header="Typ"           Binding="{Binding Extension}"   Width="55"  IsReadOnly="True" />
                         <DataGridTextColumn Header="Größe"         Binding="{Binding SizeText}"    Width="85"  IsReadOnly="True" />
                         <DataGridTextColumn Header="Art"           Binding="{Binding FileType}"    Width="85"  IsReadOnly="True" />

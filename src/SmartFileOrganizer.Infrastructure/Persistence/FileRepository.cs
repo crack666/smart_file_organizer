@@ -32,6 +32,50 @@ public class FileRepository : IFileRepository
         await tx.CommitAsync(ct);
     }
 
+    public async Task ReplaceDirectoryFilesAsync(long jobId, string parentPath, IEnumerable<FileNode> nodes, CancellationToken ct = default)
+    {
+        var nodeList = nodes.ToList();
+
+        await using var conn = _db.CreateConnection();
+        await conn.OpenAsync(ct);
+        await using var tx = await conn.BeginTransactionAsync(ct);
+
+        const string deleteSql = """
+            DELETE FROM user_overrides
+            WHERE file_node_id IN (
+                SELECT id FROM file_nodes WHERE job_id = @jobId AND parent_path = @parentPath
+            );
+
+            DELETE FROM ai_results
+            WHERE file_node_id IN (
+                SELECT id FROM file_nodes WHERE job_id = @jobId AND parent_path = @parentPath
+            );
+
+            DELETE FROM file_nodes
+            WHERE job_id = @jobId AND parent_path = @parentPath;
+            """;
+
+        await conn.ExecuteAsync(deleteSql, new { jobId, parentPath }, transaction: tx);
+
+        if (nodeList.Count > 0)
+        {
+            const string insertSql = """
+                INSERT INTO file_nodes
+                    (job_id, full_path, name, parent_path, root_path, relative_path,
+                     relative_dir, depth, size, last_write_time, extension,
+                     file_type, status, scanned_at)
+                VALUES
+                    (@JobId, @FullPath, @Name, @ParentPath, @RootPath, @RelativePath,
+                     @RelativeDir, @Depth, @Size, @LastWriteTime, @Extension,
+                     @FileType, @Status, @ScannedAt)
+                """;
+
+            await conn.ExecuteAsync(insertSql, nodeList, transaction: tx);
+        }
+
+        await tx.CommitAsync(ct);
+    }
+
     public async Task<FileNode?> GetByIdAsync(long id, CancellationToken ct = default)
     {
         await using var conn = _db.CreateConnection();
@@ -129,6 +173,31 @@ public class FileRepository : IFileRepository
                         """,
                         new { jobId, status = (int)FileNodeStatus.Discovered });
         }
+
+    public async Task UpdateMetadataAsync(FileNode node, CancellationToken ct = default)
+    {
+        await using var conn = _db.CreateConnection();
+        await conn.OpenAsync(ct);
+        await conn.ExecuteAsync(
+            """
+            UPDATE file_nodes SET
+                full_path = @FullPath,
+                name = @Name,
+                parent_path = @ParentPath,
+                root_path = @RootPath,
+                relative_path = @RelativePath,
+                relative_dir = @RelativeDir,
+                depth = @Depth,
+                size = @Size,
+                last_write_time = @LastWriteTime,
+                extension = @Extension,
+                file_type = @FileType,
+                status = @Status,
+                scanned_at = @ScannedAt
+            WHERE id = @Id
+            """,
+            node);
+    }
 
     public async Task UpdateStatusAsync(long id, FileNodeStatus status, CancellationToken ct = default)
     {

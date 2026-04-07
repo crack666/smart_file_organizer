@@ -93,21 +93,8 @@ public class DirectoryPreAssessmentService
                 var fileInfos = await _fileRepo.GetFileInfoForDirectoryAsync(jobId, dir.FullPath, token);
                 var subdirNames = childrenByParent.TryGetValue(dir.FullPath, out var ch) ? ch : [];
 
-                var input = new DirectoryPreAssessmentInput
-                {
-                    Directory = dir,
-                    DirectFiles = fileInfos,
-                    SubdirectoryNames = subdirNames
-                };
-
-                var result = await _ollama.PreAssessDirectoryAsync(input, token);
-                result.DirectoryNodeId = dir.Id;
-
-                if (result.Error == null)
-                {
-                    await ApplySamplingAsync(dir, fileInfos, result, token);
-                }
-                else
+                var result = await BuildPreAssessmentAsync(dir, fileInfos, subdirNames, token);
+                if (result.Error != null)
                 {
                     _logger.LogWarning("Pre-assessment error for {Path}: {Err}", dir.FullPath, result.Error);
                     Interlocked.Increment(ref errorCount);
@@ -129,6 +116,63 @@ public class DirectoryPreAssessmentService
             jobId, processed, pending.Count, errorCount, string.Empty, completedMsg));
 
         return new AiClassificationRunResult(true, pending.Count, processed, errorCount, completedMsg);
+    }
+
+    public async Task<DirectoryClassificationResult> PreAssessSingleAsync(
+        long jobId,
+        DirectoryNode dir,
+        CancellationToken ct = default)
+    {
+        var fileInfos = await _fileRepo.GetFileInfoForDirectoryAsync(jobId, dir.FullPath, ct);
+        var allDirs = await _dirRepo.GetAllForJobOrderedByDepthAsync(jobId, ct);
+        var subdirNames = allDirs
+            .Where(d => string.Equals(d.ParentPath, dir.FullPath, StringComparison.OrdinalIgnoreCase))
+            .Where(d => d.DirStatus != DirectoryStatus.Skip)
+            .Where(d => !string.IsNullOrWhiteSpace(d.Name) && !d.Name.StartsWith(".", StringComparison.Ordinal))
+            .Select(d => d.Name)
+            .ToList();
+
+        var result = await BuildPreAssessmentAsync(dir, fileInfos, subdirNames, ct);
+        await _dirClassRepo.UpsertAsync(result, ct);
+        return result;
+    }
+
+    private async Task<DirectoryClassificationResult> BuildPreAssessmentAsync(
+        DirectoryNode dir,
+        IReadOnlyList<DirectoryFileInfo> fileInfos,
+        IReadOnlyList<string> subdirNames,
+        CancellationToken ct)
+    {
+        if (fileInfos.Count == 0)
+        {
+            return new DirectoryClassificationResult
+            {
+                DirectoryNodeId = dir.Id,
+                Phase = "pre_assessment",
+                Summary = "Directory contains no direct files.",
+                Homogeneity = "high",
+                DominantType = "empty",
+                SamplingStrategy = "analyze_all",
+                SampleSize = 0,
+                AnalyzedAt = DateTime.UtcNow,
+                Error = null
+            };
+        }
+
+        var input = new DirectoryPreAssessmentInput
+        {
+            Directory = dir,
+            DirectFiles = fileInfos,
+            SubdirectoryNames = subdirNames
+        };
+
+        var result = await _ollama.PreAssessDirectoryAsync(input, ct);
+        result.DirectoryNodeId = dir.Id;
+
+        if (result.Error == null)
+            await ApplySamplingAsync(dir, fileInfos, result, ct);
+
+        return result;
     }
 
     private async Task ApplySamplingAsync(

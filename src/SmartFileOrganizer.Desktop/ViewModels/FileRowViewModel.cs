@@ -9,11 +9,13 @@ namespace SmartFileOrganizer.Desktop.ViewModels;
 public partial class FileRowViewModel : ViewModelBase
 {
     private readonly ReviewService _reviewService;
+    private readonly Func<FileRowViewModel, Task>? _reanalyzeFileAction;
     private bool _isInitializing = true;
 
     // ── Static / init-only ────────────────────────────────────────────────
     public long Id           { get; init; }
     public string FullPath   { get; init; } = string.Empty;
+    public string ParentPath { get; init; } = string.Empty;
     public string Name       { get; init; } = string.Empty;
     public string Extension  { get; init; } = string.Empty;
     public string FileType   { get; init; } = string.Empty;
@@ -35,7 +37,11 @@ public partial class FileRowViewModel : ViewModelBase
 
     public static IReadOnlyList<FileCategory> AllCategories { get; } = Enum.GetValues<FileCategory>().ToList();
 
-    public FileRowViewModel(ReviewService reviewService) => _reviewService = reviewService;
+    public FileRowViewModel(ReviewService reviewService, Func<FileRowViewModel, Task>? reanalyzeFileAction = null)
+    {
+        _reviewService = reviewService;
+        _reanalyzeFileAction = reanalyzeFileAction;
+    }
 
     partial void OnSelectedCategoryChanged(FileCategory value)
     {
@@ -77,6 +83,13 @@ public partial class FileRowViewModel : ViewModelBase
         OnPropertyChanged(nameof(ReviewStatusTooltip));
     }
 
+    [RelayCommand]
+    private async Task ReanalyzeAsync()
+    {
+        if (_reanalyzeFileAction == null || Id <= 0) return;
+        await _reanalyzeFileAction(this);
+    }
+
     private async Task SaveOverrideAsync()
     {
         if (Id <= 0) return;
@@ -87,12 +100,13 @@ public partial class FileRowViewModel : ViewModelBase
         OnPropertyChanged(nameof(ReviewStatusTooltip));
     }
 
-    public static FileRowViewModel From(FileNode f, ReviewService reviewService)
+    public static FileRowViewModel From(FileNode f, ReviewService reviewService, Func<FileRowViewModel, Task>? reanalyzeFileAction = null)
     {
-        var vm = new FileRowViewModel(reviewService)
+        var vm = new FileRowViewModel(reviewService, reanalyzeFileAction)
         {
             Id           = f.Id,
             FullPath     = f.FullPath,
+            ParentPath   = f.ParentPath,
             Name         = f.Name,
             Extension    = f.Extension,
             FileType     = f.FileType.ToString(),

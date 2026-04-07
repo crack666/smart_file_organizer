@@ -80,6 +80,7 @@ public static class ServiceConfigurator
         services.AddSingleton<IHeuristicsEngine>(sp =>
             new HeuristicsEngine(sp.GetRequiredService<HeuristicsOptions>()));
         services.AddSingleton<IScanEngine, ScanEngine>();
+        services.AddSingleton<IScopedRefreshService, ScopedRefreshService>();
 
         // Application services
         services.AddSingleton<ScanJobService>();
@@ -114,6 +115,7 @@ public static class ServiceConfigurator
             sp.GetRequiredService<ILogger<DirectorySummaryService>>()));
         services.AddSingleton<AiClassificationCoordinator>();
         services.AddSingleton<ReviewService>();
+        services.AddSingleton<FocusedRescanService>();
         services.AddSingleton<FilePreviewService>();
         services.AddSingleton<IClassificationInputPreparer, AiClassificationInputPreparer>();
 
@@ -130,7 +132,8 @@ public static class ServiceConfigurator
             sp.GetRequiredService<FileDetailViewModel>(),
             sp.GetRequiredService<ScanProgressViewModel>(),
             sp.GetRequiredService<AiProgressViewModel>(),
-            sp.GetRequiredService<IDirectoryClassificationRepository>()));
+            sp.GetRequiredService<IDirectoryClassificationRepository>(),
+            sp.GetRequiredService<FocusedRescanService>()));
         services.AddTransient<FolderTreeViewModel>();
         services.AddTransient<FileTableViewModel>(sp => new FileTableViewModel(
             sp.GetRequiredService<FileQueryService>(),

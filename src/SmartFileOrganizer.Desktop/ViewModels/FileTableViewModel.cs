@@ -10,6 +10,8 @@ public partial class FileTableViewModel : ViewModelBase
     private readonly FileQueryService _fileQuery;
     private readonly ReviewService _reviewService;
 
+    public Func<FileRowViewModel, Task>? ReanalyzeFileAction { get; set; }
+
     [ObservableProperty] private ObservableCollection<FileRowViewModel> _rows = [];
     [ObservableProperty] private FileRowViewModel? _selectedRow;
     [ObservableProperty] private bool _isLoading;
@@ -31,7 +33,7 @@ public partial class FileTableViewModel : ViewModelBase
             var files = await _fileQuery.GetFilesInDirectoryAsync(jobId, directoryPath, ct);
             System.Diagnostics.Debug.WriteLine($"[FILE TABLE] jobId={jobId} path='{directoryPath}' → {files.Count} file(s) returned");
             foreach (var f in files)
-                Rows.Add(FileRowViewModel.From(f, _reviewService));
+                Rows.Add(FileRowViewModel.From(f, _reviewService, ReanalyzeFileAction));
             System.Diagnostics.Debug.WriteLine($"[FILE TABLE] Rows.Count after add = {Rows.Count}");
         }
         finally

@@ -13,7 +13,7 @@ public class DatabaseContext
 
     public DatabaseContext(string dbPath, ILogger<DatabaseContext> logger)
     {
-        _connectionString = $"Data Source={dbPath};";
+        _connectionString = $"Data Source={dbPath};Pooling=False;";
         _logger = logger;
     }
 

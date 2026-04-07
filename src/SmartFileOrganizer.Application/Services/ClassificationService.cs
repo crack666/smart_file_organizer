@@ -194,4 +194,18 @@ public class ClassificationService
             Volatile.Read(ref errorCount),
             completedMessage);
     }
+
+    public async Task<FileClassification> ClassifySingleAsync(FileNode file, CancellationToken ct = default)
+    {
+        var input = await _inputPreparer.PrepareAsync(file, ct);
+        var result = await _ollama.ClassifyAsync(input, ct);
+        result.FileNodeId = file.Id;
+
+        await _classRepo.UpsertAsync(result, ct);
+
+        var newStatus = result.Error != null ? FileNodeStatus.Error : FileNodeStatus.AiAnalyzed;
+        await _fileRepo.UpdateStatusAsync(file.Id, newStatus, ct);
+
+        return result;
+    }
 }

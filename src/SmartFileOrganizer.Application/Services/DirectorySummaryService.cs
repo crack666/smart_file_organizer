@@ -158,6 +158,70 @@ public class DirectorySummaryService
         return new AiClassificationRunResult(true, pending.Count, processed, errorCount, completedMsg);
     }
 
+    public async Task<DirectoryClassificationResult> SummarizeSingleAsync(
+        long jobId,
+        DirectoryNode dir,
+        CancellationToken ct = default)
+    {
+        var preAssessment = await _dirClassRepo.GetByNodeAndPhaseAsync(dir.Id, "pre_assessment", ct)
+            ?? new DirectoryClassificationResult
+            {
+                DirectoryNodeId = dir.Id,
+                Phase = "pre_assessment",
+                Summary = "No pre-assessment available.",
+                SamplingStrategy = "analyze_all",
+                SampleSize = 0,
+                AnalyzedAt = DateTime.UtcNow
+            };
+
+        var fileNodes = await _fileRepo.GetByDirectoryAsync(jobId, dir.FullPath, ct);
+        var summaryLines = new List<string>();
+        var anomalyDescriptions = BuildAnomalyDescriptions(preAssessment);
+
+        foreach (var node in fileNodes)
+        {
+            var category = node.Classification?.Category.ToString() ?? node.FileType.ToString();
+            var line = node.Classification?.Summary is { } s
+                ? $"{node.Name} — {category} — {(s.Length > 120 ? s[..120] + "\u2026" : s)}"
+                : $"{node.Name} — {category}";
+            summaryLines.Add(line);
+        }
+
+        DirectoryClassificationResult result;
+        if (summaryLines.Count == 0 && anomalyDescriptions.Count == 0)
+        {
+            result = new DirectoryClassificationResult
+            {
+                DirectoryNodeId = dir.Id,
+                Phase = "summary",
+                Summary = "Directory is currently empty.",
+                Theme = "empty",
+                SamplingStrategy = preAssessment.SamplingStrategy,
+                SampleSize = preAssessment.SampleSize,
+                AnalyzedAt = DateTime.UtcNow,
+                Error = null
+            };
+        }
+        else
+        {
+            result = await _ollama.SummarizeDirectoryAsync(new DirectorySummaryInput
+            {
+                Directory = dir,
+                PreAssessment = preAssessment,
+                FileSummaryLines = summaryLines,
+                AnomalyDescriptions = anomalyDescriptions
+            }, ct);
+
+            result.DirectoryNodeId = dir.Id;
+            result.Phase = "summary";
+            result.SamplingStrategy = preAssessment.SamplingStrategy;
+            result.SampleSize = preAssessment.SampleSize;
+        }
+
+        await _dirClassRepo.UpsertAsync(result, ct);
+        return result;
+    }
+
     private static List<string> BuildAnomalyDescriptions(DirectoryClassificationResult preAssessment)
     {
         if (string.IsNullOrWhiteSpace(preAssessment.AnomalousFileIds)) return [];
