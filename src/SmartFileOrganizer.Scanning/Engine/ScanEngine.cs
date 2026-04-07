@@ -59,12 +59,25 @@ public class ScanEngine : IScanEngine
 
             var (dirPath, depth) = pendingDirs.Dequeue();
 
-            // Already scanned in a previous run? Skip.
+            // Resume behavior:
+            // If a directory itself is already scanned/shallow, we still may need to walk through
+            // its children to discover descendants that were queued but not processed before pause.
+            // So we do a lightweight traversal for existing Scanned dirs, but avoid reprocessing files.
             var existing = await _dirRepo.GetByPathAsync(job.Id, dirPath, ct);
-            if (existing?.DirStatus == DirectoryStatus.Scanned ||
-                existing?.DirStatus == DirectoryStatus.Shallow)
+            if (existing?.DirStatus == DirectoryStatus.Scanned)
             {
-                _logger.LogTrace("Skipping already-scanned dir: {Path}", dirPath);
+                foreach (var subDir in _fs.EnumerateDirectories(dirPath))
+                {
+                    pendingDirs.Enqueue((subDir, depth + 1));
+                }
+
+                _logger.LogTrace("Traversed children of already-scanned dir: {Path}", dirPath);
+                continue;
+            }
+
+            if (existing?.DirStatus == DirectoryStatus.Shallow)
+            {
+                _logger.LogTrace("Skipping already-shallow dir: {Path}", dirPath);
                 continue;
             }
 

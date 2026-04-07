@@ -1,4 +1,5 @@
 using Dapper;
+using SmartFileOrganizer.Domain.Enums;
 using SmartFileOrganizer.Domain.Interfaces;
 using SmartFileOrganizer.Domain.Models;
 
@@ -51,10 +52,13 @@ public class DirectoryRepository : IDirectoryRepository
         var result = await conn.QueryAsync<DirectoryNode>(
             """
             SELECT * FROM directory_nodes
-            WHERE job_id = @jobId AND parent_path = @parentPath
+            WHERE job_id = @jobId
+              AND parent_path = @parentPath
+              AND dir_status != @skip
+              AND name NOT LIKE '.%'
             ORDER BY name
             """,
-            new { jobId, parentPath });
+            new { jobId, parentPath, skip = (int)DirectoryStatus.Skip });
         return result.AsList();
     }
 
@@ -64,8 +68,15 @@ public class DirectoryRepository : IDirectoryRepository
         await using var conn = _db.CreateConnection();
         await conn.OpenAsync(ct);
         var result = await conn.QueryAsync<DirectoryNode>(
-            "SELECT * FROM directory_nodes WHERE job_id = @jobId AND depth = 0 ORDER BY name",
-            new { jobId });
+            """
+            SELECT * FROM directory_nodes
+            WHERE job_id = @jobId
+              AND depth = 0
+              AND dir_status != @skip
+              AND name NOT LIKE '.%'
+            ORDER BY name
+            """,
+            new { jobId, skip = (int)DirectoryStatus.Skip });
         return result.AsList();
     }
 

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Threading;
 using Microsoft.Extensions.Logging;
 using SmartFileOrganizer.Domain.Enums;
 using SmartFileOrganizer.Domain.Interfaces;
@@ -18,6 +19,7 @@ public class DirectoryPreAssessmentService
     private readonly IFileRepository _fileRepo;
     private readonly IDirectoryClassificationRepository _dirClassRepo;
     private readonly IOllamaService _ollama;
+    private readonly Func<int> _getMaxParallelRequests;
     private readonly DirectoryAnalysisOptions _options;
     private readonly ILogger<DirectoryPreAssessmentService> _logger;
 
@@ -26,6 +28,7 @@ public class DirectoryPreAssessmentService
         IFileRepository fileRepo,
         IDirectoryClassificationRepository dirClassRepo,
         IOllamaService ollama,
+        Func<int> getMaxParallelRequests,
         DirectoryAnalysisOptions options,
         ILogger<DirectoryPreAssessmentService> logger)
     {
@@ -33,6 +36,7 @@ public class DirectoryPreAssessmentService
         _fileRepo = fileRepo;
         _dirClassRepo = dirClassRepo;
         _ollama = ollama;
+        _getMaxParallelRequests = getMaxParallelRequests;
         _options = options;
         _logger = logger;
     }
@@ -44,64 +48,78 @@ public class DirectoryPreAssessmentService
         CancellationToken ct = default)
     {
         var allDirs = await _dirRepo.GetAllForJobOrderedByDepthAsync(jobId, ct);
-        if (allDirs.Count == 0)
+        var aiCandidateDirs = allDirs
+            .Where(d => d.DirStatus != DirectoryStatus.Skip)
+            .Where(d => !string.IsNullOrWhiteSpace(d.Name) && !d.Name.StartsWith(".", StringComparison.Ordinal))
+            .ToList();
+
+        if (aiCandidateDirs.Count == 0)
         {
-            return new AiClassificationRunResult(true, 0, 0, 0, "No directories found.");
+            return new AiClassificationRunResult(true, 0, 0, 0, "No AI-relevant directories found.");
         }
 
         var assessedIds = (await _dirClassRepo.GetAssessedNodeIdsAsync(jobId, "pre_assessment", ct)).ToHashSet();
-        var pending = allDirs.Where(d => !assessedIds.Contains(d.Id)).ToList();
+        var pending = aiCandidateDirs.Where(d => !assessedIds.Contains(d.Id)).ToList();
 
         if (pending.Count == 0)
         {
-            progress?.Report(new AiClassificationProgress(jobId, allDirs.Count, allDirs.Count, 0, string.Empty,
+            progress?.Report(new AiClassificationProgress(jobId, aiCandidateDirs.Count, aiCandidateDirs.Count, 0, string.Empty,
                 "Phase 1/3: All directories already assessed."));
-            return new AiClassificationRunResult(true, allDirs.Count, allDirs.Count, 0, "All directories already assessed.");
+            return new AiClassificationRunResult(true, aiCandidateDirs.Count, aiCandidateDirs.Count, 0, "All directories already assessed.");
         }
 
         // Build subdir lookup once (avoids N extra DB calls)
-        var childrenByParent = allDirs
+        var childrenByParent = aiCandidateDirs
             .GroupBy(d => d.ParentPath)
             .ToDictionary(g => g.Key, g => g.Select(d => d.Name).ToList());
 
-        var processed = 0;
+        long processed = 0;
         var errorCount = 0;
+        var workerCount = Math.Clamp(_getMaxParallelRequests(), 1, 8);
 
-        foreach (var dir in pending)
-        {
-            ct.ThrowIfCancellationRequested();
-            if (waitIfPausedAsync != null) await waitIfPausedAsync(ct);
-
-            progress?.Report(new AiClassificationProgress(
-                jobId, processed, pending.Count, errorCount, dir.FullPath,
-                $"Phase 1/3: Assessing directories… {processed}/{pending.Count}"));
-
-            var fileInfos = await _fileRepo.GetFileInfoForDirectoryAsync(jobId, dir.FullPath, ct);
-            var subdirNames = childrenByParent.TryGetValue(dir.FullPath, out var ch) ? ch : [];
-
-            var input = new DirectoryPreAssessmentInput
+        await Parallel.ForEachAsync(
+            pending,
+            new ParallelOptions { MaxDegreeOfParallelism = workerCount, CancellationToken = ct },
+            async (dir, token) =>
             {
-                Directory = dir,
-                DirectFiles = fileInfos,
-                SubdirectoryNames = subdirNames
-            };
+                if (waitIfPausedAsync != null) await waitIfPausedAsync(token);
 
-            var result = await _ollama.PreAssessDirectoryAsync(input, ct);
-            result.DirectoryNodeId = dir.Id;
+                var beforeProcessed = Interlocked.Read(ref processed);
+                var beforeErrors = Volatile.Read(ref errorCount);
+                progress?.Report(new AiClassificationProgress(
+                    jobId, beforeProcessed, pending.Count, beforeErrors, dir.FullPath,
+                    $"Phase 1/3: Assessing directories… {beforeProcessed}/{pending.Count} (parallel={workerCount})"));
 
-            if (result.Error == null)
-            {
-                await ApplySamplingAsync(dir, fileInfos, result, ct);
-            }
-            else
-            {
-                _logger.LogWarning("Pre-assessment error for {Path}: {Err}", dir.FullPath, result.Error);
-                errorCount++;
-            }
+                var fileInfos = await _fileRepo.GetFileInfoForDirectoryAsync(jobId, dir.FullPath, token);
+                var subdirNames = childrenByParent.TryGetValue(dir.FullPath, out var ch) ? ch : [];
 
-            await _dirClassRepo.UpsertAsync(result, ct);
-            processed++;
-        }
+                var input = new DirectoryPreAssessmentInput
+                {
+                    Directory = dir,
+                    DirectFiles = fileInfos,
+                    SubdirectoryNames = subdirNames
+                };
+
+                var result = await _ollama.PreAssessDirectoryAsync(input, token);
+                result.DirectoryNodeId = dir.Id;
+
+                if (result.Error == null)
+                {
+                    await ApplySamplingAsync(dir, fileInfos, result, token);
+                }
+                else
+                {
+                    _logger.LogWarning("Pre-assessment error for {Path}: {Err}", dir.FullPath, result.Error);
+                    Interlocked.Increment(ref errorCount);
+                }
+
+                await _dirClassRepo.UpsertAsync(result, token);
+                var nowProcessed = Interlocked.Increment(ref processed);
+                var nowErrors = Volatile.Read(ref errorCount);
+                progress?.Report(new AiClassificationProgress(
+                    jobId, nowProcessed, pending.Count, nowErrors, dir.FullPath,
+                    $"Phase 1/3: Assessing directories… {nowProcessed}/{pending.Count} (parallel={workerCount})"));
+            });
 
         var completedMsg = errorCount > 0
             ? $"Phase 1/3 finished with {errorCount} error(s)."

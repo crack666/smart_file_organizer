@@ -42,6 +42,14 @@
                         IsEnabled="{Binding IsScanRunning}"
                         Margin="0,0,12,0" />
 
+                <Button Content="▶ Resume Scan"
+                    Command="{Binding ResumeScanCommand}"
+                    Margin="0,0,4,0" />
+
+                <Button Content="🏠 Home"
+                    Command="{Binding BackToHomeCommand}"
+                    Margin="0,0,12,0" />
+
                 <!-- Progress -->
                 <StackPanel Orientation="Vertical" VerticalAlignment="Center">
                     <TextBlock Text="{Binding ScanProgress.StatusText}"
@@ -101,6 +109,13 @@
                     <TextBox Text="{Binding OllamaKeepAlive, Mode=TwoWay}"
                              Width="90"
                              Watermark="60m" />
+                </StackPanel>
+
+                <StackPanel Orientation="Vertical" VerticalAlignment="Center" Margin="0,0,8,0">
+                    <TextBlock Text="Parallel req" FontSize="11" Margin="0,0,0,2"/>
+                    <TextBox Text="{Binding OllamaParallelRequests, Mode=TwoWay}"
+                             Width="70"
+                             Watermark="1" />
                 </StackPanel>
 
                 <Button Content="🔄 Models"

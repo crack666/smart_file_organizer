@@ -12,6 +12,11 @@ public class OllamaOptions
     public long MaxImageUploadBytes { get; set; } = 10 * 1024 * 1024;   // 10 MB
     public long MaxDocumentUploadBytes { get; set; } = 5 * 1024 * 1024; // 5 MB
     public int MaxSamplesPerDirectory { get; set; } = 15;
+    /// <summary>
+    /// Number of concurrent classification requests sent by the app.
+    /// Keep aligned with Ollama's NUM_PARALLEL to maximize GPU utilization.
+    /// </summary>
+    public int MaxParallelRequests { get; set; } = 1;
 
     public const string DefaultSystemPrompt =
         """

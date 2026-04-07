@@ -41,6 +41,7 @@ public partial class MainViewModel : ViewModelBase
     [ObservableProperty] private bool _isScanRunning;
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(StartScanCommand))]
+    [NotifyCanExecuteChangedFor(nameof(ResumeScanCommand))]
     private bool _canStartScan;
     [ObservableProperty] private bool _isShowingWelcome;
     [ObservableProperty] private ObservableCollection<RecentScanItemViewModel> _recentScans = [];
@@ -60,6 +61,7 @@ public partial class MainViewModel : ViewModelBase
     }
     [ObservableProperty] private string _ollamaBaseUrl = string.Empty;
     [ObservableProperty] private string _ollamaKeepAlive = string.Empty;
+    [ObservableProperty] private string _ollamaParallelRequests = "1";
     [ObservableProperty] private string _ollamaStatusText = "Ollama settings loaded.";
     [ObservableProperty] private bool _isLoadingOllamaModels;
     [ObservableProperty] private bool _isSavingOllamaSettings;
@@ -122,6 +124,7 @@ public partial class MainViewModel : ViewModelBase
 
         OllamaBaseUrl = _ollamaOptions.BaseUrl;
         OllamaKeepAlive = _ollamaOptions.KeepAlive;
+        OllamaParallelRequests = _ollamaOptions.MaxParallelRequests.ToString();
         OllamaStatusText = $"Default model: {_ollamaOptions.Model}";
 
         UpdateCanStartScan();
@@ -190,6 +193,61 @@ public partial class MainViewModel : ViewModelBase
         await _scanJobService.StartAsync(job.Id, _uiCts.Token);
     }
 
+    [RelayCommand(CanExecute = nameof(CanResumeScan))]
+    private async Task ResumeScanAsync()
+    {
+        if (_activeJobId <= 0) return;
+
+        var job = await _scanJobService.GetJobAsync(_activeJobId);
+        if (job == null) return;
+
+        if (job.Status is Domain.Enums.JobStatus.Completed or Domain.Enums.JobStatus.Failed)
+        {
+            _scanProgress.StatusText = $"Cannot resume job in state {job.Status}.";
+            return;
+        }
+
+        IsShowingWelcome = false;
+        IsScanRunning = true;
+        UpdateCanStartScan();
+
+        _uiCts = new CancellationTokenSource();
+        await _scanJobService.StartAsync(job.Id, _uiCts.Token);
+        _scanProgress.StatusText = "Resuming scan…";
+    }
+
+    [RelayCommand]
+    private async Task BackToHomeAsync()
+    {
+        // Pause active work when returning to home screen
+        if (IsScanRunning)
+        {
+            _scanJobService.Pause();
+            IsScanRunning = false;
+        }
+
+        if (_aiProgress.CanPause)
+            _aiCoordinator.Pause();
+
+        _selectedDirectoryPath = string.Empty;
+        _selectedFileId = null;
+        SelectedDirSummary = string.Empty;
+
+        _fileTable.Clear();
+        _fileDetail.Clear();
+        _folderTree.Roots.Clear();
+        _folderTree.SelectedItem = null;
+
+        var all = await _scanJobService.GetAllJobsAsync();
+        RecentScans.Clear();
+        foreach (var j in all)
+            RecentScans.Add(new RecentScanItemViewModel(j));
+
+        IsShowingWelcome = true;
+        UpdateCanStartScan();
+        _scanProgress.StatusText = "Ready.";
+    }
+
     [RelayCommand]
     private void PauseScan()
     {
@@ -245,7 +303,7 @@ public partial class MainViewModel : ViewModelBase
         {
             var models = await _ollamaService.GetLocalModelsAsync();
             AvailableOllamaModels.Clear();
-
+            IsScanRunning = false; // This line is modified
             foreach (var model in models)
                 AvailableOllamaModels.Add(OllamaModelViewModel.From(model));
 
@@ -281,12 +339,23 @@ public partial class MainViewModel : ViewModelBase
                 ? _ollamaOptions.KeepAlive
                 : OllamaKeepAlive.Trim();
 
+            if (int.TryParse(OllamaParallelRequests, out var parallel))
+            {
+                parallel = Math.Clamp(parallel, 1, 8);
+                _ollamaOptions.MaxParallelRequests = parallel;
+                OllamaParallelRequests = parallel.ToString();
+            }
+            else
+            {
+                OllamaParallelRequests = _ollamaOptions.MaxParallelRequests.ToString();
+            }
+
             if (SelectedOllamaModel != null)
                 _ollamaOptions.Model = SelectedOllamaModel.Name;
 
             await _ollamaSettingsService.SaveAsync();
 
-            OllamaStatusText = $"Saved Ollama settings. Active model: {_ollamaOptions.Model}";
+            OllamaStatusText = $"Saved Ollama settings. Active model: {_ollamaOptions.Model}, parallel requests: {_ollamaOptions.MaxParallelRequests}";
         }
         catch (Exception ex)
         {
@@ -348,6 +417,7 @@ public partial class MainViewModel : ViewModelBase
         {
             IsScanRunning = false;
             UpdateCanStartScan();
+            ResumeScanCommand.NotifyCanExecuteChanged();
             _scanProgress.Apply(job);
 
             // Refresh tree with scanned data
@@ -457,8 +527,11 @@ public partial class MainViewModel : ViewModelBase
     private bool CanResumeAi() => _aiProgress.CanResume;
     private bool CanCancelAi() => _aiProgress.CanCancel;
 
+    private bool CanResumeScan() => _activeJobId > 0 && !IsScanRunning;
+
     private void UpdateCanStartScan()
     {
         CanStartScan = !string.IsNullOrWhiteSpace(RootPath) && !IsScanRunning && !_aiProgress.IsBusy;
+        ResumeScanCommand.NotifyCanExecuteChanged();
     }
 }

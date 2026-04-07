@@ -85,13 +85,33 @@ public static class ServiceConfigurator
         services.AddSingleton<ScanJobService>();
         services.AddSingleton<FileQueryService>();
         services.AddSingleton<DirectoryQueryService>();
-        services.AddSingleton<ClassificationService>();
+        services.AddSingleton<ClassificationService>(sp => new ClassificationService(
+            sp.GetRequiredService<IFileRepository>(),
+            sp.GetRequiredService<IClassificationRepository>(),
+            sp.GetRequiredService<IClassificationInputPreparer>(),
+            sp.GetRequiredService<IOllamaService>(),
+            () => sp.GetRequiredService<OllamaOptions>().MaxParallelRequests,
+            sp.GetRequiredService<ILogger<ClassificationService>>()));
         services.AddSingleton(sp => new DirectoryAnalysisOptions
         {
             MaxSamplesPerDirectory = sp.GetRequiredService<OllamaOptions>().MaxSamplesPerDirectory
         });
-        services.AddSingleton<DirectoryPreAssessmentService>();
-        services.AddSingleton<DirectorySummaryService>();
+        services.AddSingleton<DirectoryPreAssessmentService>(sp => new DirectoryPreAssessmentService(
+            sp.GetRequiredService<IDirectoryRepository>(),
+            sp.GetRequiredService<IFileRepository>(),
+            sp.GetRequiredService<IDirectoryClassificationRepository>(),
+            sp.GetRequiredService<IOllamaService>(),
+            () => sp.GetRequiredService<OllamaOptions>().MaxParallelRequests,
+            sp.GetRequiredService<DirectoryAnalysisOptions>(),
+            sp.GetRequiredService<ILogger<DirectoryPreAssessmentService>>()));
+        services.AddSingleton<DirectorySummaryService>(sp => new DirectorySummaryService(
+            sp.GetRequiredService<IDirectoryRepository>(),
+            sp.GetRequiredService<IFileRepository>(),
+            sp.GetRequiredService<IDirectoryClassificationRepository>(),
+            sp.GetRequiredService<IClassificationRepository>(),
+            sp.GetRequiredService<IOllamaService>(),
+            () => sp.GetRequiredService<OllamaOptions>().MaxParallelRequests,
+            sp.GetRequiredService<ILogger<DirectorySummaryService>>()));
         services.AddSingleton<AiClassificationCoordinator>();
         services.AddSingleton<ReviewService>();
         services.AddSingleton<FilePreviewService>();
