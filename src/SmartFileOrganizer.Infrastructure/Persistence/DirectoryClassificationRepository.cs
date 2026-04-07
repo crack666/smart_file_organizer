@@ -12,8 +12,11 @@ public class DirectoryClassificationRepository : IDirectoryClassificationReposit
 
     public async Task UpsertAsync(DirectoryClassificationResult result, CancellationToken ct = default)
     {
+        // Intentional: do not cancel this write mid-flight.
+        // On "Stop AI" we still prefer a best-effort persistence of already computed
+        // directory results instead of throwing TaskCanceledException from OpenAsync/ExecuteAsync.
         await using var conn = _db.CreateConnection();
-        await conn.OpenAsync(ct);
+        await conn.OpenAsync(CancellationToken.None);
 
         await conn.ExecuteAsync(
             """
