@@ -37,9 +37,14 @@ Phase 1 — Directory Reconnaissance
    ↳ Result stored in ai_directory_results (phase = 'pre_assessment')
 
 Phase 2 — Per-File Deep Analysis
-   ↳ Images → visual AI (uploaded as base64, up to 10 MB)
-   ↳ Documents → text extraction + semantic classification
-   ↳ Videos → filename + path heuristics (no bytes uploaded)
+   ↳ Raster images (jpg/png/gif/webp) → visual AI (base64, up to 10 MB)
+   ↳ SVG → XML read as text, classified semantically
+   ↳ Other image formats (bmp/tiff/heic/raw/ico/…) → metadata only
+   ↳ PDF → page 1 rendered to PNG → visual AI
+   ↳ DOCX/XLSX/ODT/ODS → ZIP/XML text extraction → semantic classification
+   ↳ Text & code files → direct UTF-8 read → semantic classification
+   ↳ Videos/audio → filename + path heuristics (no bytes uploaded)
+   ↳ Everything else → filename, path, size, date (no bytes uploaded)
    ↳ Returns: category, importance, confidence (0–100%), summary
    ↳ Result stored in ai_results
 
@@ -112,6 +117,76 @@ src/
 ├── SmartFileOrganizer.Scanning        # Scan engine, heuristics, FileType detection
 └── SmartFileOrganizer.Desktop         # Avalonia UI, ViewModels, DI wiring
 ```
+
+---
+
+## 📂 File Type Support
+
+Every file is analyzed — the approach just varies based on what content can actually be extracted.
+
+### Raster Images — visual AI analysis
+
+Sent to the vision model as a base64-encoded attachment.
+
+| Extensions | Treatment |
+|---|---|
+| `.jpg` `.jpeg` `.png` `.gif` `.webp` | Full visual analysis (up to `MaxImageUploadBytes`, default 10 MB) |
+
+If the file exceeds the size limit or cannot be read (e.g. corrupt checksum), classification falls back to filename + metadata only.
+
+### Vector & Structured Images — text analysis
+
+Vision models cannot decode these formats. The file content is read as text and sent as context instead.
+
+| Extension | Treatment |
+|---|---|
+| `.svg` | XML source read as text (truncated at 4 KB), classified semantically |
+
+### Other Image Formats — metadata only
+
+These formats are not natively decodable by Ollama vision models (raw sensor data, legacy formats, icons).
+
+| Extensions | Treatment |
+|---|---|
+| `.bmp` `.tiff` `.tif` `.heic` `.heif` `.raw` `.cr2` `.nef` `.arw` `.ico` | Filename, path, size, and modification date only |
+
+### Documents — text extraction + semantic analysis
+
+| Extensions | Treatment |
+|---|---|
+| `.pdf` | Page 1 rendered to PNG via PDFium → visual AI |
+| `.docx` | `word/document.xml` extracted from ZIP, paragraphs sent as text |
+| `.xlsx` | Shared strings + all worksheet cells extracted from ZIP, sent as text |
+| `.odt` | `content.xml` extracted from ZIP, paragraph/heading nodes sent as text |
+| `.ods` | `content.xml` extracted from ZIP, table-row/cell nodes sent as text (preview) |
+| `.txt` `.md` `.csv` `.json` `.xml` `.html` `.htm` `.yaml` `.yml` `.ini` `.cfg` `.sql` `.log` | Read directly as UTF-8 text (truncated at 12 000 chars) |
+| `.cs` `.js` `.ts` `.tsx` `.jsx` `.py` `.css` `.ps1` `.sh` `.bat` | Read as source code text |
+
+### Videos — metadata only
+
+Uploading video bytes would be impractical. Classification is based entirely on filename and directory path.
+
+| Extensions | Treatment |
+|---|---|
+| `.mp4` `.mkv` `.avi` `.mov` `.wmv` `.flv` `.webm` `.ts` `.m4v` + others | Filename + directory path heuristics |
+
+### Audio — metadata only
+
+| Extensions | Treatment |
+|---|---|
+| `.mp3` `.flac` `.wav` `.aac` `.ogg` `.m4a` `.opus` + others | Filename + directory path heuristics |
+
+### Archives & Installers — metadata only
+
+Archive contents are not unpacked. Classification is based on the archive name, path, and size.
+
+| Extensions | Treatment |
+|---|---|
+| `.zip` `.7z` `.rar` `.tar` `.gz` `.bz2` `.xz` `.dmg` `.iso` + others | Filename, path, size |
+
+### Everything Else — metadata only
+
+Any file type not covered above is still classified — the AI uses filename, extension, directory path, and size as signals. No bytes are ever uploaded for unknown formats.
 
 ---
 
