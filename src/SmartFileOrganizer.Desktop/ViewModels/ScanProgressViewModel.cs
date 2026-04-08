@@ -1,4 +1,5 @@
 using CommunityToolkit.Mvvm.ComponentModel;
+using SmartFileOrganizer.Application.Services;
 using SmartFileOrganizer.Domain.Interfaces;
 using SmartFileOrganizer.Domain.Models;
 
@@ -39,5 +40,17 @@ public partial class ScanProgressViewModel : ViewModelBase
         ProgressPercent = job.ProgressPercent;
         ProcessedFiles = job.ProcessedFiles;
         TotalFiles = job.TotalFiles;
+    }
+
+    public void Apply(FocusedRescanProgress progress)
+    {
+        StatusText = progress.StatusText;
+        CurrentPath = progress.CurrentPath;
+        ErrorCount = progress.ErrorCount;
+        ProcessedFiles = progress.ProcessedSteps;
+        TotalFiles = progress.TotalSteps;
+        ProgressPercent = progress.TotalSteps > 0
+            ? (double)progress.ProcessedSteps / progress.TotalSteps * 100.0
+            : 0;
     }
 }

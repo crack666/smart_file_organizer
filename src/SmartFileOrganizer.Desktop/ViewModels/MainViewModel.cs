@@ -423,6 +423,7 @@ public partial class MainViewModel : ViewModelBase
             IsScanRunning = false;
             UpdateCanStartScan();
             ResumeScanCommand.NotifyCanExecuteChanged();
+            UpsertJobInCollections(job);
             _scanProgress.Apply(job);
 
             // Refresh tree with scanned data
@@ -432,6 +433,33 @@ public partial class MainViewModel : ViewModelBase
             if (job.Status == Domain.Enums.JobStatus.Completed)
                 await _aiCoordinator.StartOrResumeAsync(job.Id);
         });
+    }
+
+    private void UpsertJobInCollections(ScanJob job)
+    {
+        var recentIndex = RecentScans
+            .Select((item, index) => (item, index))
+            .FirstOrDefault(x => x.item.Job.Id == job.Id)
+            .index;
+
+        var recentItem = new RecentScanItemViewModel(job);
+        if (recentIndex >= 0 && recentIndex < RecentScans.Count)
+            RecentScans[recentIndex] = recentItem;
+        else
+            RecentScans.Insert(0, recentItem);
+
+        var jobIndex = Jobs
+            .Select((existing, index) => (existing, index))
+            .FirstOrDefault(x => x.existing.Id == job.Id)
+            .index;
+
+        if (jobIndex >= 0 && jobIndex < Jobs.Count)
+            Jobs[jobIndex] = job;
+        else
+            Jobs.Insert(0, job);
+
+        if (SelectedJob?.Id == job.Id)
+            SelectedJob = job;
     }
 
     private async void OnDirectorySelected(object? sender, string path)
@@ -546,8 +574,8 @@ public partial class MainViewModel : ViewModelBase
 
         try
         {
-            _scanProgress.StatusText = $"Rescanning directory: {directoryPath}";
-            await _focusedRescanService.RescanDirectoryAsync(_activeJobId, directoryPath);
+            var progress = new Progress<FocusedRescanProgress>(p => _scanProgress.Apply(p));
+            await _focusedRescanService.RescanDirectoryAsync(_activeJobId, directoryPath, progress);
 
             _selectedDirectoryPath = directoryPath;
             _selectedFileId = null;
@@ -575,8 +603,8 @@ public partial class MainViewModel : ViewModelBase
 
         try
         {
-            _scanProgress.StatusText = $"Reanalyzing file: {row.Name}";
-            await _focusedRescanService.ReanalyzeFileAsync(_activeJobId, row.Id);
+            var progress = new Progress<FocusedRescanProgress>(p => _scanProgress.Apply(p));
+            await _focusedRescanService.ReanalyzeFileAsync(_activeJobId, row.Id, progress);
 
             var directoryPath = string.IsNullOrWhiteSpace(row.ParentPath)
                 ? _selectedDirectoryPath
