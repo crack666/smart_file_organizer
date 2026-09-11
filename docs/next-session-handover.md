@@ -142,7 +142,7 @@ Smart File Organizer has a **fully working end-to-end pipeline**:
 - classification is now really wired into the product flow after scan completion
 - local models are loaded from Ollama with `/api/tags`
 - the selected model is persisted to `%AppData%\\SmartFileOrganizer\\settings.json`
-- the default high-end model remains `qwen3-vl:30b`
+- the default model is `gemma4:26b` (MoE, 4 concurrent batches; do not retarget SFO to `qwen3.8:27b-ctx128k`)
 - `keep_alive` is supported and exposed in the UI
 - a warm-up action can preload the model into VRAM using an empty `/api/chat` request
 
