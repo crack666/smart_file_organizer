@@ -2,6 +2,7 @@ using Dapper;
 using Microsoft.Extensions.Logging.Abstractions;
 using SmartFileOrganizer.Application.Services;
 using SmartFileOrganizer.Domain.Enums;
+using SmartFileOrganizer.Domain.Interfaces;
 using SmartFileOrganizer.Domain.Models;
 using SmartFileOrganizer.Infrastructure;
 using SmartFileOrganizer.Infrastructure.Persistence;
@@ -272,7 +273,7 @@ public class ScanExportServiceTests : IDisposable
         RelativeDir = "Photos",
         Extension = ".jpg",
         FileType = FileType.Image,
-        Status = FileNodeStatus.Analyzed,
+        Status = FileNodeStatus.AiAnalyzed,
         Size = 2048,
         LastWriteTime = new DateTime(2026, 9, 17, 10, 30, 0, DateTimeKind.Utc),
         Classification = new FileClassification
