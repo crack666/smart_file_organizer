@@ -115,6 +115,7 @@ public static class ServiceConfigurator
             sp.GetRequiredService<ILogger<DirectorySummaryService>>()));
         services.AddSingleton<AiClassificationCoordinator>();
         services.AddSingleton<ReviewService>();
+        services.AddSingleton<ScanExportService>();
         services.AddSingleton<FocusedRescanService>();
         services.AddSingleton<FilePreviewService>();
         services.AddSingleton<IClassificationInputPreparer, AiClassificationInputPreparer>();
