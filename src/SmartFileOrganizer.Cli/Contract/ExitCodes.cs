@@ -35,5 +35,7 @@ public static class ErrorCodes
     public const string ExportFailed = "export_failed";
     public const string WrongRole = "wrong_role";
     public const string CompareIncomplete = "compare_incomplete";
+    public const string WordsInvalid = "words_invalid";
+    public const string OutputInsideJob = "output_inside_job";
     public const string InternalError = "internal_error";
 }
