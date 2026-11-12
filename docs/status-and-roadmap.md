@@ -111,7 +111,7 @@ https://github.com/crack666/smart_file_organizer/issues/5: `dotnet test`
 - `sfo summary`, `dirs`, `files`, `show`, `export` read a job in pages with
   filters on verdict, retention and the sensitive marker
   (https://github.com/crack666/smart_file_organizer/issues/6, measured
-  12.11.2026 by `dotnet test`: 331 passed, and every command run by hand
+  12.11.2026 by `dotnet test`: 372 passed after rebasing on the scan rules, and every command run by hand
   with `--json` against a temp database). (Until 12.11.2026 this line said
   the read commands were not there yet.)
 
