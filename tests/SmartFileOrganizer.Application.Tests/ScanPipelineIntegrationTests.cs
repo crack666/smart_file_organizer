@@ -1,11 +1,13 @@
 using Dapper;
 using Microsoft.Extensions.Logging.Abstractions;
+using SmartFileOrganizer.Application.Services;
 using SmartFileOrganizer.Domain.Enums;
 using SmartFileOrganizer.Domain.Interfaces;
 using SmartFileOrganizer.Domain.Models;
 using SmartFileOrganizer.Infrastructure;
 using SmartFileOrganizer.Infrastructure.Persistence;
 using SmartFileOrganizer.Scanning.Engine;
+using SmartFileOrganizer.Scanning.Rules;
 
 namespace SmartFileOrganizer.Application.Tests;
 
@@ -137,8 +139,7 @@ public class ScanPipelineIntegrationTests : IDisposable
             ["/Scan/Videos/Sub"] = ["/Scan/Videos/Sub/nested.txt"],
         });
 
-        var heuristics = new HeuristicsEngine(new HeuristicsOptions());
-        var engine = new ScanEngine(fakeFs, heuristics, _fileRepo, _dirRepo, _jobRepo, NullLogger<ScanEngine>.Instance);
+        var engine = new ScanEngine(fakeFs, _fileRepo, _dirRepo, _jobRepo, NullLogger<ScanEngine>.Instance);
 
         var progress = new List<ScanProgress>();
         await engine.RunAsync(job, new Progress<ScanProgress>(p => progress.Add(p)), CancellationToken.None);
@@ -187,8 +188,7 @@ public class ScanPipelineIntegrationTests : IDisposable
             [root + "/bin"]          = ["/home/alice/AppData/Scan/bin/c.dll"],
         });
 
-        var heuristics = new HeuristicsEngine(new HeuristicsOptions());
-        var engine = new ScanEngine(fakeFs, heuristics, _fileRepo, _dirRepo, _jobRepo, NullLogger<ScanEngine>.Instance);
+        var engine = new ScanEngine(fakeFs, _fileRepo, _dirRepo, _jobRepo, NullLogger<ScanEngine>.Instance);
         await engine.RunAsync(job, new Progress<ScanProgress>(_ => { }), CancellationToken.None);
 
         var finishedJob = await _jobRepo.GetByIdAsync(job.Id);
@@ -199,7 +199,7 @@ public class ScanPipelineIntegrationTests : IDisposable
 
         var bin = await _dirRepo.GetByPathAsync(job.Id, root + "/bin");
         Assert.Equal(DirectoryStatus.Skip, bin!.DirStatus);
-        Assert.Equal("Skip: matches skip pattern 'bin'", bin.DirReason);
+        Assert.Equal("Skip: matches skip rule 'bin' of rules 'default': build output", bin.DirReason);
     }
 
     [Fact]
@@ -213,8 +213,7 @@ public class ScanPipelineIntegrationTests : IDisposable
             ["/Scan"] = ["/Scan/file.txt"],
         });
 
-        var heuristics = new HeuristicsEngine(new HeuristicsOptions());
-        var engine = new ScanEngine(fakeFs, heuristics, _fileRepo, _dirRepo, _jobRepo, NullLogger<ScanEngine>.Instance);
+        var engine = new ScanEngine(fakeFs, _fileRepo, _dirRepo, _jobRepo, NullLogger<ScanEngine>.Instance);
 
         // Run scan once
         await engine.RunAsync(job, new Progress<ScanProgress>(_ => { }), CancellationToken.None);
@@ -228,6 +227,193 @@ public class ScanPipelineIntegrationTests : IDisposable
         var count2 = await _fileRepo.CountByJobAsync(job.Id);
 
         Assert.Equal(count1, count2); // No duplicates
+    }
+
+    // ------------------------------------------------------------------ rules (#21)
+
+    private ScanEngine NewEngine(IFileSystemAccessor fs) =>
+        new(fs, _fileRepo, _dirRepo, _jobRepo, NullLogger<ScanEngine>.Instance);
+
+    private ScanJobService NewJobService(IFileSystemAccessor fs) =>
+        new(_jobRepo, NewEngine(fs), NullLogger<ScanJobService>.Instance);
+
+    private static ScanRulesProfile Profile(string name, params ScanRule[] rules) =>
+        ScanRulesFile.ToProfile(new ScanRuleSet { Name = name, Rules = rules }, $"{name}.json");
+
+    /// <summary>A fake tree where every folder on the way is a key, so the fake file system links them.</summary>
+    private static Dictionary<string, string[]> Tree(params (string Dir, string[] Files)[] dirs)
+    {
+        var tree = new Dictionary<string, string[]>(StringComparer.Ordinal);
+        foreach (var (dir, files) in dirs)
+        {
+            for (var parent = dir; parent.Length > 0; parent = parent[..Math.Max(0, parent.LastIndexOf('/'))])
+                tree.TryAdd(parent, []);
+            tree[dir] = files;
+        }
+        return tree;
+    }
+
+    [Fact]
+    public async Task ScanEngine_JobWithoutRules_RecordsTheShippedRules()
+    {
+        var job = await CreateJobAsync("/Scan");
+
+        await NewEngine(new FakeFileSystemAccessor(Tree(("/Scan", ["/Scan/a.txt"])))).RunAsync(job, new Progress<ScanProgress>(_ => { }), CancellationToken.None);
+
+        var loaded = await _jobRepo.GetByIdAsync(job.Id);
+        Assert.Equal("default", loaded!.RulesName);
+        Assert.Equal(ScanRulesFile.BuiltInSource, loaded.RulesSource);
+        Assert.Equal(ScanRulesFile.Hash(ScanRulesFile.Default), loaded.RulesHash);
+        Assert.Equal(ScanRulesFile.Default.Rules.Count, ScanRulesFile.FromProfile(loaded.Rules!).Rules.Count);
+    }
+
+    // Beyond shallow_from the content decides: a photo folder is entered, a program folder recorded shallow.
+    [Fact]
+    public async Task ScanEngine_BeyondShallowDepth_EntersPhotoFolder_RecordsProgramFolderShallow()
+    {
+        const string deep = "/Scan/1/2/3/4/5";
+        var fs = new FakeFileSystemAccessor(Tree(
+            (deep + "/Urlaubsfotos", [deep + "/Urlaubsfotos/strand.jpg"]),
+            (deep + "/Urlaubsfotos/Tag2", [deep + "/Urlaubsfotos/Tag2/berg.jpg"]),
+            (deep + "/Tool", [deep + "/Tool/tool.exe", deep + "/Tool/tool.dll"]),
+            (deep + "/Tool/Plugins", [deep + "/Tool/Plugins/p.dll"])));
+        var job = await CreateJobAsync("/Scan");
+
+        await NewEngine(fs).RunAsync(job, new Progress<ScanProgress>(_ => { }), CancellationToken.None);
+
+        var photos = await _dirRepo.GetByPathAsync(job.Id, deep + "/Urlaubsfotos");
+        Assert.Equal(DirectoryStatus.Scanned, photos!.DirStatus);
+        Assert.Contains("user file", photos.DirReason);
+        Assert.Equal(DirectoryStatus.Scanned, (await _dirRepo.GetByPathAsync(job.Id, deep + "/Urlaubsfotos/Tag2"))!.DirStatus);
+
+        var tool = await _dirRepo.GetByPathAsync(job.Id, deep + "/Tool");
+        Assert.Equal(DirectoryStatus.Shallow, tool!.DirStatus);
+        Assert.Contains("program folder", tool.DirReason);
+        Assert.Equal(2, tool.DirectFileCount);
+        Assert.Equal(1, tool.SubdirCount);   // counted, not entered
+        Assert.Null(await _dirRepo.GetByPathAsync(job.Id, deep + "/Tool/Plugins"));
+    }
+
+    // The "done when" of #21: own rules scan a folder the default skips and record shallow one it scans.
+    [Fact]
+    public async Task ScanEngine_OwnRules_ScanSkippedFolder_AndRecordScannedFolderShallow()
+    {
+        var fs = new FakeFileSystemAccessor(Tree(
+            ("/Scan/bin", ["/Scan/bin/export.csv"]),
+            ("/Scan/Games", ["/Scan/Games/readme.txt"]),
+            ("/Scan/Games/Quake", ["/Scan/Games/Quake/save.dat"])));
+
+        var withDefault = await CreateJobAsync("/Scan");
+        await NewEngine(fs).RunAsync(withDefault, new Progress<ScanProgress>(_ => { }), CancellationToken.None);
+        Assert.Equal(DirectoryStatus.Skip, (await _dirRepo.GetByPathAsync(withDefault.Id, "/Scan/bin"))!.DirStatus);
+        Assert.Equal(DirectoryStatus.Scanned, (await _dirRepo.GetByPathAsync(withDefault.Id, "/Scan/Games"))!.DirStatus);
+
+        var own = Profile("laptop", new ScanRule("bin", ScanRuleAction.UserData, Why: "exports live here"),
+                                    new ScanRule("Games", ScanRuleAction.Shallow, Why: "installed games"));
+        var withOwn = await NewJobService(fs).CreateJobAsync("/Scan", own);
+        await NewEngine(fs).RunAsync(withOwn, new Progress<ScanProgress>(_ => { }), CancellationToken.None);
+
+        var bin = await _dirRepo.GetByPathAsync(withOwn.Id, "/Scan/bin");
+        Assert.Equal(DirectoryStatus.Scanned, bin!.DirStatus);
+        Assert.Contains("rules 'laptop'", bin.DirReason);
+        Assert.Contains("exports live here", bin.DirReason);
+        var games = await _dirRepo.GetByPathAsync(withOwn.Id, "/Scan/Games");
+        Assert.Equal(DirectoryStatus.Shallow, games!.DirStatus);
+        Assert.Equal(1, games.SubdirCount);
+        Assert.Null(await _dirRepo.GetByPathAsync(withOwn.Id, "/Scan/Games/Quake"));
+        Assert.Equal("laptop", (await _jobRepo.GetByIdAsync(withOwn.Id))!.RulesName);
+    }
+
+    [Fact]
+    public async Task RunWithChangedRules_ReopensFinishedJob_EntersFormerSkipAndShallow_WithoutDuplicates()
+    {
+        var fs = new FakeFileSystemAccessor(Tree(
+            ("/Scan/bin", ["/Scan/bin/x.txt"]),
+            ("/Scan/Archive", ["/Scan/Archive/a.txt"]),
+            ("/Scan/Archive/Old", ["/Scan/Archive/Old/o.txt"])));
+        var service = NewJobService(fs);
+        var narrow = Profile("narrow", new ScanRule("bin", ScanRuleAction.Skip), new ScanRule("Archive", ScanRuleAction.Shallow));
+        var job = await service.CreateJobAsync("/Scan", narrow);
+
+        var first = await service.RunAsync(job.Id);
+        Assert.Equal(JobStatus.Completed, first.Status);
+        Assert.Equal(1, first.ProcessedFiles);   // a.txt; bin skipped, Old not entered
+
+        // Same rules: a finished job stays as it is.
+        Assert.Equal(1, (await service.RunAsync(job.Id, narrow, null)).ProcessedFiles);
+
+        var wide = Profile("wide");
+        var second = await service.RunAsync(job.Id, wide, null);
+
+        Assert.Equal(JobStatus.Completed, second.Status);
+        Assert.Equal("wide", second.RulesName);
+        Assert.Equal(3, await _fileRepo.CountByJobAsync(job.Id));
+        Assert.Equal(3, second.ProcessedFiles);
+
+        var bin = await _dirRepo.GetByPathAsync(job.Id, "/Scan/bin");
+        Assert.Equal(DirectoryStatus.Scanned, bin!.DirStatus);
+        Assert.Contains("re-evaluated on resume", bin.DirReason);
+        Assert.Contains("before: Skip: matches skip rule 'bin' of rules 'narrow'", bin.DirReason);
+        var archive = await _dirRepo.GetByPathAsync(job.Id, "/Scan/Archive");
+        Assert.Equal(DirectoryStatus.Scanned, archive!.DirStatus);
+        Assert.Equal(1, archive.DirectFileCount);
+        Assert.Equal(DirectoryStatus.Scanned, (await _dirRepo.GetByPathAsync(job.Id, "/Scan/Archive/Old"))!.DirStatus);
+
+        // Back to the narrow rules: nothing already collected is dropped.
+        var third = await service.RunAsync(job.Id, narrow, null);
+        Assert.Equal(JobStatus.Completed, third.Status);
+        Assert.Equal(3, await _fileRepo.CountByJobAsync(job.Id));
+        Assert.Equal(DirectoryStatus.Scanned, (await _dirRepo.GetByPathAsync(job.Id, "/Scan/bin"))!.DirStatus);
+    }
+
+    // A job paused before rules were stored still holds decisions of the old hard-coded rules,
+    // for example a photo folder recorded shallow only because of its depth.
+    [Fact]
+    public async Task Resume_JobFromBeforeRules_ReevaluatesOldShallowDecision()
+    {
+        const string photos = "/Scan/1/2/3/4/5/Urlaubsfotos";
+        var fs = new FakeFileSystemAccessor(Tree(
+            (photos, [photos + "/strand.jpg"]),
+            (photos + "/Tag2", [photos + "/Tag2/berg.jpg"])));
+        var job = await CreateJobAsync("/Scan");
+        await _dirRepo.InsertBatchAsync([new DirectoryNode
+        {
+            JobId = job.Id, FullPath = photos, Name = "Urlaubsfotos", ParentPath = "/Scan/1/2/3/4/5", RootPath = "/Scan",
+            RelativePath = "1/2/3/4/5/Urlaubsfotos", Depth = 6, DirStatus = DirectoryStatus.Shallow,
+            DirReason = "Shallow: depth 6 reaches shallow depth 6", DirectFileCount = 1, ScannedAt = DateTime.UtcNow
+        }]);
+        await _fileRepo.InsertBatchAsync([MakeFile(job.Id, photos, photos + "/strand.jpg", FileType.Image)]);
+        job.Status = JobStatus.Paused;
+        await _jobRepo.UpdateAsync(job);
+
+        var resumed = await NewJobService(fs).RunAsync(job.Id);
+
+        Assert.Equal("default", resumed.RulesName);
+        var node = await _dirRepo.GetByPathAsync(job.Id, photos);
+        Assert.Equal(DirectoryStatus.Scanned, node!.DirStatus);
+        Assert.Contains("before: Shallow: depth 6 reaches shallow depth 6", node.DirReason);
+        Assert.Equal(DirectoryStatus.Scanned, (await _dirRepo.GetByPathAsync(job.Id, photos + "/Tag2"))!.DirStatus);
+        Assert.Equal(2, await _fileRepo.CountByJobAsync(job.Id));
+    }
+
+    // Skipped folders used to be counted as discovered but never as processed, so a finished scan
+    // with two or more of them looked unfinished and was reported as paused.
+    [Fact]
+    public async Task FinishedScanWithSeveralSkippedFolders_StaysCompleted()
+    {
+        var fs = new FakeFileSystemAccessor(Tree(
+            ("/Scan/bin", ["/Scan/bin/a.dll"]),
+            ("/Scan/obj", ["/Scan/obj/b.obj"]),
+            ("/Scan/node_modules", ["/Scan/node_modules/c.js"]),
+            ("/Scan/docs", ["/Scan/docs/d.txt"])));
+        var service = NewJobService(fs);
+        var job = await service.CreateJobAsync("/Scan");
+
+        await service.RunAsync(job.Id);
+
+        var reloaded = await service.GetJobAsync(job.Id);
+        Assert.Equal(JobStatus.Completed, reloaded!.Status);
+        Assert.True(reloaded.ProcessedDirectories >= reloaded.TotalDirectories);
     }
 
     // ------------------------------------------------------------------ helpers

@@ -26,14 +26,24 @@ line said 271 before, and 47 before that) and in CI on Windows and Linux._
 - SQLite persistence (Dapper) for scan jobs, directory nodes, file nodes,
   AI results, directory AI results and user overrides.
 - File type detection by extension (`FileTypeDetector`).
-- Scan pruning (`HeuristicsEngine`): dot-directories and skip patterns such
-  as `AppData`, `Windows`, `node_modules`, `$Recycle.Bin`. Patterns match
-  whole path segments (case-insensitive, either separator) and only below
-  the scan root, so `Combinations` is not skipped for `bin` and a root
-  inside `AppData` is scanned. Each skip stores its rule in `dir_reason`,
-  e.g. `Skip: matches skip pattern 'bin'` _(checked 12.11.2026, #19, by
-  `HeuristicsEngineTests`)_.
-- Resume: directories already scanned are skipped on restart.
+- Scan pruning (`HeuristicsEngine`) from a rule file (profile): the shipped
+  `default-rules.json` or one given with `sfo scan --rules`, stored at the
+  job; `skip`, `shallow` (with `max_depth`) and `user_data` rules. Rules match
+  whole path segments (case-insensitive, either separator), skip and shallow
+  rules only below the scan root. Beyond `shallow_from` (6) the content
+  decides: user files → scanned, program files only → shallow. Every
+  decision stores rule, profile and reason in `dir_reason`, e.g.
+  `Skip: matches skip rule 'bin' of rules 'default': build output`;
+  `sfo rules check` shows it for any path. Format: [scan-rules.md](scan-rules.md)
+  _(checked 12.11.2026, https://github.com/crack666/smart_file_organizer/issues/21,
+  by `HeuristicsEngineTests`, `ScanPipelineIntegrationTests`, `CliTests` and
+  `sfo rules check` / `sfo scan --rules` run by hand on a temp folder; until
+  then the line read "Each skip stores its rule in `dir_reason`, e.g.
+  `Skip: matches skip pattern 'bin'`" and the patterns were fixed in code)_.
+- Resume: directories already scanned are not read again; directories stored
+  as skipped or shallow are re-evaluated with the job's current rules and
+  entered if those let them in (until 12.11.2026 stored shallow decisions
+  were kept as they were and re-evaluated skips were not written back).
 - `ScanExportService` (CSV export) exists and is tested; it is
   registered in DI but not reachable from the UI. Every row goes through
   `SensitiveOutputGuard`. (Until 12.11.2026 this line said "CSV/JSON

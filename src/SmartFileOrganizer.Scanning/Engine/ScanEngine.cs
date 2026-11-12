@@ -3,18 +3,22 @@ using SmartFileOrganizer.Application.Sensitivity;
 using SmartFileOrganizer.Domain.Enums;
 using SmartFileOrganizer.Domain.Interfaces;
 using SmartFileOrganizer.Domain.Models;
+using SmartFileOrganizer.Scanning.Rules;
 
 namespace SmartFileOrganizer.Scanning.Engine;
 
 /// <summary>
 /// Iterative scan engine. Processes directories using a work queue (not recursion).
 /// Writes results to SQLite in configurable batches.
-/// Supports cancellation and resume: directories that are already in the DB are skipped.
+/// Scans with the rules stored at the job (<see cref="ScanJob.Rules"/>); a job without stored rules
+/// gets the shipped rules recorded on its first run.
+/// Supports cancellation and resume: directories already scanned are not read again. Directories stored
+/// as skipped or shallow are re-evaluated with the job's current rules and entered if those let them in,
+/// so resuming after a rule change (or after an update of the shipped rules) does not keep stale skips.
 /// </summary>
 public class ScanEngine : IScanEngine
 {
     private readonly IFileSystemAccessor _fs;
-    private readonly IHeuristicsEngine _heuristics;
     private readonly IFileRepository _fileRepo;
     private readonly IDirectoryRepository _dirRepo;
     private readonly IScanJobRepository _jobRepo;
@@ -25,14 +29,12 @@ public class ScanEngine : IScanEngine
 
     public ScanEngine(
         IFileSystemAccessor fs,
-        IHeuristicsEngine heuristics,
         IFileRepository fileRepo,
         IDirectoryRepository dirRepo,
         IScanJobRepository jobRepo,
         ILogger<ScanEngine> logger)
     {
         _fs = fs;
-        _heuristics = heuristics;
         _fileRepo = fileRepo;
         _dirRepo = dirRepo;
         _jobRepo = jobRepo;
@@ -41,11 +43,18 @@ public class ScanEngine : IScanEngine
 
     public async Task RunAsync(ScanJob job, IProgress<ScanProgress> progress, CancellationToken ct)
     {
+        if (job.Rules == null)
+        {
+            job.Rules = ScanRulesFile.DefaultProfile;
+            _logger.LogInformation("Scan job {JobId} has no rules recorded; using the shipped rules '{Name}'", job.Id, job.RulesName);
+        }
+        var heuristics = new HeuristicsEngine(ScanRulesFile.FromProfile(job.Rules));
+
         job.Status = JobStatus.Running;
         job.StartedAt ??= DateTime.UtcNow;
         await _jobRepo.UpdateAsync(job, ct);
 
-        _logger.LogInformation("Scan job {JobId} started at {Root}", job.Id, job.RootPath);
+        _logger.LogInformation("Scan job {JobId} started at {Root} with rules '{Rules}'", job.Id, job.RootPath, job.RulesName);
 
         var pendingDirs = new Queue<(string Path, int Depth)>();
         pendingDirs.Enqueue((job.RootPath, 0));
@@ -76,30 +85,56 @@ public class ScanEngine : IScanEngine
                 continue;
             }
 
-            if (existing?.DirStatus == DirectoryStatus.Shallow)
-            {
-                _logger.LogTrace("Skipping already-shallow dir: {Path}", dirPath);
-                continue;
-            }
+            // Listed at most once: for the content check (only when a decision depends on it) and for the rows.
+            List<string>? files = null;
+            List<string> Files() => files ??= _fs.EnumerateFiles(dirPath).ToList();
 
             var evaluation = depth == 0
                 ? new DirectoryEvaluation(ScanDecision.Descend, "Descend: scan root")   // always descend root
-                : _heuristics.EvaluateDirectory(job.RootPath, dirPath, depth);
+                : heuristics.EvaluateDirectory(job.RootPath, dirPath, depth,
+                    () => new DirectoryContent(Files().Select(f => FileTypeDetector.Detect(_fs.GetExtension(f)))));
             var decision = evaluation.Decision;
+            var status = DecisionToStatus(decision);
 
-            var dirNode = new DirectoryNode
+            DirectoryNode dirNode;
+            bool listFiles;
+            if (existing != null)
             {
-                JobId = job.Id,
-                FullPath = dirPath,
-                Name = _fs.GetFileName(dirPath),
-                ParentPath = _fs.GetDirectoryName(dirPath),
-                RootPath = job.RootPath,
-                RelativePath = _fs.GetRelativePath(job.RootPath, dirPath),
-                Depth = depth,
-                DirStatus = DecisionToStatus(decision),
-                DirReason = evaluation.Reason,
-                ScannedAt = DateTime.UtcNow
-            };
+                // Stored as skipped or shallow by an earlier run, possibly under other rules. Only a wider
+                // decision is applied; a narrower one never throws away what was already collected.
+                if (Coverage(status) <= Coverage(existing.DirStatus))
+                {
+                    _logger.LogTrace("Kept stored decision for {Path}: {Reason}", dirPath, existing.DirReason);
+                    continue;
+                }
+
+                _logger.LogDebug("Re-evaluated {Path}: {Old} -> {New}", dirPath, existing.DirReason, evaluation.Reason);
+                listFiles = existing.DirStatus != DirectoryStatus.Shallow;   // a shallow folder's files are stored
+                dirNode = existing;
+                dirNode.DirStatus = status;
+                dirNode.DirReason = $"{evaluation.Reason} (re-evaluated on resume; before: {existing.DirReason})";
+                dirNode.ScannedAt = DateTime.UtcNow;
+            }
+            else
+            {
+                listFiles = true;
+                dirNode = new DirectoryNode
+                {
+                    JobId = job.Id,
+                    FullPath = dirPath,
+                    Name = _fs.GetFileName(dirPath),
+                    ParentPath = _fs.GetDirectoryName(dirPath),
+                    RootPath = job.RootPath,
+                    RelativePath = _fs.GetRelativePath(job.RootPath, dirPath),
+                    Depth = depth,
+                    DirStatus = status,
+                    DirReason = evaluation.Reason,
+                    ScannedAt = DateTime.UtcNow
+                };
+                // Every stored decision counts as processed, skips included; otherwise a finished scan with
+                // two or more skipped folders reads as unfinished (processed < total) and is reported as paused.
+                job.ProcessedDirectories++;
+            }
 
             if (decision == ScanDecision.Skip)
             {
@@ -112,7 +147,7 @@ public class ScanEngine : IScanEngine
             // Enumerate files in this directory
             int fileCount = 0;
             long dirSize = 0;
-            foreach (var filePath in _fs.EnumerateFiles(dirPath))
+            foreach (var filePath in listFiles ? Files() : [])
             {
                 ct.ThrowIfCancellationRequested();
 
@@ -154,8 +189,11 @@ public class ScanEngine : IScanEngine
                 }
             }
 
-            dirNode.DirectFileCount = fileCount;
-            dirNode.TotalSize = dirSize;
+            if (listFiles)
+            {
+                dirNode.DirectFileCount = fileCount;
+                dirNode.TotalSize = dirSize;
+            }
 
             // Enumerate subdirectories
             if (decision == ScanDecision.Descend)
@@ -169,9 +207,17 @@ public class ScanEngine : IScanEngine
                 }
                 dirNode.SubdirCount = subdirCount;
             }
+            else
+            {
+                // Shallow: count the subfolders without entering them, so the stored node shows
+                // that there is more below it instead of looking like a leaf.
+                dirNode.SubdirCount = _fs.EnumerateDirectories(dirPath).Count();
+            }
 
-            dirBatch.Add(dirNode);
-            job.ProcessedDirectories++;
+            if (existing != null)
+                await _dirRepo.UpdateAsync(dirNode, ct);
+            else
+                dirBatch.Add(dirNode);
 
             await FlushDirBatchIfNeeded(dirBatch, ct);
 
@@ -220,6 +266,14 @@ public class ScanEngine : IScanEngine
             batch.Clear();
         }
     }
+
+    /// <summary>How much of a folder a status covers: skipped &lt; shallow &lt; scanned.</summary>
+    private static int Coverage(DirectoryStatus status) => status switch
+    {
+        DirectoryStatus.Scanned => 2,
+        DirectoryStatus.Shallow => 1,
+        _ => 0
+    };
 
     private static DirectoryStatus DecisionToStatus(ScanDecision d) => d switch
     {

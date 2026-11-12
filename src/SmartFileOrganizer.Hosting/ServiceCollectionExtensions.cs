@@ -86,9 +86,6 @@ public static class ServiceCollectionExtensions
             paths.SettingsPath));
 
         // Scanning
-        services.AddSingleton<HeuristicsOptions>();
-        services.AddSingleton<IHeuristicsEngine>(sp =>
-            new HeuristicsEngine(sp.GetRequiredService<HeuristicsOptions>()));
         services.AddSingleton<IScanEngine, ScanEngine>();
         services.AddSingleton<IScopedRefreshService, ScopedRefreshService>();
 

@@ -35,13 +35,19 @@ public class ScanJobService
         _logger = logger;
     }
 
-    public async Task<ScanJob> CreateJobAsync(string rootPath, CancellationToken ct = default)
+    /// <summary>Creates a job scanned with the shipped rules (recorded at the job on its first run).</summary>
+    public Task<ScanJob> CreateJobAsync(string rootPath, CancellationToken ct = default) =>
+        CreateJobAsync(rootPath, rules: null, ct);
+
+    /// <summary>Creates a job scanned with <paramref name="rules"/>; null means the shipped rules.</summary>
+    public async Task<ScanJob> CreateJobAsync(string rootPath, ScanRulesProfile? rules, CancellationToken ct = default)
     {
         var job = new ScanJob
         {
             RootPath = rootPath,
             Status = JobStatus.Created,
-            CreatedAt = DateTime.UtcNow
+            CreatedAt = DateTime.UtcNow,
+            Rules = rules
         };
         return await _jobRepo.CreateAsync(job, ct);
     }
@@ -127,12 +133,35 @@ public class ScanJobService
     /// <see cref="JobStatus.Failed"/> and returned. Cancelling <paramref name="ct"/> persists the job as
     /// <see cref="JobStatus.Paused"/>, so it can be resumed, and then throws <see cref="OperationCanceledException"/>.
     /// </summary>
-    public async Task<ScanJob> RunAsync(long jobId, IProgress<ScanProgress>? progress = null, CancellationToken ct = default)
+    public Task<ScanJob> RunAsync(long jobId, IProgress<ScanProgress>? progress = null, CancellationToken ct = default) =>
+        RunAsync(jobId, rules: null, progress, ct);
+
+    /// <summary>
+    /// Like the overload without rules, but first switches the
+    /// job to <paramref name="rules"/> if they differ from the stored ones (null keeps the stored rules).
+    /// A switch reopens a finished job: the scan engine re-evaluates every folder stored as skipped or
+    /// shallow and enters those the new rules let in. Data already collected is kept.
+    /// </summary>
+    public async Task<ScanJob> RunAsync(long jobId, ScanRulesProfile? rules, IProgress<ScanProgress>? progress, CancellationToken ct = default)
     {
         var job = await _jobRepo.GetByIdAsync(jobId, ct)
             ?? throw new InvalidOperationException($"Job {jobId} not found.");
 
         await NormalizeCompletedIfIncompleteAsync(job, ct);
+
+        if (rules != null && rules.Hash != job.RulesHash)
+        {
+            _logger.LogInformation("Job {JobId}: scan rules changed from '{Old}' to '{New}' ({Source}); stored decisions are re-evaluated.",
+                jobId, job.RulesName ?? "(none recorded)", rules.Name, rules.Source);
+            job.Rules = rules;
+            if (job.Status is JobStatus.Completed or JobStatus.Failed)
+            {
+                job.Status = JobStatus.Paused;
+                job.CompletedAt = null;
+            }
+            await _jobRepo.UpdateAsync(job, ct);
+        }
+
         if (job.Status is JobStatus.Completed or JobStatus.Failed)
             return job;
 

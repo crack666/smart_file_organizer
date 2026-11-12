@@ -17,6 +17,25 @@ public class ScanJob
     public int ErrorCount { get; set; }
     public string? LastError { get; set; }
 
+    // The scan rules (profile) of this job; null for jobs created before rules were stored.
+    public string? RulesName { get; set; }
+    public string? RulesSource { get; set; }
+    public string? RulesHash { get; set; }
+    public string? RulesJson { get; set; }
+
+    /// <summary>The stored rules, or null if none are recorded yet.</summary>
+    public ScanRulesProfile? Rules
+    {
+        get => RulesJson == null ? null : new ScanRulesProfile(RulesName ?? string.Empty, RulesSource ?? string.Empty, RulesHash ?? string.Empty, RulesJson);
+        set
+        {
+            RulesName = value?.Name;
+            RulesSource = value?.Source;
+            RulesHash = value?.Hash;
+            RulesJson = value?.Json;
+        }
+    }
+
     public double ProgressPercent =>
         TotalFiles > 0 ? (double)ProcessedFiles / TotalFiles * 100.0 : 0;
 }

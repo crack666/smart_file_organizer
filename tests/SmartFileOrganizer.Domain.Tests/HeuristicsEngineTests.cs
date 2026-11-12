@@ -1,19 +1,24 @@
+using SmartFileOrganizer.Domain.Enums;
 using SmartFileOrganizer.Scanning.Engine;
 using SmartFileOrganizer.Domain.Interfaces;
+using SmartFileOrganizer.Scanning.Rules;
 
 namespace SmartFileOrganizer.Domain.Tests;
 
 public class HeuristicsEngineTests
 {
     private static HeuristicsEngine CreateEngine() =>
-        new HeuristicsEngine(new HeuristicsOptions());
+        new HeuristicsEngine(ScanRulesFile.Default);
+
+    private static HeuristicsEngine Engine(params ScanRule[] rules) =>
+        new HeuristicsEngine(new ScanRuleSet { Name = "test", Rules = rules });
+
+    private static Func<DirectoryContent?> Content(params FileType[] types) => () => new DirectoryContent(types);
 
     [Theory]
     [InlineData("C:\\Users\\Alice\\Documents\\Reports", 2, ScanDecision.Descend)]
     [InlineData("C:\\node_modules\\react", 3, ScanDecision.Skip)]
     [InlineData("C:\\Windows\\System32", 2, ScanDecision.Skip)]
-    [InlineData("C:\\Users\\Alice\\Code\\very\\deep\\path\\here\\more\\levels\\deeply\\nested\\stuff", 11, ScanDecision.Shallow)]
-    [InlineData("C:\\deep\\path\\really\\really\\really\\that\\is\\very\\very\\deeply\\nested\\here\\stuff", 12, ScanDecision.Skip)]
     public void EvaluateDirectory_ReturnsExpectedDecision(string path, int depth, ScanDecision expected)
     {
         var engine = CreateEngine();
@@ -48,6 +53,7 @@ public class HeuristicsEngineTests
         var result = CreateEngine().EvaluateDirectory(root, path, 2);
         Assert.Equal(ScanDecision.Skip, result.Decision);
         Assert.Contains($"'{pattern}'", result.Reason);
+        Assert.Contains("rules 'default'", result.Reason);
     }
 
     [Theory]
@@ -106,7 +112,7 @@ public class HeuristicsEngineTests
     {
         foreach (var pattern in new[] { "Local\\Temp", "Local/Temp" })
         {
-            var engine = new HeuristicsEngine(new HeuristicsOptions { SkipPatterns = [pattern, "Cache"] });
+            var engine = Engine(new ScanRule(pattern, ScanRuleAction.Skip), new ScanRule("Cache", ScanRuleAction.Skip));
             var decision = engine.EvaluateDirectory(root, path, 2).Decision;
             Assert.Equal(skipped ? ScanDecision.Skip : ScanDecision.Descend, decision);
         }
@@ -124,6 +130,13 @@ public class HeuristicsEngineTests
         Assert.Contains("hidden", windows.Reason);
     }
 
+    [Fact]
+    public void EvaluateDirectory_HiddenDirectoryInUserData_IsScanned()
+    {
+        var result = CreateEngine().EvaluateDirectory("/home/alice", "/home/alice/Documents/.thunderbird", 2);
+        Assert.Equal(ScanDecision.Descend, result.Decision);
+    }
+
     [Theory]
     [InlineData("C:\\Users\\Alice\\Pictures", true)]
     [InlineData("C:\\Users\\Alice\\Documents", true)]
@@ -136,5 +149,165 @@ public class HeuristicsEngineTests
     {
         var engine = CreateEngine();
         Assert.Equal(expected, engine.IsLikelyUserData(path));
+    }
+
+    // ---------------------------------------------------------------- depth: decided by content
+
+    private const string DeepRoot = "/disk";
+    private const string Deep7 = "/disk/a/b/c/d/e/f/Urlaubsfotos";    // depth 7, beyond shallow_from 6
+    private const string Deep7Win = "D:\\a\\b\\c\\d\\e\\f\\Urlaubsfotos";
+
+    // Since #19 "Urlaubsfotos" no longer counts as user data through the partial word "Fotos".
+    // Its content decides instead: photos inside, so the scan enters it.
+    [Theory]
+    [InlineData(DeepRoot, Deep7)]
+    [InlineData("D:\\", Deep7Win)]
+    public void BeyondShallowDepth_FolderWithPhotos_IsDescended(string root, string path)
+    {
+        var result = CreateEngine().Explain(root, path, 7, Content(FileType.Image, FileType.Image, FileType.Other));
+
+        Assert.Equal(ScanDecision.Descend, result.Decision);
+        Assert.Equal(DecisionBasis.UserContent, result.Basis);
+        Assert.Equal(2, result.UserFiles);
+        Assert.Contains("2 image", result.Reason);
+    }
+
+    [Theory]
+    [InlineData(FileType.Video)]
+    [InlineData(FileType.Document)]
+    [InlineData(FileType.Audio)]
+    public void BeyondShallowDepth_UserFilesNextToProgramFiles_StillDescends(FileType userType)
+    {
+        var result = CreateEngine().Explain(DeepRoot, Deep7, 7, Content(FileType.Executable, userType));
+        Assert.Equal(ScanDecision.Descend, result.Decision);
+    }
+
+    [Fact]
+    public void BeyondShallowDepth_ProgramFolder_IsShallow_WithReason()
+    {
+        var result = CreateEngine().Explain(DeepRoot, "/disk/a/b/c/d/e/f/Tool", 7, Content(FileType.Executable, FileType.Executable, FileType.Code));
+
+        Assert.Equal(ScanDecision.Shallow, result.Decision);
+        Assert.Equal(DecisionBasis.ProgramContent, result.Basis);
+        Assert.Contains("program folder", result.Reason);
+        Assert.Contains("2 executable", result.Reason);
+    }
+
+    // In doubt the scan enters: a folder of subfolders only, or one it could not look into.
+    [Fact]
+    public void BeyondShallowDepth_NoProgramFiles_OrUnknownContent_Descends()
+    {
+        var engine = CreateEngine();
+        Assert.Equal(DecisionBasis.NoProgramContent, engine.Explain(DeepRoot, Deep7, 7, Content()).Basis);
+        Assert.Equal(ScanDecision.Descend, engine.Explain(DeepRoot, Deep7, 7, Content()).Decision);
+        Assert.Equal(ScanDecision.Descend, engine.Explain(DeepRoot, Deep7, 7, () => null).Decision);
+        Assert.Equal(ScanDecision.Descend, engine.Explain(DeepRoot, Deep7, 7).Decision);
+    }
+
+    [Fact]
+    public void AboveShallowDepth_ContentIsNotLookedAt()
+    {
+        var probed = false;
+        var result = CreateEngine().Explain(DeepRoot, "/disk/a/Tool", 2, () => { probed = true; return new DirectoryContent([FileType.Executable]); });
+
+        Assert.Equal(ScanDecision.Descend, result.Decision);
+        Assert.False(probed);
+    }
+
+    // The old fixed limit skipped everything from depth 12, user data included.
+    [Fact]
+    public void UserData_BeyondOldMaxDepth_IsDescended_UntilSafetyLimit()
+    {
+        var engine = CreateEngine();
+        var deep = "/home/alice/Documents/" + string.Join('/', Enumerable.Range(1, 14));
+
+        Assert.Equal(ScanDecision.Descend, engine.EvaluateDirectory("/home/alice", deep, 15).Decision);
+
+        var atLimit = engine.Explain("/home/alice", deep, ScanRulesFile.Default.SafetyLimit);
+        Assert.Equal(ScanDecision.Shallow, atLimit.Decision);
+        Assert.Equal(DecisionBasis.SafetyLimit, atLimit.Basis);
+    }
+
+    // ---------------------------------------------------------------- rule precedence
+
+    [Fact]
+    public void SkipRuleInsideUserData_WinsBecauseItMatchesCloserToTheFolder()
+    {
+        var result = CreateEngine().EvaluateDirectory("/home/alice", "/home/alice/Documents/project/bin", 3);
+        Assert.Equal(ScanDecision.Skip, result.Decision);
+    }
+
+    [Fact]
+    public void ShallowRule_WithMaxDepth_ScansThatManyLevelsBelowTheMatch()
+    {
+        var engine = Engine(new ScanRule("Games", ScanRuleAction.Shallow, MaxDepth: 2, Why: "installed games"));
+
+        Assert.Equal(ScanDecision.Descend, engine.EvaluateDirectory("/d", "/d/Games", 1).Decision);
+        Assert.Equal(ScanDecision.Descend, engine.EvaluateDirectory("/d", "/d/Games/Quake", 2).Decision);
+        var limit = engine.Explain("/d", "/d/Games/Quake/id1", 3);
+        Assert.Equal(ScanDecision.Shallow, limit.Decision);
+        Assert.Equal(0, limit.RuleIndex);
+        Assert.Contains("installed games", limit.Reason);
+        Assert.Contains("max_depth 2", limit.Reason);
+    }
+
+    [Fact]
+    public void UserDataRule_InsideShallowRule_WinsBecauseItMatchesCloserToTheFolder()
+    {
+        var engine = Engine(
+            new ScanRule("Games", ScanRuleAction.Shallow, MaxDepth: 1),
+            new ScanRule("Saves", ScanRuleAction.UserData));
+
+        Assert.Equal(ScanDecision.Shallow, engine.EvaluateDirectory("/d", "/d/Games/Quake/data", 3).Decision);
+        Assert.Equal(ScanDecision.Descend, engine.EvaluateDirectory("/d", "/d/Games/Quake/Saves", 3).Decision);
+    }
+
+    [Fact]
+    public void ShallowRule_AppliesWhateverTheContent()
+    {
+        var engine = Engine(new ScanRule("Archive", ScanRuleAction.Shallow));
+        var result = engine.EvaluateDirectory("/d", "/d/Archive", 1, Content(FileType.Image));
+        Assert.Equal(ScanDecision.Shallow, result.Decision);
+    }
+
+    [Fact]
+    public void SkipHiddenOff_ScansDotFolders()
+    {
+        var engine = new HeuristicsEngine(new ScanRuleSet { Name = "t", SkipHidden = false });
+        Assert.Equal(ScanDecision.Descend, engine.EvaluateDirectory("/d", "/d/.config", 1).Decision);
+    }
+
+    // ---------------------------------------------------------------- check: the way from the root
+
+    [Fact]
+    public void Check_FolderBelowSkippedFolder_IsReportedAsNotReached()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "sfo-check-root");
+        var below = Path.Combine(root, "app", "bin", "Documents");
+
+        var check = CreateEngine().Check(root, below, _ => null);
+
+        Assert.Equal(ScanDecision.Descend, check.Evaluation.Decision);   // own rule: user data
+        Assert.False(check.Reached);
+        Assert.Equal(Path.Combine(root, "app", "bin"), check.BlockedAt);
+        Assert.Equal(ScanDecision.Skip, check.BlockedBy!.Decision);
+        Assert.Equal(3, check.Evaluation.Depth);
+    }
+
+    [Fact]
+    public void Check_RootItself_IsTheScanRoot()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "sfo-check-root");
+        var check = CreateEngine().Check(root, root + Path.DirectorySeparatorChar, _ => null);
+        Assert.Equal(DecisionBasis.ScanRoot, check.Evaluation.Basis);
+        Assert.True(check.Reached);
+    }
+
+    [Fact]
+    public void Check_PathOutsideRoot_Throws()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "sfo-check-root");
+        var other = Path.Combine(Path.GetTempPath(), "elsewhere", "x");
+        Assert.Throws<ArgumentException>(() => CreateEngine().Check(root, other, _ => null));
     }
 }

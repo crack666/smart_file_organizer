@@ -31,5 +31,6 @@ public static class ErrorCodes
     public const string AnalysisFailed = "analysis_failed";
     public const string DatabaseError = "database_error";
     public const string ModelMissing = "model_missing";
+    public const string RulesInvalid = "rules_invalid";
     public const string InternalError = "internal_error";
 }
