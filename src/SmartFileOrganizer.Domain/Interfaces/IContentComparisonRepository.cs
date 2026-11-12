@@ -28,6 +28,9 @@ public interface IContentComparisonRepository
     /// <summary>The stored comparison of a source job against a library job (or without one), or null.</summary>
     Task<ComparisonHeader?> GetComparisonAsync(long sourceJobId, long? againstJobId, CancellationToken ct = default);
 
+    /// <summary>The newest stored comparison of a source job against any library job, or null.</summary>
+    Task<ComparisonHeader?> GetLatestWithLibraryAsync(long sourceJobId, CancellationToken ct = default);
+
     /// <summary>Per-file results of a stored comparison, ordered by path.</summary>
     Task<IReadOnlyList<FileComparison>> GetFileComparisonsAsync(long comparisonId, CancellationToken ct = default);
 }

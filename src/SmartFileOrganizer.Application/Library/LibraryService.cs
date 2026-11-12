@@ -11,7 +11,21 @@ namespace SmartFileOrganizer.Application.Library;
 public enum LibraryFailure
 {
     JobNotFound,
-    ScanNotCompleted
+    ScanNotCompleted,
+
+    /// <summary><c>library show</c> got a source job, or <c>library match</c> a library job where a source belongs.</summary>
+    WrongRole,
+
+    /// <summary>The path is neither a folder nor a file of the job.</summary>
+    PathNotFound,
+
+    BundleNotFound,
+
+    /// <summary>The patterns file next to the database cannot be read; the message lists every problem.</summary>
+    PatternsInvalid,
+
+    /// <summary>A threshold of section <c>LibraryMatch</c> is out of range.</summary>
+    OptionsInvalid
 }
 
 public sealed class LibraryServiceException(LibraryFailure failure, string message) : Exception(message)
@@ -175,7 +189,7 @@ public sealed class LibraryService
             : new LibraryProposal(job, target, status, null, dropped);
     }
 
-    private async Task<(ScanJob Job, LibraryTree Tree)> LoadAsync(long jobId, LibraryWords words, CancellationToken ct)
+    internal async Task<(ScanJob Job, LibraryTree Tree)> LoadAsync(long jobId, LibraryWords words, CancellationToken ct)
     {
         var job = await _jobs.GetByIdAsync(jobId, ct)
                   ?? throw new LibraryServiceException(LibraryFailure.JobNotFound, $"Job {jobId} not found.");
@@ -194,7 +208,7 @@ public sealed class LibraryService
     /// The stored answer to the same facts, or a new one. Returns the status and the record, or a null record
     /// when Ollama is not reachable.
     /// </summary>
-    private async Task<(string Status, LibraryAdviceRecord? Record)> AskAsync(
+    internal async Task<(string Status, LibraryAdviceRecord? Record)> AskAsync(
         long jobId, string task, LibraryAdviceTask kind, string facts, string? model, bool refresh, CancellationToken ct)
     {
         var hash = Hash(task + "\n" + (model ?? string.Empty) + "\n" + facts);

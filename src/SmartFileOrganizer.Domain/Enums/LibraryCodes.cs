@@ -119,3 +119,67 @@ public enum AdviceOrigin
     [JsonStringEnumMemberName("rule")] Rule,
     [JsonStringEnumMemberName("model")] Model
 }
+
+// Codes of the target proposals (https://github.com/crack666/smart_file_organizer/issues/25).
+
+/// <summary>Where <c>sfo library match</c> proposes to put something of a source. Proposals are data; nothing is moved.</summary>
+public enum MatchPlacement
+{
+    /// <summary>The files go into an existing folder of the library.</summary>
+    [JsonStringEnumMemberName("into_existing")] IntoExisting,
+
+    /// <summary>A named source folder goes, whole and under its own name, into an existing folder next to its kind.</summary>
+    [JsonStringEnumMemberName("as_subfolder")] AsSubfolder,
+
+    /// <summary>No existing folder fits: a new folder, named in the style of its siblings.</summary>
+    [JsonStringEnumMemberName("new_folder")] NewFolder
+}
+
+/// <summary>A signal behind a target proposal. Each is computed from scan data and the comparison, never from a model.</summary>
+public enum MatchSignal
+{
+    /// <summary>Files with exactly the same content already lie there (from <c>sfo compare</c>).</summary>
+    [JsonStringEnumMemberName("content_neighbours")] ContentNeighbours,
+
+    /// <summary>The times of the files fit the period of the folder (dates in names, capture dates, modification times).</summary>
+    [JsonStringEnumMemberName("period")] Period,
+
+    /// <summary>Words of the names agree (folder name, file names, document kind such as invoices).</summary>
+    [JsonStringEnumMemberName("name")] Name,
+
+    /// <summary>The folder holds files of the same kind (photos, documents, music, ...).</summary>
+    [JsonStringEnumMemberName("file_type")] FileType,
+
+    /// <summary>The folder's subfolders are of the same kind as the source folder (occasions next to occasions).</summary>
+    [JsonStringEnumMemberName("siblings")] Siblings
+}
+
+/// <summary>What <c>sfo library match</c> was asked about.</summary>
+public enum MatchUnitKind
+{
+    [JsonStringEnumMemberName("file")] File,
+    [JsonStringEnumMemberName("folder")] Folder,
+    [JsonStringEnumMemberName("bundle")] Bundle
+}
+
+/// <summary>How the library of a match was chosen.</summary>
+public enum LibraryChoice
+{
+    /// <summary>Given with <c>--against</c>.</summary>
+    [JsonStringEnumMemberName("option")] Option,
+
+    /// <summary>The library of the source's latest <c>sfo compare</c>.</summary>
+    [JsonStringEnumMemberName("comparison")] Comparison,
+
+    /// <summary>The newest completed library job (there was no comparison).</summary>
+    [JsonStringEnumMemberName("latest")] Latest
+}
+
+/// <summary>Whether <c>sfo library match</c> had a library to work with.</summary>
+public enum MatchStatus
+{
+    [JsonStringEnumMemberName("ok")] Ok,
+
+    /// <summary>No library has been scanned: nothing to match against, and nothing is proposed.</summary>
+    [JsonStringEnumMemberName("no_library")] NoLibrary
+}
