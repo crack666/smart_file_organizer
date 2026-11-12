@@ -1,14 +1,16 @@
-namespace SmartFileOrganizer.Infrastructure.Persistence;
+namespace SmartFileOrganizer.Infrastructure.Persistence.Migrations;
 
 /// <summary>
-/// All DDL for the SQLite schema in one place.
+/// Step 1: the schema as it existed before numbered migrations were introduced.
+/// A database that has these tables but no <c>db_version</c> row is treated as version 1
+/// and this step is not re-run on it.
 /// </summary>
-internal static class Schema
+internal sealed class M0001_InitialSchema : SqlSchemaMigration
 {
-    public const string CreateAll = """
-        PRAGMA journal_mode=WAL;
-        PRAGMA foreign_keys=ON;
+    public override int Version => 1;
+    public override string Description => "Initial schema (scan jobs, nodes, AI results, overrides)";
 
+    protected override string Sql => """
         CREATE TABLE IF NOT EXISTS db_version (
             id      INTEGER PRIMARY KEY,
             version INTEGER NOT NULL,

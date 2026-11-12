@@ -47,6 +47,8 @@ Chosen for first-page PDF rendering because it is:
 - capable of rendering PDF pages to image buffers
 - sufficient for MVP-grade embedded preview without introducing paid components
 
+It is referenced by `SmartFileOrganizer.Infrastructure` (not the desktop project), so the CLI and tests render PDF pages the same way as the GUI. Rendered pages are encoded with a small built-in PNG writer, so the core needs no imaging library.
+
 ### Trade-off
 
 It introduces native PDFium runtimes. That is acceptable, but it means:
@@ -178,7 +180,7 @@ The current multimodal evidence path is practical rather than complete:
 Reason:
 
 - this gives real vision capability quickly without waiting for a full document/OCR subsystem
-- it reuses the preview/rendering work already present in the desktop app
+- it shares one extraction path (`FileContentExtractor`) with the GUI preview
 
 Known limitation:
 

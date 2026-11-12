@@ -1,19 +1,22 @@
-using System.Text;
-using Avalonia.Media.Imaging;
+using SmartFileOrganizer.Domain.Enums;
 using SmartFileOrganizer.Domain.Interfaces;
 using SmartFileOrganizer.Domain.Models;
 using SmartFileOrganizer.Infrastructure.Ollama;
 
-namespace SmartFileOrganizer.Desktop.Services;
+namespace SmartFileOrganizer.Infrastructure.Content;
 
+/// <summary>
+/// Builds the evidence sent to the model for one file: base64 image for raster images,
+/// a rendered first page for PDFs, or a text excerpt. Video bytes are never uploaded.
+/// </summary>
 public class AiClassificationInputPreparer : IClassificationInputPreparer
 {
-    private readonly FilePreviewService _previewService;
+    private readonly FileContentExtractor _extractor;
     private readonly OllamaOptions _options;
 
-    public AiClassificationInputPreparer(FilePreviewService previewService, OllamaOptions options)
+    public AiClassificationInputPreparer(FileContentExtractor extractor, OllamaOptions options)
     {
-        _previewService = previewService;
+        _extractor = extractor;
         _options = options;
     }
 
@@ -24,7 +27,7 @@ public class AiClassificationInputPreparer : IClassificationInputPreparer
     public async Task<OllamaClassificationInput> PrepareAsync(FileNode file, CancellationToken ct = default)
     {
         // Video: classify heuristically from filename + path — never upload bytes
-        if (file.FileType == Domain.Enums.FileType.Video)
+        if (file.FileType == FileType.Video)
         {
             return new OllamaClassificationInput
             {
@@ -33,7 +36,7 @@ public class AiClassificationInputPreparer : IClassificationInputPreparer
             };
         }
 
-        if (file.FileType == Domain.Enums.FileType.Image && File.Exists(file.FullPath))
+        if (file.FileType == FileType.Image && File.Exists(file.FullPath))
         {
             var ext = file.Extension?.ToLowerInvariant() ?? string.Empty;
 
@@ -97,20 +100,17 @@ public class AiClassificationInputPreparer : IClassificationInputPreparer
             };
         }
 
-        var preview = await _previewService.BuildAsync(file, ct);
+        var content = await _extractor.ExtractAsync(file, ct);
         var images = new List<string>();
 
-        if (preview.ImagePreview != null)
-        {
-            // Respect document size limit for rendered previews
-            if (file.Size <= _options.MaxDocumentUploadBytes)
-                images.Add(EncodeBitmapToBase64(preview.ImagePreview));
-        }
+        // Respect document size limit for rendered pages
+        if (content.HasImage && file.Size <= _options.MaxDocumentUploadBytes)
+            images.Add(Convert.ToBase64String(content.ImageBytes!));
 
         return new OllamaClassificationInput
         {
             File = file,
-            ExtractedText = preview.TextPreview,
+            ExtractedText = content.TextPreview,
             Base64Images = images
         };
     }
@@ -121,12 +121,5 @@ public class AiClassificationInputPreparer : IClassificationInputPreparer
         if (bytes >= 1024 * 1024) return $"{bytes / (1024.0 * 1024):F1} MB";
         if (bytes >= 1024) return $"{bytes / 1024.0:F1} KB";
         return $"{bytes} B";
-    }
-
-    private static string EncodeBitmapToBase64(Bitmap bitmap)
-    {
-        using var stream = new MemoryStream();
-        bitmap.Save(stream);
-        return Convert.ToBase64String(stream.ToArray());
     }
 }

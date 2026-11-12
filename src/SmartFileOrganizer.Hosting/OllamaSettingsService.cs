@@ -1,8 +1,9 @@
 using System.Text.Json;
 using SmartFileOrganizer.Infrastructure.Ollama;
 
-namespace SmartFileOrganizer.Desktop.Services;
+namespace SmartFileOrganizer.Hosting;
 
+/// <summary>Persists the user-changeable Ollama settings to the resolved settings file.</summary>
 public class OllamaSettingsService
 {
     private readonly OllamaOptions _options;
