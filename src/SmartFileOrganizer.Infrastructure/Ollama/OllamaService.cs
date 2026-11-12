@@ -191,6 +191,16 @@ public class OllamaService : IOllamaService
         sb.AppendLine("Do NOT use TrashCandidate for personal documents, even if they appear old or superseded.");
         sb.AppendLine("Use ReviewNeeded if you are uncertain — do not guess TrashCandidate.");
         sb.AppendLine();
+        sb.AppendLine("Sensitive content: list every marker that applies in the sensitive field (empty list if none):");
+        sb.AppendLine("- zugangsdaten: passwords, password lists, login data, API keys or tokens");
+        sb.AppendLine("- schluessel: private keys, certificates with private key, crypto wallets or seed phrases");
+        sb.AppendLine("- private_nachricht: private messages, chats, e-mails, personal letters");
+        sb.AppendLine("- ausweis: identity card, passport, driving licence or a scan of one");
+        sb.AppendLine("- finanzen: bank statements, tax documents, payslips, credit card data");
+        sb.AppendLine("- gesundheit: medical findings, doctor letters, health insurance documents");
+        sb.AppendLine("If any marker applies: never use TrashCandidate, and keep the summary neutral (what kind of document it is),");
+        sb.AppendLine("without quoting passwords, keys, numbers, names or message text.");
+        sb.AppendLine();
         if (!string.IsNullOrWhiteSpace(summaryLanguage) &&
             !string.Equals(summaryLanguage, "English", StringComparison.OrdinalIgnoreCase))
         {
@@ -223,9 +233,14 @@ public class OllamaService : IOllamaService
             },
             confidence = new { type = "number" },
             summary = new { type = "string" },
-            suggested_target = new { type = "string" }
+            suggested_target = new { type = "string" },
+            sensitive = new
+            {
+                type = "array",
+                items = new { type = "string", @enum = SensitiveMarkerNames.AllTokens }
+            }
         },
-        required = new[] { "category", "importance", "confidence", "summary", "suggested_target" }
+        required = new[] { "category", "importance", "confidence", "summary", "suggested_target", "sensitive" }
     };
 
     private static void ParseResponse(string json, FileClassification result)
@@ -284,11 +299,44 @@ public class OllamaService : IOllamaService
 
             if (inner.TryGetProperty("suggested_target", out var target))
                 result.SuggestedTarget = target.GetString();
+
+            result.SensitiveMarkers = ParseSensitiveMarkers(inner);
         }
         catch
         {
             // Malformed response — leave defaults, caller will see empty fields
         }
+    }
+
+    /// <summary>
+    /// Reads the <c>sensitive</c> field: an array of tokens as the schema asks, or a single
+    /// comma-separated string, which some models return instead. Unknown tokens are ignored.
+    /// </summary>
+    private static SensitiveMarker ParseSensitiveMarkers(JsonElement inner)
+    {
+        JsonElement prop = default;
+        var found = false;
+        foreach (var name in new[] { "sensitive", "sensitive_markers", "sensitivity" })
+        {
+            if (inner.TryGetProperty(name, out prop)) { found = true; break; }
+        }
+        if (!found) return SensitiveMarker.None;
+
+        var markers = SensitiveMarker.None;
+        switch (prop.ValueKind)
+        {
+            case JsonValueKind.Array:
+                foreach (var item in prop.EnumerateArray())
+                {
+                    if (item.ValueKind == JsonValueKind.String)
+                        markers |= SensitiveMarkerNames.Parse(item.GetString());
+                }
+                break;
+            case JsonValueKind.String:
+                markers = SensitiveMarkerNames.Parse(prop.GetString());
+                break;
+        }
+        return markers;
     }
 
     private static int CountJsonArray(string? json)
