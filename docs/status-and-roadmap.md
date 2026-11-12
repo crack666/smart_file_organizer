@@ -27,7 +27,12 @@ Windows and Linux._
   AI results, directory AI results and user overrides.
 - File type detection by extension (`FileTypeDetector`).
 - Scan pruning (`HeuristicsEngine`): dot-directories and skip patterns such
-  as `AppData`, `Windows`, `node_modules`, `$Recycle.Bin`.
+  as `AppData`, `Windows`, `node_modules`, `$Recycle.Bin`. Patterns match
+  whole path segments (case-insensitive, either separator) and only below
+  the scan root, so `Combinations` is not skipped for `bin` and a root
+  inside `AppData` is scanned. Each skip stores its rule in `dir_reason`,
+  e.g. `Skip: matches skip pattern 'bin'` _(checked 12.11.2026, #19, by
+  `HeuristicsEngineTests`)_.
 - Resume: directories already scanned are skipped on restart.
 - `ScanExportService` (CSV/JSON export) exists and is tested; it is
   registered in DI but not reachable from the UI.

@@ -175,6 +175,34 @@ public class ScanPipelineIntegrationTests : IDisposable
     }
 
     [Fact]
+    public async Task ScanEngine_RootUnderAppData_ScansPartialWords_SkipsWholeSegmentsWithReason()
+    {
+        var root = "/home/alice/AppData/Scan";
+        var job = await CreateJobAsync(root);
+
+        var fakeFs = new FakeFileSystemAccessor(new Dictionary<string, string[]>
+        {
+            [root]                   = ["/home/alice/AppData/Scan/a.txt"],
+            [root + "/Combinations"] = ["/home/alice/AppData/Scan/Combinations/b.txt"],
+            [root + "/bin"]          = ["/home/alice/AppData/Scan/bin/c.dll"],
+        });
+
+        var heuristics = new HeuristicsEngine(new HeuristicsOptions());
+        var engine = new ScanEngine(fakeFs, heuristics, _fileRepo, _dirRepo, _jobRepo, NullLogger<ScanEngine>.Instance);
+        await engine.RunAsync(job, new Progress<ScanProgress>(_ => { }), CancellationToken.None);
+
+        var finishedJob = await _jobRepo.GetByIdAsync(job.Id);
+        Assert.Equal(2, finishedJob!.ProcessedFiles); // a.txt, b.txt
+
+        var combinations = await _dirRepo.GetByPathAsync(job.Id, root + "/Combinations");
+        Assert.Equal(DirectoryStatus.Scanned, combinations!.DirStatus);
+
+        var bin = await _dirRepo.GetByPathAsync(job.Id, root + "/bin");
+        Assert.Equal(DirectoryStatus.Skip, bin!.DirStatus);
+        Assert.Equal("Skip: matches skip pattern 'bin'", bin.DirReason);
+    }
+
+    [Fact]
     public async Task ScanEngine_Resume_SkipsAlreadyScannedDirs()
     {
         var root = "/Scan";
