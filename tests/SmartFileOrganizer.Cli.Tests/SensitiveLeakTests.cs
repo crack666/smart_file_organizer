@@ -252,6 +252,33 @@ public class SensitiveLeakTests : IDisposable
         Assert.DoesNotContain("id_ed25519", files.Stdout);
     }
 
+    /// <summary>
+    /// The full SHA-256 of a short secret file confirms a guess of its content. compare keeps it for
+    /// unmarked files only; the match path still says where the backup is.
+    /// </summary>
+    [Fact]
+    public async Task Compare_ShowsNoChecksumOfAMarkedFile()
+    {
+        var library = Path.Combine(_dir, "library");
+        Directory.CreateDirectory(library);
+        File.WriteAllText(Path.Combine(library, "passwords-backup.txt"), $"mail: {Secret}");
+        File.WriteAllText(Path.Combine(library, "letter-copy.txt"), "Dear landlord, the heating is broken.");
+        var source = await ScanAsync();
+        var scan = await SfoAsync("scan", library, "--role", "library", "--json");
+        Assert.True(scan.ExitCode == ExitCodes.Ok, scan.Stdout + scan.Stderr);
+        var libraryJob = scan.Result().GetProperty("job").GetProperty("id").GetInt64();
+
+        var run = await SfoAsync("compare", source.ToString(), "--against", libraryJob.ToString(), "--files", "all", "--json");
+
+        Assert.True(run.ExitCode == ExitCodes.Ok, run.Stdout + run.Stderr);
+        var files = run.Result().GetProperty("files").EnumerateArray()
+            .ToDictionary(f => Path.GetFileName(f.GetProperty("path").GetString()!), f => f);
+        Assert.Equal("backed_up", files["passwords.txt"].GetProperty("state").GetString());
+        Assert.Equal(JsonValueKind.Null, files["passwords.txt"].GetProperty("match_hash").ValueKind);
+        Assert.Equal("backed_up", files["letter.txt"].GetProperty("state").GetString());
+        Assert.Equal(64, files["letter.txt"].GetProperty("match_hash").GetString()!.Length);
+    }
+
     [Fact]
     public async Task Analyze_WithoutVerbose_WritesNoDebugLog()
     {

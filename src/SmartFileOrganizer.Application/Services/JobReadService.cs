@@ -36,6 +36,18 @@ public class JobReadService
         _bundles = bundles;
     }
 
+    /// <summary>Ids of the files of a job that the output guard treats as marked (stored markers and name rules).</summary>
+    public async Task<IReadOnlySet<long>> GetMarkedFileIdsAsync(long jobId, CancellationToken ct = default)
+    {
+        var ids = new HashSet<long>();
+        await foreach (var row in _read.StreamFilesAsync(new FileListFilter { JobId = jobId }, ct))
+        {
+            if (SensitiveOutputGuard.GetMatch(row.File).IsMatch)
+                ids.Add(row.File.Id);
+        }
+        return ids;
+    }
+
     public async Task<ReadPage<DirectoryItem>> ListDirectoriesAsync(DirectoryListQuery query, CancellationToken ct = default)
     {
         var job = await RequireJobAsync(query.JobId, ct);

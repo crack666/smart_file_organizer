@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using SmartFileOrganizer.Application.Services;
 using SmartFileOrganizer.Cli.Contract;
 using SmartFileOrganizer.Domain.Enums;
+using SmartFileOrganizer.Domain.Models;
 
 namespace SmartFileOrganizer.Cli.Commands;
 
@@ -114,7 +115,13 @@ public static class CompareCommand
                     "Comparison interrupted. Checksums computed so far are saved; run the command again to continue.");
             }
 
-            var result = Map(report, ParseStates(ctx.ParseResult.GetValue(files)), ctx.ParseResult.GetValue(limit));
+            // The full checksum of a short secret file confirms a guess of its content: none for marked files.
+            var reads = services.GetRequiredService<JobReadService>();
+            var marked = new HashSet<long>(await reads.GetMarkedFileIdsAsync(report.Source.Id, ct));
+            if (report.Against != null)
+                marked.UnionWith(await reads.GetMarkedFileIdsAsync(report.Against.Id, ct));
+
+            var result = Map(report, ParseStates(ctx.ParseResult.GetValue(files)), ctx.ParseResult.GetValue(limit), marked);
             if (!result.Complete)
             {
                 return CommandOutcome.Fail(ExitCodes.Failure, ErrorCodes.CompareIncomplete,
@@ -136,8 +143,16 @@ public static class CompareCommand
         return names.Select(ContentStateValues.Parse).ToHashSet();
     }
 
-    public static CompareResult Map(ComparisonReport report, IReadOnlySet<ContentState> listStates, int limit)
+    /// <param name="markedFileIds">Marked files of both jobs; their match checksum is left out.</param>
+    public static CompareResult Map(
+        ComparisonReport report, IReadOnlySet<ContentState> listStates, int limit, IReadOnlySet<long>? markedFileIds = null)
     {
+        string? Hash(FileComparison f) =>
+            markedFileIds != null && (markedFileIds.Contains(f.FileNodeId) ||
+                                      (f.MatchFileNodeId is { } m && markedFileIds.Contains(m)))
+                ? null
+                : f.MatchHash;
+
         IReadOnlyList<T> Take<T>(IEnumerable<T> items) => (limit == 0 ? items : items.Take(limit)).ToList();
 
         var listed = report.Files.Where(f => f.State is { } s && listStates.Contains(s)).ToList();
@@ -156,7 +171,7 @@ public static class CompareCommand
             report.Errors.Count,
             Take(report.Errors.Select(e => new ErrorView(e.Role, e.Kind, e.Path, e.Message))),
             listed.Count,
-            Take(listed.Select(f => new FileView(f.FullPath, f.State, f.MatchPath, f.MatchCount, f.MatchHash, f.MatchVerifiedAt, f.DuplicateGroup, f.Error))),
+            Take(listed.Select(f => new FileView(f.FullPath, f.State, f.MatchPath, f.MatchCount, Hash(f), f.MatchVerifiedAt, f.DuplicateGroup, f.Error))),
             report.Hashing);
     }
 
