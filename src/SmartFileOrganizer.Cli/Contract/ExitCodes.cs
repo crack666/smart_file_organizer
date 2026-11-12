@@ -32,5 +32,6 @@ public static class ErrorCodes
     public const string DatabaseError = "database_error";
     public const string ModelMissing = "model_missing";
     public const string RulesInvalid = "rules_invalid";
+    public const string ExportFailed = "export_failed";
     public const string InternalError = "internal_error";
 }
