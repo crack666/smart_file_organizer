@@ -69,7 +69,7 @@ Guards against false dumps:
 
 - A library with `Documents`, `Pictures`, `Music` is no user profile: profile folders alone never
   reach a key marker.
-- A `software` match is dropped when photos and videos make up more than `max_media_share` (10 %) of
+- A `software` match is dropped when photos and videos make up more than `max_media_share` (50 %) of
   the subtree: holiday photos next to a `setup.exe` stay photos.
 - The scan root itself is only checked against signatures with `at_root: true` (phone, computer):
   a scanned USB stick is the medium, not a copy inside it.

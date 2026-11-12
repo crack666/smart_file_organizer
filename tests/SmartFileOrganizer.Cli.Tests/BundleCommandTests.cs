@@ -89,6 +89,36 @@ public class BundleCommandTests : IDisposable
     private async Task<long> ScanAsync(string path, params string[] extra) =>
         (await OkAsync(["scan", path, .. extra])).GetProperty("job").GetProperty("id").GetInt64();
 
+    /// <summary>
+    /// The phone backup of the evaluation corpus (<c>sfo eval generate</c>, docs/evaluation.md) is one phone
+    /// dump with its camera folder as the worth-keeping part, and the projects with <c>.git</c> are software.
+    /// </summary>
+    [Fact]
+    public async Task EvaluationCorpus_PhoneBackup_IsOneDump_WithItsCamera()
+    {
+        var corpusDir = Path.Combine(_dir, "corpus");
+        await OkAsync("eval", "generate", corpusDir);
+        var job = await ScanAsync(Path.Combine(corpusDir, "tree"));
+        await OkAsync("bundles", "build", job.ToString());
+
+        var items = (await OkAsync("bundles", "list", job.ToString(), "--all", "--limit", "500"))
+            .GetProperty("items").EnumerateArray().ToList();
+        static string? Str(JsonElement e, string name) =>
+            e.GetProperty(name).ValueKind == JsonValueKind.String ? e.GetProperty(name).GetString() : null;
+        static string Tail(JsonElement e) => Path.GetFileName(Str(e, "root_path") ?? string.Empty);
+
+        var phone = Assert.Single(items, x => Str(x, "kind") == "dump" && Str(x, "origin") == "phone");
+        Assert.Equal("Handy-Backup 2021", Tail(phone));
+        var camera = Assert.Single(items, x => Str(x, "kind") == "dump_keep"
+                                                && x.GetProperty("parent_id").GetInt64() == phone.GetProperty("id").GetInt64());
+        Assert.Equal("camera", Str(camera, "part"));
+        Assert.Equal("DCIM", Tail(camera));
+
+        var software = items.Where(x => Str(x, "origin") == "software").Select(Tail).ToList();
+        Assert.Contains("haushaltsbuch-app", software);
+        Assert.Contains("vereinswebsite", software);
+    }
+
     [Fact]
     public async Task Build_List_Show_Files_And_Summary()
     {
