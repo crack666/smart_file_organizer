@@ -104,6 +104,39 @@ public class SensitiveLeakTests : IDisposable
     }
 
     [Fact]
+    public async Task SkippedSshFolder_IsMarkedSensitive_WithoutBeingEntered()
+    {
+        var home = Path.Combine(_root, "home");
+        Directory.CreateDirectory(Path.Combine(home, ".ssh"));
+        Directory.CreateDirectory(Path.Combine(home, ".cache"));
+        Directory.CreateDirectory(Path.Combine(home, "AppData", "Local"));
+        // Made-up key file: a header line plus filler, put together at run time.
+        File.WriteAllText(Path.Combine(home, ".ssh", "id_ed25519"), "-----BEGIN OPENSSH " + "PRIVATE KEY-----\n" + Secret);
+        var job = await ScanAsync();
+
+        var dirs = await SfoAsync("dirs", job.ToString(), "--sensitive", "yes", "--json");
+        Assert.True(dirs.ExitCode == ExitCodes.Ok, dirs.Stdout + dirs.Stderr);
+        var marked = dirs.Result();
+
+        var items = marked.GetProperty("items").EnumerateArray()
+            .ToDictionary(i => Path.GetFileName(i.GetProperty("path").GetString()!), i => i);
+        var ssh = items[".ssh"];
+        Assert.Equal("skip", ssh.GetProperty("status").GetString());
+        Assert.Equal(["schluessel"], ssh.GetProperty("sensitive").EnumerateArray().Select(t => t.GetString()));
+        Assert.Equal("dir:ssh", ssh.GetProperty("sensitive_rule").GetString());
+        Assert.Equal(0, ssh.GetProperty("files").GetInt64());
+        Assert.Equal("dir:appdata", items["AppData"].GetProperty("sensitive_rule").GetString());
+        Assert.False(items.ContainsKey(".cache"));
+        // The parent holds a marked folder, so it is listed as sensitive as well.
+        Assert.Equal(2, items["home"].GetProperty("sensitive_dirs").GetInt64());
+        Assert.DoesNotContain(Secret, marked.GetRawText());
+
+        var files = await SfoAsync("files", job.ToString(), "--json");
+        Assert.True(files.ExitCode == ExitCodes.Ok, files.Stdout + files.Stderr);
+        Assert.DoesNotContain("id_ed25519", files.Stdout);
+    }
+
+    [Fact]
     public async Task Analyze_WithoutVerbose_WritesNoDebugLog()
     {
         var job = await ScanAsync();

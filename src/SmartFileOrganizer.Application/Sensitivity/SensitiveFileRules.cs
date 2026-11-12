@@ -119,6 +119,69 @@ public static class SensitiveFileRules
         ("chatverlauf", N)
     ];
 
+    /// <summary>
+    /// Names of folders that hold keys, logins or messages, for folders the scan skips without entering
+    /// (dot folders, <c>AppData</c>). Matched case-insensitively against the folder name. Rule ids start
+    /// with <c>dir:</c>.
+    /// </summary>
+    public static IReadOnlyDictionary<string, (SensitiveMarker Markers, string Id)> SkippedFolderNames { get; } =
+        new Dictionary<string, (SensitiveMarker, string)>(StringComparer.OrdinalIgnoreCase)
+        {
+            [".ssh"] = (S, "dir:ssh"),
+            [".gnupg"] = (S, "dir:gnupg"),
+            [".aws"] = (Z, "dir:aws"),
+            [".azure"] = (Z, "dir:azure"),
+            [".kube"] = (Z, "dir:kube"),
+            [".docker"] = (Z, "dir:docker"),
+            [".password-store"] = (Z, "dir:password-store"),
+            // Linux: browser profiles, tokens of many tools (Chromium, gcloud, gh, ...)
+            [".config"] = (Z, "dir:config"),
+            [".mozilla"] = (Z | N, "dir:browser-profile"),
+            [".thunderbird"] = (N, "dir:mail-profile"),
+            [".electrum"] = (S | F, "dir:wallet"),
+            [".bitcoin"] = (S | F, "dir:wallet"),
+            [".ethereum"] = (S | F, "dir:wallet"),
+            // Windows: browser and mail profiles, saved logins
+            ["AppData"] = (Z | N, "dir:appdata"),
+            ["Application Data"] = (Z | N, "dir:appdata")
+        };
+
+    /// <summary>
+    /// Rules for a folder the scan skips: its name (<see cref="SkippedFolderNames"/>) and the folder
+    /// fragments (<see cref="FolderRules"/>) applied to the folder itself. Needs no file access, so the
+    /// folder is never entered.
+    /// </summary>
+    /// <param name="folderName">Name of the skipped folder.</param>
+    /// <param name="folderPath">Its path (absolute or relative); may be null.</param>
+    public static SensitiveMatch MatchSkippedFolder(string folderName, string? folderPath)
+    {
+        var result = SensitiveMatch.None;
+        if (!string.IsNullOrEmpty(folderName) && SkippedFolderNames.TryGetValue(folderName, out var byName))
+            result = result.Combine(new SensitiveMatch(byName.Markers, byName.Id));
+
+        if (!string.IsNullOrEmpty(folderPath))
+        {
+            var dir = "/" + folderPath.Replace('\\', '/').Trim('/') + "/";
+            foreach (var (fragment, markers, id) in FolderRules)
+            {
+                var dirId = id.Replace("path:", "dir:", StringComparison.Ordinal);
+                if (dir.Contains(fragment, StringComparison.OrdinalIgnoreCase) && result.Rule?.Contains(dirId, StringComparison.Ordinal) != true)
+                    result = result.Combine(new SensitiveMatch(markers, dirId));
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>Runs <see cref="MatchSkippedFolder"/> and stores the result on the node.</summary>
+    public static void ApplyToSkippedFolder(DirectoryNode node)
+    {
+        ArgumentNullException.ThrowIfNull(node);
+        var match = MatchSkippedFolder(node.Name, node.FullPath);
+        node.SensitiveMarkers = match.Markers;
+        node.SensitiveRule = match.Rule;
+    }
+
     private static readonly FileType[] NeverProbedTypes =
     [
         FileType.Image, FileType.Video, FileType.Audio, FileType.Archive,

@@ -57,7 +57,7 @@ public class JobReadService
         if (query.MinSize is { } minSize)
             entries = entries.Where(e => e.Bytes >= minSize);
         if (query.Sensitive is { } sensitive)
-            entries = entries.Where(e => e.SensitiveFiles > 0 == sensitive);
+            entries = entries.Where(e => (e.SensitiveFiles > 0 || e.SensitiveDirs > 0) == sensitive);
 
         var items = entries.Select(e => ToItem(e, index, protect: false));
         if (query.Verdicts.Count > 0)
@@ -244,6 +244,7 @@ public class JobReadService
             PendingFiles = pending,
             ErrorFiles = errors,
             SensitiveFiles = sensitive,
+            SensitiveDirectories = index.Entries.Count(e => e.Match.IsMatch),
             ByCategory = Sorted(byCategory),
             ByFileType = Sorted(byType),
             ByStatus = Sorted(byStatus),
@@ -367,7 +368,10 @@ public class JobReadService
             Reason = r.Reason,
             Summary = r.AiSummary,
             SummaryError = r.AiSummaryError,
-            SensitiveFiles = entry.SensitiveFiles
+            SensitiveFiles = entry.SensitiveFiles,
+            Sensitive = SensitiveMarkerNames.ToTokens(entry.Match.Markers),
+            SensitiveRule = entry.Match.Rule,
+            SensitiveDirs = entry.SensitiveDirs
         };
 
         if (!protect || entry.SensitiveFiles == 0)
@@ -469,6 +473,26 @@ public class JobReadService
         var rows = await _read.GetDirectoriesAsync(jobId, ct);
         var index = new DirectoryIndex(rows);
 
+        // Folders marked themselves; the rules run again for skips stored before folders were marked.
+        foreach (var entry in index.Entries)
+        {
+            var match = entry.Row.SensitiveMarkers == SensitiveMarker.None
+                ? SensitiveMatch.None
+                : new SensitiveMatch(entry.Row.SensitiveMarkers, entry.Row.SensitiveRule ?? "rule");
+            if (entry.Row.DirStatus == DirectoryStatus.Skip)
+            {
+                var byRule = SensitiveFileRules.MatchSkippedFolder(entry.Row.Name, entry.Row.FullPath);
+                if ((byRule.Markers & ~match.Markers) != 0)
+                    match = match.Combine(byRule);
+            }
+            entry.Match = match;
+        }
+        foreach (var entry in index.Entries.Where(e => e.Match.IsMatch).ToList())
+        {
+            foreach (var self in index.SelfAndAncestors(entry.Row.FullPath))
+                self.SensitiveDirs++;
+        }
+
         foreach (var totals in await _read.GetDirectoryFileTotalsAsync(jobId, ct))
         {
             if (index.ByPath.TryGetValue(totals.ParentPath, out var direct))
@@ -503,6 +527,12 @@ public class JobReadService
         public long DirectFiles { get; set; }
         public long Bytes { get; set; }
         public long SensitiveFiles { get; set; }
+
+        /// <summary>Markers of the folder itself (skipped folders).</summary>
+        public SensitiveMatch Match { get; set; }
+
+        /// <summary>Marked folders in the subtree, this one included.</summary>
+        public long SensitiveDirs { get; set; }
 
         /// <summary>Names of marked files in the subtree.</summary>
         public HashSet<string> MarkedNames { get; } = new(StringComparer.OrdinalIgnoreCase);

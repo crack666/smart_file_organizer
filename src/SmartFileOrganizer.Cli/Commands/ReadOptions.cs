@@ -215,6 +215,9 @@ public sealed record DirectoryView(
     string? VerdictSource,
     string? Retention,
     long SensitiveFiles,
+    IReadOnlyList<string> Sensitive,
+    string? SensitiveRule,
+    long SensitiveDirs,
     string? Purpose,
     string? Summary,
     bool TextWithheld)
@@ -222,11 +225,12 @@ public sealed record DirectoryView(
     public static DirectoryView From(DirectoryItem d) => new(
         d.FullPath, d.RelativePath, d.Depth, d.Status, d.SizeBytes, d.Files, d.DirectFiles, d.Subdirs,
         d.Verdict ?? (d.VerdictError is not null ? ReadFilterCodes.Error : null), d.VerdictSource, d.Retention,
-        d.SensitiveFiles, d.Purpose, d.Summary, d.TextWithheld);
+        d.SensitiveFiles, d.Sensitive, d.SensitiveRule, d.SensitiveDirs, d.Purpose, d.Summary, d.TextWithheld);
 
     public string ToLine() =>
         $"{ReadFormat.Size(SizeBytes),10}  {Files,7} files  {Verdict ?? "-",-11} {Retention ?? "-",-11}"
         + (SensitiveFiles > 0 ? $" [{SensitiveFiles} sensitive]" : string.Empty)
+        + (Sensitive.Count > 0 ? $" [{string.Join(',', Sensitive)}]" : string.Empty)
         + $"  {Path}";
 }
 

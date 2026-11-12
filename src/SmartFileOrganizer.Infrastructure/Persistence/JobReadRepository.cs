@@ -44,7 +44,7 @@ public class JobReadRepository : IJobReadRepository
         var rows = await conn.QueryAsync<DirectoryReadRow>(new CommandDefinition(
             """
             SELECT d.id, d.full_path, d.name, d.parent_path, d.relative_path, d.depth, d.dir_status,
-                   d.subdir_count,
+                   d.subdir_count, d.sensitive_markers, d.sensitive_rule,
                    dv.verdict, dv.source AS verdict_source, dv.rule AS verdict_rule, dv.retention,
                    dv.purpose, dv.reason, dv.error AS verdict_error,
                    s.summary AS ai_summary, s.error AS ai_summary_error

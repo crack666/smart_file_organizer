@@ -34,6 +34,19 @@ public sealed class DirectoryReadRow
     public string? AiSummary { get; set; }
 
     public string? AiSummaryError { get; set; }
+
+    /// <summary>Stored markers of a skipped folder (<see cref="DirectoryNode.SensitiveMarkers"/>).</summary>
+    public SensitiveMarker SensitiveMarkers { get; set; }
+
+    /// <summary>Database form of <see cref="SensitiveMarkers"/>; the persistence layer reads into it.</summary>
+    [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
+    public string? SensitiveMarkerTokens
+    {
+        get => SensitiveMarkerNames.Format(SensitiveMarkers);
+        set => SensitiveMarkers = SensitiveMarkerNames.Parse(value);
+    }
+
+    public string? SensitiveRule { get; set; }
 }
 
 /// <summary>Count and bytes of the files stored directly in one directory.</summary>

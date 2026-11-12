@@ -22,15 +22,17 @@ public class DirectoryRepository : IDirectoryRepository
                 (job_id, full_path, name, parent_path, root_path, relative_path,
                  depth, dir_status, dir_reason, total_size, direct_file_count,
                  recursive_file_count, subdir_count, dominant_file_types,
-                 dominant_categories, suggested_area, scanned_at)
+                 dominant_categories, suggested_area, scanned_at,
+                 sensitive_markers, sensitive_rule)
             VALUES
                 (@JobId, @FullPath, @Name, @ParentPath, @RootPath, @RelativePath,
                  @Depth, @DirStatus, @DirReason, @TotalSize, @DirectFileCount,
                  @RecursiveFileCount, @SubdirCount, @DominantFileTypes,
-                 @DominantCategories, @SuggestedArea, @ScannedAt)
+                 @DominantCategories, @SuggestedArea, @ScannedAt,
+                 @SensitiveMarkers, @SensitiveRule)
             """;
 
-        await conn.ExecuteAsync(sql, nodes, transaction: tx);
+        await conn.ExecuteAsync(sql, nodes.Select(ToParameters), transaction: tx);
         await tx.CommitAsync(ct);
     }
 
@@ -96,11 +98,13 @@ public class DirectoryRepository : IDirectoryRepository
                 dominant_file_types = @DominantFileTypes,
                 dominant_categories = @DominantCategories,
                 suggested_area = @SuggestedArea,
-                scanned_at = @ScannedAt
+                scanned_at = @ScannedAt,
+                sensitive_markers = @SensitiveMarkers,
+                sensitive_rule = @SensitiveRule
             WHERE id = @Id
             """;
 
-        await conn.ExecuteAsync(sql, node);
+        await conn.ExecuteAsync(sql, ToParameters(node));
     }
 
     public async Task<IReadOnlyList<DirectoryNode>> GetAllForJobOrderedByDepthAsync(
@@ -113,4 +117,32 @@ public class DirectoryRepository : IDirectoryRepository
             new { jobId });
         return result.AsList();
     }
+
+    /// <summary>
+    /// Parameter object for inserts and updates. Dapper would bind <see cref="SensitiveMarker"/> as its
+    /// integer value; the column holds the fixed token list instead.
+    /// </summary>
+    private static object ToParameters(DirectoryNode n) => new
+    {
+        n.Id,
+        n.JobId,
+        n.FullPath,
+        n.Name,
+        n.ParentPath,
+        n.RootPath,
+        n.RelativePath,
+        n.Depth,
+        n.DirStatus,
+        n.DirReason,
+        n.TotalSize,
+        n.DirectFileCount,
+        n.RecursiveFileCount,
+        n.SubdirCount,
+        n.DominantFileTypes,
+        n.DominantCategories,
+        n.SuggestedArea,
+        n.ScannedAt,
+        SensitiveMarkers = SensitiveMarkerNames.Format(n.SensitiveMarkers),
+        n.SensitiveRule
+    };
 }
