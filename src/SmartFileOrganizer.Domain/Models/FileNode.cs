@@ -28,6 +28,14 @@ public class FileNode
     /// <c>name:id_rsa</c> or <c>header:private-key</c>. Never contains file content.</summary>
     public string? SensitiveRule { get; set; }
 
+    /// <summary>Stored form of <see cref="SensitiveMarkers"/>, for the database mapper only
+    /// (it cannot convert enums itself; see <c>SensitiveMarkerColumnMap</c>).</summary>
+    private string? SensitiveMarkerTokens
+    {
+        get => SensitiveMarkerNames.Format(SensitiveMarkers);
+        set => SensitiveMarkers = SensitiveMarkerNames.Parse(value);
+    }
+
     // Navigation / denormalized for sorting/filtering
     public FileClassification? Classification { get; set; }
     public UserOverride? Override { get; set; }

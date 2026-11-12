@@ -18,7 +18,10 @@ public class DatabaseContext
         // Dapper: map snake_case column names to PascalCase C# properties.
         // Set here so every composition (GUI, CLI, tests) gets the same mapping.
         DefaultTypeMap.MatchNamesWithUnderscores = true;
-        SqlMapper.AddTypeHandler(new SensitiveMarkerTypeHandler());    }
+        SqlMapper.AddTypeHandler(new SensitiveMarkerTypeHandler());
+        // ai_results is read through ClassificationRepository.Row, which parses the codes itself.
+        SqlMapper.SetTypeMap(typeof(Domain.Models.FileNode), new SensitiveMarkerColumnMap(typeof(Domain.Models.FileNode)));
+    }
 
     public DatabaseContext(string dbPath, ILogger<DatabaseContext> logger)
     {

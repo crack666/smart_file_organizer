@@ -1,3 +1,4 @@
+using SmartFileOrganizer.Application.Evaluation;
 using SmartFileOrganizer.Domain.Enums;
 using SmartFileOrganizer.Domain.Interfaces;
 using SmartFileOrganizer.Domain.Models;
@@ -5,17 +6,21 @@ using SmartFileOrganizer.Domain.Models;
 namespace SmartFileOrganizer.Application.Services;
 
 /// <summary>
-/// Handles manual user overrides for file classifications.
+/// Handles manual user overrides for file classifications. A category that differs from the
+/// model's answer is also kept as a test case (<see cref="EvalCaseService"/>), so later changes
+/// to prompts, rules or model can be checked against it.
 /// </summary>
 public class ReviewService
 {
     private readonly IUserOverrideRepository _overrideRepo;
     private readonly IFileRepository _fileRepo;
+    private readonly EvalCaseService? _evalCases;
 
-    public ReviewService(IUserOverrideRepository overrideRepo, IFileRepository fileRepo)
+    public ReviewService(IUserOverrideRepository overrideRepo, IFileRepository fileRepo, EvalCaseService? evalCases = null)
     {
         _overrideRepo = overrideRepo;
         _fileRepo = fileRepo;
+        _evalCases = evalCases;
     }
 
     public async Task ApplyOverrideAsync(
@@ -36,6 +41,10 @@ public class ReviewService
 
         await _overrideRepo.UpsertAsync(uo, ct);
         await _fileRepo.UpdateStatusAsync(fileNodeId, FileNodeStatus.Approved, ct);
+
+        // Never fails the override; returns null when there is nothing to keep.
+        if (_evalCases != null)
+            await _evalCases.RecordCategoryCorrectionAsync(fileNodeId, category, ct);
     }
 
     /// <summary>

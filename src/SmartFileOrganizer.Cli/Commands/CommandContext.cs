@@ -16,6 +16,7 @@ public sealed class CommandContext : IAsyncDisposable
     private readonly GlobalOptions _globals;
     private readonly StderrChannel _stderr;
     private ServiceProvider? _services;
+    private Action<IServiceCollection>? _commandServices;
     private bool _databaseInitialized;
 
     internal CommandContext(ParseResult parseResult, CliHost host, GlobalOptions globals)
@@ -59,6 +60,17 @@ public sealed class CommandContext : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Registrations for this command only (for example scripted answers instead of Ollama), applied
+    /// after the host's. Call before the services are first used.
+    /// </summary>
+    public void ConfigureServices(Action<IServiceCollection> configure)
+    {
+        if (_services != null)
+            throw new InvalidOperationException("Services are already built; configure them before first use.");
+        _commandServices += configure;
+    }
+
     /// <summary>The core services without touching the database file.</summary>
     public IServiceProvider BuildServices()
     {
@@ -79,6 +91,7 @@ public sealed class CommandContext : IAsyncDisposable
             b.AddProvider(LoggerProvider);
         });
         _host.ConfigureServices?.Invoke(services);
+        _commandServices?.Invoke(services);
 
         _services = services.BuildServiceProvider();
         return _services;

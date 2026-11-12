@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using SmartFileOrganizer.Application.Library;
+using SmartFileOrganizer.Application.Evaluation;
 using SmartFileOrganizer.Application.Services;
 using SmartFileOrganizer.Domain.Interfaces;
 using SmartFileOrganizer.Infrastructure;
@@ -67,6 +68,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IContentComparisonRepository, ContentComparisonRepository>();
         services.AddSingleton<IDirectorySampleRepository, DirectorySampleRepository>();
         services.AddSingleton<ILibraryRepository, LibraryRepository>();
+        services.AddSingleton<IEvalCaseRepository, EvalCaseRepository>();
+        services.AddSingleton<IEvalRunRepository, EvalRunRepository>();
 
         // Infrastructure
         services.AddSingleton<IFileSystemAccessor, FileSystemAccessor>();
@@ -154,6 +157,9 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<ILogger<DirectorySummaryService>>()));
         services.AddSingleton<AiClassificationCoordinator>();
         services.AddSingleton<ReviewService>();
+        services.AddSingleton<EvalCaseService>();
+        services.AddSingleton<EvalRunService>();
+        services.AddSingleton<CorpusEvaluator>();
         services.AddSingleton<ScanExportService>();
         services.AddSingleton<FocusedRescanService>();
         services.AddSingleton<ContentComparisonService>();

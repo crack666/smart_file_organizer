@@ -37,5 +37,8 @@ public static class ErrorCodes
     public const string CompareIncomplete = "compare_incomplete";
     public const string WordsInvalid = "words_invalid";
     public const string OutputInsideJob = "output_inside_job";
+    public const string TruthInvalid = "truth_invalid";
+    public const string RunNotFound = "run_not_found";
+    public const string OutputNotEmpty = "output_not_empty";
     public const string InternalError = "internal_error";
 }

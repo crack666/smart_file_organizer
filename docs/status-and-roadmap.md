@@ -59,6 +59,9 @@ before that) and in CI on Windows and Linux._
   `sensitive_rule` and `ai_results.sensitive_markers` (schema step 2).
   Outputs withhold their content by default; see
   [engineering-decisions.md](engineering-decisions.md#8-sensitive-files-local-and-external-readers).
+  Until 12.11.2026 a stored `private_nachricht` marker made every read of
+  its folder fail (Dapper parsed the token as an enum name); fixed with
+  issue 36, tested for every marker in `SensitivePersistenceTests`.
 
 ### AI pipeline (three phases, run after the scan, never inside it)
 
@@ -143,6 +146,17 @@ https://github.com/crack666/smart_file_organizer/issues/5: `dotnet test`
   12.11.2026 by `dotnet test`: 372 passed after rebasing on the scan rules, and every command run by hand
   with `--json` against a temp database). (Until 12.11.2026 this line said
   the read commands were not there yet.)
+- `sfo eval` measures directory verdicts, categories and sensitive markers
+  against the generated corpus (41 folders, 97 files) and names every
+  failure; corrections in the review are kept as test cases
+  (`sfo eval --cases`); runs are stored and compared (`sfo eval --compare`).
+  See [evaluation.md](evaluation.md). _(checked 12.11.2026 on the branch for
+  https://github.com/crack666/smart_file_organizer/issues/36, rebased on the
+  staged analysis, the comparison, the read commands, the file evidence and the library review: `dotnet test`
+  523 passed, `sfo eval generate` and `sfo eval --stub` run by hand
+  against a temp database; CI runs the same with scripted answers. No run with
+  a real model yet.)_ What perfect scripted answers still get wrong is listed
+  in [evaluation.md](evaluation.md#measured).
 
 ### Comparison with the library
 
