@@ -132,7 +132,8 @@ against two temp folders and a temp database._
 - Directories a scan cannot read are now recorded as errors (before, they
   looked empty).
 - `sfo analyze` does not yet skip files that are `backed_up`; the
-  per-directory counts say which ones need no analysis.
+  per-directory counts say which ones need no analysis
+  (https://github.com/crack666/smart_file_organizer/issues/42).
 
 ### Known limits
 
