@@ -91,6 +91,9 @@ public sealed record LibraryReviewOptions
 
     public int ItemsPerFinding { get; init; } = 5;
 
+    /// <summary>Findings of a repeating kind below this many children of one folder are folded into one finding there.</summary>
+    public int RollupMin { get; init; } = 3;
+
     /// <summary>A placeholder or catch-all folder counts as grown from this many files or bytes (impact high).</summary>
     public int GrownFiles { get; init; } = 100;
     public long GrownBytes { get; init; } = 1L << 30;

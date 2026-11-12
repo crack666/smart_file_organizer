@@ -58,8 +58,60 @@ public static partial class LibraryRules
             findings = kept;
         }
 
+        findings = Rollup(ctx, findings);
+
         findings.Sort(LibraryFinding.Compare);
         return new LibraryRuleResult(findings, dumps, excluded);
+    }
+
+    /// <summary>Kinds whose findings repeat with the structure (every event folder has an empty "edited" folder).</summary>
+    private static readonly LibraryFindingKind[] RollupKinds =
+    [
+        LibraryFindingKind.Empty, LibraryFindingKind.PlaceholderName, LibraryFindingKind.CameraFolderName,
+        LibraryFindingKind.SavedWebPage, LibraryFindingKind.CaseInconsistent
+    ];
+
+    /// <summary>
+    /// Folds findings of one kind that occur below <see cref="LibraryReviewOptions.RollupMin"/> or more children of a
+    /// folder into one finding at that folder, level by level, but never into the root: "empty folders in 25
+    /// places below Photos" instead of 25 findings.
+    /// </summary>
+    private static List<LibraryFinding> Rollup(Ctx ctx, List<LibraryFinding> findings)
+    {
+        var byPath = ctx.Tree.All.ToDictionary(n => n.RelativePath, StringComparer.Ordinal);
+        var changed = true;
+        while (changed)
+        {
+            changed = false;
+            foreach (var kind in RollupKinds)
+            {
+                var candidates = findings.Where(f => f.Kind == kind && byPath.ContainsKey(f.RelativePath)).ToList();
+                var groups = candidates
+                    .Select(f => (Finding: f, Node: byPath[f.RelativePath]))
+                    .Where(x => x.Node.Parent is { Depth: >= 1 })
+                    .GroupBy(x => x.Node.Parent!)
+                    .Where(g => g.Count() >= ctx.O.RollupMin)
+                    .ToList();
+                foreach (var group in groups)
+                {
+                    var parent = group.Key;
+                    var members = group.Select(x => x.Finding)
+                        .Concat(candidates.Where(f => f.RelativePath == parent.RelativePath))
+                        .ToList();
+                    var merged = ctx.Make(kind, members.Min(m => m.Impact), parent,
+                        $"In {members.Count} places below this folder ({Count(members.Sum(m => m.Directories), "folder", "folders")}, "
+                        + $"{Count(members.Sum(m => m.Files), "file", "files")}). For example at {members[0].RelativePath}: {members[0].Reason}",
+                        members.Select(m => m.RelativePath).ToList(),
+                        members.Sum(m => m.Directories), members.Sum(m => m.Files), members.Sum(m => m.Bytes),
+                        new Dictionary<string, object?> { ["places"] = members.Count });
+                    findings.RemoveAll(members.Contains);
+                    findings.Add(merged);
+                    changed = true;
+                    break;   // groups were computed before this merge; recompute
+                }
+            }
+        }
+        return findings;
     }
 
     // ------------------------------------------------------------------ context and helpers
@@ -244,11 +296,27 @@ public static partial class LibraryRules
 
     private static IEnumerable<LibraryFinding> Placeholders(Ctx ctx)
     {
-        foreach (var n in ctx.Live.Where(n => n.Depth > 0))
+        var hits = ctx.Live.Where(n => n.Depth > 0)
+            .Select(n => (Node: n, Kind: ctx.PlaceholderKind(n.Name)))
+            .Where(x => x.Kind is not null)
+            .Select(x => (x.Node, Kind: x.Kind!, Grown: x.Node.LiveFiles >= ctx.O.GrownFiles || x.Node.LiveBytes >= ctx.O.GrownBytes))
+            .ToList();
+
+        // Small ones under one parent are one finding; a grown one keeps its own, its size is the point.
+        foreach (var group in hits.Where(h => !h.Grown).GroupBy(h => h.Node.Parent!).Where(g => g.Count() > 1))
         {
-            var kind = ctx.PlaceholderKind(n.Name);
-            if (kind is null) continue;
-            var grown = n.LiveFiles >= ctx.O.GrownFiles || n.LiveBytes >= ctx.O.GrownBytes;
+            var members = group.ToList();
+            var files = members.Sum(m => m.Node.LiveFiles);
+            yield return ctx.Make(LibraryFindingKind.PlaceholderName, files > 0 ? FindingImpact.Medium : FindingImpact.Low, group.Key,
+                $"{members.Count} folders with placeholder or catch-all names, together {Count(files, "file", "files")} ({Size(members.Sum(m => m.Node.LiveBytes))}).",
+                members.Select(m => $"{m.Node.Name} ({m.Node.LiveFiles} files)").ToList(),
+                members.Sum(m => m.Node.TreeDirs + 1), files, members.Sum(m => m.Node.LiveBytes),
+                new Dictionary<string, object?> { ["name_kind"] = members.Select(m => m.Kind).Distinct().ToList(), ["grown"] = false });
+        }
+
+        var bundled = hits.Where(h => !h.Grown).GroupBy(h => h.Node.Parent!).Where(g => g.Count() > 1).SelectMany(g => g).Select(h => h.Node).ToHashSet();
+        foreach (var (n, kind, grown) in hits.Where(h => !bundled.Contains(h.Node)))
+        {
             var impact = grown ? FindingImpact.High : n.LiveFiles > 0 ? FindingImpact.Medium : FindingImpact.Low;
             var what = kind switch
             {
@@ -260,7 +328,7 @@ public static partial class LibraryRules
                 $"{what}; it holds {Count(n.LiveFiles, "file", "files")} ({Size(n.LiveBytes)}) in {Count(n.TreeDirs, "subfolder", "subfolders")}"
                 + (grown ? ", it has grown." : "."),
                 [], n.TreeDirs + 1, n.LiveFiles, n.LiveBytes,
-                new Dictionary<string, object?> { ["name_kind"] = kind, ["grown"] = grown });
+                new Dictionary<string, object?> { ["name_kind"] = new[] { kind }, ["grown"] = grown });
         }
     }
 
