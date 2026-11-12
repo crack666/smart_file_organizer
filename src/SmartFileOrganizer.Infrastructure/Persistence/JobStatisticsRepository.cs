@@ -17,13 +17,19 @@ public class JobStatisticsRepository : IJobStatisticsRepository
         await conn.OpenAsync(ct);
 
         // The AI-relevant filter mirrors DirectoryPreAssessmentService and DirectorySummaryService.
+        // Pre-assessed: a pre-assessment row, or a verdict without error. A folder inside a unit gets its
+        // verdict from the unit and no row of its own, and is judged all the same.
         var dirs = await conn.QuerySingleAsync<DirectoryCounts>(
             """
             SELECT
                 COUNT(*) AS total,
                 COALESCE(SUM(CASE WHEN d.dir_status <> @skip AND d.name <> '' AND substr(d.name, 1, 1) <> '.' THEN 1 ELSE 0 END), 0) AS ai_relevant,
-                (SELECT COUNT(*) FROM ai_directory_results r JOIN directory_nodes n ON n.id = r.directory_node_id
-                    WHERE n.job_id = @jobId AND r.phase = 'pre_assessment') AS pre_assessed,
+                (SELECT COUNT(*) FROM directory_nodes n
+                    WHERE n.job_id = @jobId
+                      AND (EXISTS (SELECT 1 FROM ai_directory_results r WHERE r.directory_node_id = n.id AND r.phase = 'pre_assessment')
+                           OR (n.dir_status <> @skip AND n.name <> '' AND substr(n.name, 1, 1) <> '.'
+                               AND EXISTS (SELECT 1 FROM directory_verdicts v
+                                           WHERE v.directory_node_id = n.id AND v.verdict IS NOT NULL AND v.error IS NULL)))) AS pre_assessed,
                 (SELECT COUNT(*) FROM ai_directory_results r JOIN directory_nodes n ON n.id = r.directory_node_id
                     WHERE n.job_id = @jobId AND r.phase = 'pre_assessment' AND r.error IS NOT NULL) AS pre_assessment_errors,
                 (SELECT COUNT(*) FROM ai_directory_results r JOIN directory_nodes n ON n.id = r.directory_node_id

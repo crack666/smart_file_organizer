@@ -190,6 +190,8 @@ public static class EvalCommand
             throw new CliFailureException(ExitCodes.Failure, ErrorCodes.ScanFailed, $"Scan of job {job.Id} ended as {scanned.Status}: {scanned.LastError}");
 
         var analyzeClock = System.Diagnostics.Stopwatch.StartNew();
+        // Without Phase 3 on purpose: no summary is measured, and each would cost a model call. The job's status
+        // shows the summaries as pending; `sfo analyze <job>` writes them.
         var run = await services.GetRequiredService<AiClassificationCoordinator>().RunAsync(
             job.Id, AiPhases.PreAssessment | AiPhases.Classification,
             new SynchronousProgress<AiPhaseProgress>(pr => ctx.Progress.Report(AnalyzeCommand.PhaseName(pr.Phase),

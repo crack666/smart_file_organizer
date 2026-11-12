@@ -342,6 +342,29 @@ public class DirectoryVerdictTests : IDisposable
     }
 
     /// <summary>
+    /// Folders inside a unit get their verdict from the unit and no pre-assessment row of their own. The job
+    /// status counted only those rows, so after a complete Phase 1 it showed them as pending (three in the
+    /// first measurement of issue 50).
+    /// </summary>
+    [Fact]
+    public async Task JobStatus_CountsFoldersInsideAUnitAsJudged()
+    {
+        var root = MakeTree("Status");
+        WriteFile(Path.Combine(root, "app", "package.json"));
+        WriteFile(Path.Combine(root, "app", "src", "index.js"));
+        WriteFile(Path.Combine(root, "app", "src", "lib", "util.js"));
+        WriteFile(Path.Combine(root, "Fotos", "IMG_0001.jpg"));
+
+        var jobId = await ScanAsync(root);
+        await NewService().RunAsync(jobId);
+
+        var stats = await new JobStatisticsRepository(_db).GetAsync(jobId, 0);
+        Assert.Equal(5, stats.DirectoriesAiRelevant);
+        Assert.Equal(stats.DirectoriesAiRelevant, stats.DirectoriesPreAssessed);
+        Assert.Equal(0, stats.PreAssessmentErrors);
+    }
+
+    /// <summary>
     /// A scan of the phone itself is not one unit: that would leave no file to judge. The bundles split
     /// such a scan into its parts (docs/bundles.md); the verdicts judge its folders one by one.
     /// </summary>
