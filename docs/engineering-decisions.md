@@ -240,8 +240,8 @@ and health records. Two kinds of reader see the results:
 
 How it is enforced:
 
-- Markers (`zugangsdaten`, `schluessel`, `private_nachricht`, `ausweis`,
-  `finanzen`, `gesundheit`; several per file) come from rules without a
+- Markers (`credentials`, `keys`, `private_message`, `identity`,
+  `finance`, `health`; several per file) come from rules without a
   model, run during the scan so they also cover files the model never sees,
   and from an extra field in the regular classification schema (no second
   model call).

@@ -494,10 +494,16 @@ down with `dirs` and `files`, look at single entries with `show`.
 as listed, or a path relative to the job root (`photos/2024`, `.` for the root).
 
 **Verdict codes.** `--verdict` and `--retention` accept the codes the core defines in
-`VerdictCodes` (see [architecture.md](architecture.md), Phase 1), plus `error` (only an error
-is stored for the directory) and `none` (not judged yet, or no retention). Output carries the
-same codes. When the codes change in the core, the accepted values change with them; `sfo dirs
---help` always lists the current ones.
+`VerdictCodes` (`--verdict mixed`, `--retention keep`; all codes and their meaning in
+[glossary.md](glossary.md)), plus `error` (only an error is stored for the directory) and `none`
+(not judged yet, or no retention). JSON output carries the same codes; the German words used
+before 12.11.2026 (`gemischt`, `behalten`) are no longer accepted. `sfo dirs --help` always lists
+the current codes.
+
+**Words in the text output.** Without `--json`, verdict, retention, verdict source, result origin
+and sensitive markers are shown as words for people, in German when the summary language in the
+settings is German (`"SummaryLanguage": "Deutsch"`), in English otherwise (`mixed` / `gemischt`,
+`credentials` / `Zugangsdaten`). Programs read the JSON, which never changes with the language.
 
 ### Lists and paging
 

@@ -68,6 +68,9 @@ How good folder verdicts, categories and sensitive markers are is measured
 with `sfo eval` against a generated corpus with a known truth; corrections
 made in the review become test cases ([docs/evaluation.md](docs/evaluation.md)).
 
+Database, JSON output and prompts use fixed English codes (`mixed`, `keep`,
+`credentials`, ...); their meanings are in [docs/glossary.md](docs/glossary.md).
+
 ## Roadmap
 
 Open work lives in GitHub issues, grouped into milestones A to D:
