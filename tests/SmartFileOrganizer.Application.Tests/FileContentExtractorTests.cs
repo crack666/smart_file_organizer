@@ -126,12 +126,12 @@ public class FileContentExtractorTests : IDisposable
     public async Task InputPreparer_NeverUploadsVideoBytes()
     {
         await File.WriteAllBytesAsync(Path.Combine(_dir, "clip.mp4"), [1, 2, 3]);
-        var preparer = new AiClassificationInputPreparer(_extractor, new OllamaOptions());
+        var preparer = new AiClassificationInputPreparer(_extractor, new OllamaOptions(), new VideoFrameExtractor(() => null));
 
         var input = await preparer.PrepareAsync(Node("clip.mp4", FileType.Video));
 
         Assert.Empty(input.Base64Images);
-        Assert.Contains("Video file", input.ExtractedText);
+        Assert.Contains(input.Missing, m => m.Contains("never uploaded"));
     }
 
     /// <summary>Checks signature, chunk CRCs, IHDR (8-bit RGBA) and that IDAT inflates to the expected size.</summary>

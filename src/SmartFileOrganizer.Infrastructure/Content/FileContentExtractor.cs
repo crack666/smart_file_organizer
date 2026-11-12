@@ -4,6 +4,7 @@ using System.Xml.Linq;
 using Docnet.Core;
 using Docnet.Core.Converters;
 using Docnet.Core.Models;
+using Docnet.Core.Readers;
 using SmartFileOrganizer.Domain.Enums;
 using SmartFileOrganizer.Domain.Models;
 
@@ -28,6 +29,21 @@ public sealed class FileContent
     public bool HasImage => ImageBytes is { Length: > 0 };
     public bool HasText => !string.IsNullOrWhiteSpace(TextPreview);
 }
+
+/// <summary>What <see cref="FileContentExtractor.ReadPdf"/> found in a PDF.</summary>
+/// <param name="PageCount">Number of pages.</param>
+/// <param name="Text">Embedded text of the first pages, each introduced by <c>[Page n]</c>.</param>
+/// <param name="PagesRead">How many pages were read for text.</param>
+/// <param name="TextTruncated">True when pages or characters were left out because of the limit.</param>
+/// <param name="HasText">True when at least one read page carries text; false for an image-only PDF.</param>
+/// <param name="RenderedPages">Rendered pages (1-based number and PNG).</param>
+public sealed record PdfEvidence(
+    int PageCount,
+    string Text,
+    int PagesRead,
+    bool TextTruncated,
+    bool HasText,
+    IReadOnlyList<(int Page, byte[] Png)> RenderedPages);
 
 /// <summary>
 /// Reads file content for preview and AI evidence: images as bytes, PDF page 1 rendered via
@@ -66,7 +82,7 @@ public class FileContentExtractor
             if (ext == ".pdf")
                 return RenderPdfFirstPage(file.FullPath);
 
-            if (ext is ".docx" or ".xlsx" or ".odt" or ".ods")
+            if (ext is ".docx" or ".xlsx" or ".pptx" or ".odt" or ".ods")
                 return await ExtractOfficeTextAsync(file.FullPath, ext, ct);
 
             if (IsTextLike(file))
@@ -93,6 +109,7 @@ public class FileContentExtractor
             {
                 ".docx" => ExtractDocxText(path, ct),
                 ".xlsx" => ExtractXlsxText(path, ct),
+                ".pptx" => ExtractPptxText(path, ct),
                 ".odt" => ExtractOdtText(path, ct),
                 ".ods" => ExtractOdsText(path, ct),
                 _ => string.Empty
@@ -260,23 +277,99 @@ public class FileContentExtractor
         return sb.ToString();
     }
 
+    private static string ExtractPptxText(string path, CancellationToken ct)
+    {
+        using var archive = ZipFile.OpenRead(path);
+        var slides = archive.Entries
+            .Where(e => e.FullName.StartsWith("ppt/slides/slide", StringComparison.OrdinalIgnoreCase)
+                     && e.FullName.EndsWith(".xml", StringComparison.OrdinalIgnoreCase))
+            .Select(e => (Entry: e, Number: int.TryParse(Path.GetFileNameWithoutExtension(e.Name)[5..], out var n) ? n : int.MaxValue))
+            .OrderBy(s => s.Number)
+            .ToList();
+
+        var sb = new StringBuilder();
+        foreach (var (entry, number) in slides)
+        {
+            ct.ThrowIfCancellationRequested();
+            using var stream = entry.Open();
+            var doc = XDocument.Load(stream);
+            var lines = doc.Descendants().Where(e => e.Name.LocalName == "p")
+                .Select(p => string.Concat(p.Descendants().Where(e => e.Name.LocalName == "t").Select(e => e.Value)).Trim())
+                .Where(l => l.Length > 0)
+                .ToList();
+            if (lines.Count == 0) continue;
+            sb.AppendLine($"[Slide {number}]");
+            foreach (var line in lines) sb.AppendLine(line);
+            if (sb.Length >= MaxTextChars) break;
+        }
+        return sb.ToString();
+    }
+
     /// <summary>Renders page 1 with a white background (so it reads as a page on dark UIs) and encodes it as PNG.</summary>
     private static FileContent RenderPdfFirstPage(string path)
     {
         lock (PdfRenderLock)
         {
             using var docReader = PdfLib.Value.GetDocReader(path, new PageDimensions(PdfTargetWidth, PdfTargetHeight));
-            using var pageReader = docReader.GetPageReader(0);
-
-            var width = pageReader.GetPageWidth();
-            var height = pageReader.GetPageHeight();
-            var bgra = pageReader.GetImage(new NaiveTransparencyRemover(255, 255, 255));
-
             return new FileContent
             {
-                ImageBytes = PngEncoder.EncodeBgra(bgra, width, height),
+                ImageBytes = RenderPage(docReader, 0),
                 IsRenderedPage = true
             };
+        }
+    }
+
+    private static byte[] RenderPage(IDocReader docReader, int index)
+    {
+        using var pageReader = docReader.GetPageReader(index);
+        var width = pageReader.GetPageWidth();
+        var height = pageReader.GetPageHeight();
+        var bgra = pageReader.GetImage(new NaiveTransparencyRemover(255, 255, 255));
+        return PngEncoder.EncodeBgra(bgra, width, height);
+    }
+
+    /// <summary>
+    /// Reads a PDF for the model: page count, the embedded text of the first pages up to
+    /// <paramref name="maxTextChars"/>, and rendered pages: page 1 always, plus a middle page
+    /// when the document has no text (a scan), so the model sees more than the cover.
+    /// PDFium is not thread-safe; all PDF work shares one lock.
+    /// </summary>
+    public PdfEvidence ReadPdf(string path, int maxTextChars, CancellationToken ct)
+    {
+        lock (PdfRenderLock)
+        {
+            using var docReader = PdfLib.Value.GetDocReader(path, new PageDimensions(PdfTargetWidth, PdfTargetHeight));
+            var pageCount = docReader.GetPageCount();
+
+            var text = new StringBuilder();
+            var pagesWithText = 0;
+            var pagesRead = 0;
+            for (var i = 0; i < pageCount && text.Length < maxTextChars; i++)
+            {
+                ct.ThrowIfCancellationRequested();
+                using var pageReader = docReader.GetPageReader(i);
+                var pageText = pageReader.GetText()?.Trim() ?? string.Empty;
+                pagesRead++;
+                if (pageText.Length == 0) continue;
+                pagesWithText++;
+                text.AppendLine($"[Page {i + 1}]");
+                text.AppendLine(pageText);
+            }
+
+            var allText = text.ToString();
+            var truncated = allText.Length > maxTextChars;
+            if (truncated) allText = allText[..maxTextChars];
+
+            var rendered = new List<(int Page, byte[] Png)>();
+            if (pageCount > 0)
+                rendered.Add((1, RenderPage(docReader, 0)));
+            if (pagesWithText == 0 && pageCount >= 3)
+            {
+                var middle = pageCount / 2;
+                rendered.Add((middle + 1, RenderPage(docReader, middle)));
+            }
+
+            return new PdfEvidence(pageCount, allText.TrimEnd(), pagesRead, truncated || pagesRead < pageCount, pagesWithText > 0, rendered);
         }
     }
 
