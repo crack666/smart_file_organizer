@@ -77,17 +77,30 @@ line said 312 before, 293 before that, 271 before that, and 47 before that) and 
    category and target (`origin = inherited`, confidence at most 0.6), otherwise
    the directory is raised to mixed (`escalated_from`) and every file is judged.
    Mixed directories: every file, with a keep hint (`temporary`,
-   `worth_keeping`). Images as base64 (default limit 10 MB), documents as
-   extracted text or first PDF page rendered to an image (default limit
-   5 MB), videos and audio by file name and path only. Returns category,
+   `worth_keeping`). Since 12.11.2026 every file type takes part
+   ([#22](https://github.com/crack666/smart_file_organizer/issues/22)): the
+   evidence holds facts read without the model (capture date, device,
+   location present, image origin, page count, document properties, audio
+   tags and duration, speech or music, archive listing and content), the
+   content the model may look at (image, PDF text and rendered pages, video
+   frames if `ffmpeg` is installed, text), and what is missing. Programs,
+   fonts, databases and unknown binaries get a rule result (`origin = rule`)
+   without a model call. Facts are stored in `file_facts` (schema step 7),
+   the evidence notes in `ai_results.evidence`. _(Until then: "images as
+   base64, documents as extracted text or first PDF page rendered to an
+   image, videos and audio by file name and path only"; checked by
+   `FileEvidenceTests` and `Phase2EvidenceTests` with generated files, no
+   run against a real model.)_ Returns category,
    importance, confidence, summary, suggested target and sensitive markers.
    Stored in `ai_results`; samples in `directory_samples` (schema step 6).
    A marked file is stored as `ReviewNeeded` instead of `TrashCandidate`
    and as `worth_keeping` instead of `temporary`. The thresholds are starting
    values until the measurement of
    [#10](https://github.com/crack666/smart_file_organizer/issues/10).
-   Files of other types (audio, archives, executables, ...) still get no
-   result in any directory. Samples and escalations are not yet shown by
+   Samples draw only images, videos and documents; the other files of a
+   uniform directory are judged one by one. (Until 12.11.2026 this line
+   read: "Files of other types (audio, archives, executables, ...) still get
+   no result in any directory.") Samples and escalations are not yet shown by
    the CLI (https://github.com/crack666/smart_file_organizer/issues/6).
 3. **Directory summaries** (`DirectorySummaryService`): bottom-up. One
    Ollama call per mixed directory or directory without a verdict; the
@@ -151,8 +164,16 @@ against two temp folders and a temp database._
 
 ### Known limits
 
-- PDFs: only the first page is seen; text extraction is preview-sized; no
-  OCR beyond what the vision model reads from rendered pages.
+- PDFs: embedded text of the first pages up to 6,000 characters, page 1 as
+  image (plus the middle page for PDFs without text); no OCR beyond what the
+  vision model reads from rendered pages; document properties are not read.
+  (Until 12.11.2026: "only the first page is seen".)
+- Not read at all: sound (no transcription), text of `.doc`/`.xls`/`.ppt`,
+  listings of `.tar.gz`/`.gz`/`.bz2`/`.xz`/`.iso`, video frames when `ffmpeg`
+  is not on the PATH. The evidence names each of these as missing.
+- Files that Phase 1 does not sample are still marked `Skipped` and get no
+  Phase 2 result (sampling is reworked in
+  https://github.com/crack666/smart_file_organizer/issues/8).
 - If the model gives a valid category but omits `confidence`, the parser
   sets `0.85`.
 - gemma4 ignores schema field names; the parser accepts aliases such as
@@ -185,7 +206,9 @@ sessions of April 2026 and were not re-measured._
   behave as `appsettings.json` suggests. The SQLite database `data.db` lives
   in the same folder.
 - **Stale AI results.** Phases treat existing `ai_directory_results` rows as
-  done. After changing the AI pipeline, start a new scan job or delete the
+  done. Since 12.11.2026 Phase 2 takes every `Discovered` file, so the next
+  run on an older job also classifies its audio, archives and other files
+  that were left out before. After changing the AI pipeline, start a new scan job or delete the
   database, otherwise old results are reused. Exception: Phase 1 decides by
   `directory_verdicts`, so jobs analysed before #7 get their verdicts (and one
   Ollama call per undecided directory) on the next AI run. Files that the old
