@@ -58,6 +58,12 @@ internal sealed class ScriptedOllamaService : IOllamaService
 
     public IReadOnlyList<string> ClassifiedNames => ClassifyInputs.Select(i => i.File.Name).OrderBy(n => n, StringComparer.Ordinal).ToList();
 
+    /// <summary>First looks only; second calls of a check have <see cref="EvidenceDepth.Extended"/>.</summary>
+    public IReadOnlyList<OllamaClassificationInput> FirstLooks => ClassifyInputs.Where(i => i.Depth == EvidenceDepth.Standard).ToList();
+
+    /// <summary>Second calls of a check.</summary>
+    public IReadOnlyList<OllamaClassificationInput> SecondLooks => ClassifyInputs.Where(i => i.Depth == EvidenceDepth.Extended).ToList();
+
     public Task<FileClassification> ClassifyAsync(OllamaClassificationInput input, CancellationToken ct = default)
     {
         if (Classify is null) throw new NotSupportedException("Phase 2 is not part of these tests.");

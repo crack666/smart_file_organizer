@@ -412,6 +412,7 @@ public class OllamaService : IOllamaService
             if (inner.TryGetProperty("confidence", out var conf) && conf.ValueKind == JsonValueKind.Number)
             {
                 result.Confidence = Math.Clamp(conf.GetDouble(), 0, 1);
+                result.ConfidenceMissing = false;
             }
             else
             {

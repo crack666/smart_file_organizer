@@ -25,7 +25,9 @@ public sealed record AiClassificationRunResult(
     long TotalFiles,
     long ProcessedFiles,
     int ErrorCount,
-    string StatusText);
+    string StatusText,
+    int RetriedFiles = 0,
+    int SecondChecks = 0);
 
 /// <summary>The three AI phases. Combine flags to run a subset; the order is always 1 → 2 → 3.</summary>
 [Flags]

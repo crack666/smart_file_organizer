@@ -23,6 +23,9 @@ namespace SmartFileOrganizer.Application.Services;
 /// workers send requests to Ollama (GPU-bound).</para>
 /// <para>3. <see cref="DirectorySamplingService.ResolveAsync"/> lets the Deferred files of a confirmed
 /// sample inherit, or raises the directory to mixed and releases its files; then another pass judges them.</para>
+/// <para>A model answer that is unsure or contradicted gets a second call with more evidence and the
+/// directory as context, right after the first and before anything is stored
+/// (https://github.com/crack666/smart_file_organizer/issues/23; rules in <see cref="ResultCheckRules"/>).</para>
 /// </remarks>
 public class ClassificationService
 {
@@ -34,6 +37,14 @@ public class ClassificationService
     private readonly DirectorySamplingService _sampling;
     private readonly Func<int> _getMaxParallelRequests;
     private readonly ILogger<ClassificationService> _logger;
+    private readonly SecondCheckOptions _check;
+    private readonly IUserOverrideRepository? _overrides;
+
+    /// <summary>Counters of one run, shared by its workers.</summary>
+    private sealed class RunCounters
+    {
+        public int SecondCalls;
+    }
 
     /// <summary>How many files to fetch from DB per producer iteration.</summary>
     private const int FetchBatchSize = 30;
@@ -56,7 +67,9 @@ public class ClassificationService
         IOllamaService ollama,
         DirectorySamplingService sampling,
         Func<int> getMaxParallelRequests,
-        ILogger<ClassificationService> logger)
+        ILogger<ClassificationService> logger,
+        SecondCheckOptions? secondCheck = null,
+        IUserOverrideRepository? overrides = null)
     {
         _fileRepo = fileRepo;
         _classRepo = classRepo;
@@ -66,14 +79,23 @@ public class ClassificationService
         _sampling = sampling;
         _getMaxParallelRequests = getMaxParallelRequests;
         _logger = logger;
+        _check = secondCheck ?? new SecondCheckOptions();
+        _overrides = overrides;
     }
 
+    /// <param name="retryErrors">First set failed files back to Discovered, so they are tried again
+    /// (<c>sfo analyze --retry-errors</c>). Files with a result are never called again.</param>
     public async Task<AiClassificationRunResult> RunAsync(
         long jobId,
         IProgress<AiClassificationProgress>? progress = null,
         Func<CancellationToken, Task>? waitIfPausedAsync = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        bool retryErrors = false)
     {
+        var retried = retryErrors ? await _fileRepo.ReleaseFailedAsync(jobId, ct) : 0;
+        if (retried > 0)
+            _logger.LogInformation("Retrying {Count} failed file(s) of job {JobId}.", retried, jobId);
+
         var totalEligible = await _fileRepo.CountAiEligibleAsync(jobId, ct);
         if (totalEligible == 0)
         {
@@ -87,10 +109,11 @@ public class ClassificationService
 
         var errorCount = 0;
         var inherited = 0;
+        var counters = new RunCounters();
         for (var pass = 1; pass <= MaxPasses; pass++)
         {
             var context = await _sampling.GetContextAsync(jobId, ct);
-            errorCount += await RunPassAsync(jobId, totalEligible, context, progress, waitIfPausedAsync, ct);
+            errorCount += await RunPassAsync(jobId, totalEligible, context, counters, progress, waitIfPausedAsync, ct);
 
             var resolved = await _sampling.ResolveAsync(jobId, waitIfPausedAsync, ct);
             inherited += resolved.Inherited;
@@ -100,12 +123,14 @@ public class ClassificationService
         var pending = await _fileRepo.CountPendingAiAnalysisAsync(jobId, ct);
         var processed = totalEligible - pending;
         var inheritedText = inherited > 0 ? $" {inherited:N0} file(s) inherited from confirmed samples." : string.Empty;
+        var checkText = counters.SecondCalls > 0 ? $" {counters.SecondCalls:N0} result(s) checked a second time." : string.Empty;
+        var retryText = retried > 0 ? $" {retried:N0} failed file(s) retried." : string.Empty;
         var completedMessage = errorCount > 0
-            ? $"AI classification finished with {errorCount} error(s).{inheritedText}"
-            : $"AI classification completed.{inheritedText}";
+            ? $"AI classification finished with {errorCount} error(s).{inheritedText}{checkText}{retryText}"
+            : $"AI classification completed.{inheritedText}{checkText}{retryText}";
 
         progress?.Report(new AiClassificationProgress(jobId, processed, totalEligible, errorCount, string.Empty, completedMessage));
-        return new AiClassificationRunResult(true, totalEligible, processed, errorCount, completedMessage);
+        return new AiClassificationRunResult(true, totalEligible, processed, errorCount, completedMessage, retried, counters.SecondCalls);
     }
 
     /// <summary>Judges every Discovered eligible file once. Returns the number of errors.</summary>
@@ -113,6 +138,7 @@ public class ClassificationService
         long jobId,
         long totalEligible,
         DirectorySamplingService.Context context,
+        RunCounters counters,
         IProgress<AiClassificationProgress>? progress,
         Func<CancellationToken, Task>? waitIfPausedAsync,
         CancellationToken ct)
@@ -201,7 +227,7 @@ public class ClassificationService
 
                 _logger.LogDebug("Classifying: {Path}", file.FullPath);
 
-                var result = await CompleteAsync(file, input, ct);
+                var result = await CompleteAsync(file, input, context, counters, ct);
 
                 if (result.Error != null)
                     Interlocked.Increment(ref errorCount);
@@ -237,34 +263,149 @@ public class ClassificationService
     {
         var input = await _inputPreparer.PrepareAsync(file, ct);
         input.AskKeepHint = askKeepHint;
-        return await CompleteAsync(file, input, ct);
+        var context = await _sampling.GetContextAsync(file.JobId, ct);
+        return await CompleteAsync(file, input, context, new RunCounters(), ct);
     }
 
     /// <summary>
-    /// Takes the rule result or asks the model, applies the sensitive review rule, and stores
-    /// result, evidence notes and facts. Every file leaves here with a stored result: a rule
-    /// result (<see cref="ResultOrigin.Rule"/>), a model result, or a model error. Rule results also
-    /// set status <see cref="FileNodeStatus.AiAnalyzed"/>: Phase 2 is done for the file.
+    /// Takes the rule result or asks the model, checks an unsure or contradicted answer a second time, applies
+    /// the sensitive review rule, and stores result, check, evidence notes and facts. Every file leaves here
+    /// with a stored result: a rule result (<see cref="ResultOrigin.Rule"/>), a model result, or a model
+    /// error. Rule results also set status <see cref="FileNodeStatus.AiAnalyzed"/>: Phase 2 is done for the file.
     /// </summary>
-    private async Task<FileClassification> CompleteAsync(FileNode file, OllamaClassificationInput input, CancellationToken ct)
+    private async Task<FileClassification> CompleteAsync(
+        FileNode file, OllamaClassificationInput input, DirectorySamplingService.Context context, RunCounters counters, CancellationToken ct)
     {
-        var result = input.RuleResult is { } rule
-            ? CopyRuleResult(rule)
-            : await _ollama.ClassifyAsync(input, ct);
+        FileClassification result;
+        ResultCheck? check = null;
+        if (input.RuleResult is { } rule)
+        {
+            result = CopyRuleResult(rule);
+            result.Origin = ResultOrigin.Rule;
+            result.Certainty = ResultCheckRules.RuleResultCertainty(result);
+            result.Evidence = FormatEvidence(input);
+        }
+        else
+        {
+            var first = await AskModelAsync(file, input, ct);
+            (result, check) = first.Error is null
+                ? await CheckAsync(file, input, first, context, counters, ct)
+                : (first, null);
+        }
         result.FileNodeId = file.Id;
-        result.Origin = input.RuleResult is null ? ResultOrigin.Model : ResultOrigin.Rule;
         result.InheritedFromDirectoryNodeId = null;
         ApplySensitiveReviewRule(file, result);
-        result.Evidence = FormatEvidence(input);
 
         // An answer the model already gave is kept even when the run is being stopped; otherwise the file
-        // would fall back to Discovered and cost another call on resume.
-        await _classRepo.UpsertAsync(result, CancellationToken.None);
+        // would fall back to Discovered and cost another call on resume. Result and check in one transaction.
+        await _classRepo.SaveAsync(result, check, CancellationToken.None);
         await _factRepo.ReplaceAsync(file.Id, FactsToStore(file, result, input.Facts), CancellationToken.None);
 
         var newStatus = result.Error != null ? FileNodeStatus.Error : FileNodeStatus.AiAnalyzed;
         await _fileRepo.UpdateStatusAsync(file.Id, newStatus, CancellationToken.None);
         return result;
+    }
+
+    /// <summary>
+    /// One model call. A call that failed because the run is being stopped is not a result: nothing is
+    /// stored, the file stays Processing and is reset to Discovered by the next run (until 12.11.2026 such
+    /// files were stored as errors).
+    /// </summary>
+    private async Task<FileClassification> AskModelAsync(FileNode file, OllamaClassificationInput input, CancellationToken ct)
+    {
+        var answer = await _ollama.ClassifyAsync(input, ct);
+        if (answer.Error is not null) ct.ThrowIfCancellationRequested();
+        answer.FileNodeId = file.Id;
+        answer.Origin = ResultOrigin.Model;
+        answer.Evidence = FormatEvidence(input);
+        ApplySensitiveReviewRule(file, answer);
+        return answer;
+    }
+
+    /// <summary>
+    /// Decides whether a first answer is sure enough, and if not asks a second time with extended evidence and
+    /// the directory as context; the second call never sees the first answer. Both answers go into the check.
+    /// A stop during the second call stores nothing (no half result); the file is judged anew on resume.
+    /// </summary>
+    private async Task<(FileClassification Result, ResultCheck? Check)> CheckAsync(
+        FileNode file, OllamaClassificationInput input, FileClassification first,
+        DirectorySamplingService.Context context, RunCounters counters, CancellationToken ct)
+    {
+        var verdict = context.VerdictOf(file);
+        var findings = ResultCheckRules.Find(file, input.Facts, first, verdict, _check);
+        if (findings.Reasons.Count == 0)
+        {
+            first.Certainty = ResultCheckRules.SingleAnswerCertainty(input.Facts, first);
+            return (first, null);
+        }
+
+        var check = new ResultCheck
+        {
+            FileNodeId = file.Id,
+            Reasons = findings.Reasons,
+            RuleNote = findings.RuleNote,
+            First = CheckAnswer.From(first),
+            CheckedAt = DateTime.UtcNow
+        };
+
+        if (!findings.NeedsSecondCall)
+        {
+            first.Category = findings.RuleCategory!.Value;
+            first.Certainty = ResultCertainty.Likely;
+            check.Outcome = CheckOutcome.RuleWins;
+            return (first, check);
+        }
+
+        // A person's correction beats every model answer and is never checked again.
+        if (!_check.Enabled || await HasOverrideAsync(file, ct))
+        {
+            if (findings.RuleCategory is { } byRule) first.Category = byRule;
+            first.Certainty = ResultCertainty.Uncertain;
+            check.Outcome = CheckOutcome.Skipped;
+            return (first, check);
+        }
+
+        var secondInput = await _inputPreparer.PrepareAsync(file, EvidenceDepth.Extended, ct);
+        secondInput.AskKeepHint = input.AskKeepHint;
+        secondInput.Context = await BuildContextAsync(file, verdict, ct);
+        _logger.LogDebug("Second check of {Path}: {Reasons}", file.FullPath,
+            string.Join(",", findings.Reasons.Select(r => r.ToCode())));
+
+        var second = await AskModelAsync(file, secondInput, ct);
+        Interlocked.Increment(ref counters.SecondCalls);
+        check.Second = CheckAnswer.From(second);
+
+        var (result, outcome) = ResultCheckRules.Combine(file, input.Facts, first, second);
+        if (ResultCheckRules.RuleOverride(input.Facts, result.Category) is { } rule)
+        {
+            result.Category = rule.Category;
+            if (result.Certainty == ResultCertainty.Certain) result.Certainty = ResultCertainty.Likely;
+            check.RuleNote = check.RuleNote is null ? rule.Note : $"{check.RuleNote} {rule.Note}";
+        }
+        check.Outcome = outcome;
+        return (result, check);
+    }
+
+    private async Task<bool> HasOverrideAsync(FileNode file, CancellationToken ct) =>
+        file.Override is not null
+        || (_overrides is not null && await _overrides.GetByFileNodeIdAsync(file.Id, ct) is not null);
+
+    /// <summary>Verdict, purpose and retention of the directory and other files with their category so far.</summary>
+    private async Task<ClassificationContext> BuildContextAsync(FileNode file, DirectoryVerdict? verdict, CancellationToken ct)
+    {
+        var siblings = (await _fileRepo.GetByDirectoryAsync(file.JobId, file.ParentPath, ct))
+            .Where(f => f.Id != file.Id)
+            .ToList();
+        var neighbours = siblings
+            .OrderBy(f => f.Classification is { Error: null } ? 0 : 1)
+            .ThenBy(f => f.Name, StringComparer.Ordinal)
+            .Take(Math.Max(0, _check.MaxNeighbours))
+            .Select(f => new NeighbourFile(f.Name,
+                f.Override?.OverriddenCategory.ToString()
+                ?? (f.Classification is { Error: null } c ? c.Category.ToString() : null)))
+            .ToList();
+        return new ClassificationContext(
+            verdict?.Verdict.ToCode(), verdict?.Purpose, verdict?.Retention.ToCode(), neighbours, siblings.Count + 1);
     }
 
     private static FileClassification CopyRuleResult(FileClassification rule) => new()
