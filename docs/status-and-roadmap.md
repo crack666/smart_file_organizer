@@ -119,7 +119,7 @@ https://github.com/crack666/smart_file_organizer/issues/5: `dotnet test`
 
 _Checked 12.11.2026 on the branch for
 https://github.com/crack666/smart_file_organizer/issues/24, rebased on #31,
-#32 and #41 (comparison migration now step 5): `dotnet test` 354 passed; `sfo scan`, `scan --role library`,
+#32, #41 (comparison migration now step 5) and #44: `dotnet test` 392 passed; `sfo scan`, `scan --role library`,
 `compare --json` (twice, the second run computing no checksum; `match_hash`
 equal to `sha256sum` of the file) and `analyze` of a `library` job run by hand
 against two temp folders and a temp database._
