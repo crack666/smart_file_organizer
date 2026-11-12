@@ -149,7 +149,6 @@ public class FileRepository : IFileRepository
             SELECT * FROM file_nodes
             WHERE job_id = @jobId
               AND status = @status
-              AND file_type IN (1, 2, 4)  -- Image=1, Video=2, Document=4 (heuristic path for video: no bytes uploaded)
             ORDER BY id
             LIMIT @batchSize
             """,
@@ -166,7 +165,6 @@ public class FileRepository : IFileRepository
                         """
                         SELECT COUNT(*) FROM file_nodes
                         WHERE job_id = @jobId
-                            AND file_type IN (1, 2, 4)
                         """,
                         new { jobId });
         }
@@ -180,7 +178,6 @@ public class FileRepository : IFileRepository
                         SELECT COUNT(*) FROM file_nodes
                         WHERE job_id = @jobId
                             AND status = @status
-                            AND file_type IN (1, 2, 4)
                         """,
                         new { jobId, status = (int)FileNodeStatus.Discovered });
         }

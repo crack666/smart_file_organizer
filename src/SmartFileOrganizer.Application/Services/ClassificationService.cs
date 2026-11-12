@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
@@ -11,6 +12,8 @@ namespace SmartFileOrganizer.Application.Services;
 /// <summary>
 /// Phase 2: judges files with the model, in stages
 /// (https://github.com/crack666/smart_file_organizer/issues/8).
+/// Every file type takes part: files a rule can decide (programs, fonts, unknown binaries) are
+/// stored without a model call (https://github.com/crack666/smart_file_organizer/issues/22).
 /// </summary>
 /// <remarks>
 /// <para>1. <see cref="DirectorySamplingService.PlanAsync"/> draws the sample of every uniform directory;
@@ -25,6 +28,7 @@ public class ClassificationService
 {
     private readonly IFileRepository _fileRepo;
     private readonly IClassificationRepository _classRepo;
+    private readonly IFileFactRepository _factRepo;
     private readonly IClassificationInputPreparer _inputPreparer;
     private readonly IOllamaService _ollama;
     private readonly DirectorySamplingService _sampling;
@@ -47,6 +51,7 @@ public class ClassificationService
     public ClassificationService(
         IFileRepository fileRepo,
         IClassificationRepository classRepo,
+        IFileFactRepository factRepo,
         IClassificationInputPreparer inputPreparer,
         IOllamaService ollama,
         DirectorySamplingService sampling,
@@ -55,6 +60,7 @@ public class ClassificationService
     {
         _fileRepo = fileRepo;
         _classRepo = classRepo;
+        _factRepo = factRepo;
         _inputPreparer = inputPreparer;
         _ollama = ollama;
         _sampling = sampling;
@@ -195,8 +201,7 @@ public class ClassificationService
 
                 _logger.LogDebug("Classifying: {Path}", file.FullPath);
 
-                var result = await _ollama.ClassifyAsync(input, ct);
-                await StoreAsync(file, result, ct);
+                var result = await CompleteAsync(file, input, ct);
 
                 if (result.Error != null)
                     Interlocked.Increment(ref errorCount);
@@ -232,24 +237,63 @@ public class ClassificationService
     {
         var input = await _inputPreparer.PrepareAsync(file, ct);
         input.AskKeepHint = askKeepHint;
-        var result = await _ollama.ClassifyAsync(input, ct);
-        await StoreAsync(file, result, ct);
-        return result;
+        return await CompleteAsync(file, input, ct);
     }
 
-    private async Task StoreAsync(FileNode file, FileClassification result, CancellationToken ct)
+    /// <summary>
+    /// Takes the rule result or asks the model, applies the sensitive review rule, and stores
+    /// result, evidence notes and facts. Every file leaves here with a stored result: a rule
+    /// result (<see cref="ResultOrigin.Rule"/>), a model result, or a model error. Rule results also
+    /// set status <see cref="FileNodeStatus.AiAnalyzed"/>: Phase 2 is done for the file.
+    /// </summary>
+    private async Task<FileClassification> CompleteAsync(FileNode file, OllamaClassificationInput input, CancellationToken ct)
     {
+        var result = input.RuleResult is { } rule
+            ? CopyRuleResult(rule)
+            : await _ollama.ClassifyAsync(input, ct);
         result.FileNodeId = file.Id;
-        result.Origin = ResultOrigin.Model;
+        result.Origin = input.RuleResult is null ? ResultOrigin.Model : ResultOrigin.Rule;
         result.InheritedFromDirectoryNodeId = null;
         ApplySensitiveReviewRule(file, result);
+        result.Evidence = FormatEvidence(input);
 
         // An answer the model already gave is kept even when the run is being stopped; otherwise the file
         // would fall back to Discovered and cost another call on resume.
         await _classRepo.UpsertAsync(result, CancellationToken.None);
+        await _factRepo.ReplaceAsync(file.Id, FactsToStore(file, result, input.Facts), CancellationToken.None);
 
         var newStatus = result.Error != null ? FileNodeStatus.Error : FileNodeStatus.AiAnalyzed;
         await _fileRepo.UpdateStatusAsync(file.Id, newStatus, CancellationToken.None);
+        return result;
+    }
+
+    private static FileClassification CopyRuleResult(FileClassification rule) => new()
+    {
+        Category = rule.Category,
+        Importance = rule.Importance,
+        Confidence = rule.Confidence,
+        Summary = rule.Summary,
+        SuggestedTarget = rule.SuggestedTarget,
+        ModelUsed = rule.ModelUsed,
+        AnalyzedAt = rule.AnalyzedAt == default ? DateTime.UtcNow : rule.AnalyzedAt,
+        IsAiResult = false
+    };
+
+    /// <summary>
+    /// For a file marked sensitive (by rule or by the model) free-text facts such as title or
+    /// author are dropped: the marker stays the only statement about its content.
+    /// </summary>
+    public static IReadOnlyList<FileFact> FactsToStore(FileNode file, FileClassification result, IReadOnlyList<FileFact> facts)
+    {
+        var markers = SensitiveOutputGuard.GetMarkers(file) | result.SensitiveMarkers;
+        return markers == SensitiveMarker.None ? facts : facts.Where(f => !f.Key.IsFreeText()).ToList();
+    }
+
+    /// <summary><c>{"contains":[...],"missing":[...]}</c>, or null when the evidence says nothing.</summary>
+    public static string? FormatEvidence(OllamaClassificationInput input)
+    {
+        if (input.Contains.Count == 0 && input.Missing.Count == 0) return null;
+        return JsonSerializer.Serialize(new { contains = input.Contains, missing = input.Missing });
     }
 
     /// <summary>

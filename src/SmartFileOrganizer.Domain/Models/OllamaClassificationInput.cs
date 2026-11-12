@@ -11,11 +11,9 @@ public class OllamaClassificationInput
     public string ExtractedText { get; init; } = string.Empty;
     public IReadOnlyList<string> Base64Images { get; init; } = [];
 
-<<<<<<< HEAD
     /// <summary>Ask the model whether the file is temporary or worth keeping (files of mixed or uniform directories).</summary>
     public bool AskKeepHint { get; set; }
-}
-=======
+
     /// <summary>Facts from metadata or rules. Stored as such and shown to the model as reliable.</summary>
     public IReadOnlyList<FileFact> Facts { get; init; } = [];
 
@@ -28,4 +26,3 @@ public class OllamaClassificationInput
     /// <summary>A result decided by a rule (executable, font, unknown binary). Set: no model call.</summary>
     public FileClassification? RuleResult { get; init; }
 }
->>>>>>> 9c261f6 (B-5: Evidence per file type with facts and what is missing)

@@ -107,7 +107,7 @@ public class StagedAnalysisTests : IDisposable
         _fileRepo, _verdictRepo, _sampleRepo, _dirClassRepo, _options, NullLogger<DirectorySamplingService>.Instance);
 
     private ClassificationService Classification() => new(
-        _fileRepo, _classRepo, new PlainInputPreparer(), _ollama, Sampling(), () => 4, NullLogger<ClassificationService>.Instance);
+        _fileRepo, _classRepo, new FileFactRepository(_db), new PlainInputPreparer(), _ollama, Sampling(), () => 4, NullLogger<ClassificationService>.Instance);
 
     private Task<AiClassificationRunResult> Phase1Async(long jobId) => new DirectoryPreAssessmentService(
         _dirRepo, _fileRepo, _dirClassRepo, _verdictRepo, _ollama, () => 4, _options,

@@ -29,7 +29,8 @@ public class CliTests : IDisposable
         File.WriteAllText(Path.Combine(_root, "notes.txt"), "Shopping list: milk, bread");
         File.WriteAllText(Path.Combine(_root, "docs", "letter.txt"), "Dear landlord");
         File.WriteAllBytes(Path.Combine(_root, "photos", "pic.png"), [0x89, 0x50, 0x4E, 0x47, 1, 2, 3]);
-        File.WriteAllText(Path.Combine(_root, "photos", "data.bin"), "not eligible for classification");
+        // Binary of unknown format: Phase 2 decides it by rule, without a model call.
+        File.WriteAllBytes(Path.Combine(_root, "photos", "data.bin"), [0x00, 0x13, 0x37, 0x00, 0xFF]);
     }
 
     public void Dispose()
@@ -114,11 +115,11 @@ public class CliTests : IDisposable
         Assert.Equal(3, scanPhase.GetProperty("directories_processed").GetInt64());
         Assert.Equal(0, scanPhase.GetProperty("errors").GetInt64());
 
-        // Three text/image files are eligible; the .bin file is not.
+        // Every file takes part in Phase 2, the binary one included (decided by rule).
         var classification = phases.GetProperty("classification");
-        Assert.Equal(3, classification.GetProperty("total").GetInt64());
+        Assert.Equal(4, classification.GetProperty("total").GetInt64());
         Assert.Equal(0, classification.GetProperty("done").GetInt64());
-        Assert.Equal(3, classification.GetProperty("pending").GetInt64());
+        Assert.Equal(4, classification.GetProperty("pending").GetInt64());
 
         foreach (var dirPhase in new[] { "pre_assessment", "summary" })
         {
@@ -143,10 +144,11 @@ public class CliTests : IDisposable
         Assert.Equal(2, result.GetProperty("parallel").GetInt32());
         var phases = result.GetProperty("phases").EnumerateArray().Select(p => p.GetProperty("phase").GetString()).ToList();
         Assert.Equal(["pre_assessment", "classification", "summary"], phases);
+        // The binary file got a rule result; only the three readable files went to the model.
         Assert.Equal(3, ollama.FileInputs.Count);
 
         var status = (await SfoAsync(null, "status", jobId.ToString(), "--json")).Json().GetProperty("result").GetProperty("phases");
-        Assert.Equal(3, status.GetProperty("classification").GetProperty("done").GetInt64());
+        Assert.Equal(4, status.GetProperty("classification").GetProperty("done").GetInt64());
         Assert.Equal(0, status.GetProperty("classification").GetProperty("pending").GetInt64());
         Assert.Equal(3, status.GetProperty("pre_assessment").GetProperty("done").GetInt64());
         Assert.Equal(3, status.GetProperty("summary").GetProperty("done").GetInt64());
@@ -213,7 +215,7 @@ public class CliTests : IDisposable
         var resumed = await SfoAsync(new FakeOllamaService(), "analyze", jobId.ToString(), "--phase", "classification", "--json");
         Assert.Equal(ExitCodes.Ok, resumed.ExitCode);
         var status = (await SfoAsync(null, "status", jobId.ToString(), "--json")).Json();
-        Assert.Equal(3, status.GetProperty("result").GetProperty("phases").GetProperty("classification").GetProperty("done").GetInt64());
+        Assert.Equal(4, status.GetProperty("result").GetProperty("phases").GetProperty("classification").GetProperty("done").GetInt64());
     }
 
     [Fact]

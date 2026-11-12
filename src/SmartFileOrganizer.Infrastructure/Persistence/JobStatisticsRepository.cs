@@ -39,13 +39,13 @@ public class JobStatisticsRepository : IJobStatisticsRepository
             """
             SELECT
                 COUNT(*) AS total,
-                COALESCE(SUM(CASE WHEN file_type IN (1, 2, 4) THEN 1 ELSE 0 END), 0) AS eligible,
-                COALESCE(SUM(CASE WHEN file_type IN (1, 2, 4) AND status IN (@discovered, @processing) THEN 1 ELSE 0 END), 0) AS pending,
-                COALESCE(SUM(CASE WHEN file_type IN (1, 2, 4) AND status = @analyzed THEN 1 ELSE 0 END), 0) AS analyzed,
-                COALESCE(SUM(CASE WHEN file_type IN (1, 2, 4) AND status = @error THEN 1 ELSE 0 END), 0) AS errors,
-                COALESCE(SUM(CASE WHEN file_type IN (1, 2, 4) AND status = @skipped THEN 1 ELSE 0 END), 0) AS skipped,
-                COALESCE(SUM(CASE WHEN file_type IN (1, 2, 4) AND status = @inherited THEN 1 ELSE 0 END), 0) AS inherited,
-                COALESCE(SUM(CASE WHEN file_type IN (1, 2, 4) AND status = @deferred THEN 1 ELSE 0 END), 0) AS deferred
+                COUNT(*) AS eligible,
+                COALESCE(SUM(CASE WHEN status IN (@discovered, @processing) THEN 1 ELSE 0 END), 0) AS pending,
+                COALESCE(SUM(CASE WHEN status = @analyzed THEN 1 ELSE 0 END), 0) AS analyzed,
+                COALESCE(SUM(CASE WHEN status = @error THEN 1 ELSE 0 END), 0) AS errors,
+                COALESCE(SUM(CASE WHEN status = @skipped THEN 1 ELSE 0 END), 0) AS skipped,
+                COALESCE(SUM(CASE WHEN status = @inherited THEN 1 ELSE 0 END), 0) AS inherited,
+                COALESCE(SUM(CASE WHEN status = @deferred THEN 1 ELSE 0 END), 0) AS deferred
             FROM file_nodes
             WHERE job_id = @jobId
             """,
