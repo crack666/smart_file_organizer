@@ -163,7 +163,14 @@ call) or `model`.
    series, `mixed` from three or more types with none above 50 %).
 3. `DirectoryVerdictRules` decide the clear cases without the model, in this order: below a directory
    judged `unit` (`inside-unit`), skipped by the scan (`scan-skip`), name starting with a dot
-   (`hidden`), unit markers (`marker`), no files and no subdirectories (`empty`).
+   (`hidden`), unit markers (`marker`), a dump (`dump`), no files and no subdirectories (`empty`).
+   `dump` uses the one recognition the bundles and the library review use (`BundlePatterns.Recognise`,
+   `bundle-patterns.json`, or `Bundles:PatternsFile` when set): a copy of a phone, a user profile, a
+   system drive, a USB stick or unpacked software is a unit, so everything inside it is `inside-unit`
+   and none of its files is judged one by one. Never the scan root: a scanned phone as one unit would
+   leave nothing to judge; the bundles split it into its parts
+   ([#50](https://github.com/crack666/smart_file_organizer/issues/50), measured on the corpus of
+   [evaluation.md](evaluation.md)).
 4. Directories are processed level by level from the root. What no rule decides goes to Ollama in
    parallel (`PreAssessDirectoryAsync`): file list, subdirectory names and the profile. The model returns
    verdict, purpose, retention and reason, together with the sampling fields used so far

@@ -300,6 +300,67 @@ public class DirectoryVerdictTests : IDisposable
         Assert.Equal(DirectoryVerdictKind.Uniform, (await VerdictAsync(jobId, root)).Verdict); // a collection of units
     }
 
+    /// <summary>
+    /// A phone backup has no direct files, so before issue 50 the container rule made it a uniform
+    /// collection and the model judged its camera folder. The dump recognition of the bundles
+    /// (<c>BundlePatterns.Recognise</c>) now decides it as one unit, and everything inside follows.
+    /// </summary>
+    [Fact]
+    public async Task PhoneBackup_IsOneUnit_WithEverythingInside_WithoutModelCall()
+    {
+        var root = MakeTree("Platte");
+        var phone = Path.Combine(root, "Handy-Backup 2021");
+        for (var i = 1; i <= 5; i++)
+            WriteFile(Path.Combine(phone, "DCIM", "Camera", $"IMG_2021031{i}_120000.jpg"));
+        Directory.CreateDirectory(Path.Combine(phone, "LOST.DIR"));
+        WriteFile(Path.Combine(phone, "Android", "data", "com.example.notes", "files", "notes.db"));
+        WriteFile(Path.Combine(root, "Fotos", "IMG_0001.jpg"));
+
+        var jobId = await ScanAsync(root);
+        _ollama.Answer = _ => DirectoryVerdictKind.Uniform;
+        await NewService().RunAsync(jobId);
+
+        var dump = await VerdictAsync(jobId, phone);
+        Assert.Equal(DirectoryVerdictKind.Unit, dump.Verdict);
+        Assert.Equal(DirectoryVerdictRules.Dump, dump.Rule);
+        Assert.Contains("phone", dump.Reason);
+        Assert.Equal(dump.DirectoryNodeId, dump.UnitDirectoryNodeId);
+
+        foreach (var inside in new[] { "DCIM", "DCIM/Camera", "LOST.DIR", "Android", "Android/data",
+                     "Android/data/com.example.notes", "Android/data/com.example.notes/files" })
+        {
+            var v = await VerdictAsync(jobId, Path.Combine(phone, inside.Replace('/', Path.DirectorySeparatorChar)));
+            Assert.Equal(DirectoryVerdictKind.Unit, v.Verdict);
+            Assert.Equal(DirectoryVerdictRules.InsideUnit, v.Rule);
+            Assert.Equal(dump.DirectoryNodeId, v.UnitDirectoryNodeId);
+        }
+
+        // Only the photo folder next to the dump needed the model.
+        Assert.Equal(new[] { "Fotos" }, _ollama.CalledDirectoryNames);
+        Assert.All(await _fileRepo.GetByDirectoryAsync(jobId, Path.Combine(phone, "DCIM", "Camera")),
+            f => Assert.Equal(FileNodeStatus.Skipped, f.Status));
+    }
+
+    /// <summary>
+    /// A scan of the phone itself is not one unit: that would leave no file to judge. The bundles split
+    /// such a scan into its parts (docs/bundles.md); the verdicts judge its folders one by one.
+    /// </summary>
+    [Fact]
+    public async Task PhoneScannedAtTheRoot_IsNotOneUnit()
+    {
+        var phone = MakeTree("Handy");
+        WriteFile(Path.Combine(phone, "DCIM", "Camera", "IMG_20210311_120000.jpg"));
+        Directory.CreateDirectory(Path.Combine(phone, "LOST.DIR"));
+        WriteFile(Path.Combine(phone, "Android", "data", "com.example.notes", "files", "notes.db"));
+
+        var jobId = await ScanAsync(phone);
+        _ollama.Answer = _ => DirectoryVerdictKind.Uniform;
+        await NewService().RunAsync(jobId);
+
+        Assert.NotEqual(DirectoryVerdictRules.Dump, (await VerdictAsync(jobId, phone)).Rule);
+        Assert.Contains("Camera", _ollama.CalledDirectoryNames);
+    }
+
     [Fact]
     public async Task SecondRun_DoesNotCallTheModelAgain()
     {

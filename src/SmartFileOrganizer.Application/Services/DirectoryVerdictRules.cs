@@ -13,6 +13,7 @@ public static class DirectoryVerdictRules
     public const string ScanSkip = "scan-skip";
     public const string Hidden = "hidden";
     public const string Marker = "marker";
+    public const string Dump = "dump";
     public const string Empty = "empty";
     public const string Container = "container";
 
@@ -33,8 +34,13 @@ public static class DirectoryVerdictRules
     /// Rules that need only the directory itself and its nearest ancestor that is a unit.
     /// Order matters: being part of a unit wins over everything, because a unit is never split.
     /// </summary>
+    /// <param name="dump">The directory recognised as a device, computer or software dump by
+    /// <see cref="Bundles.BundlePatterns.Recognise"/>, the one recognition the bundles and the library review
+    /// use as well; null when it is none. A dump is a backup that belongs together, so it is a unit like a
+    /// project: https://github.com/crack666/smart_file_organizer/issues/50.</param>
     public static (Next Next, DirectoryVerdict? Verdict) Evaluate(
-        DirectoryNode dir, DirectoryProfile profile, DirectoryVerdict? unitAncestor, string? unitAncestorPath)
+        DirectoryNode dir, DirectoryProfile profile, DirectoryVerdict? unitAncestor, string? unitAncestorPath,
+        Bundles.DumpRecognition? dump = null)
     {
         if (unitAncestor is not null)
         {
@@ -62,6 +68,13 @@ public static class DirectoryVerdictRules
         {
             return Decide(dir, profile, DirectoryVerdictKind.Unit, Marker,
                 $"Markers of a project, program, game or backup: {string.Join(", ", profile.UnitMarkers)}.",
+                RetentionValue.Review, dir.Id);
+        }
+
+        if (dump is not null)
+        {
+            return Decide(dir, profile, DirectoryVerdictKind.Unit, Dump,
+                $"Recognised as a {dump.Describe()}; a copy of a device, computer or software is handled as a whole.",
                 RetentionValue.Review, dir.Id);
         }
 
