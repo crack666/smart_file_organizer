@@ -1,6 +1,7 @@
 using System.Threading;
 using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
+using SmartFileOrganizer.Application.Sensitivity;
 using SmartFileOrganizer.Domain.Enums;
 using SmartFileOrganizer.Domain.Interfaces;
 using SmartFileOrganizer.Domain.Models;
@@ -144,6 +145,7 @@ public class ClassificationService
 
                 var result = await _ollama.ClassifyAsync(input, ct);
                 result.FileNodeId = file.Id;
+                ApplySensitiveReviewRule(file, result);
 
                 await _classRepo.UpsertAsync(result, ct);
 
@@ -200,6 +202,7 @@ public class ClassificationService
         var input = await _inputPreparer.PrepareAsync(file, ct);
         var result = await _ollama.ClassifyAsync(input, ct);
         result.FileNodeId = file.Id;
+        ApplySensitiveReviewRule(file, result);
 
         await _classRepo.UpsertAsync(result, ct);
 
@@ -207,5 +210,16 @@ public class ClassificationService
         await _fileRepo.UpdateStatusAsync(file.Id, newStatus, ct);
 
         return result;
+    }
+
+    /// <summary>
+    /// A marked file is never stored as a trash candidate: whatever the model proposes, it
+    /// becomes "review needed". Markers come from the rules (scan time and file name) and from
+    /// the model answer itself.
+    /// </summary>
+    public static void ApplySensitiveReviewRule(FileNode file, FileClassification result)
+    {
+        var markers = SensitiveOutputGuard.GetMarkers(file) | result.SensitiveMarkers;
+        result.Category = SensitiveOutputGuard.ApplyReviewRule(result.Category, markers);
     }
 }
