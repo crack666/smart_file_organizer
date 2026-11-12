@@ -114,6 +114,13 @@ public class ScanEngine : IScanEngine
                 // decision is applied; a narrower one never throws away what was already collected.
                 if (Coverage(status) <= Coverage(existing.DirStatus))
                 {
+                    // A skip stored before folders were marked gets its markers now, still without entering it.
+                    if (existing.DirStatus == DirectoryStatus.Skip && existing.SensitiveMarkers == SensitiveMarker.None)
+                    {
+                        SensitiveFileRules.ApplyToSkippedFolder(existing);
+                        if (existing.SensitiveMarkers != SensitiveMarker.None)
+                            await _dirRepo.UpdateAsync(existing, ct);
+                    }
                     _logger.LogTrace("Kept stored decision for {Path}: {Reason}", dirPath, existing.DirReason);
                     continue;
                 }
@@ -175,6 +182,9 @@ public class ScanEngine : IScanEngine
 
             if (decision == ScanDecision.Skip)
             {
+                // No rule sees the files of a skipped folder, so the folder itself carries the marker
+                // (.ssh, .gnupg, .aws, AppData, ...). Name and path only: the folder is not entered.
+                SensitiveFileRules.ApplyToSkippedFolder(dirNode);
                 dirBatch.Add(dirNode);
                 await FlushDirBatchIfNeeded(dirBatch, ct);
                 _logger.LogDebug("Skipped: {Path} ({Reason})", dirPath, evaluation.Reason);

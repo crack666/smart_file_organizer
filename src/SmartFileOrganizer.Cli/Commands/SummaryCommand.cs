@@ -29,6 +29,7 @@ public static class SummaryCommand
     public sealed record SummaryResult(
         JobView Job,
         long Directories,
+        long SensitiveDirectories,
         FileCounts Files,
         IReadOnlyDictionary<string, long> ByCategory,
         IReadOnlyDictionary<string, long> ByFileType,
@@ -89,6 +90,7 @@ public static class SummaryCommand
             var result = new SummaryResult(
                 JobView.From(summary.Job),
                 summary.Directories,
+                summary.SensitiveDirectories,
                 new FileCounts(summary.Files, summary.PendingFiles, summary.ErrorFiles, summary.SensitiveFiles, summary.TotalBytes),
                 summary.ByCategory,
                 summary.ByFileType,
@@ -111,7 +113,8 @@ public static class SummaryCommand
         var sb = new StringBuilder();
         sb.AppendLine(r.Job.ToLine());
         sb.AppendLine($"  {r.Directories} directories, {r.Files.Total} files, {ReadFormat.Size(r.Files.TotalBytes)}; " +
-                      $"{r.Files.Pending} pending, {r.Files.Errors} errors, {r.Files.Sensitive} sensitive");
+                      $"{r.Files.Pending} pending, {r.Files.Errors} errors, {r.Files.Sensitive} sensitive" +
+                      (r.SensitiveDirectories > 0 ? $", {r.SensitiveDirectories} sensitive folders" : string.Empty));
         Counts(sb, "categories", r.ByCategory);
         Counts(sb, "types", r.ByFileType);
         Counts(sb, "status", r.ByStatus);

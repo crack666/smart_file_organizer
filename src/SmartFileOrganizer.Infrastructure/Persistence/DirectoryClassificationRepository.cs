@@ -22,10 +22,10 @@ public class DirectoryClassificationRepository : IDirectoryClassificationReposit
             """
             INSERT INTO ai_directory_results
                 (directory_node_id, phase, summary, theme, homogeneity, dominant_type,
-                 anomalous_file_ids, sampling_strategy, sample_size, model_used, analyzed_at, error)
+                 anomalous_file_ids, sampling_strategy, sample_size, model_used, analyzed_at, error, marked_inputs)
             VALUES
                 (@DirectoryNodeId, @Phase, @Summary, @Theme, @Homogeneity, @DominantType,
-                 @AnomalousFileIds, @SamplingStrategy, @SampleSize, @ModelUsed, @AnalyzedAt, @Error)
+                 @AnomalousFileIds, @SamplingStrategy, @SampleSize, @ModelUsed, @AnalyzedAt, @Error, @MarkedInputs)
             ON CONFLICT(directory_node_id, phase) DO UPDATE SET
                 summary            = excluded.summary,
                 theme              = excluded.theme,
@@ -36,9 +36,26 @@ public class DirectoryClassificationRepository : IDirectoryClassificationReposit
                 sample_size        = excluded.sample_size,
                 model_used         = excluded.model_used,
                 analyzed_at        = excluded.analyzed_at,
-                error              = excluded.error
+                error              = excluded.error,
+                marked_inputs      = excluded.marked_inputs
             """,
             result);
+    }
+
+    public async Task<IReadOnlyList<DirectoryClassificationResult>> GetForJobAsync(
+        long jobId, string phase, CancellationToken ct = default)
+    {
+        await using var conn = _db.CreateConnection();
+        await conn.OpenAsync(ct);
+        var rows = await conn.QueryAsync<DirectoryClassificationResult>(new CommandDefinition(
+            """
+            SELECT adr.*
+            FROM ai_directory_results adr
+            JOIN directory_nodes dn ON dn.id = adr.directory_node_id
+            WHERE dn.job_id = @jobId AND adr.phase = @phase
+            """,
+            new { jobId, phase }, cancellationToken: ct));
+        return rows.AsList();
     }
 
     public async Task<DirectoryClassificationResult?> GetByNodeAndPhaseAsync(

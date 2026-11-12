@@ -6,9 +6,10 @@ namespace SmartFileOrganizer.Application.Sensitivity;
 /// if it names none of them; otherwise it is replaced by <see cref="NeutralHint"/>.
 /// </summary>
 /// <remarks>
-/// This is a name check, not a content check: a model summary can still paraphrase a marked file
-/// without naming it. The thorough solution is tracked in
-/// https://github.com/crack666/smart_file_organizer/issues/33.
+/// This is a name check, a second safety net. The protection at the source: Phase 1 sees names and
+/// the profile only, Phase 3 gives a marked file to the model as its neutral line, and a Phase 3 summary
+/// written before a file was marked is withheld (<see cref="DirectorySummaryGuard"/>).
+/// https://github.com/crack666/smart_file_organizer/issues/33
 /// </remarks>
 public static class DirectoryTextGuard
 {

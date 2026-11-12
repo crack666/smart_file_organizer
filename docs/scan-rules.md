@@ -84,6 +84,13 @@ First that applies wins:
 7. From `shallow_from` on, the folder's own files decide: any user file → scanned;
    program files and no user file → shallow; neither → scanned.
 
+A skipped folder is marked sensitive by its name when it typically holds keys,
+logins or private messages (`.ssh`, `.gnupg`, `.aws`, `.azure`, `.kube`,
+`.docker`, `.password-store`, `.config`, `.mozilla`, `.thunderbird`, wallets,
+`AppData`), without being entered. The read commands show the marker
+([cli.md](cli.md#sensitive-files)); skips stored before this was introduced are
+marked when read.
+
 Skip and shallow rules only look at the part of the path below the scan root:
 what lies above it was chosen by the user, so a root inside `AppData` is scanned.
 User-data rules look at the whole path, so a root inside `Documents` makes

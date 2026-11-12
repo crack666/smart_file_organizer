@@ -36,6 +36,18 @@ public class JobReadService
         _bundles = bundles;
     }
 
+    /// <summary>Ids of the files of a job that the output guard treats as marked (stored markers and name rules).</summary>
+    public async Task<IReadOnlySet<long>> GetMarkedFileIdsAsync(long jobId, CancellationToken ct = default)
+    {
+        var ids = new HashSet<long>();
+        await foreach (var row in _read.StreamFilesAsync(new FileListFilter { JobId = jobId }, ct))
+        {
+            if (SensitiveOutputGuard.GetMatch(row.File).IsMatch)
+                ids.Add(row.File.Id);
+        }
+        return ids;
+    }
+
     public async Task<ReadPage<DirectoryItem>> ListDirectoriesAsync(DirectoryListQuery query, CancellationToken ct = default)
     {
         var job = await RequireJobAsync(query.JobId, ct);
@@ -57,7 +69,7 @@ public class JobReadService
         if (query.MinSize is { } minSize)
             entries = entries.Where(e => e.Bytes >= minSize);
         if (query.Sensitive is { } sensitive)
-            entries = entries.Where(e => e.SensitiveFiles > 0 == sensitive);
+            entries = entries.Where(e => (e.SensitiveFiles > 0 || e.SensitiveDirs > 0) == sensitive);
 
         var items = entries.Select(e => ToItem(e, index, protect: false));
         if (query.Verdicts.Count > 0)
@@ -165,7 +177,9 @@ public class JobReadService
         var item = ToItem(entry, index, protect: true, output);
         var rawResponse = DirectoryTextGuard.Protect(verdict?.RawResponse, marked, output, out var rawWithheld);
 
-        var analysisItems = analyses.Select(a => ToAnalysis(a, marked, output, ref rawWithheld)).ToList();
+        var analysisItems = analyses
+            .Select(a => ToAnalysis(a, marked, output, stale: a.Phase == "summary" && !entry.SummaryIsCurrent, ref rawWithheld))
+            .ToList();
 
         return new PathDetail(new DirectoryDetail
         {
@@ -244,6 +258,7 @@ public class JobReadService
             PendingFiles = pending,
             ErrorFiles = errors,
             SensitiveFiles = sensitive,
+            SensitiveDirectories = index.Entries.Count(e => e.Match.IsMatch),
             ByCategory = Sorted(byCategory),
             ByFileType = Sorted(byType),
             ByStatus = Sorted(byStatus),
@@ -367,7 +382,10 @@ public class JobReadService
             Reason = r.Reason,
             Summary = r.AiSummary,
             SummaryError = r.AiSummaryError,
-            SensitiveFiles = entry.SensitiveFiles
+            SensitiveFiles = entry.SensitiveFiles,
+            Sensitive = SensitiveMarkerNames.ToTokens(entry.Match.Markers),
+            SensitiveRule = entry.Match.Rule,
+            SensitiveDirs = entry.SensitiveDirs
         };
 
         if (!protect || entry.SensitiveFiles == 0)
@@ -376,9 +394,19 @@ public class JobReadService
         var marked = index.MarkedNamesBelow(entry);
         var purpose = DirectoryTextGuard.Protect(item.Purpose, marked, output, out var w1);
         var reason = DirectoryTextGuard.Protect(item.Reason, marked, output, out var w2);
-        var summary = DirectoryTextGuard.Protect(item.Summary, marked, output, out var w3);
+        string? summary;
+        bool w3;
+        if (output?.IncludeSensitive != true && item.Summary is not null && !entry.SummaryIsCurrent)
+            (summary, w3) = (DirectorySummaryGuard.StaleHint, true);
+        else
+            summary = DirectoryTextGuard.Protect(item.Summary, marked, output, out w3);
         var verdictError = DirectoryTextGuard.Protect(item.VerdictError, marked, output, out var w4);
-        var summaryError = DirectoryTextGuard.Protect(item.SummaryError, marked, output, out var w5);
+        string? summaryError;
+        bool w5;
+        if (output?.IncludeSensitive != true && item.SummaryError is not null && !entry.SummaryIsCurrent)
+            (summaryError, w5) = (DirectorySummaryGuard.StaleHint, true);
+        else
+            summaryError = DirectoryTextGuard.Protect(item.SummaryError, marked, output, out w5);
 
         return item with
         {
@@ -392,8 +420,27 @@ public class JobReadService
     }
 
     private static DirectoryAnalysisItem ToAnalysis(
-        DirectoryClassificationResult a, IReadOnlyCollection<string> marked, SensitiveOutputOptions output, ref bool withheld)
+        DirectoryClassificationResult a, IReadOnlyCollection<string> marked, SensitiveOutputOptions output, bool stale, ref bool withheld)
     {
+        // A model summary written before a file of the directory was marked: none of its texts is shown.
+        if (stale && !output.IncludeSensitive)
+        {
+            withheld = true;
+            return new DirectoryAnalysisItem
+            {
+                Phase = a.Phase,
+                Summary = DirectorySummaryGuard.StaleHint,
+                Homogeneity = a.Homogeneity,
+                DominantType = a.DominantType,
+                SamplingStrategy = a.SamplingStrategy,
+                SampleSize = a.SampleSize,
+                Anomalies = ParseAnomalies(a.AnomalousFileIds).Select(x => new AnomalyItem(x.Name, DirectoryTextGuard.NeutralHint)).ToList(),
+                ModelUsed = a.ModelUsed,
+                AnalyzedAt = a.AnalyzedAt == default ? null : a.AnalyzedAt,
+                Error = a.Error is null ? null : DirectorySummaryGuard.StaleHint
+            };
+        }
+
         var summary = DirectoryTextGuard.Protect(a.Summary, marked, output, out var w1);
         var theme = DirectoryTextGuard.Protect(a.Theme, marked, output, out var w2);
         var error = DirectoryTextGuard.Protect(a.Error, marked, output, out var w3);
@@ -469,6 +516,26 @@ public class JobReadService
         var rows = await _read.GetDirectoriesAsync(jobId, ct);
         var index = new DirectoryIndex(rows);
 
+        // Folders marked themselves; the rules run again for skips stored before folders were marked.
+        foreach (var entry in index.Entries)
+        {
+            var match = entry.Row.SensitiveMarkers == SensitiveMarker.None
+                ? SensitiveMatch.None
+                : new SensitiveMatch(entry.Row.SensitiveMarkers, entry.Row.SensitiveRule ?? "rule");
+            if (entry.Row.DirStatus == DirectoryStatus.Skip)
+            {
+                var byRule = SensitiveFileRules.MatchSkippedFolder(entry.Row.Name, entry.Row.FullPath);
+                if ((byRule.Markers & ~match.Markers) != 0)
+                    match = match.Combine(byRule);
+            }
+            entry.Match = match;
+        }
+        foreach (var entry in index.Entries.Where(e => e.Match.IsMatch).ToList())
+        {
+            foreach (var self in index.SelfAndAncestors(entry.Row.FullPath))
+                self.SensitiveDirs++;
+        }
+
         foreach (var totals in await _read.GetDirectoryFileTotalsAsync(jobId, ct))
         {
             if (index.ByPath.TryGetValue(totals.ParentPath, out var direct))
@@ -486,6 +553,8 @@ public class JobReadService
             visit?.Invoke(row, match);
             if (!match.IsMatch) continue;
 
+            if (index.ByPath.TryGetValue(row.File.ParentPath, out var parent))
+                parent.DirectMarkedNames.Add(row.File.Name);
             foreach (var entry in index.SelfAndAncestors(row.File.ParentPath))
             {
                 entry.SensitiveFiles++;
@@ -504,8 +573,21 @@ public class JobReadService
         public long Bytes { get; set; }
         public long SensitiveFiles { get; set; }
 
+        /// <summary>Markers of the folder itself (skipped folders).</summary>
+        public SensitiveMatch Match { get; set; }
+
+        /// <summary>Marked folders in the subtree, this one included.</summary>
+        public long SensitiveDirs { get; set; }
+
         /// <summary>Names of marked files in the subtree.</summary>
         public HashSet<string> MarkedNames { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>Names of marked files stored directly in this directory: the ones a Phase 3 summary saw.</summary>
+        public HashSet<string> DirectMarkedNames { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>False when the model summary was written before a file of this directory was marked.</summary>
+        public bool SummaryIsCurrent =>
+            DirectorySummaryGuard.IsCurrent(Row.AiSummaryModel, Row.AiSummaryMarkedInputs, DirectMarkedNames);
     }
 
     private sealed class DirectoryIndex

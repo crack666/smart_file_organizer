@@ -69,7 +69,22 @@ public class DirectorySummaryService
         if (dirsDeepFirst.Count == 0)
             return new AiClassificationRunResult(true, 0, 0, 0, "No AI-relevant directories found.");
 
-        var summarizedIds = (await _dirClassRepo.GetAssessedNodeIdsAsync(jobId, "summary", ct)).ToHashSet();
+        // A model summary written before a file of its directory was marked is written again.
+        var summarizedIds = new HashSet<long>();
+        var dirsById = dirsDeepFirst.ToDictionary(d => d.Id);
+        foreach (var row in await _dirClassRepo.GetForJobAsync(jobId, "summary", ct))
+        {
+            if (!string.IsNullOrEmpty(row.ModelUsed) && dirsById.TryGetValue(row.DirectoryNodeId, out var summarizedDir))
+            {
+                var markedNow = MarkedNames(await _fileRepo.GetByDirectoryAsync(jobId, summarizedDir.FullPath, ct));
+                if (!DirectorySummaryGuard.IsCurrent(row.ModelUsed, row.MarkedInputs, markedNow))
+                {
+                    _logger.LogInformation("Summary of {Path} predates a marker; it is written again.", summarizedDir.FullPath);
+                    continue;
+                }
+            }
+            summarizedIds.Add(row.DirectoryNodeId);
+        }
         var pending = dirsDeepFirst.Where(d => !summarizedIds.Contains(d.Id)).ToList();
 
         if (pending.Count == 0)
@@ -154,10 +169,12 @@ public class DirectorySummaryService
                 result.DirectoryNodeId = dir.Id;
                 result.SamplingStrategy = preAssessment.SamplingStrategy;
                 result.SampleSize = preAssessment.SampleSize;
+                result.MarkedInputs = DirectorySummaryGuard.FormatInputs(MarkedNames(fileNodes));
 
                 if (result.Error != null)
                 {
-                    _logger.LogWarning("Summary error for {Path}: {Err}", dir.FullPath, result.Error);
+                    // The error text can echo the prompt; it is stored and shown by sfo show, not logged here.
+                    _logger.LogWarning("Summary error for {Path}; see sfo show", dir.FullPath);
                     Interlocked.Increment(ref errorCount);
                 }
 
@@ -233,6 +250,10 @@ public class DirectorySummaryService
             : $"{node.Name} — {category}";
     }
 
+    /// <summary>Names of the marked files among <paramref name="nodes"/>: those that enter as their neutral line.</summary>
+    private static List<string> MarkedNames(IEnumerable<FileNode> nodes) =>
+        nodes.Where(n => SensitiveOutputGuard.GetMarkers(n) != SensitiveMarker.None).Select(n => n.Name).ToList();
+
     public async Task<DirectoryClassificationResult> SummarizeSingleAsync(
         long jobId,
         DirectoryNode dir,
@@ -285,6 +306,7 @@ public class DirectorySummaryService
             result.Phase = "summary";
             result.SamplingStrategy = preAssessment.SamplingStrategy;
             result.SampleSize = preAssessment.SampleSize;
+            result.MarkedInputs = DirectorySummaryGuard.FormatInputs(MarkedNames(fileNodes));
         }
 
         await _dirClassRepo.UpsertAsync(result, ct);

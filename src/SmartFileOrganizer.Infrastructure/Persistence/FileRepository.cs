@@ -21,11 +21,11 @@ public class FileRepository : IFileRepository
             INSERT OR IGNORE INTO file_nodes
                 (job_id, full_path, name, parent_path, root_path, relative_path,
                  relative_dir, depth, size, last_write_time, extension,
-                 file_type, status, scanned_at, sensitive_markers, sensitive_rule)
+                 file_type, status, scanned_at, sensitive_markers, sensitive_rule, sensitive_rules_version)
             VALUES
                 (@JobId, @FullPath, @Name, @ParentPath, @RootPath, @RelativePath,
                  @RelativeDir, @Depth, @Size, @LastWriteTime, @Extension,
-                 @FileType, @Status, @ScannedAt, @SensitiveMarkers, @SensitiveRule)
+                 @FileType, @Status, @ScannedAt, @SensitiveMarkers, @SensitiveRule, @SensitiveRulesVersion)
             """;
 
         await conn.ExecuteAsync(sql, nodes.Select(ToParameters), transaction: tx);
@@ -76,11 +76,11 @@ public class FileRepository : IFileRepository
                 INSERT INTO file_nodes
                     (job_id, full_path, name, parent_path, root_path, relative_path,
                      relative_dir, depth, size, last_write_time, extension,
-                     file_type, status, scanned_at, sensitive_markers, sensitive_rule)
+                     file_type, status, scanned_at, sensitive_markers, sensitive_rule, sensitive_rules_version)
                 VALUES
                     (@JobId, @FullPath, @Name, @ParentPath, @RootPath, @RelativePath,
                      @RelativeDir, @Depth, @Size, @LastWriteTime, @Extension,
-                     @FileType, @Status, @ScannedAt, @SensitiveMarkers, @SensitiveRule)
+                     @FileType, @Status, @ScannedAt, @SensitiveMarkers, @SensitiveRule, @SensitiveRulesVersion)
                 """;
 
             await conn.ExecuteAsync(insertSql, nodeList.Select(ToParameters), transaction: tx);
@@ -205,10 +205,45 @@ public class FileRepository : IFileRepository
                 status = @Status,
                 scanned_at = @ScannedAt,
                 sensitive_markers = @SensitiveMarkers,
-                sensitive_rule = @SensitiveRule
+                sensitive_rule = @SensitiveRule,
+                sensitive_rules_version = @SensitiveRulesVersion
             WHERE id = @Id
             """,
             ToParameters(node));
+    }
+
+    public async Task<IReadOnlyList<FileNode>> GetBelowRulesVersionAsync(
+        long jobId, int version, CancellationToken ct = default)
+    {
+        await using var conn = _db.CreateConnection();
+        await conn.OpenAsync(ct);
+        var nodes = await conn.QueryAsync<FileNode>(new CommandDefinition(
+            """
+            SELECT * FROM file_nodes
+            WHERE job_id = @jobId
+              AND (sensitive_rules_version IS NULL OR sensitive_rules_version < @version)
+            ORDER BY id
+            """,
+            new { jobId, version }, cancellationToken: ct));
+        return nodes.AsList();
+    }
+
+    public async Task UpdateSensitiveAsync(IReadOnlyList<FileNode> nodes, CancellationToken ct = default)
+    {
+        if (nodes.Count == 0) return;
+        await using var conn = _db.CreateConnection();
+        await conn.OpenAsync(ct);
+        await using var tx = await conn.BeginTransactionAsync(ct);
+        await conn.ExecuteAsync(
+            """
+            UPDATE file_nodes SET
+                sensitive_markers = @SensitiveMarkers,
+                sensitive_rule = @SensitiveRule,
+                sensitive_rules_version = @SensitiveRulesVersion
+            WHERE id = @Id
+            """,
+            nodes.Select(ToParameters), transaction: tx);
+        await tx.CommitAsync(ct);
     }
 
     public async Task UpdateStatusAsync(long id, FileNodeStatus status, CancellationToken ct = default)
@@ -328,6 +363,7 @@ public class FileRepository : IFileRepository
         n.Status,
         n.ScannedAt,
         SensitiveMarkers = SensitiveMarkerNames.Format(n.SensitiveMarkers),
-        n.SensitiveRule
+        n.SensitiveRule,
+        n.SensitiveRulesVersion
     };
 }

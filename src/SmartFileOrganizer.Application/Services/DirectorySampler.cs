@@ -244,7 +244,12 @@ public static class DirectorySampler
         var importance = majorityResults.GroupBy(r => r.Importance)
             .OrderByDescending(g => g.Count()).ThenByDescending(g => g.Key)
             .First().Key;
-        var target = majorityResults.Select(r => r.SuggestedTarget?.Trim())
+        // The target is model text about the file it was suggested for; unmarked files inherit it, so a
+        // marked member does not take part (https://github.com/crack666/smart_file_organizer/issues/33).
+        var target = judged
+            .Where(j => j.Result.Category == majority && j.Member.Role != SampleRole.Sensitive &&
+                        j.Result.SensitiveMarkers == SensitiveMarker.None)
+            .Select(j => j.Result.SuggestedTarget?.Trim())
             .Where(t => !string.IsNullOrEmpty(t))
             .GroupBy(t => t!, StringComparer.Ordinal)
             .OrderByDescending(g => g.Count()).ThenBy(g => g.Key, StringComparer.Ordinal)

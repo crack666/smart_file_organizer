@@ -64,6 +64,10 @@ before that) and in CI on Windows and Linux._
   Until 12.11.2026 a stored `private_nachricht` marker made every read of
   its folder fail (Dapper parsed the token as an enum name); fixed with
   issue 36, tested for every marker in `SensitivePersistenceTests`.
+  Since [#33](https://github.com/crack666/smart_file_organizer/issues/33) (schema
+  step 12) the boundary also covers logs (prompts only in a local debug file),
+  directory summaries written before a marker, skipped folders such as `.ssh`,
+  the header check of older rows, inherited targets and the `compare` checksum.
 
 ### AI pipeline (three phases, run after the scan, never inside it)
 

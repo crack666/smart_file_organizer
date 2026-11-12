@@ -67,7 +67,7 @@ public abstract record ReadQuery
     /// <summary>Retention codes, plus <see cref="ReadFilterCodes.None"/>. Empty: no filter.</summary>
     public IReadOnlyCollection<string> Retentions { get; init; } = [];
 
-    /// <summary>True: only marked files (directories holding marked files); false: only unmarked; null: no filter.</summary>
+    /// <summary>True: only marked files (directories holding marked files or marked folders); false: only unmarked; null: no filter.</summary>
     public bool? Sensitive { get; init; }
 
     public int Limit { get; init; } = JobReadService.DefaultLimit;
@@ -147,6 +147,15 @@ public sealed record DirectoryItem
 
     /// <summary>Marked files in the subtree.</summary>
     public long SensitiveFiles { get; init; }
+
+    /// <summary>Marker tokens of the folder itself: set for a folder the scan skipped (<c>.ssh</c>, <c>AppData</c>).</summary>
+    public IReadOnlyList<string> Sensitive { get; init; } = [];
+
+    /// <summary>Rule ids that marked the folder itself (<c>dir:ssh</c>); null when it is not marked.</summary>
+    public string? SensitiveRule { get; init; }
+
+    /// <summary>Marked folders in the subtree, this one included.</summary>
+    public long SensitiveDirs { get; init; }
 
     /// <summary>True when at least one model text was replaced by <see cref="DirectoryTextGuard.NeutralHint"/>.</summary>
     public bool TextWithheld { get; init; }
@@ -240,6 +249,9 @@ public sealed record JobSummary
     public long ErrorFiles { get; init; }
 
     public long SensitiveFiles { get; init; }
+
+    /// <summary>Folders marked themselves (skipped without being entered: <c>.ssh</c>, <c>AppData</c>).</summary>
+    public long SensitiveDirectories { get; init; }
 
     /// <summary>Counts by effective category (as the output guard reports it); <c>unclassified</c> for files without one.</summary>
     public IReadOnlyDictionary<string, long> ByCategory { get; init; } = new Dictionary<string, long>();

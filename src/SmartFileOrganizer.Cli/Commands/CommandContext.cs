@@ -17,6 +17,7 @@ public sealed class CommandContext : IAsyncDisposable
     private readonly StderrChannel _stderr;
     private ServiceProvider? _services;
     private Action<IServiceCollection>? _commandServices;
+    private DebugFileLoggerProvider? _debugLog;
     private bool _databaseInitialized;
 
     internal CommandContext(ParseResult parseResult, CliHost host, GlobalOptions globals)
@@ -84,11 +85,24 @@ public sealed class CommandContext : IAsyncDisposable
             o.AppSettingsDirectory = _host.AppSettingsDirectory;
             o.ReloadSettingsOnChange = false;
         });
+        // --verbose: Information on stderr (never prompts or answers), everything from Debug on, the model
+        // traffic included, in a local file next to the database.
+        if (ParseResult.GetValue(_globals.Verbose))
+        {
+            var paths = SmartFileOrganizerPaths.Resolve(new SmartFileOrganizerHostOptions
+            {
+                DatabasePath = ParseResult.GetValue(_globals.Database)
+            });
+            _debugLog = new DebugFileLoggerProvider(CliLogFiles.DebugLogPath(paths.DatabasePath));
+        }
+
         services.AddLogging(b =>
         {
             b.ClearProviders();
             b.SetMinimumLevel(LogLevel.Trace);
             b.AddProvider(LoggerProvider);
+            if (_debugLog != null)
+                b.AddProvider(_debugLog);
         });
         _host.ConfigureServices?.Invoke(services);
         _commandServices?.Invoke(services);
@@ -113,5 +127,6 @@ public sealed class CommandContext : IAsyncDisposable
     {
         if (_services != null)
             await _services.DisposeAsync();
+        _debugLog?.Dispose();
     }
 }

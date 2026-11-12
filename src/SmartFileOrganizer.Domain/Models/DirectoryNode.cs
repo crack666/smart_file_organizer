@@ -27,4 +27,21 @@ public class DirectoryNode
     public string? SuggestedArea { get; set; }
 
     public DateTime ScannedAt { get; set; }
+
+    /// <summary>
+    /// Markers of a folder the scan skipped without entering (<c>.ssh</c>, <c>AppData</c>), so it can
+    /// still show up as a finding. Stored as tokens in <c>directory_nodes.sensitive_markers</c>.
+    /// </summary>
+    public SensitiveMarker SensitiveMarkers { get; set; }
+
+    /// <summary>Database form of <see cref="SensitiveMarkers"/> (token list); the persistence layer reads into it.</summary>
+    [System.ComponentModel.EditorBrowsable(System.ComponentModel.EditorBrowsableState.Never)]
+    public string? SensitiveMarkerTokens
+    {
+        get => SensitiveMarkerNames.Format(SensitiveMarkers);
+        set => SensitiveMarkers = SensitiveMarkerNames.Parse(value);
+    }
+
+    /// <summary>Ids of the rules that marked the folder (<c>dir:ssh</c>); no content.</summary>
+    public string? SensitiveRule { get; set; }
 }

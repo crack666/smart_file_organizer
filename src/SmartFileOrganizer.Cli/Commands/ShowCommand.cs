@@ -82,6 +82,9 @@ public static class ShowCommand
         long DirectFiles,
         int Subdirs,
         long SensitiveFiles,
+        IReadOnlyList<string> Sensitive,
+        string? SensitiveRule,
+        long SensitiveDirs,
         string? Verdict,
         string? VerdictSource,
         string? VerdictRule,
@@ -103,7 +106,7 @@ public static class ShowCommand
         {
             var d = detail.Directory;
             return new DirectoryDetailView(d.FullPath, d.RelativePath, d.Depth, d.Status, d.SizeBytes, d.Files,
-                d.DirectFiles, d.Subdirs, d.SensitiveFiles, d.Verdict, d.VerdictSource, d.VerdictRule, d.Retention,
+                d.DirectFiles, d.Subdirs, d.SensitiveFiles, d.Sensitive, d.SensitiveRule, d.SensitiveDirs, d.Verdict, d.VerdictSource, d.VerdictRule, d.Retention,
                 d.Purpose, d.Reason, d.VerdictError, detail.UnitDirectory, detail.VerdictModel, detail.JudgedAt,
                 detail.VerdictRawResponse, detail.Profile, d.Summary, d.SummaryError, detail.Analyses, d.TextWithheld);
         }
@@ -187,6 +190,7 @@ public static class ShowCommand
             Line(sb, "unit", d.UnitDirectory);
             Line(sb, "summary", d.Summary);
             Line(sb, "sensitive", d.SensitiveFiles > 0 ? $"{d.SensitiveFiles} marked files" : null);
+            Line(sb, "marked", d.Sensitive.Count > 0 ? $"{string.Join(", ", d.Sensitive)} ({d.SensitiveRule})" : null);
             Line(sb, "error", d.VerdictError ?? d.SummaryError);
         }
         return sb.ToString().TrimEnd();

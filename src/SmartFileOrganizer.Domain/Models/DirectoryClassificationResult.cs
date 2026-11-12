@@ -22,4 +22,10 @@ public class DirectoryClassificationResult
     public string? ModelUsed { get; set; }
     public DateTime AnalyzedAt { get; set; }
     public string? Error { get; set; }
+
+    /// <summary>
+    /// Summary phase, model-written: JSON list of the marked files that entered the prompt as their neutral
+    /// line only. Null for rows written before this was recorded. See <c>DirectorySummaryGuard</c>.
+    /// </summary>
+    public string? MarkedInputs { get; set; }
 }

@@ -87,6 +87,51 @@ public class SensitivePersistenceTests : IDisposable
         Assert.Equal("schluessel", raw);
     }
 
+    /// <summary>
+    /// Dapper ignores type handlers for enums when it reads, and <c>private_nachricht</c> is no enum name:
+    /// reading a mail archive used to throw, which stopped sampling and Phase 3 for its directory.
+    /// </summary>
+    [Fact]
+    public async Task Scan_MarkerWithUnderscoreToken_ReadsBack()
+    {
+        var fs = new FakeFileSystemAccessor(
+            new Dictionary<string, string[]> { ["/Scan"] = ["/Scan/archiv.pst", "/Scan/passwort-mails.eml"] },
+            new Dictionary<string, byte[]>());
+
+        var job = await ScanAsync(fs);
+        var files = (await _fileRepo.GetByDirectoryAsync(job.Id, "/Scan")).ToDictionary(f => f.Name);
+
+        Assert.Equal(SensitiveMarker.PrivateNachricht, files["archiv.pst"].SensitiveMarkers);
+        Assert.Equal(SensitiveMarker.PrivateNachricht | SensitiveMarker.Zugangsdaten, files["passwort-mails.eml"].SensitiveMarkers);
+        Assert.Equal(SensitiveMarker.PrivateNachricht, (await _fileRepo.GetByIdAsync(files["archiv.pst"].Id))!.SensitiveMarkers);
+    }
+
+    [Fact]
+    public async Task Scan_MarksSkippedFolders_WithoutEnteringThem()
+    {
+        var fs = new FakeFileSystemAccessor(
+            new Dictionary<string, string[]>
+            {
+                ["/Scan"] = ["/Scan/readme.txt"],
+                ["/Scan/.ssh"] = ["/Scan/.ssh/id_ed25519"],
+                ["/Scan/AppData"] = ["/Scan/AppData/x.txt"],
+                ["/Scan/.cache"] = ["/Scan/.cache/y.bin"]
+            },
+            new Dictionary<string, byte[]> { ["/Scan/.ssh/id_ed25519"] = FakeKeyFile() });
+
+        var job = await ScanAsync(fs);
+
+        var ssh = (await _dirRepo.GetByPathAsync(job.Id, "/Scan/.ssh"))!;
+        Assert.Equal(DirectoryStatus.Skip, ssh.DirStatus);
+        Assert.Equal(SensitiveMarker.Schluessel, ssh.SensitiveMarkers);
+        Assert.Equal("dir:ssh", ssh.SensitiveRule);
+        var appData = (await _dirRepo.GetByPathAsync(job.Id, "/Scan/AppData"))!;
+        Assert.Equal(SensitiveMarker.Zugangsdaten | SensitiveMarker.PrivateNachricht, appData.SensitiveMarkers);
+        Assert.Equal(SensitiveMarker.None, (await _dirRepo.GetByPathAsync(job.Id, "/Scan/.cache"))!.SensitiveMarkers);
+        Assert.DoesNotContain("/Scan/.ssh/id_ed25519", fs.PrefixReads);
+        Assert.Empty(await _fileRepo.GetByDirectoryAsync(job.Id, "/Scan/.ssh"));
+    }
+
     [Fact]
     public async Task Export_OfScannedJob_ProtectsMarkedRows()
     {

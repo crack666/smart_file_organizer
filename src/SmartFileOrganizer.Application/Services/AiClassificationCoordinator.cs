@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using SmartFileOrganizer.Application.Sensitivity;
 using SmartFileOrganizer.Domain.Interfaces;
 
 namespace SmartFileOrganizer.Application.Services;
@@ -10,6 +11,7 @@ public class AiClassificationCoordinator
     private readonly DirectorySummaryService _directorySummaryService;
     private readonly IOllamaService _ollama;
     private readonly ILogger<AiClassificationCoordinator> _logger;
+    private readonly SensitiveRulesBackfill? _rulesBackfill;
 
     private readonly object _sync = new();
     private CancellationTokenSource? _cts;
@@ -29,8 +31,10 @@ public class AiClassificationCoordinator
         DirectoryPreAssessmentService preAssessmentService,
         DirectorySummaryService directorySummaryService,
         IOllamaService ollama,
-        ILogger<AiClassificationCoordinator> logger)
+        ILogger<AiClassificationCoordinator> logger,
+        SensitiveRulesBackfill? rulesBackfill = null)
     {
+        _rulesBackfill = rulesBackfill;
         _classificationService = classificationService;
         _preAssessmentService = preAssessmentService;
         _directorySummaryService = directorySummaryService;
@@ -140,6 +144,10 @@ public class AiClassificationCoordinator
         // Single availability check — avoids 3x /api/tags calls
         if (!await _ollama.IsAvailableAsync(ct))
             return new AiPipelineRunResult(false, []);
+
+        // Rows scanned with older file rules: run the header rules before any of their content reaches a model.
+        if (_rulesBackfill != null)
+            await _rulesBackfill.RunAsync(jobId, ct);
 
         var results = new List<AiPhaseRunResult>();
 
