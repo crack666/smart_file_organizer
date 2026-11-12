@@ -96,6 +96,12 @@ public class JobReadRepository : IJobReadRepository
             }
         }
 
+        if (filter.BundleIds.Count > 0)
+        {
+            parameters.Add("BundleIds", filter.BundleIds.ToArray());
+            where.Add("f.id IN (SELECT file_node_id FROM bundle_files WHERE bundle_id IN @BundleIds)");
+        }
+
         if (filter.FileTypes.Count > 0)
         {
             parameters.Add("Types", filter.FileTypes.Select(t => (int)t).ToArray());

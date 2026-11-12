@@ -26,12 +26,14 @@ public class JobReadService
     private readonly IScanJobRepository _jobs;
     private readonly IJobReadRepository _read;
     private readonly IDirectoryVerdictRepository _verdicts;
+    private readonly IBundleRepository _bundles;
 
-    public JobReadService(IScanJobRepository jobs, IJobReadRepository read, IDirectoryVerdictRepository verdicts)
+    public JobReadService(IScanJobRepository jobs, IJobReadRepository read, IDirectoryVerdictRepository verdicts, IBundleRepository bundles)
     {
         _jobs = jobs;
         _read = read;
         _verdicts = verdicts;
+        _bundles = bundles;
     }
 
     public async Task<ReadPage<DirectoryItem>> ListDirectoriesAsync(DirectoryListQuery query, CancellationToken ct = default)
@@ -92,9 +94,19 @@ public class JobReadService
                 throw new JobReadException(ReadFailure.PathNotFound, $"Directory '{query.Directory}' is not part of job {job.Id}.");
         }
 
+        IReadOnlyCollection<long> bundleIds = [];
+        if (query.Bundle is { } bundleId)
+        {
+            var all = await _bundles.GetAllAsync(job.Id, ct);
+            if (!all.Any(b => b.Id == bundleId))
+                throw new JobReadException(ReadFailure.BundleNotFound, $"Bundle {bundleId} is not part of job {job.Id} (see sfo bundles list).");
+            bundleIds = BundleService.SelfAndDescendants(all, bundleId);
+        }
+
         var filter = new FileListFilter
         {
             JobId = job.Id,
+            BundleIds = bundleIds,
             Directory = directory,
             Recursive = query.Recursive,
             DirectoryPrefix = directory is null ? null : WithSeparator(directory),

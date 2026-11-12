@@ -61,6 +61,9 @@ public sealed class FileListFilter
     /// <summary>Path prefix of a subdirectory of <see cref="Directory"/>, ending with a separator. Set with <see cref="Recursive"/>.</summary>
     public string? DirectoryPrefix { get; init; }
 
+    /// <summary>Only files belonging directly to one of these bundles (pass a bundle with all its descendants). Empty: no filter.</summary>
+    public IReadOnlyCollection<long> BundleIds { get; init; } = [];
+
     public IReadOnlyCollection<FileType> FileTypes { get; init; } = [];
     public IReadOnlyCollection<FileNodeStatus> Statuses { get; init; } = [];
 

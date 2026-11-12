@@ -43,7 +43,9 @@ public class FileRepository : IFileRepository
         // Replaced rows get new ids, so stored comparisons of this job would point at rows that
         // no longer exist. They are dropped as a whole; running the comparison again is cheap
         // because checksums are cached by path.
-        const string deleteSql = """
+        // Bundles of the job point at file ids too and are dropped the same way; `sfo bundles build` makes them again.
+        const string deleteSql = BundleRepository.DeleteForJobSql + """
+
             DELETE FROM comparison_files
             WHERE comparison_id IN (
                 SELECT id FROM comparisons WHERE source_job_id = @jobId OR against_job_id = @jobId

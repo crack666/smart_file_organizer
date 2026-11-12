@@ -8,7 +8,8 @@ namespace SmartFileOrganizer.Application.Services;
 public enum ReadFailure
 {
     JobNotFound,
-    PathNotFound
+    PathNotFound,
+    BundleNotFound
 }
 
 /// <summary>Thrown by <see cref="JobReadService"/> for an unknown job or path.</summary>
@@ -97,6 +98,9 @@ public sealed record FileListQuery : ReadQuery
 
     /// <summary>With <see cref="Directory"/>: include its subdirectories.</summary>
     public bool Recursive { get; init; }
+
+    /// <summary>Only files of this bundle and its child bundles (see <see cref="BundleService"/>).</summary>
+    public long? Bundle { get; init; }
 
     /// <summary>Effective category as the output guard reports it; <see cref="FileCategory.Unknown"/> also matches unclassified files.</summary>
     public IReadOnlyCollection<FileCategory> Categories { get; init; } = [];
