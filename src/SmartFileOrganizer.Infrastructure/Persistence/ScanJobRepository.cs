@@ -86,7 +86,8 @@ public class ScanJobRepository : IScanJobRepository
 
         // Cascade manually (SQLite FK cascade requires ON DELETE CASCADE in DDL;
         // we delete in dependency order instead).
-        const string sql = """
+        const string sql = BundleRepository.DeleteForJobSql + """
+
             DELETE FROM comparison_files    WHERE comparison_id IN (SELECT id FROM comparisons WHERE source_job_id = @id OR against_job_id = @id);
             DELETE FROM comparisons         WHERE source_job_id = @id OR against_job_id = @id;
             DELETE FROM user_overrides     WHERE file_node_id IN (SELECT id FROM file_nodes WHERE job_id = @id);
@@ -98,6 +99,6 @@ public class ScanJobRepository : IScanJobRepository
             DELETE FROM scan_jobs           WHERE id = @id;
             """;
 
-        await conn.ExecuteAsync(sql, new { id });
+        await conn.ExecuteAsync(sql, new { id, jobId = id });
     }
 }

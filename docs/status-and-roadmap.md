@@ -15,8 +15,10 @@ its date, or delete it.
 ## What exists
 
 _Checked 12.11.2026 by reading the code on `master`; build and tests run
-locally (`dotnet build` 0 errors and 0 warnings, `dotnet test` 551 passed with
-https://github.com/crack666/smart_file_organizer/issues/23 on top of the library review and the evaluation; the line said 454 with #22 on top of #8 and was not updated by those two, 411 with #8 on top of the
+locally (`dotnet build` 0 errors and 0 warnings, `dotnet test` 582 passed with
+https://github.com/crack666/smart_file_organizer/issues/39 on top of the second check
+(https://github.com/crack666/smart_file_organizer/issues/23); the line said 551 with the second check on top of
+the library review and the evaluation, 454 with #22 on top of #8 and was not updated by those two, 411 with #8 on top of the
 scan rules, read commands and library comparison, 312 before that, 293 before that, 271 before that, and 47
 before that) and in CI on Windows and Linux._
 
@@ -184,6 +186,28 @@ against two temp folders and a temp database._
 - `sfo analyze` does not yet skip files that are `backed_up`; the
   per-directory counts say which ones need no analysis
   (https://github.com/crack666/smart_file_organizer/issues/42).
+
+### Bundles
+
+_Checked 12.11.2026 on the branch for
+https://github.com/crack666/smart_file_organizer/issues/39, rebased on master after the library review, the evaluation corpus and the second check (bundles migration is step 11):
+`dotnet test` 582 passed; `sfo scan`, `bundles build`, `bundles list`, `bundles show` and `summary` run by hand
+with `--json` on a generated tree (a phone copy nested in two folders, 60 loose photos from three periods, one
+named folder) against a temp database, output checked with a JSON parser: one `phone` dump with `camera`,
+`chat_media` and noise parts, three events of 20, one folder. On the evaluation corpus (`sfo eval generate`)
+the phone backup is one `phone` dump with `DCIM` as `camera` part; the two programs and two projects are
+`software`._
+
+- `sfo bundles build <job>` groups a scanned job without a model: dumps (`phone`, `computer`,
+  `removable_drive`, `software`) with worth-keeping parts and noise, named folders taken as they are, loose
+  photos and videos as events by pauses (capture date from `file_facts`, else date in the name, else
+  modification time). `sfo bundles list|show`, `sfo files --bundle`, and `summary` with and without dumps;
+  see [bundles.md](bundles.md).
+- Capture dates exist only after `sfo analyze` has run Phase 2 on the photos; for a job that was only
+  scanned, events rest on names and modification times (`period.time_source` says which).
+- Not yet used by anything else: findings
+  (https://github.com/crack666/smart_file_organizer/issues/26) and the plan
+  (https://github.com/crack666/smart_file_organizer/issues/11) are meant to work per bundle.
 
 ### Known limits
 

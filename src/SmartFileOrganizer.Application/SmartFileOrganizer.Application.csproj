@@ -12,6 +12,8 @@
   <ItemGroup>
     <!-- Word lists of the library review (docs/library-review.md). Embedded so every host and test sees the same file. -->
     <EmbeddedResource Include="Library\library-words.json" LogicalName="SmartFileOrganizer.Application.Library.library-words.json" />
+    <!-- The shipped patterns that recognise dumps and generic folder names (docs/bundles.md). -->
+    <EmbeddedResource Include="Bundles\bundle-patterns.json" LogicalName="SmartFileOrganizer.Application.Bundles.bundle-patterns.json" />
   </ItemGroup>
 
   <PropertyGroup>

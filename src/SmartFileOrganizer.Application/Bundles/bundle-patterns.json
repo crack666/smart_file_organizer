@@ -1,0 +1,195 @@
+{
+  // Shipped patterns of the bundle builder (docs/bundles.md). Copy this file and point
+  // Bundles:PatternsFile at the copy to extend or change them; the copy replaces this file.
+  "schema_version": 1,
+  "name": "default",
+
+  // A directory is a dump when the names of its own subdirectories and files reach min_score
+  // and at least one "key" marker is among them. The outermost match wins.
+  "signatures": [
+    {
+      "name": "phone-storage",
+      "origin": "phone",
+      "split": true,
+      "at_root": true,
+      "min_score": 3,
+      "markers": [
+        { "dir": "DCIM", "weight": 1, "key": true },
+        { "dir": "Android", "weight": 2, "key": true },
+        // Only an SD card or a phone has LOST.DIR: alone it is enough.
+        { "dir": "LOST.DIR", "weight": 3, "key": true },
+        { "dir_regex": "^(com|org|net|de|io|tv|me|jp|ru|kr|cn|fr|uk|eu|at|ch)\\.[A-Za-z0-9_]+(\\.[A-Za-z0-9_]+)+$", "label": "package", "weight": 1, "max_count": 3, "key": true },
+        // Folders only a phone creates; two of them, or one with DCIM, make a phone.
+        { "dir": "WhatsApp", "weight": 2, "key": true },
+        { "dir": "MIUI", "weight": 2, "key": true },
+        { "dir": "Alarms", "weight": 2, "key": true },
+        { "dir": "Notifications", "weight": 2, "key": true },
+        { "dir": "Ringtones", "weight": 2, "key": true },
+        { "dir": "Telegram", "weight": 1 },
+        { "dir": "Podcasts", "weight": 1 },
+        { "dir": "Audiobooks", "weight": 1 },
+        { "dir": "Download", "weight": 1 },
+        { "dir": "Bluetooth", "weight": 1 },
+        { "dir": "Movies", "weight": 1 },
+        { "dir": "Pictures", "weight": 1 },
+        { "dir": ".thumbnails", "weight": 1 }
+      ]
+    },
+    {
+      "name": "user-profile",
+      "origin": "computer",
+      "split": true,
+      "at_root": true,
+      "min_score": 4,
+      "markers": [
+        { "dir": "AppData", "weight": 2, "key": true },
+        { "dir": "Application Data", "weight": 2, "key": true },
+        { "dir": "Anwendungsdaten", "weight": 2, "key": true },
+        { "dir": "Local Settings", "weight": 2, "key": true },
+        { "dir": "Lokale Einstellungen", "weight": 2, "key": true },
+        { "file": "NTUSER.DAT", "weight": 2, "key": true },
+        { "file": ".bashrc", "weight": 2, "key": true },
+        { "dir": ".config", "weight": 1, "key": true },
+        { "dir": ".local", "weight": 1 },
+        { "dir": "Desktop", "weight": 1 },
+        { "dir": "Documents", "weight": 1 },
+        { "dir": "My Documents", "weight": 1 },
+        { "dir": "Eigene Dateien", "weight": 1 },
+        { "dir": "Downloads", "weight": 1 },
+        { "dir": "Pictures", "weight": 1 },
+        { "dir": "Music", "weight": 1 },
+        { "dir": "Videos", "weight": 1 },
+        { "dir": "Favorites", "weight": 1 },
+        { "dir": "Favoriten", "weight": 1 },
+        { "dir": "Contacts", "weight": 1 },
+        { "dir": "Links", "weight": 1 },
+        { "dir": "Saved Games", "weight": 1 },
+        { "dir": "Searches", "weight": 1 },
+        { "dir": "Start Menu", "weight": 1 },
+        { "dir": "Startmenü", "weight": 1 },
+        { "dir": "SendTo", "weight": 1 },
+        { "dir": "Recent", "weight": 1 },
+        { "dir": "Cookies", "weight": 1 },
+        { "dir": "Templates", "weight": 1 },
+        { "dir": "Vorlagen", "weight": 1 }
+      ]
+    },
+    {
+      "name": "system-drive",
+      "origin": "computer",
+      "split": true,
+      "at_root": true,
+      "min_score": 3,
+      "markers": [
+        { "dir": "Windows", "weight": 2, "key": true },
+        { "dir": "PerfLogs", "weight": 1 },
+        { "dir": "Program Files", "weight": 2, "key": true },
+        { "dir": "Programme", "weight": 2, "key": true },
+        { "dir": "Documents and Settings", "weight": 2, "key": true },
+        { "dir": "Dokumente und Einstellungen", "weight": 2, "key": true },
+        { "dir": "Program Files (x86)", "weight": 1 },
+        { "dir": "ProgramData", "weight": 1 },
+        { "dir": "Users", "weight": 1 },
+        { "dir": "Benutzer", "weight": 1 },
+        { "file": "pagefile.sys", "weight": 2 },
+        { "file": "hiberfil.sys", "weight": 2 },
+        { "file": "boot.ini", "weight": 1 },
+        { "dir": "$Recycle.Bin", "weight": 1 },
+        { "dir": "RECYCLER", "weight": 1 }
+      ]
+    },
+    {
+      "name": "removable-drive",
+      "origin": "removable_drive",
+      "split": false,
+      "at_root": false,
+      "min_score": 2,
+      "markers": [
+        { "dir": "System Volume Information", "weight": 2, "key": true },
+        { "file": "autorun.inf", "weight": 2, "key": true },
+        { "dir": ".Trashes", "weight": 1, "key": true },
+        { "dir": ".Spotlight-V100", "weight": 1, "key": true },
+        { "dir": ".fseventsd", "weight": 1, "key": true },
+        { "dir": "$RECYCLE.BIN", "weight": 1 },
+        { "dir": "RECYCLER", "weight": 1 },
+        { "dir_regex": "^FOUND\\.\\d{3}$", "label": "found", "weight": 1 }
+      ]
+    },
+    {
+      "name": "software",
+      "origin": "software",
+      "split": false,
+      "at_root": false,
+      "min_score": 2,
+      // Photos and videos above this share of the subtree's files make it something else than software.
+      "max_media_share": 0.5,
+      "markers": [
+        { "dir": ".git", "weight": 2, "key": true },
+        { "dir": ".svn", "weight": 2, "key": true },
+        { "dir": ".hg", "weight": 2, "key": true },
+        { "dir": ".idea", "weight": 2, "key": true },
+        { "dir": ".vs", "weight": 2, "key": true },
+        { "dir": ".gradle", "weight": 2, "key": true },
+        { "dir": "venv", "weight": 2, "key": true },
+        { "dir": ".venv", "weight": 2, "key": true },
+        { "dir": "node_modules", "weight": 2, "key": true },
+        { "dir": "site-packages", "weight": 2, "key": true },
+        { "dir": "__pycache__", "weight": 1, "key": true },
+        { "file": "package.json", "weight": 1, "key": true },
+        { "file": "pyproject.toml", "weight": 1, "key": true },
+        { "file": "setup.py", "weight": 1, "key": true },
+        { "file": "CMakeLists.txt", "weight": 1, "key": true },
+        { "file": "pom.xml", "weight": 1, "key": true },
+        { "file_regex": "\\.sln$", "label": "solution", "weight": 1, "key": true },
+        { "file_regex": "\\.exe$", "label": "exe", "weight": 1, "key": true },
+        { "file_regex": "\\.dll$", "label": "dll", "weight": 1 }
+      ]
+    }
+  ],
+
+  // Parts of a split dump worth keeping. A path is a run of folder names (either separator) that
+  // ends at the directory; the deepest match below the dump root decides, so DCIM/Screenshots is
+  // "screenshots" although DCIM is "camera".
+  "keep_parts": [
+    { "part": "camera", "paths": ["DCIM", "Camera"] },
+    { "part": "screenshots", "paths": ["Screenshots", "Pictures/Screenshots", "DCIM/Screenshots"] },
+    { "part": "chat_media", "paths": ["WhatsApp/Media", "Telegram", "Signal", "Threema"] },
+    { "part": "received", "paths": ["Bluetooth"] },
+    { "part": "recordings", "paths": ["Recordings", "Voice Recorder", "Sounds", "Call"] },
+    { "part": "documents", "paths": ["Documents", "Dokumente", "My Documents", "Eigene Dateien", "Eigene Dokumente"] },
+    { "part": "pictures", "paths": ["Pictures", "Bilder", "My Pictures", "Eigene Bilder"] },
+    { "part": "videos", "paths": ["Movies", "Videos", "My Videos", "Eigene Videos"] },
+    { "part": "music", "paths": ["Music", "Musik", "My Music", "Eigene Musik"] },
+    { "part": "downloads", "paths": ["Download", "Downloads"] },
+    { "part": "desktop", "paths": ["Desktop"] }
+  ],
+
+  // Below one of these paths a dump is noise, whatever deeper folder names say
+  // (Android/data/<app>/files/Pictures is app data, not the user's pictures).
+  "noise_paths": [
+    "Android/data", "Android/obb", "AppData", "Application Data", "Anwendungsdaten",
+    "Local Settings", "Lokale Einstellungen", ".thumbnails", ".trashed", ".Trash", ".cache", "cache",
+    "Windows", "Program Files", "Program Files (x86)", "Programme", "ProgramData"
+  ],
+
+  // Folder names that say nothing about an occasion. Files in such folders are loose and grouped
+  // by time; a folder with any other name is a bundle of its own. Compared case-insensitively.
+  "generic_folder_names": [
+    "neuer ordner", "new folder", "unsortiert", "unsorted", "sonstiges", "misc", "diverses", "div",
+    "verschiedenes", "other", "others", "temp", "tmp", "neu", "new", "alt", "old", "backup", "backups",
+    "sicherung", "sicherungen", "kopie", "copy", "import", "imports", "export", "upload", "uploads",
+    "download", "downloads", "desktop", "dcim", "camera", "kamera", "bilder", "fotos", "photos",
+    "pictures", "images", "img", "videos", "movies", "filme", "handy", "phone", "iphone", "android",
+    "sd", "sdcard", "card", "data", "daten", "files", "dateien", "documents", "dokumente",
+    "eigene dateien", "eigene bilder", "my pictures", "my documents", "media", "medien", "aussortiert",
+    "fertig", "done", "todo", "test", "stuff", "kram", "zu sortieren", "to sort", "screenshots",
+    "whatsapp", "whatsapp images", "whatsapp video", "telegram", "bluetooth"
+  ],
+  "generic_folder_regexes": [
+    "^\\d{3}[A-Z_]{5}$",
+    "^(neuer ordner|new folder)( ?\\(\\d+\\))?$",
+    "^(tag|day|teil|part|cd|disk|disc|folder|ordner)[ _-]?\\d+$",
+    "^\\d{4}([-_. ]\\d{1,2}){0,2}$",
+    "^(img|dsc|dcim|vid|mov|pxl|photo|bild|foto)[-_ ]?\\d+"
+  ]
+}

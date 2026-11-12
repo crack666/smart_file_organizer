@@ -3,6 +3,7 @@ using System.Text;
 using Microsoft.Extensions.DependencyInjection;
 using SmartFileOrganizer.Application.Services;
 using SmartFileOrganizer.Cli.Contract;
+using SmartFileOrganizer.Domain.Models;
 
 namespace SmartFileOrganizer.Cli.Commands;
 
@@ -35,7 +36,21 @@ public static class SummaryCommand
         IReadOnlyDictionary<string, long> BySensitiveMarker,
         IReadOnlyDictionary<string, long> DirectoriesByVerdict,
         IReadOnlyDictionary<string, long> DirectoriesByRetention,
-        IReadOnlyList<LargeDirectoryView> LargestDirectories);
+        IReadOnlyList<LargeDirectoryView> LargestDirectories,
+        BundleStatsView? Bundles);
+
+    /// <summary>
+    /// The job with and without dumps, from the last <c>sfo bundles build</c>; null when bundles were never built
+    /// (or a rescan dropped them). Dumps (phone, computer, stick copies, unpacked software) dominate every
+    /// count, so the numbers without them describe what the person actually collected.
+    /// </summary>
+    public sealed record BundleStatsView(
+        DateTime BuiltAt,
+        int DumpCount,
+        int BundleCount,
+        long UnbundledFiles,
+        BundleSplitStats.PartStats Dumps,
+        BundleSplitStats.PartStats WithoutDumps);
 
     public static Command Create(CliHost host, GlobalOptions globals)
     {
@@ -81,7 +96,10 @@ public static class SummaryCommand
                 summary.BySensitiveMarker,
                 summary.DirectoriesByVerdict,
                 summary.DirectoriesByRetention,
-                summary.LargestDirectories.Select(LargeDirectoryView.From).ToList());
+                summary.LargestDirectories.Select(LargeDirectoryView.From).ToList(),
+                await services.GetRequiredService<BundleService>().GetOverviewAsync(summary.Job.Id, ct) is { } o
+                    ? new BundleStatsView(o.BuiltAt, o.Stats.DumpCount, o.Stats.BundleCount, o.Stats.UnbundledFiles, o.Stats.Dumps, o.Stats.WithoutDumps)
+                    : null);
             return CommandOutcome.Success(result, () => Render(result));
         });
 
@@ -100,6 +118,11 @@ public static class SummaryCommand
         Counts(sb, "verdicts", r.DirectoriesByVerdict);
         Counts(sb, "retention", r.DirectoriesByRetention);
         Counts(sb, "sensitive", r.BySensitiveMarker);
+        if (r.Bundles is { } b)
+        {
+            sb.AppendLine($"  dumps       {b.DumpCount}: {BundlesCommand.Line(b.Dumps)}");
+            sb.AppendLine($"  w/o dumps   {BundlesCommand.Line(b.WithoutDumps)}");
+        }
         if (r.LargestDirectories.Count > 0)
         {
             sb.AppendLine("  largest directories:");

@@ -411,7 +411,7 @@ public class SecondCheckTests : IDisposable
         _ollama.Classify = input => input.Depth == EvidenceDepth.Standard ? Answer(FileCategory.Photo, 0.3) : Answer(FileCategory.DocumentScan);
         await Service().RunAsync(job.Id);
 
-        var read = new JobReadService(new ScanJobRepository(_db), new JobReadRepository(_db), _verdictRepo);
+        var read = new JobReadService(new ScanJobRepository(_db), new JobReadRepository(_db), _verdictRepo, new BundleRepository(_db));
         var open = (await read.ShowAsync(job.Id, Path.Combine(_dir, "open.jpg"), null)).File!;
         var openCheck = Assert.Single(open.Checks);
         Assert.Equal("disagreed", openCheck.Outcome);

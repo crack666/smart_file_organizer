@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using SmartFileOrganizer.Application.Library;
+using SmartFileOrganizer.Application.Bundles;
 using SmartFileOrganizer.Application.Evaluation;
 using SmartFileOrganizer.Application.Services;
 using SmartFileOrganizer.Domain.Interfaces;
@@ -168,6 +169,13 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ScanExportService>();
         services.AddSingleton<FocusedRescanService>();
         services.AddSingleton<ContentComparisonService>();
+
+        // Bundles (https://github.com/crack666/smart_file_organizer/issues/39)
+        services.AddSingleton<IBundleRepository, BundleRepository>();
+        services.AddSingleton<ICaptureInfoSource, FileFactCaptureInfoSource>();
+        services.AddSingleton(sp =>
+            sp.GetRequiredService<IConfiguration>().GetSection("Bundles").Get<BundleOptions>() ?? new BundleOptions());
+        services.AddSingleton<BundleService>();
 
         return services;
     }

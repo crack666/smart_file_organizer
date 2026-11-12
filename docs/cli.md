@@ -591,6 +591,11 @@ sfo summary 7 --json
   `unclassified` are files without a category.
 - Distributions are sorted by count, largest first. `largest_directories` leaves out the job
   root; sizes and file counts cover the whole subtree.
+- `bundles`: the job with and without dumps, from the last `sfo bundles build`; `null` when bundles
+  were never built or a rescan dropped them. `{ "built_at", "dump_count", "bundle_count",
+  "unbundled_files", "dumps": {...}, "without_dumps": {...} }`, each part with `directories`,
+  `empty_directories`, `files`, `total_bytes` and `by_file_type`. The other numbers of the summary
+  include dumps.
 
 ### `sfo dirs <job>`
 
@@ -632,6 +637,7 @@ Files with type, category, confidence, summary and status.
 |---|---|
 | `--dir <path>` | Only files directly in this directory. |
 | `--recursive`, `-r` | With `--dir`: include subdirectories. |
+| `--bundle <id>` | Only files of this bundle and its child bundles (see [`sfo bundles`](#sfo-bundles-build-job)); `bundle_not_found` (1) for an unknown id. |
 | `--category <value>` | Category as reported (`photo`, `invoice`, `review_needed`, ...). `unknown` also matches unclassified files. Repeatable. |
 | `--status <value>` | `discovered`, `ai_analyzed`, `skipped`, `error`, ..., or `pending` (`discovered` or `processing`). Repeatable. |
 | `--type <value>` | `image`, `video`, `document`, `archive`, ... Repeatable. |
@@ -782,6 +788,86 @@ Errors: `job_not_found` (1), `scan_not_completed` (1), `output_inside_job` (1),
 `path_not_found` (1, missing target folder or word file), `export_failed` (1),
 `words_invalid` (1).
 
+## Bundles
+
+### `sfo bundles build <job>`
+
+Groups a completed job into bundles the person decides once: dumps (phone, computer, USB stick or
+software copies) with their worth-keeping parts and noise, named folders, and events of loose photos
+and videos. Replaces earlier bundles of the job. Reads only the database: no file is opened, no model
+called. How bundles are formed and why: [bundles.md](bundles.md). Issue:
+https://github.com/crack666/smart_file_organizer/issues/39
+
+| Option | Meaning |
+|---|---|
+| `--patterns <file>` | Pattern file for this run (default: `Bundles:PatternsFile`, else the shipped patterns). |
+| `--gap-hours <h>` | Pause that starts a new event (default `Bundles:EventGapHours`, 8). |
+| `--max-event-days <d>` | Longer events are cut at their largest pauses (default 14). |
+| `--min-event-files <n>` | Smaller groups go to the year's `scattered` bundle (default 3). |
+
+```json
+{
+  "job_id": 7,
+  "built_at": "2026-11-12T19:25:52.350Z",
+  "settings": { "event_gap_hours": 8, "max_event_days": 14, "min_event_files": 3,
+                "patterns": { "name": "default", "source": "built-in", "hash": "…" } },
+  "stats": {
+    "all": { "directories": 15, "empty_directories": 1, "files": 71, "total_bytes": 229, "by_file_type": { "image": 70, "other": 1 } },
+    "dumps": { "...": "same fields" },
+    "without_dumps": { "...": "same fields" },
+    "dump_count": 1, "bundle_count": 10, "unbundled_files": 0
+  },
+  "top_level_by_kind": { "event": 3, "dump": 1, "folder": 1 },
+  "comparison": { "comparison_id": 3, "against_job_id": 8, "compared_at": "2026-11-12T15:02:11.410Z" }
+}
+```
+
+`comparison` is the latest `sfo compare` of the job against a library, or `null`. Errors:
+`job_not_found` (1), `scan_not_completed` (1), `patterns_invalid` (1, the pattern file or a threshold).
+
+### `sfo bundles list <job>`
+
+One page of bundles (paging as in [Lists and paging](#lists-and-paging)): the top level by default.
+
+| Option | Meaning |
+|---|---|
+| `--parent <id>` | The children of this bundle: a dump's parts, a camera part's events. |
+| `--all` | Every bundle, whatever its parent. |
+| `--kind <code>` | `dump`, `dump_keep`, `dump_noise`, `folder`, `event`, `scattered`. Repeatable. |
+
+```json
+{
+  "job_id": 7, "total": 5, "limit": 200, "offset": 0, "next_offset": null,
+  "items": [
+    { "id": 1, "parent_id": null, "kind": "dump", "origin": "phone", "part": null,
+      "suggested_name": "Handy (phone 2013)", "styled_name": null, "root_path": "/media/disk/Handy",
+      "period": { "from": "2013-06-10T10:00:00", "to": "2013-06-20T12:00:00", "time_source": "file_name" },
+      "files": 10, "total_bytes": 18, "directories": 12, "empty_directories": 1, "children": 3,
+      "sensitive_files": 0, "comparison": { "backed_up": 4, "new": 6 },
+      "reason": "Recognised as phone dump by signature 'phone-storage' (score 5 of at least 3): dir:DCIM, dir:Android, dir:LOST.DIR.",
+      "facts": { "by_file_type": { "image": 9, "other": 1 }, "time_sources": { "file_name": 9, "modified_date": 1 },
+                 "markers": [ "dir:DCIM", "dir:Android", "dir:LOST.DIR" ], "directories": [], "directories_total": 0,
+                 "device": null, "copy_time_suspected": false, "direct_files_only": false } }
+  ]
+}
+```
+
+- `origin` for `dump`, `part` for `dump_keep`, otherwise `null`. `root_path` is the directory that is
+  the bundle (dump, folder, first folder of a part); `null` for events.
+- `period.from`/`to` are local wall-clock times **without** a zone and without `Z`: capture dates and
+  dates in names carry none. `time_source`: `capture_date`, `file_name`, `modified_date` or `mixed`.
+- `files`, `total_bytes`, `directories`, `sensitive_files` and `comparison` cover the bundle with its
+  children. `sensitive_files` and `comparison` (counts per state of the latest comparison with a
+  library, `null` without one) are computed when read.
+- `styled_name` is always `null` until a model proposes names in the style of the library.
+- `facts.directories` lists at most 20 directories (relative to the root) of a part or an event;
+  `directories_total` counts all.
+
+### `sfo bundles show <job> <bundle>`
+
+`{ "job_id", "bundle": {...}, "children": [ {...} ] }` with the fields of `list`. The files:
+`sfo files <job> --bundle <bundle>`. Errors: `job_not_found` (1), `bundle_not_found` (1).
+
 ## Machine contract
 
 Applies to every command, including the ones added later.
@@ -819,7 +905,7 @@ one line per phase every 500 ms, plus the final line of a phase.
 | Code | Meaning | `error.code` |
 |---|---|---|
 | 0 | Done | |
-| 1 | The command ran but could not do its job | `job_not_found`, `path_not_found`, `scan_failed`, `scan_not_completed`, `wrong_role`, `compare_incomplete`, `database_error`, `model_missing`, `rules_invalid`, `words_invalid`, `output_inside_job`, `export_failed`, `truth_invalid`, `run_not_found`, `output_not_empty`, `internal_error` |
+| 1 | The command ran but could not do its job | `job_not_found`, `path_not_found`, `scan_failed`, `scan_not_completed`, `wrong_role`, `compare_incomplete`, `database_error`, `model_missing`, `rules_invalid`, `words_invalid`, `output_inside_job`, `export_failed`, `truth_invalid`, `run_not_found`, `output_not_empty`, `bundle_not_found`, `patterns_invalid`, `internal_error` |
 | 2 | Wrong invocation: unknown command or option, missing or invalid value | `usage` |
 | 3 | Ollama not reachable | `ollama_unavailable` |
 | 130 | Interrupted with Ctrl+C; stored work stays and the command can be run again | `cancelled` |
