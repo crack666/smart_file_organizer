@@ -1,0 +1,199 @@
+using System.Net.Http.Json;
+using System.Text;
+using System.Text.Json;
+using Microsoft.Extensions.Logging;
+using SmartFileOrganizer.Domain.Enums;
+using SmartFileOrganizer.Domain.Interfaces;
+using SmartFileOrganizer.Domain.Models;
+
+namespace SmartFileOrganizer.Infrastructure.Ollama;
+
+/// <summary>
+/// Asks the configured local Ollama model about a library (<c>sfo library review</c> and <c>propose</c>).
+/// Prompts and answer schemas for both questions live here, next to the other prompts. The facts hold
+/// folder names, which can be private; they go to this server and nowhere else.
+/// </summary>
+public sealed class OllamaLibraryAdvisor : ILibraryAdvisor
+{
+    private readonly HttpClient _http;
+    private readonly OllamaOptions _options;
+    private readonly ILogger<OllamaLibraryAdvisor> _logger;
+
+    public OllamaLibraryAdvisor(HttpClient http, OllamaOptions options, ILogger<OllamaLibraryAdvisor> logger)
+    {
+        _http = http;
+        _options = options;
+        _logger = logger;
+    }
+
+    public async Task<LibraryAdviceReply> AskAsync(LibraryAdviceRequest request, CancellationToken ct = default)
+    {
+        var model = string.IsNullOrWhiteSpace(request.Model) ? _options.Model : request.Model;
+        var language = request.Language ?? _options.SummaryLanguage;
+        var prompt = request.Task == LibraryAdviceTask.Review
+            ? BuildReviewPrompt(request.Facts, language)
+            : BuildProposePrompt(request.Facts, language);
+        var body = new
+        {
+            model,
+            stream = false,
+            think = false,
+            keep_alive = _options.KeepAlive,
+            format = request.Task == LibraryAdviceTask.Review ? ReviewSchema() : ProposeSchema(),
+            messages = new object[] { new { role = "user", content = prompt } }
+        };
+
+        try
+        {
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            // One call over a whole tree: allow three times the per-file timeout.
+            cts.CancelAfter(TimeSpan.FromSeconds(_options.TimeoutSeconds * 3));
+            var response = await _http.PostAsJsonAsync(new Uri(new Uri(_options.BaseUrl.TrimEnd('/') + "/"), "api/chat"), body, cts.Token);
+            var raw = await response.Content.ReadAsStringAsync(cts.Token);
+            if (!response.IsSuccessStatusCode)
+                return new LibraryAdviceReply(null, model, raw, $"HTTP {(int)response.StatusCode} from Ollama.");
+
+            using var doc = JsonDocument.Parse(raw);
+            var content = doc.RootElement.TryGetProperty("message", out var message) && message.TryGetProperty("content", out var c)
+                ? c.GetString()
+                : doc.RootElement.TryGetProperty("response", out var r) ? r.GetString() : null;
+            _logger.LogInformation("[Library] {Task} answered with {Chars} characters", request.Task, content?.Length ?? 0);
+            return string.IsNullOrWhiteSpace(content)
+                ? new LibraryAdviceReply(null, model, raw, "The model returned no content.")
+                : new LibraryAdviceReply(content, model, raw, null);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            return new LibraryAdviceReply(null, model, null, $"Ollama request timed out after {_options.TimeoutSeconds * 3}s.");
+        }
+        catch (Exception ex) when (ex is HttpRequestException or JsonException)
+        {
+            _logger.LogWarning(ex, "[Library] {Task} failed", request.Task);
+            return new LibraryAdviceReply(null, model, null, ex.Message);
+        }
+    }
+
+    public static string BuildReviewPrompt(string facts, string language)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("You review the folder structure of a person's own archive (a home NAS or a folder). You see only folder names,");
+        sb.AppendLine("counts, file types and years, plus findings of deterministic rules. You never see file contents.");
+        sb.AppendLine();
+        sb.AppendLine("Principles:");
+        sb.AppendLine("- Continue the person's habits instead of replacing them. If photo folders are named by occasion (\"Ski trip 2015\"), keep that; never switch to folders by year.");
+        sb.AppendLine("- Say explicitly what is already good; it stays as it is.");
+        sb.AppendLine("- Decide the role of folders first: on one level, occasions, persons, devices and topics may lie side by side. Only siblings with the same role are comparable.");
+        sb.AppendLine("- A number at the end of a name can be a year or an age; judge from the siblings.");
+        sb.AppendLine("- A majority of names is a hint, not a decision. Prefer the most common pattern among the dated names for occasions.");
+        sb.AppendLine("- Areas of life (home, car, health, work) carry a document structure better than persons.");
+        sb.AppendLine("- Dumps (device or computer copies) are handled as a whole; do not restructure their insides.");
+        sb.AppendLine("- Propose few changes with clear effect, each with a reason. Changes are suggestions; nothing is moved now.");
+        sb.AppendLine();
+        sb.AppendLine("Answer with JSON only:");
+        sb.AppendLine("- good: folders that are fine as they are (path, reason).");
+        sb.AppendLine($"- roles: role of important folders and of their children (path, role, children_role, reason). Roles: {string.Join(", ", VerdictCodes.All<FolderRole>())}.");
+        sb.AppendLine($"- changes: (action, path, target, reason, finding). Actions: {string.Join(", ", VerdictCodes.All<ProposalAction>())}. "
+                      + "path is an existing folder exactly as listed; target is the new name or path; finding is the finding code it answers, if any.");
+        sb.AppendLine("- outline: the target structure in at most three levels (path, purpose, pattern for the names of the folders inside, if any).");
+        sb.AppendLine($"Write reasons and purposes in {language}. Keep folder names in their own language.");
+        sb.AppendLine();
+        sb.AppendLine("Facts:");
+        sb.Append(facts);
+        return sb.ToString();
+    }
+
+    public static string BuildProposePrompt(string facts, string language)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("A person has no ordered archive yet. From what was found on a source (folder names, counts, file types, dates,");
+        sb.AppendLine("and where available a verdict on each folder), propose a target structure for a new archive.");
+        sb.AppendLine();
+        sb.AppendLine("Principles:");
+        sb.AppendLine("- Few targets, at most two levels each. Only targets for content that was actually found.");
+        sb.AppendLine("- Photos and videos of an occasion go together, named by occasion and year (pattern like \"{occasion} {year}\"), not by year alone.");
+        sb.AppendLine("- Documents by area of life, not by person.");
+        sb.AppendLine("- Programs, projects and device copies are kept whole.");
+        sb.AppendLine("- Use the language of the source's folder names for target names.");
+        sb.AppendLine();
+        sb.AppendLine("Answer with JSON only: targets, each with id (lower case, no spaces), path (relative, '/' as separator), pattern (or empty),");
+        sb.AppendLine("holds (file types: image, video, audio, document, archive, code, executable, database, font, other), reason, examples (folder names from the facts that would go there).");
+        sb.AppendLine($"Write reasons in {language}.");
+        sb.AppendLine();
+        sb.AppendLine("Facts:");
+        sb.Append(facts);
+        return sb.ToString();
+    }
+
+    private static object Str() => new { type = "string" };
+
+    private static object ReviewSchema() => new
+    {
+        type = "object",
+        properties = new
+        {
+            good = new { type = "array", items = new { type = "object", properties = new { path = Str(), reason = Str() }, required = new[] { "path", "reason" } } },
+            roles = new
+            {
+                type = "array",
+                items = new
+                {
+                    type = "object",
+                    properties = new
+                    {
+                        path = Str(),
+                        role = new { type = "string", @enum = VerdictCodes.All<FolderRole>() },
+                        children_role = new { type = "string", @enum = VerdictCodes.All<FolderRole>() },
+                        reason = Str()
+                    },
+                    required = new[] { "path", "role" }
+                }
+            },
+            changes = new
+            {
+                type = "array",
+                items = new
+                {
+                    type = "object",
+                    properties = new
+                    {
+                        action = new { type = "string", @enum = VerdictCodes.All<ProposalAction>() },
+                        path = Str(),
+                        target = Str(),
+                        reason = Str(),
+                        finding = Str()
+                    },
+                    required = new[] { "action", "path", "reason" }
+                }
+            },
+            outline = new { type = "array", items = new { type = "object", properties = new { path = Str(), purpose = Str(), pattern = Str() }, required = new[] { "path", "purpose" } } }
+        },
+        required = new[] { "good", "roles", "changes", "outline" }
+    };
+
+    private static object ProposeSchema() => new
+    {
+        type = "object",
+        properties = new
+        {
+            targets = new
+            {
+                type = "array",
+                items = new
+                {
+                    type = "object",
+                    properties = new
+                    {
+                        id = Str(),
+                        path = Str(),
+                        pattern = Str(),
+                        holds = new { type = "array", items = Str() },
+                        reason = Str(),
+                        examples = new { type = "array", items = Str() }
+                    },
+                    required = new[] { "id", "path", "holds", "reason" }
+                }
+            }
+        },
+        required = new[] { "targets" }
+    };
+}
