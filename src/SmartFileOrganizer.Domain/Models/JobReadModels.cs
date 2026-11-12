@@ -35,6 +35,12 @@ public sealed class DirectoryReadRow
 
     public string? AiSummaryError { get; set; }
 
+    /// <summary>Model that wrote the Phase 3 summary; null when it was built from the verdict.</summary>
+    public string? AiSummaryModel { get; set; }
+
+    /// <summary>Marked files that entered the Phase 3 summary as their neutral line (JSON list); null when unknown.</summary>
+    public string? AiSummaryMarkedInputs { get; set; }
+
     /// <summary>Stored markers of a skipped folder (<see cref="DirectoryNode.SensitiveMarkers"/>).</summary>
     public SensitiveMarker SensitiveMarkers { get; set; }
 

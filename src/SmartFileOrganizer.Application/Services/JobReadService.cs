@@ -165,7 +165,9 @@ public class JobReadService
         var item = ToItem(entry, index, protect: true, output);
         var rawResponse = DirectoryTextGuard.Protect(verdict?.RawResponse, marked, output, out var rawWithheld);
 
-        var analysisItems = analyses.Select(a => ToAnalysis(a, marked, output, ref rawWithheld)).ToList();
+        var analysisItems = analyses
+            .Select(a => ToAnalysis(a, marked, output, stale: a.Phase == "summary" && !entry.SummaryIsCurrent, ref rawWithheld))
+            .ToList();
 
         return new PathDetail(new DirectoryDetail
         {
@@ -380,9 +382,19 @@ public class JobReadService
         var marked = index.MarkedNamesBelow(entry);
         var purpose = DirectoryTextGuard.Protect(item.Purpose, marked, output, out var w1);
         var reason = DirectoryTextGuard.Protect(item.Reason, marked, output, out var w2);
-        var summary = DirectoryTextGuard.Protect(item.Summary, marked, output, out var w3);
+        string? summary;
+        bool w3;
+        if (output?.IncludeSensitive != true && item.Summary is not null && !entry.SummaryIsCurrent)
+            (summary, w3) = (DirectorySummaryGuard.StaleHint, true);
+        else
+            summary = DirectoryTextGuard.Protect(item.Summary, marked, output, out w3);
         var verdictError = DirectoryTextGuard.Protect(item.VerdictError, marked, output, out var w4);
-        var summaryError = DirectoryTextGuard.Protect(item.SummaryError, marked, output, out var w5);
+        string? summaryError;
+        bool w5;
+        if (output?.IncludeSensitive != true && item.SummaryError is not null && !entry.SummaryIsCurrent)
+            (summaryError, w5) = (DirectorySummaryGuard.StaleHint, true);
+        else
+            summaryError = DirectoryTextGuard.Protect(item.SummaryError, marked, output, out w5);
 
         return item with
         {
@@ -396,8 +408,27 @@ public class JobReadService
     }
 
     private static DirectoryAnalysisItem ToAnalysis(
-        DirectoryClassificationResult a, IReadOnlyCollection<string> marked, SensitiveOutputOptions output, ref bool withheld)
+        DirectoryClassificationResult a, IReadOnlyCollection<string> marked, SensitiveOutputOptions output, bool stale, ref bool withheld)
     {
+        // A model summary written before a file of the directory was marked: none of its texts is shown.
+        if (stale && !output.IncludeSensitive)
+        {
+            withheld = true;
+            return new DirectoryAnalysisItem
+            {
+                Phase = a.Phase,
+                Summary = DirectorySummaryGuard.StaleHint,
+                Homogeneity = a.Homogeneity,
+                DominantType = a.DominantType,
+                SamplingStrategy = a.SamplingStrategy,
+                SampleSize = a.SampleSize,
+                Anomalies = ParseAnomalies(a.AnomalousFileIds).Select(x => new AnomalyItem(x.Name, DirectoryTextGuard.NeutralHint)).ToList(),
+                ModelUsed = a.ModelUsed,
+                AnalyzedAt = a.AnalyzedAt == default ? null : a.AnalyzedAt,
+                Error = a.Error is null ? null : DirectorySummaryGuard.StaleHint
+            };
+        }
+
         var summary = DirectoryTextGuard.Protect(a.Summary, marked, output, out var w1);
         var theme = DirectoryTextGuard.Protect(a.Theme, marked, output, out var w2);
         var error = DirectoryTextGuard.Protect(a.Error, marked, output, out var w3);
@@ -510,6 +541,8 @@ public class JobReadService
             visit?.Invoke(row, match);
             if (!match.IsMatch) continue;
 
+            if (index.ByPath.TryGetValue(row.File.ParentPath, out var parent))
+                parent.DirectMarkedNames.Add(row.File.Name);
             foreach (var entry in index.SelfAndAncestors(row.File.ParentPath))
             {
                 entry.SensitiveFiles++;
@@ -536,6 +569,13 @@ public class JobReadService
 
         /// <summary>Names of marked files in the subtree.</summary>
         public HashSet<string> MarkedNames { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>Names of marked files stored directly in this directory: the ones a Phase 3 summary saw.</summary>
+        public HashSet<string> DirectMarkedNames { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>False when the model summary was written before a file of this directory was marked.</summary>
+        public bool SummaryIsCurrent =>
+            DirectorySummaryGuard.IsCurrent(Row.AiSummaryModel, Row.AiSummaryMarkedInputs, DirectMarkedNames);
     }
 
     private sealed class DirectoryIndex

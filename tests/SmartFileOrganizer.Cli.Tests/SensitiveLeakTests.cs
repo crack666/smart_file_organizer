@@ -103,6 +103,122 @@ public class SensitiveLeakTests : IDisposable
         Assert.DoesNotContain(Secret, log);
     }
 
+    private async Task ExecuteSqlAsync(string sql)
+    {
+        await using var conn = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={_dbPath};Pooling=False;");
+        await conn.OpenAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        await cmd.ExecuteNonQueryAsync();
+    }
+
+    private async Task<string?> QueryTextAsync(string sql)
+    {
+        await using var conn = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={_dbPath};Pooling=False;");
+        await conn.OpenAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        return (await cmd.ExecuteScalarAsync()) as string;
+    }
+
+    private async Task<bool> ColumnExistsAsync(string table, string column)
+    {
+        await using var conn = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={_dbPath};Pooling=False;");
+        await conn.OpenAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = $"SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name = '{column}'";
+        return (long)(await cmd.ExecuteScalarAsync())! > 0;
+    }
+
+    /// <summary>Every read command and the export, as JSON or CSV text.</summary>
+    private async Task<string> AllOutputsAsync(long job)
+    {
+        var sb = new StringBuilder();
+        foreach (var args in new[]
+                 {
+                     new[] { "dirs" }, ["dirs", "--sensitive", "yes"], ["files"], ["show", "docs"], ["show", "."],
+                     ["show", Path.Combine("docs", "passwords.txt")], ["summary"], ["status"]
+                 })
+        {
+            var run = await SfoAsync([args[0], job.ToString(), .. args.Skip(1), "--json"]);
+            Assert.True(run.ExitCode == ExitCodes.Ok, string.Join(' ', args) + ": " + run.Stdout + run.Stderr);
+            sb.AppendLine(run.Stdout).AppendLine(run.Stderr);
+        }
+
+        var csv = Path.Combine(_dir, $"export-{Guid.NewGuid():N}.csv");
+        var export = await SfoAsync("export", job.ToString(), "--csv", csv, "--json");
+        Assert.True(export.ExitCode == ExitCodes.Ok, export.Stdout + export.Stderr);
+        sb.AppendLine(await File.ReadAllTextAsync(csv));
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// A directory summary written before a file was marked (older version, rules added later) can
+    /// paraphrase the file without naming it, so the name check does not catch it.
+    /// </summary>
+    [Fact]
+    public async Task DirectoryJson_DoesNotCarryContentOfAMarkedFile_FromASummaryWrittenBeforeTheMarker()
+    {
+        var job = await ScanAsync();
+        var docs = Path.Combine(_root, "docs");
+        await ExecuteSqlAsync($"""
+            INSERT INTO ai_directory_results (directory_node_id, phase, summary, theme, sampling_strategy, sample_size, model_used, analyzed_at)
+            SELECT id, 'summary', 'Letters and a mail login {Secret}.', 'mail login {Secret}', 'analyze_all', 2, 'older-model', '2026-01-01T00:00:00Z'
+            FROM directory_nodes WHERE full_path = '{docs.Replace("'", "''")}'
+            """);
+
+        var before = await AllOutputsAsync(job);
+        Assert.DoesNotContain(Secret, before);
+        var shown = (await SfoAsync("show", job.ToString(), "docs", "--json")).Result().GetProperty("directory");
+        Assert.True(shown.GetProperty("text_withheld").GetBoolean());
+
+        // The next analysis writes the summary again, now with the marked file as its neutral line.
+        var analyze = await SfoAsync("analyze", job.ToString(), "--verbose", "--json");
+        Assert.True(analyze.ExitCode == ExitCodes.Ok, analyze.Stdout + analyze.Stderr);
+        var summarySql = $"""
+            SELECT s.{"{0}"} FROM ai_directory_results s JOIN directory_nodes d ON d.id = s.directory_node_id
+            WHERE s.phase = 'summary' AND d.full_path = '{docs.Replace("'", "''")}'
+            """;
+        Assert.NotEqual("older-model", await QueryTextAsync(summarySql.Replace("{0}", "model_used")));
+        Assert.Equal("""["passwords.txt"]""", await QueryTextAsync(summarySql.Replace("{0}", "marked_inputs")));
+        var rewritten = await QueryTextAsync(summarySql.Replace("{0}", "summary"));
+        Assert.Contains("letter.txt", rewritten);
+        Assert.Contains("passwords.txt", rewritten);
+        Assert.DoesNotContain(Secret, rewritten);
+        // Shown again: the echo names the marked file, so the name check may still hold the text back, but not as stale.
+        var after = (await SfoAsync("show", job.ToString(), "docs", "--json")).Result().GetProperty("directory");
+        Assert.DoesNotContain("marked after this summary", after.ToString());
+        Assert.DoesNotContain(Secret, await AllOutputsAsync(job));
+        Assert.DoesNotContain(Secret, await File.ReadAllTextAsync(DebugLogPath));
+    }
+
+    /// <summary>
+    /// Rows scanned before the header rules existed have no header check. The next analysis checks them
+    /// before any model call, so a key file with an innocent name is marked before its text is used.
+    /// </summary>
+    [Fact]
+    public async Task Analyze_ChecksHeadersOfOlderRows_BeforeTheirContentIsUsed()
+    {
+        // Made-up key file with an innocent name: only the header rule finds it.
+        File.WriteAllText(Path.Combine(_root, "docs", "notes-2009.txt"), "-----BEGIN RSA " + "PRIVATE KEY-----\n" + Secret + "\n");
+        var job = await ScanAsync();
+        // As written by a version before the header rules.
+        await ExecuteSqlAsync("UPDATE file_nodes SET sensitive_markers = NULL, sensitive_rule = NULL WHERE name = 'notes-2009.txt'");
+        if (await ColumnExistsAsync("file_nodes", "sensitive_rules_version"))
+            await ExecuteSqlAsync("UPDATE file_nodes SET sensitive_rules_version = NULL WHERE name = 'notes-2009.txt'");
+
+        var analyze = await SfoAsync("analyze", job.ToString(), "--verbose", "--json");
+
+        Assert.True(analyze.ExitCode == ExitCodes.Ok, analyze.Stdout + analyze.Stderr);
+        Assert.DoesNotContain(Secret, analyze.Stderr);
+        var marked = (await SfoAsync("files", job.ToString(), "--sensitive", "yes", "--json")).Result();
+        var notes = marked.GetProperty("items").EnumerateArray()
+            .Single(i => i.GetProperty("name").GetString() == "notes-2009.txt");
+        Assert.Equal(["schluessel"], notes.GetProperty("sensitive").EnumerateArray().Select(t => t.GetString()));
+        Assert.DoesNotContain(Secret, await AllOutputsAsync(job));
+        Assert.DoesNotContain(Secret, await File.ReadAllTextAsync(DebugLogPath));
+    }
+
     [Fact]
     public async Task SkippedSshFolder_IsMarkedSensitive_WithoutBeingEntered()
     {
