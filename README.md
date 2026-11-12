@@ -44,6 +44,14 @@ dotnet run --project src/SmartFileOrganizer.Cli -- scan <library> --role library
 dotnet run --project src/SmartFileOrganizer.Cli -- compare <job> --against <library-job>
 ```
 
+To judge how an existing library is filed, without opening a file and
+without changing anything in it ([docs/library-review.md](docs/library-review.md)):
+
+```bash
+dotnet run --project src/SmartFileOrganizer.Cli -- scan <folder> --structure-only
+dotnet run --project src/SmartFileOrganizer.Cli -- library review <job> --no-model
+```
+
 ## Roadmap
 
 Open work lives in GitHub issues, grouped into milestones A to D:

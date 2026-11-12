@@ -229,6 +229,7 @@ https://github.com/crack666/smart_file_organizer/milestones
 | [status-and-roadmap.md](status-and-roadmap.md) | What exists (dated), known limits, operating notes, traps |
 | [architecture.md](architecture.md) | Layer structure, runtime flows, DB schema |
 | [scan-rules.md](scan-rules.md) | Rule files (profiles): which folders a scan enters, records shallow or skips, and why |
+| [library-review.md](library-review.md) | Judging a library by its structure: dumps, finding kinds and thresholds, word file, model questions, target file |
 | [engineering-decisions.md](engineering-decisions.md) | Library choices, trade-offs, lessons learned |
 | [code-guidelines.md](code-guidelines.md) | Repo-specific conventions and rules |
 | [product-overview.md](product-overview.md) | Vision, use cases, non-goals |

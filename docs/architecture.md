@@ -303,6 +303,17 @@ string json = SensitiveOutputGuard.ToJson(record);   // or ToJson(records) for a
 - Directory sizes and file counts are rolled up along the parent chain from `file_nodes`, because `directory_nodes.total_size` holds the direct files only and `recursive_file_count` is not filled by the scan.
 - Directory listings and the summary stream every file of the job once to count marked files per subtree (the name rules are code, not SQL).
 
+## Library review
+
+`LibraryService` (Application/Library) answers `sfo library review` and `propose`
+([library-review.md](library-review.md)). It reads only the database; nothing touches the judged folder.
+
+- `LibraryTree.BuildAsync` builds the tree in memory from `IJobReadRepository.GetDirectoriesAsync` and `ILibraryRepository.StreamStructureFilesAsync` (name, size, type, date, markers; unbuffered) and rolls up subtree sums.
+- `DumpDetector` marks device, computer and package dumps first; `LibraryRules` then runs the rules on the rest and bundles findings per parent. Word lists and exceptions come from `LibraryWords` (embedded `library-words.json`, extendable with `--words`).
+- `LibraryFacts` turns the tree into the text the model sees (outline and findings, no file names). `ILibraryAdvisor` (`OllamaLibraryAdvisor`) asks the model with a JSON schema; `LibraryAdviceParser` drops unknown paths and codes. Answers are cached in `library_advice` by a hash of task, model and facts.
+- `TargetProposer` builds the target structure from the rules or the model answer; `TargetStructureFile` writes, reads and validates it.
+- `sfo scan --structure-only` stores `scan_jobs.structure_only`; `ScanEngine` and `ScopedRefreshService` then call `SensitiveFileRules.Apply` without a header probe, so no file is opened.
+
 ## Ollama configuration flow
 
 1. default settings come from `src/SmartFileOrganizer.Hosting/appsettings.json` (copied into every referencing app's output)
@@ -334,7 +345,7 @@ SQLite is the local source of truth. It stores both operational state and review
 
 Important tables:
 
-- `scan_jobs` — job lifecycle, counters, status, and the scan rules of the job (step 4: `rules_name`, `rules_source`, `rules_hash`, `rules_json`), role (`source`/`library`)
+- `scan_jobs` — job lifecycle, counters, status, and the scan rules of the job (step 4: `rules_name`, `rules_source`, `rules_hash`, `rules_json`), role (`source`/`library`), `structure_only` (step 8)
 - `directory_nodes` — scanned directories with heuristic metadata and stats; `dir_status = Error` for directories the scan could not read
 - `file_nodes` — scanned files with metadata, type, AI status, rule-based sensitive markers (`sensitive_markers`, `sensitive_rule`)
 - `ai_results` — Phase 2 per-file classification results, including model sensitive markers (`sensitive_markers`) and the evidence notes (`evidence`, step 7)
@@ -357,6 +368,7 @@ Important tables:
 - `content_fingerprints` — head-and-tail and full SHA-256 per path, with the size and modification time (`last_write_ticks`) they belong to and the time the full checksum was computed (`full_hash_at`); shared by all jobs
 - `comparisons` — one row per compared pair of source job and library job (`against_job_id` null: duplicates only), with `complete` and `error_count`
 - `comparison_files` — per source file: `state` (`backed_up`, `new`, `differs`, `error`; null without library), `match_file_node_id`, `match_count`, `match_hash`, `match_verified_at`, `duplicate_group`, `error`
+- `library_advice` — model answers of `sfo library` (step 8): `job_id`, `task` (`review`/`propose`), `input_hash`, `model`, `created_at`, `content`, `raw_response`, `error`
 - `db_version` — one row per applied schema step (`version`, `applied_at`)
 
 ## Schema migrations
@@ -373,7 +385,7 @@ The schema is built from numbered steps in `src/SmartFileOrganizer.Infrastructur
 1. Add one file `Migrations/M000N_ShortName.cs` with a class implementing `ISchemaMigration`, or deriving from `SqlSchemaMigration` when plain SQL is enough. `Version` is `N`.
 2. Take the next free number on `master`. Steps are discovered by reflection, so no shared list is edited.
 3. Versions must be exactly `1..N`. If two branches picked the same number, startup and `SchemaMigrationTests` fail with a "Duplicate schema migration versions" message; the branch merged second renumbers its step (file name and `Version`).
-4. Never change a step that has been merged; add a new one. Step 1 (`M0001_InitialSchema`) is the schema as it existed before migrations. Step 2 (`M0002_SensitiveMarkers`) adds the sensitive-marker columns. Step 3 (`M0003_DirectoryVerdicts`) adds `directory_verdicts`. Step 4 (`M0004_ScanJobRules`) adds the scan rules of a job. Step 5 (`M0005_ContentComparison`) adds the comparison with the library. Step 6 (`M0006_DirectorySamples`) adds `directory_samples`, the escalation columns and the origin and keep-hint columns of `ai_results`; its new codes are English.
+4. Never change a step that has been merged; add a new one. Step 1 (`M0001_InitialSchema`) is the schema as it existed before migrations. Step 2 (`M0002_SensitiveMarkers`) adds the sensitive-marker columns. Step 3 (`M0003_DirectoryVerdicts`) adds `directory_verdicts`. Step 4 (`M0004_ScanJobRules`) adds the scan rules of a job. Step 5 (`M0005_ContentComparison`) adds the comparison with the library. Step 6 (`M0006_DirectorySamples`) adds `directory_samples`, the escalation columns and the origin and keep-hint columns of `ai_results`; its new codes are English. Step 8 (`M0008_LibraryReview`) adds `scan_jobs.structure_only` and `library_advice`.
 5. Do not put `PRAGMA journal_mode` or other transaction-incompatible statements in a step.
 
 ## Architectural rules
