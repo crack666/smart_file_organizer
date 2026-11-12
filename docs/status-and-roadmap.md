@@ -71,6 +71,18 @@ All three phases run with bounded concurrency set by `MaxParallelRequests`
 - Right-click on a folder opens it in the file manager. This calls
   `explorer.exe` and therefore only works on Windows.
 
+### Command line
+
+_Checked 12.11.2026 on the branch for
+https://github.com/crack666/smart_file_organizer/issues/5: `dotnet test`
+130 passed after rebasing on the scan-rule change of #20, and `scan`, `status --json`, `analyze` against a closed port
+(exit code 3) and `doctor` run by hand against a temp database._
+
+- `sfo scan`, `analyze`, `jobs`, `status`, `doctor` with `--json` output
+  and JSONL progress; see [cli.md](cli.md).
+- Read commands for folders and files are not there yet
+  (https://github.com/crack666/smart_file_organizer/issues/6).
+
 ### Known limits
 
 - PDFs: only the first page is seen; text extraction is preview-sized; no

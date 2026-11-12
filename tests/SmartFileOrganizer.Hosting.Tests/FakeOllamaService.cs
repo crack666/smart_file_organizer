@@ -12,6 +12,9 @@ internal sealed class FakeOllamaService : IOllamaService
     public ConcurrentBag<string> PreAssessedDirectories { get; } = [];
     public ConcurrentBag<string> SummarizedDirectories { get; } = [];
 
+    /// <summary>Called before each file classification, for example to cancel a run midway.</summary>
+    public Action<OllamaClassificationInput>? BeforeClassify { get; set; }
+
     public Task<bool> IsAvailableAsync(CancellationToken ct = default) => Task.FromResult(true);
 
     public Task<IReadOnlyList<OllamaLocalModel>> GetLocalModelsAsync(CancellationToken ct = default) =>
@@ -21,6 +24,8 @@ internal sealed class FakeOllamaService : IOllamaService
 
     public Task<FileClassification> ClassifyAsync(OllamaClassificationInput input, CancellationToken ct = default)
     {
+        BeforeClassify?.Invoke(input);
+        ct.ThrowIfCancellationRequested();
         FileInputs.Add(input);
         return Task.FromResult(new FileClassification
         {

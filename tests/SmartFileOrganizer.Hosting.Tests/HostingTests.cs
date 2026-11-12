@@ -145,6 +145,82 @@ public class HostingTests : IDisposable
     }
 
     [Fact]
+    public async Task AwaitedRuns_ReportPhaseCounters_ThroughJobStatusService()
+    {
+        var root = Path.Combine(_dir, "data");
+        Directory.CreateDirectory(Path.Combine(root, "sub"));
+        await File.WriteAllTextAsync(Path.Combine(root, "a.txt"), "alpha");
+        await File.WriteAllBytesAsync(Path.Combine(root, "sub", "b.png"), [0x89, 0x50, 0x4E, 0x47, 1]);
+        await File.WriteAllTextAsync(Path.Combine(root, "sub", "c.bin"), "not eligible");
+
+        var ollama = new FakeOllamaService();
+        await using var provider = BuildProvider(ollama);
+        await provider.InitializeSmartFileOrganizerDatabaseAsync();
+
+        var scans = provider.GetRequiredService<ScanJobService>();
+        var job = await scans.CreateJobAsync(root);
+        var scanned = await scans.RunAsync(job.Id);
+        Assert.Equal(JobStatus.Completed, scanned.Status);
+
+        var status = provider.GetRequiredService<JobStatusService>();
+        var before = await status.GetAsync(job.Id);
+        Assert.NotNull(before);
+        Assert.Equal(3, before!.Statistics.FilesTotal);
+        Assert.Equal(2, before.Statistics.FilesAiEligible);
+        Assert.Equal(2, before.Statistics.FilesAiPending);
+        Assert.Equal(2, before.Statistics.DirectoriesTotal);
+        Assert.Equal(0, before.Statistics.DirectoriesPreAssessed);
+
+        // Only phase 2, awaited, with phase-tagged progress
+        var ai = provider.GetRequiredService<AiClassificationCoordinator>();
+        var reported = new List<AiPhaseProgress>();
+        var run = await ai.RunAsync(job.Id, AiPhases.Classification, new SyncProgress<AiPhaseProgress>(reported.Add));
+        Assert.True(run.OllamaAvailable);
+        Assert.Equal(AiPhases.Classification, Assert.Single(run.Phases).Phase);
+        Assert.NotEmpty(reported);
+        Assert.All(reported, p => Assert.Equal(AiPhases.Classification, p.Phase));
+        Assert.Empty(ollama.PreAssessedDirectories);
+
+        var after = (await status.GetAsync(job.Id))!.Statistics;
+        Assert.Equal(2, after.FilesAiAnalyzed);
+        Assert.Equal(0, after.FilesAiPending);
+        Assert.Equal(0, after.DirectoriesSummarized);
+        Assert.Empty(after.RecentErrors);
+
+        Assert.Null(await status.GetAsync(job.Id + 1000));
+    }
+
+    [Fact]
+    public async Task AwaitedScan_Cancelled_IsStoredAsPaused_AndResumes()
+    {
+        var root = Path.Combine(_dir, "data");
+        for (var i = 0; i < 5; i++)
+        {
+            Directory.CreateDirectory(Path.Combine(root, $"d{i}"));
+            await File.WriteAllTextAsync(Path.Combine(root, $"d{i}", "a.txt"), "alpha");
+        }
+
+        await using var provider = BuildProvider();
+        await provider.InitializeSmartFileOrganizerDatabaseAsync();
+        var scans = provider.GetRequiredService<ScanJobService>();
+        var job = await scans.CreateJobAsync(root);
+
+        // Cancel at the first progress report, i.e. after the scan has started.
+        using var cts = new CancellationTokenSource();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            scans.RunAsync(job.Id, new SyncProgress<ScanProgress>(_ => cts.Cancel()), cts.Token));
+        Assert.Equal(JobStatus.Paused, (await scans.GetJobAsync(job.Id))!.Status);
+
+        var resumed = await scans.RunAsync(job.Id);
+        Assert.Equal(JobStatus.Completed, resumed.Status);
+    }
+
+    private sealed class SyncProgress<T>(Action<T> report) : IProgress<T>
+    {
+        public void Report(T value) => report(value);
+    }
+
+    [Fact]
     public void Paths_DefaultToAppData_WhenNothingIsSet()
     {
         var paths = SmartFileOrganizerPaths.Resolve(new SmartFileOrganizerHostOptions(), _ => null);

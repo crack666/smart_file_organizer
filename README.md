@@ -32,6 +32,14 @@ To run the desktop app (needs a running Ollama for the AI part):
 dotnet run --project src/SmartFileOrganizer.Desktop
 ```
 
+The same work runs from the command line, with `--json` output for scripts
+and models ([docs/cli.md](docs/cli.md)):
+
+```bash
+dotnet run --project src/SmartFileOrganizer.Cli -- scan <folder>
+dotnet run --project src/SmartFileOrganizer.Cli -- status <job>
+```
+
 ## Roadmap
 
 Open work lives in GitHub issues, grouped into milestones A to D:

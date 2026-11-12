@@ -56,6 +56,14 @@ It introduces native PDFium runtimes. That is acceptable, but it means:
 - enterprise environments may enforce additional application control policies
 - packaging/runtime verification matters more than for pure managed libraries
 
+## System.CommandLine for the CLI
+
+`sfo` parses arguments with System.CommandLine (MIT, maintained by the .NET team, version 2.0). It gives typed arguments and options, validation, help and typo suggestions without own parsing code.
+
+- Parse errors are answered by `SfoApp` itself, so a wrong invocation ends with exit code 2 and, with `--json`, a JSON envelope; the library's default would be exit code 1.
+- Ctrl+C is not left to the library: `Program` cancels a token, so a handler can store a scan as paused before the process ends.
+- `Program` sets the invariant UI culture, because the library localises its messages and a calling model should see one language.
+
 ## Ollama HTTP API
 
 Chosen because the project wants local AI inference rather than cloud-only dependency.

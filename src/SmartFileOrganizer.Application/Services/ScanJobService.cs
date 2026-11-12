@@ -120,6 +120,44 @@ public class ScanJobService
         }, _cts.Token);
     }
 
+    /// <summary>
+    /// Runs (or resumes) a scan in the caller's flow and returns the persisted job, for hosts without an
+    /// event loop (CLI, tests). Independent of <see cref="StartAsync"/>: no <see cref="JobStateChanged"/> events.
+    /// A finished job (Completed or Failed) is returned unchanged. A failure is persisted as
+    /// <see cref="JobStatus.Failed"/> and returned. Cancelling <paramref name="ct"/> persists the job as
+    /// <see cref="JobStatus.Paused"/>, so it can be resumed, and then throws <see cref="OperationCanceledException"/>.
+    /// </summary>
+    public async Task<ScanJob> RunAsync(long jobId, IProgress<ScanProgress>? progress = null, CancellationToken ct = default)
+    {
+        var job = await _jobRepo.GetByIdAsync(jobId, ct)
+            ?? throw new InvalidOperationException($"Job {jobId} not found.");
+
+        await NormalizeCompletedIfIncompleteAsync(job, ct);
+        if (job.Status is JobStatus.Completed or JobStatus.Failed)
+            return job;
+
+        try
+        {
+            await _scanEngine.RunAsync(job, progress ?? new Progress<ScanProgress>(), ct);
+            return await _jobRepo.GetByIdAsync(jobId, CancellationToken.None) ?? job;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            job.Status = JobStatus.Paused;
+            await _jobRepo.UpdateAsync(job, CancellationToken.None);
+            _logger.LogInformation("Scan job {JobId} paused.", jobId);
+            throw;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex, "Scan job {JobId} failed.", jobId);
+            job.Status = JobStatus.Failed;
+            job.LastError = ex.Message;
+            await _jobRepo.UpdateAsync(job, CancellationToken.None);
+            return job;
+        }
+    }
+
     public void Pause()
     {
         _pauseRequested = true;
