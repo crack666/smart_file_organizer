@@ -61,15 +61,19 @@ public class DirectoryVerdictTests : IDisposable
 
     private async Task<long> ScanAsync(string root)
     {
-        var job = await _jobRepo.CreateAsync(new ScanJob { RootPath = root, Status = JobStatus.Created, CreatedAt = DateTime.UtcNow });
-
         // Temp paths can contain "AppData" or user-data names; only the rules under test are active here.
-        var heuristics = new HeuristicsEngine(new ScanRuleSet
+        var rules = new ScanRuleSet
         {
             Name = "test",
             Rules = [new ScanRule("$Recycle.Bin", ScanRuleAction.Skip)]
+        };
+        var job = await _jobRepo.CreateAsync(new ScanJob
+        {
+            RootPath = root, Status = JobStatus.Created, CreatedAt = DateTime.UtcNow,
+            Rules = ScanRulesFile.ToProfile(rules, "test")
         });
-        var engine = new ScanEngine(new FileSystemAccessor(), heuristics, _fileRepo, _dirRepo, _jobRepo, NullLogger<ScanEngine>.Instance);
+
+        var engine = new ScanEngine(new FileSystemAccessor(), _fileRepo, _dirRepo, _jobRepo, NullLogger<ScanEngine>.Instance);
         await engine.RunAsync(job, new Progress<ScanProgress>(_ => { }), CancellationToken.None);
         return job.Id;
     }

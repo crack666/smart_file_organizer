@@ -199,7 +199,6 @@ public class ScanExportServiceTests : IDisposable
 
         var engine = new ScanEngine(
             fakeFs,
-            new HeuristicsEngine(ScanRulesFile.Default),
             _fileRepo, _dirRepo, _jobRepo,
             NullLogger<ScanEngine>.Instance);
 

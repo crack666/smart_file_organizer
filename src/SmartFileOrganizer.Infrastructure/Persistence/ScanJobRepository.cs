@@ -19,11 +19,13 @@ public class ScanJobRepository : IScanJobRepository
             INSERT INTO scan_jobs
                 (root_path, status, created_at, started_at, completed_at,
                  total_files, processed_files, total_directories, processed_directories,
-                 error_count, last_error)
+                 error_count, last_error,
+                 rules_name, rules_source, rules_hash, rules_json)
             VALUES
                 (@RootPath, @Status, @CreatedAt, @StartedAt, @CompletedAt,
                  @TotalFiles, @ProcessedFiles, @TotalDirectories, @ProcessedDirectories,
-                 @ErrorCount, @LastError);
+                 @ErrorCount, @LastError,
+                 @RulesName, @RulesSource, @RulesHash, @RulesJson);
             SELECT last_insert_rowid();
             """;
 
@@ -62,7 +64,11 @@ public class ScanJobRepository : IScanJobRepository
                 total_directories = @TotalDirectories,
                 processed_directories = @ProcessedDirectories,
                 error_count = @ErrorCount,
-                last_error = @LastError
+                last_error = @LastError,
+                rules_name = @RulesName,
+                rules_source = @RulesSource,
+                rules_hash = @RulesHash,
+                rules_json = @RulesJson
             WHERE id = @Id
             """;
 
