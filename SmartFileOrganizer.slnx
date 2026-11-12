@@ -10,6 +10,7 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/SmartFileOrganizer.Application.Tests/SmartFileOrganizer.Application.Tests.csproj" />
+    <Project Path="tests/SmartFileOrganizer.Cli.Tests/SmartFileOrganizer.Cli.Tests.csproj" />
     <Project Path="tests/SmartFileOrganizer.Domain.Tests/SmartFileOrganizer.Domain.Tests.csproj" />
     <Project Path="tests/SmartFileOrganizer.Hosting.Tests/SmartFileOrganizer.Hosting.Tests.csproj" />
   </Folder>

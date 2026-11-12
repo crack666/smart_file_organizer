@@ -190,6 +190,31 @@ public class HostingTests : IDisposable
         Assert.Null(await status.GetAsync(job.Id + 1000));
     }
 
+    [Fact]
+    public async Task AwaitedScan_Cancelled_IsStoredAsPaused_AndResumes()
+    {
+        var root = Path.Combine(_dir, "data");
+        for (var i = 0; i < 5; i++)
+        {
+            Directory.CreateDirectory(Path.Combine(root, $"d{i}"));
+            await File.WriteAllTextAsync(Path.Combine(root, $"d{i}", "a.txt"), "alpha");
+        }
+
+        await using var provider = BuildProvider();
+        await provider.InitializeSmartFileOrganizerDatabaseAsync();
+        var scans = provider.GetRequiredService<ScanJobService>();
+        var job = await scans.CreateJobAsync(root);
+
+        // Cancel at the first progress report, i.e. after the scan has started.
+        using var cts = new CancellationTokenSource();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            scans.RunAsync(job.Id, new SyncProgress<ScanProgress>(_ => cts.Cancel()), cts.Token));
+        Assert.Equal(JobStatus.Paused, (await scans.GetJobAsync(job.Id))!.Status);
+
+        var resumed = await scans.RunAsync(job.Id);
+        Assert.Equal(JobStatus.Completed, resumed.Status);
+    }
+
     private sealed class SyncProgress<T>(Action<T> report) : IProgress<T>
     {
         public void Report(T value) => report(value);
