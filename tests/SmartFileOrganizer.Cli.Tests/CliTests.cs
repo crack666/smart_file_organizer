@@ -6,7 +6,6 @@ using SmartFileOrganizer.Cli;
 using SmartFileOrganizer.Cli.Contract;
 using SmartFileOrganizer.Domain.Interfaces;
 using SmartFileOrganizer.Hosting.Tests;
-using SmartFileOrganizer.Scanning.Engine;
 
 namespace SmartFileOrganizer.Cli.Tests;
 
@@ -60,9 +59,6 @@ public class CliTests : IDisposable
             {
                 if (ollama != null)
                     services.AddSingleton<IOllamaService>(ollama);
-                // The temp directory lives under "AppData" on Windows, which the default skip patterns
-                // match anywhere in the path. Scan rules are not under test here.
-                services.AddSingleton(new HeuristicsOptions { SkipPatterns = [] });
             }
         };
 
