@@ -205,9 +205,19 @@ fixed the old mistake; `--compare` between two case runs shows cases that broke 
 
 Cases can hold private content. They live only in the local database (the same SQLite file as
 the jobs) and are never exported: no command prints the evidence, and the output of a case is its
-path, the codes and the outcome. Further correction kinds (a verdict overridden, a finding
-reported as wrong) are added as new `EvalCaseKind` codes with their own runner once the product
-has those corrections.
+path, the codes and the outcome. Further correction kinds (a verdict overridden) are added as new
+`EvalCaseKind` codes with their own runner once the product has those corrections.
+
+### Findings reported wrong
+
+`sfo findings wrong <job> <key>` (https://github.com/crack666/smart_file_organizer/issues/26, rules in
+[architecture.md, Findings flow](architecture.md#findings-flow)) stores a case of kind `finding`, origin
+`finding_reported_wrong`: `subject_path` is the folder of the finding (or the job root) plus `#` and the finding
+key, `observed` the kind code, `expected` `none`, `evidence_json` the key, kind, certainty, reason, file count,
+examples, action and note, as JSON. A sensitive finding keeps only its markers, no evidence. Reporting the same
+finding again updates the case. These cases are rule results, not model answers: `sfo eval --cases` leaves them
+out. They are the material of the measurement series of findings
+(https://github.com/crack666/smart_file_organizer/issues/10): how often each kind is wrong, and why.
 
 ## Runs and comparison
 

@@ -176,6 +176,7 @@ when read, so they follow later analysis and comparisons without a rebuild.
 - Content of unsplit dumps: a copied USB stick or a project stays one bundle, even if it holds photos;
   their file types are in `facts.by_file_type`.
 - Worth-keeping files inside the noise (a photo in an app folder) are counted in the noise's
-  `by_file_type`, not lifted out; that is a finding (https://github.com/crack666/smart_file_organizer/issues/26).
+  `by_file_type`, not lifted out; `sfo findings` lists them as `in_noise`, one finding per noise part
+  (https://github.com/crack666/smart_file_organizer/issues/26, [architecture.md, Findings flow](architecture.md#findings-flow)).
 - Two occasions with less than `EventGapHours` between them, and shot with the same device, end in one
   event. Nothing without a model can tell them apart.

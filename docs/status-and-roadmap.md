@@ -215,10 +215,27 @@ the phone backup is one `phone` dump with `DCIM` as `camera` part; the two progr
   see [bundles.md](bundles.md).
 - Capture dates exist only after `sfo analyze` has run Phase 2 on the photos; for a job that was only
   scanned, events rest on names and modification times (`period.time_source` says which).
-- Used by `sfo library match --bundle`. Not yet used by findings
-  (https://github.com/crack666/smart_file_organizer/issues/26) and the plan
-  (https://github.com/crack666/smart_file_organizer/issues/11), which are meant to work per bundle.
-  (Until 12.11.2026: "Not yet used by anything else".)
+- Used by `sfo library match --bundle` and by the findings
+  (https://github.com/crack666/smart_file_organizer/issues/26); not yet by the plan
+  (https://github.com/crack666/smart_file_organizer/issues/11). (Until 12.11.2026 evening: "Not yet used by
+  findings".)
+
+### Findings
+
+_Checked 12.11.2026 on the branch for https://github.com/crack666/smart_file_organizer/issues/26 (decisions
+migration is step 14): `dotnet test` TESTCOUNT passed; `sfo eval --stub`, `scan --role library`, `compare`,
+`bundles build`, `findings`, `findings --summary` run by hand with `--json` on generated trees against a temp
+database, output checked with a JSON parser: the evaluation corpus with 300 loose photos, copies, a photo among
+invoices and a document in a program folder (28 findings, every kind, 300 loose photos one finding; without a
+library 15, `not_backed_up` not computed), and a generated old Windows profile with 2,476 of 2,924 files app data
+(11 findings). No run with a real model._
+
+- `sfo findings <job>` lists `not_backed_up`, `in_noise`, `misplaced`, `sensitive`, `duplicate`, summarized per
+  bundle or folder, sure before unsure; `--summary` fits one page; `accept|reject|wrong|reopen` store only the
+  decision, `wrong` also a test case. Rules: [architecture.md, Findings flow](architecture.md#findings-flow).
+- `misplaced` stays `uncertain` at most: no step checks the content of a target folder yet
+  (https://github.com/crack666/smart_file_organizer/issues/56).
+- Nothing executes an accepted finding yet (https://github.com/crack666/smart_file_organizer/issues/11).
 
 ### Placing into the library
 
