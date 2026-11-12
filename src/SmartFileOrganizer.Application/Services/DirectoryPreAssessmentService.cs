@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Threading;
 using Microsoft.Extensions.Logging;
@@ -8,16 +9,31 @@ using SmartFileOrganizer.Domain.Models;
 namespace SmartFileOrganizer.Application.Services;
 
 /// <summary>
-/// Phase 1 of the 3-phase AI pipeline.
-/// For each directory, asks Ollama to assess content homogeneity, spot anomalies,
-/// and recommend a sampling strategy. Non-sampled files are marked Skipped so
-/// Phase 2 (ClassificationService) skips them automatically.
+/// Phase 1 of the 3-phase AI pipeline: the directory verdict.
 /// </summary>
+/// <remarks>
+/// <para>For every directory of the job a <see cref="DirectoryProfile"/> is computed from scan data, then
+/// <see cref="DirectoryVerdictRules"/> decide the clear cases without a model call (part of a unit,
+/// unit markers, skipped or hidden, empty, judged from subdirectories). Only the rest goes to Ollama,
+/// which gets the profile with the file list and returns verdict, purpose, retention and reason together
+/// with the sampling recommendation.</para>
+/// <para>Directories are processed level by level from the root, so a directory the model judges as
+/// <c>einheit</c> spares all calls below it. Directories without direct files are decided last, bottom-up,
+/// from their subdirectories.</para>
+/// <para>Every directory ends with a row in <c>directory_verdicts</c>: a verdict or a stored error.
+/// Rows with an error are retried on the next run.</para>
+/// <para>The pre-assessment row in <c>ai_directory_results</c> (sampling for Phase 2) is still written for
+/// AI-relevant directories. Units and system directories decided by rule get <c>skip</c>, so their files are
+/// not analysed one by one.</para>
+/// </remarks>
 public class DirectoryPreAssessmentService
 {
+    private const string PreAssessmentPhase = "pre_assessment";
+
     private readonly IDirectoryRepository _dirRepo;
     private readonly IFileRepository _fileRepo;
     private readonly IDirectoryClassificationRepository _dirClassRepo;
+    private readonly IDirectoryVerdictRepository _verdictRepo;
     private readonly IOllamaService _ollama;
     private readonly Func<int> _getMaxParallelRequests;
     private readonly DirectoryAnalysisOptions _options;
@@ -27,6 +43,7 @@ public class DirectoryPreAssessmentService
         IDirectoryRepository dirRepo,
         IFileRepository fileRepo,
         IDirectoryClassificationRepository dirClassRepo,
+        IDirectoryVerdictRepository verdictRepo,
         IOllamaService ollama,
         Func<int> getMaxParallelRequests,
         DirectoryAnalysisOptions options,
@@ -35,6 +52,7 @@ public class DirectoryPreAssessmentService
         _dirRepo = dirRepo;
         _fileRepo = fileRepo;
         _dirClassRepo = dirClassRepo;
+        _verdictRepo = verdictRepo;
         _ollama = ollama;
         _getMaxParallelRequests = getMaxParallelRequests;
         _options = options;
@@ -48,69 +66,101 @@ public class DirectoryPreAssessmentService
         CancellationToken ct = default)
     {
         var allDirs = await _dirRepo.GetAllForJobOrderedByDepthAsync(jobId, ct);
-        var aiCandidateDirs = allDirs
-            .Where(d => d.DirStatus != DirectoryStatus.Skip)
-            .Where(d => !string.IsNullOrWhiteSpace(d.Name) && !d.Name.StartsWith(".", StringComparison.Ordinal))
-            .ToList();
+        if (allDirs.Count == 0)
+            return new AiClassificationRunResult(true, 0, 0, 0, "No directories found.");
 
-        if (aiCandidateDirs.Count == 0)
-        {
-            return new AiClassificationRunResult(true, 0, 0, 0, "No AI-relevant directories found.");
-        }
-
-        var assessedIds = (await _dirClassRepo.GetAssessedNodeIdsAsync(jobId, "pre_assessment", ct)).ToHashSet();
-        var pending = aiCandidateDirs.Where(d => !assessedIds.Contains(d.Id)).ToList();
+        var tree = await JobTree.LoadAsync(jobId, allDirs, _verdictRepo, ct);
+        var pending = allDirs.Where(d => !tree.HasVerdict(d.Id)).ToList();
 
         if (pending.Count == 0)
         {
-            progress?.Report(new AiClassificationProgress(jobId, aiCandidateDirs.Count, aiCandidateDirs.Count, 0, string.Empty,
-                "Phase 1/3: All directories already assessed."));
-            return new AiClassificationRunResult(true, aiCandidateDirs.Count, aiCandidateDirs.Count, 0, "All directories already assessed.");
+            progress?.Report(new AiClassificationProgress(jobId, allDirs.Count, allDirs.Count, 0, string.Empty,
+                "Phase 1/3: All directories already judged."));
+            return new AiClassificationRunResult(true, allDirs.Count, allDirs.Count, 0, "All directories already judged.");
         }
-
-        // Build subdir lookup once (avoids N extra DB calls)
-        var childrenByParent = aiCandidateDirs
-            .GroupBy(d => d.ParentPath)
-            .ToDictionary(g => g.Key, g => g.Select(d => d.Name).ToList());
 
         long processed = 0;
         var errorCount = 0;
+        var modelCalls = 0;
         var workerCount = Math.Clamp(_getMaxParallelRequests(), 1, 8);
+        var fromSubdirectories = new List<PreparedDirectory>();
 
-        await Parallel.ForEachAsync(
-            pending,
-            new ParallelOptions { MaxDegreeOfParallelism = workerCount, CancellationToken = ct },
-            async (dir, token) =>
+        void Report(string path)
+        {
+            var done = Interlocked.Read(ref processed);
+            progress?.Report(new AiClassificationProgress(
+                jobId, done, pending.Count, Volatile.Read(ref errorCount), path,
+                $"Phase 1/3: Judging directories… {done}/{pending.Count} (parallel={workerCount})"));
+        }
+
+        void Count(DirectoryVerdict verdict, string path)
+        {
+            if (verdict.Error != null)
             {
-                if (waitIfPausedAsync != null) await waitIfPausedAsync(token);
+                _logger.LogWarning("Directory verdict error for {Path}: {Err}", path, verdict.Error);
+                Interlocked.Increment(ref errorCount);
+            }
+            Interlocked.Increment(ref processed);
+            Report(path);
+        }
 
-                var beforeProcessed = Interlocked.Read(ref processed);
-                var beforeErrors = Volatile.Read(ref errorCount);
-                progress?.Report(new AiClassificationProgress(
-                    jobId, beforeProcessed, pending.Count, beforeErrors, dir.FullPath,
-                    $"Phase 1/3: Assessing directories… {beforeProcessed}/{pending.Count} (parallel={workerCount})"));
+        // Top-down, one depth level at a time: rules first, then the model in parallel for the rest.
+        foreach (var level in pending.GroupBy(d => d.Depth).OrderBy(g => g.Key))
+        {
+            var askModel = new List<PreparedDirectory>();
 
-                var fileInfos = await _fileRepo.GetFileInfoForDirectoryAsync(jobId, dir.FullPath, token);
-                var subdirNames = childrenByParent.TryGetValue(dir.FullPath, out var ch) ? ch : [];
+            foreach (var dir in level)
+            {
+                if (waitIfPausedAsync != null) await waitIfPausedAsync(ct);
+                ct.ThrowIfCancellationRequested();
 
-                var result = await BuildPreAssessmentAsync(dir, fileInfos, subdirNames, token);
-                if (result.Error != null)
+                var prepared = await PrepareAsync(jobId, dir, tree, ct);
+                var (next, verdict) = DirectoryVerdictRules.Evaluate(
+                    dir, prepared.Profile, prepared.UnitAncestor, prepared.UnitAncestorPath);
+
+                switch (next)
                 {
-                    _logger.LogWarning("Pre-assessment error for {Path}: {Err}", dir.FullPath, result.Error);
-                    Interlocked.Increment(ref errorCount);
+                    case DirectoryVerdictRules.Next.Decided:
+                        await StoreRuleVerdictAsync(prepared, verdict!, tree, ct);
+                        Count(verdict!, dir.FullPath);
+                        break;
+                    case DirectoryVerdictRules.Next.FromSubdirectories:
+                        fromSubdirectories.Add(prepared);
+                        break;
+                    default:
+                        askModel.Add(prepared);
+                        break;
                 }
+            }
 
-                await _dirClassRepo.UpsertAsync(result, token);
-                var nowProcessed = Interlocked.Increment(ref processed);
-                var nowErrors = Volatile.Read(ref errorCount);
-                progress?.Report(new AiClassificationProgress(
-                    jobId, nowProcessed, pending.Count, nowErrors, dir.FullPath,
-                    $"Phase 1/3: Assessing directories… {nowProcessed}/{pending.Count} (parallel={workerCount})"));
-            });
+            await Parallel.ForEachAsync(
+                askModel,
+                new ParallelOptions { MaxDegreeOfParallelism = workerCount, CancellationToken = ct },
+                async (prepared, token) =>
+                {
+                    if (waitIfPausedAsync != null) await waitIfPausedAsync(token);
+                    Report(prepared.Directory.FullPath);
+                    Interlocked.Increment(ref modelCalls);
+                    var verdict = await AskModelAsync(prepared, tree, token);
+                    Count(verdict, prepared.Directory.FullPath);
+                });
+        }
+
+        // Bottom-up: directories without direct files, from their subdirectories.
+        foreach (var prepared in fromSubdirectories.OrderByDescending(p => p.Directory.Depth))
+        {
+            ct.ThrowIfCancellationRequested();
+            var verdict = await StoreFromSubdirectoriesAsync(prepared, tree, ct);
+            Count(verdict, prepared.Directory.FullPath);
+        }
+
+        _logger.LogInformation(
+            "Phase 1 for job {JobId}: {Judged} directories judged, {Calls} by the model, {Errors} error(s).",
+            jobId, processed, modelCalls, errorCount);
 
         var completedMsg = errorCount > 0
             ? $"Phase 1/3 finished with {errorCount} error(s)."
-            : "Phase 1/3: Directory pre-assessment complete.";
+            : "Phase 1/3: Directory verdicts complete.";
 
         progress?.Report(new AiClassificationProgress(
             jobId, processed, pending.Count, errorCount, string.Empty, completedMsg));
@@ -118,62 +168,164 @@ public class DirectoryPreAssessmentService
         return new AiClassificationRunResult(true, pending.Count, processed, errorCount, completedMsg);
     }
 
+    /// <summary>Judges one directory again (focused rescan) and returns its pre-assessment.</summary>
     public async Task<DirectoryClassificationResult> PreAssessSingleAsync(
         long jobId,
         DirectoryNode dir,
         CancellationToken ct = default)
     {
-        var fileInfos = await _fileRepo.GetFileInfoForDirectoryAsync(jobId, dir.FullPath, ct);
         var allDirs = await _dirRepo.GetAllForJobOrderedByDepthAsync(jobId, ct);
-        var subdirNames = allDirs
-            .Where(d => string.Equals(d.ParentPath, dir.FullPath, StringComparison.OrdinalIgnoreCase))
-            .Where(d => d.DirStatus != DirectoryStatus.Skip)
-            .Where(d => !string.IsNullOrWhiteSpace(d.Name) && !d.Name.StartsWith(".", StringComparison.Ordinal))
-            .Select(d => d.Name)
-            .ToList();
+        if (!allDirs.Any(d => d.Id == dir.Id))
+            allDirs = [.. allDirs, dir];
 
-        var result = await BuildPreAssessmentAsync(dir, fileInfos, subdirNames, ct);
-        await _dirClassRepo.UpsertAsync(result, ct);
-        return result;
-    }
+        var tree = await JobTree.LoadAsync(jobId, allDirs, _verdictRepo, ct);
+        var prepared = await PrepareAsync(jobId, dir, tree, ct);
+        var (next, verdict) = DirectoryVerdictRules.Evaluate(
+            dir, prepared.Profile, prepared.UnitAncestor, prepared.UnitAncestorPath);
 
-    private async Task<DirectoryClassificationResult> BuildPreAssessmentAsync(
-        DirectoryNode dir,
-        IReadOnlyList<DirectoryFileInfo> fileInfos,
-        IReadOnlyList<string> subdirNames,
-        CancellationToken ct)
-    {
-        if (fileInfos.Count == 0)
+        switch (next)
         {
-            return new DirectoryClassificationResult
-            {
-                DirectoryNodeId = dir.Id,
-                Phase = "pre_assessment",
-                Summary = "Directory contains no direct files.",
-                Homogeneity = "high",
-                DominantType = "empty",
-                SamplingStrategy = "analyze_all",
-                SampleSize = 0,
-                AnalyzedAt = DateTime.UtcNow,
-                Error = null
-            };
+            case DirectoryVerdictRules.Next.Decided:
+                await StoreRuleVerdictAsync(prepared, verdict!, tree, ct);
+                break;
+            case DirectoryVerdictRules.Next.FromSubdirectories:
+                await StoreFromSubdirectoriesAsync(prepared, tree, ct);
+                break;
+            default:
+                await AskModelAsync(prepared, tree, ct);
+                break;
         }
 
+        return await _dirClassRepo.GetByNodeAndPhaseAsync(dir.Id, PreAssessmentPhase, ct)
+            ?? NoFilesAssessment(dir);
+    }
+
+    private async Task<PreparedDirectory> PrepareAsync(long jobId, DirectoryNode dir, JobTree tree, CancellationToken ct)
+    {
+        var files = await _fileRepo.GetFileInfoForDirectoryAsync(jobId, dir.FullPath, ct);
+        var children = tree.ChildrenOf(dir);
+        var profile = DirectoryProfileBuilder.Build(files, children.Select(c => c.Name).ToList());
+        var (unitAncestor, unitPath) = tree.FindUnitAncestor(dir);
+        return new PreparedDirectory(dir, files, children, profile, unitAncestor, unitPath);
+    }
+
+    private async Task StoreRuleVerdictAsync(PreparedDirectory p, DirectoryVerdict verdict, JobTree tree, CancellationToken ct)
+    {
+        var dir = p.Directory;
+        await _verdictRepo.UpsertAsync(verdict, ct);
+        tree.Set(verdict);
+
+        var handledAsWhole = verdict.Verdict is DirectoryVerdictKind.Einheit or DirectoryVerdictKind.System;
+
+        if (verdict.Rule == DirectoryVerdictRules.InsideUnit || !IsAiCandidate(dir))
+        {
+            // No pre-assessment of its own: the unit root (or nothing) stands for it. Its files are not analysed singly.
+            if (handledAsWhole && p.Files.Count > 0)
+                await _fileRepo.MarkAsSkippedAsync(p.Files.Select(f => f.Id).ToList(), ct);
+            return;
+        }
+
+        var assessment = handledAsWhole
+            ? new DirectoryClassificationResult
+            {
+                DirectoryNodeId = dir.Id,
+                Phase = PreAssessmentPhase,
+                Summary = verdict.Reason,
+                Homogeneity = "high",
+                DominantType = verdict.Verdict.ToCode(),
+                SamplingStrategy = "skip",
+                SampleSize = 0,
+                AnalyzedAt = DateTime.UtcNow
+            }
+            : NoFilesAssessment(dir);
+
+        await ApplySamplingAsync(dir, p.Files, assessment, ct);
+        await _dirClassRepo.UpsertAsync(assessment, ct);
+    }
+
+    private async Task<DirectoryVerdict> StoreFromSubdirectoriesAsync(PreparedDirectory p, JobTree tree, CancellationToken ct)
+    {
+        var childVerdicts = p.Children.Select(c => tree.Get(c.Id)).ToList();
+        var verdict = DirectoryVerdictRules.EvaluateFromSubdirectories(p.Directory, p.Profile, childVerdicts);
+
+        await _verdictRepo.UpsertAsync(verdict, ct);
+        tree.Set(verdict);
+
+        if (IsAiCandidate(p.Directory))
+            await _dirClassRepo.UpsertAsync(NoFilesAssessment(p.Directory), ct);
+        return verdict;
+    }
+
+    private async Task<DirectoryVerdict> AskModelAsync(PreparedDirectory p, JobTree tree, CancellationToken ct)
+    {
+        var dir = p.Directory;
         var input = new DirectoryPreAssessmentInput
         {
             Directory = dir,
-            DirectFiles = fileInfos,
-            SubdirectoryNames = subdirNames
+            DirectFiles = p.Files,
+            SubdirectoryNames = p.Children.Select(c => c.Name).ToList(),
+            Profile = p.Profile
         };
 
-        var result = await _ollama.PreAssessDirectoryAsync(input, ct);
-        result.DirectoryNodeId = dir.Id;
+        DirectoryPreAssessmentOutcome outcome;
+        try
+        {
+            outcome = await _ollama.PreAssessDirectoryAsync(input, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            // The service contract is to return errors, but a failing call must still leave a stored error.
+            var error = $"Pre-assessment failed: {ex.Message}";
+            outcome = new DirectoryPreAssessmentOutcome(
+                new DirectoryClassificationResult { Phase = PreAssessmentPhase, AnalyzedAt = DateTime.UtcNow, Error = error },
+                new DirectoryVerdict { Source = VerdictSource.Modell, JudgedAt = DateTime.UtcNow, Error = error });
+        }
 
-        if (result.Error == null)
-            await ApplySamplingAsync(dir, fileInfos, result, ct);
+        var assessment = outcome.Assessment;
+        assessment.DirectoryNodeId = dir.Id;
+        assessment.Phase = PreAssessmentPhase;
 
-        return result;
+        var verdict = outcome.Verdict;
+        verdict.DirectoryNodeId = dir.Id;
+        verdict.Source = VerdictSource.Modell;
+        verdict.Rule = null;
+        verdict.Profile = p.Profile;
+        if (verdict.Verdict is null && verdict.Error is null)
+            verdict.Error = "The model answer contained no valid verdict.";
+        if (verdict.Error is not null)
+            verdict.Verdict = null;
+        verdict.UnitDirectoryNodeId = verdict.Verdict == DirectoryVerdictKind.Einheit ? dir.Id : null;
+
+        if (IsAiCandidate(dir))
+        {
+            if (assessment.Error == null)
+                await ApplySamplingAsync(dir, p.Files, assessment, ct);
+            await _dirClassRepo.UpsertAsync(assessment, ct);
+        }
+
+        await _verdictRepo.UpsertAsync(verdict, ct);
+        tree.Set(verdict);
+        return verdict;
     }
+
+    /// <summary>Directories Phase 2 and Phase 3 work on; the others get a verdict only.</summary>
+    private static bool IsAiCandidate(DirectoryNode d) =>
+        d.DirStatus != DirectoryStatus.Skip
+        && !string.IsNullOrWhiteSpace(d.Name)
+        && !d.Name.StartsWith('.');
+
+    private static DirectoryClassificationResult NoFilesAssessment(DirectoryNode dir) => new()
+    {
+        DirectoryNodeId = dir.Id,
+        Phase = PreAssessmentPhase,
+        Summary = "Directory contains no direct files.",
+        Homogeneity = "high",
+        DominantType = "empty",
+        SamplingStrategy = "analyze_all",
+        SampleSize = 0,
+        AnalyzedAt = DateTime.UtcNow,
+        Error = null
+    };
 
     private async Task ApplySamplingAsync(
         DirectoryNode dir,
@@ -255,6 +407,62 @@ public class DirectoryPreAssessmentService
         catch
         {
             return [];
+        }
+    }
+
+    private sealed record PreparedDirectory(
+        DirectoryNode Directory,
+        IReadOnlyList<DirectoryFileInfo> Files,
+        IReadOnlyList<DirectoryNode> Children,
+        DirectoryProfile Profile,
+        DirectoryVerdict? UnitAncestor,
+        string? UnitAncestorPath);
+
+    /// <summary>All directories of a job with their verdicts so far; safe for the parallel model calls.</summary>
+    private sealed class JobTree
+    {
+        private readonly Dictionary<string, DirectoryNode> _byPath;
+        private readonly Dictionary<string, List<DirectoryNode>> _children;
+        private readonly ConcurrentDictionary<long, DirectoryVerdict> _verdicts;
+
+        private JobTree(IReadOnlyList<DirectoryNode> dirs, IEnumerable<DirectoryVerdict> verdicts)
+        {
+            _byPath = new Dictionary<string, DirectoryNode>(StringComparer.Ordinal);
+            foreach (var d in dirs) _byPath[d.FullPath] = d;
+
+            _children = dirs
+                .Where(d => !string.IsNullOrEmpty(d.ParentPath))
+                .GroupBy(d => d.ParentPath, StringComparer.Ordinal)
+                .ToDictionary(g => g.Key, g => g.OrderBy(d => d.Name, StringComparer.Ordinal).ToList(), StringComparer.Ordinal);
+
+            _verdicts = new ConcurrentDictionary<long, DirectoryVerdict>(verdicts.ToDictionary(v => v.DirectoryNodeId));
+        }
+
+        public static async Task<JobTree> LoadAsync(
+            long jobId, IReadOnlyList<DirectoryNode> dirs, IDirectoryVerdictRepository repo, CancellationToken ct) =>
+            new(dirs, await repo.GetForJobAsync(jobId, ct));
+
+        public bool HasVerdict(long id) => _verdicts.TryGetValue(id, out var v) && v.Error == null;
+
+        public DirectoryVerdict? Get(long id) => _verdicts.TryGetValue(id, out var v) ? v : null;
+
+        public void Set(DirectoryVerdict v) => _verdicts[v.DirectoryNodeId] = v;
+
+        public IReadOnlyList<DirectoryNode> ChildrenOf(DirectoryNode dir) =>
+            _children.TryGetValue(dir.FullPath, out var list) ? list : [];
+
+        /// <summary>Nearest ancestor judged <c>einheit</c>, with its path relative to the scan root.</summary>
+        public (DirectoryVerdict? Verdict, string? RelativePath) FindUnitAncestor(DirectoryNode dir)
+        {
+            var parentPath = dir.ParentPath;
+            var guard = 0;
+            while (!string.IsNullOrEmpty(parentPath) && _byPath.TryGetValue(parentPath, out var parent) && guard++ < 512)
+            {
+                if (_verdicts.TryGetValue(parent.Id, out var v) && v.Verdict == DirectoryVerdictKind.Einheit)
+                    return (v, parent.RelativePath);
+                parentPath = parent.ParentPath;
+            }
+            return (null, null);
         }
     }
 }

@@ -225,7 +225,7 @@ public class FileRepository : IFileRepository
         await conn.OpenAsync(ct);
         var result = await conn.QueryAsync<DirectoryFileInfo>(
             """
-            SELECT id, name, size, file_type
+            SELECT id, name, size, file_type, extension, last_write_time
             FROM file_nodes
             WHERE job_id = @jobId AND parent_path = @parentPath
             ORDER BY name

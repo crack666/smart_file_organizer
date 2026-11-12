@@ -34,10 +34,12 @@ _Status checked against the code on 12.11.2026; details and limits in
 Smart File Organizer runs a **3-phase AI pipeline** after scanning your directory:
 
 ```
-Phase 1 — Directory Reconnaissance
-   ↳ For every folder: analyze file names, types, sizes
+Phase 1 — Directory Verdict
+   ↳ For every folder: profile of types, sizes, dates, naming patterns, project/program markers
+   ↳ Verdict einheit / einheitlich / gemischt / leer / system, with purpose, retention, reason
+   ↳ Clear cases (Git repo, program, empty, skipped) by rule without a model call
    ↳ Decide sampling strategy (analyze_all / random_sample / skip)
-   ↳ Result stored in ai_directory_results (phase = 'pre_assessment')
+   ↳ Verdict stored in directory_verdicts, sampling in ai_directory_results (phase = 'pre_assessment')
 
 Phase 2 — Per-File Deep Analysis
    ↳ Raster images (jpg/png/gif/webp) → visual AI (base64, up to 10 MB)

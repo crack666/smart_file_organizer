@@ -79,7 +79,7 @@ public class SchemaMigrationTests : IDisposable
         Assert.Equal(Enumerable.Range(1, latest), recorded);
 
         foreach (var table in new[] { "scan_jobs", "directory_nodes", "file_nodes", "ai_results",
-                                      "user_overrides", "ai_directory_results" })
+                                      "user_overrides", "ai_directory_results", "directory_verdicts" })
         {
             Assert.Equal(1, await CountTable(conn, table));
         }

@@ -95,15 +95,51 @@ Other options: `AppSettingsDirectory` (where the shipped `appsettings.json` defa
 
 The post-scan AI pipeline runs as three sequential phases coordinated by `AiClassificationCoordinator`:
 
-### Phase 1 — Directory Pre-Assessment (`DirectoryPreAssessmentService`)
+### Phase 1 — Directory verdict and pre-assessment (`DirectoryPreAssessmentService`)
 
-1. All `directory_nodes` for the job are loaded, ordered by depth
-2. Directories already in `ai_directory_results` (phase=`pre_assessment`) are skipped (resume support)
-3. For each pending directory, `GetFileInfoForDirectoryAsync` returns all direct files (all types)
-4. A file list prompt is sent to Ollama via `PreAssessDirectoryAsync`
-5. Ollama returns: `sampling_strategy`, `sample_size`, `anomalous_file_ids`, `homogeneity`, `suggested_area`
-6. `ApplySamplingAsync` marks non-sampled `FileNode` rows as `Skipped`
-7. Result stored in `ai_directory_results` (phase=`pre_assessment`)
+Every directory of the job gets a verdict: what lies here, and can it be handled as a whole
+([#7](https://github.com/crack666/smart_file_organizer/issues/7)). Values are fixed German codes,
+defined once on the Domain enums and shared by database and JSON (`VerdictCodes`):
+
+| Verdict | Meaning |
+|---|---|
+| `einheit` | project, program, game or backup that only makes sense as a whole; never split up |
+| `einheitlich` | collection of similar content (photos of one trip, invoices of one year) |
+| `gemischt` | storage without a common purpose (desktop, downloads); handled file by file |
+| `leer` | no files, neither directly nor below |
+| `system` | operating system, tool or cache data, or excluded by the scan |
+
+Retention is `behalten`, `pruefen` or `entbehrlich`; the source is `regel` (a rule decided, no model
+call) or `modell`.
+
+1. All `directory_nodes` of the job are loaded, including directories the scan skipped. Directories with
+   a verdict in `directory_verdicts` are done (resume); rows with an error are retried.
+2. For each pending directory `DirectoryProfileBuilder` computes a profile from scan data only:
+   distribution by extension and file type (count and bytes), oldest and newest modification and the
+   span in days, naming patterns (`camera`, `date-prefix`, `screenshot`, `copy-suffix`), unit markers
+   (`dir:.git`, `dir:node_modules`, `file:package.json`, `ext:.sln`, `program:exe+dll`,
+   `game:exe+_Data`, backup images, …) and a hint (`einheitlich` from 80 % of one file type or naming
+   series, `gemischt` from three or more types with none above 50 %).
+3. `DirectoryVerdictRules` decide the clear cases without the model, in this order: below a directory
+   judged `einheit` (`inside-unit`), skipped by the scan (`scan-skip`), name starting with a dot
+   (`hidden`), unit markers (`marker`), no files and no subdirectories (`empty`).
+4. Directories are processed level by level from the root. What no rule decides goes to Ollama in
+   parallel (`PreAssessDirectoryAsync`): file list, subdirectory names and the profile. The model returns
+   verdict, purpose, retention and reason, together with the sampling fields used so far
+   (`homogeneity`, `anomalous_files`, `sampling_strategy`, `suggested_sample_size`).
+   `PreAssessmentResponseParser` reads the answer; a missing or unknown verdict is stored as an error.
+   A directory the model judges `einheit` spares all calls below it.
+5. Directories without direct files but with subdirectories are decided last, bottom-up, from their
+   subdirectories (`container`): all empty → `leer`; only system → `system`; all units, or all
+   `einheitlich` with the same dominant file type → `einheitlich`; otherwise `gemischt`.
+6. The verdict is stored in `directory_verdicts`; the pre-assessment for sampling in
+   `ai_directory_results` (phase=`pre_assessment`) for directories Phase 2 and 3 work on. Units and
+   system directories decided by rule get `sampling_strategy = skip`, so their files are marked
+   `Skipped`; directories inside a unit get no pre-assessment row and no summary of their own.
+7. `ApplySamplingAsync` marks non-sampled `FileNode` rows as `Skipped` (unchanged; reworked in
+   [#8](https://github.com/crack666/smart_file_organizer/issues/8)).
+
+`DirectoryQueryService.GetVerdictAsync` and `GetVerdictsAsync` read verdicts with their profile.
 
 ### Phase 2 — Per-File Classification (`ClassificationService`)
 
@@ -189,6 +225,9 @@ Important tables:
 - `file_nodes` — scanned files with metadata, type, AI status, rule-based sensitive markers (`sensitive_markers`, `sensitive_rule`)
 - `ai_results` — Phase 2 per-file classification results, including model sensitive markers (`sensitive_markers`)
 - `ai_directory_results` — Phase 1 pre-assessment + Phase 3 directory summaries (distinguished by `phase` column)
+- `directory_verdicts` — one verdict per directory (step 3): `verdict`, `source` (`regel`/`modell`), `rule`,
+  `purpose`, `retention`, `reason`, `unit_directory_node_id` (the directory that is the whole, for `einheit`),
+  `profile_json` (snake_case), `model_used`, `raw_response`, `judged_at`, `error`; either `verdict` or `error` is set
 - `user_overrides` — manual category/target corrections
 - `db_version` — one row per applied schema step (`version`, `applied_at`)
 

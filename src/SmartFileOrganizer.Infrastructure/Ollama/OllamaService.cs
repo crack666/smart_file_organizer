@@ -376,7 +376,7 @@ public class OllamaService : IOllamaService
 
     // ─── Phase 1: Directory Pre-Assessment ───────────────────────────────────
 
-    public async Task<DirectoryClassificationResult> PreAssessDirectoryAsync(
+    public async Task<DirectoryPreAssessmentOutcome> PreAssessDirectoryAsync(
         DirectoryPreAssessmentInput input, CancellationToken ct = default)
     {
         var result = new DirectoryClassificationResult
@@ -387,9 +387,23 @@ public class OllamaService : IOllamaService
             ModelUsed = _options.Model
         };
 
+        DirectoryPreAssessmentOutcome Failed(string error, string? raw = null)
+        {
+            result.Error = error;
+            return new DirectoryPreAssessmentOutcome(result, new DirectoryVerdict
+            {
+                DirectoryNodeId = input.Directory.Id,
+                Source = VerdictSource.Modell,
+                ModelUsed = _options.Model,
+                RawResponse = raw,
+                JudgedAt = result.AnalyzedAt,
+                Error = error
+            });
+        }
+
         try
         {
-            var prompt = BuildPreAssessmentPrompt(input);
+            var prompt = BuildPreAssessmentPrompt(input, _options.SummaryLanguage);
             _logger.LogInformation("[Phase1] PROMPT for '{Dir}' ({Files} files, {Subdirs} subdirs, {Len} chars):\n{Prompt}",
                 input.Directory.RelativePath, input.DirectFiles.Count, input.SubdirectoryNames.Count,
                 prompt.Length, Trunc(prompt, 800));
@@ -414,46 +428,54 @@ public class OllamaService : IOllamaService
             if (!response.IsSuccessStatusCode)
             {
                 var errorBody = await response.Content.ReadAsStringAsync(cts.Token);
-                result.Error = TryExtractOllamaError(errorBody) ?? $"HTTP {(int)response.StatusCode}";
+                var error = TryExtractOllamaError(errorBody) ?? $"HTTP {(int)response.StatusCode}";
                 _logger.LogWarning(
                     "[Phase1] HTTP {Status} for '{Dir}' after {Elapsed:F1}s — Error: {Err}\nBody: {Body}",
                     (int)response.StatusCode, input.Directory.RelativePath, sw.Elapsed.TotalSeconds,
-                    result.Error, Trunc(errorBody, 500));
-                return result;
+                    error, Trunc(errorBody, 500));
+                return Failed(error, errorBody);
             }
 
             var json = await response.Content.ReadAsStringAsync(cts.Token);
-            ParsePreAssessmentResponse(json, result);
+            var outcome = PreAssessmentResponseParser.Parse(json, _options.Model);
+            outcome.Assessment.DirectoryNodeId = input.Directory.Id;
+            outcome.Verdict.DirectoryNodeId = input.Directory.Id;
             _logger.LogInformation(
-                "[Phase1] '{Dir}' in {Elapsed:F1}s — homogeneity={Hom}, strategy={Strat}, sample={Sample}, anomalies={Anom} — RAW: {Raw}",
+                "[Phase1] '{Dir}' in {Elapsed:F1}s — verdict={Verdict}, retention={Retention}, strategy={Strat}, sample={Sample}, anomalies={Anom}{Err} — RAW: {Raw}",
                 input.Directory.RelativePath, sw.Elapsed.TotalSeconds,
-                result.Homogeneity, result.SamplingStrategy,
-                result.SampleSize, CountJsonArray(result.AnomalousFileIds), Trunc(json, 400));
+                outcome.Verdict.Verdict.ToCode(), outcome.Verdict.Retention.ToCode(),
+                outcome.Assessment.SamplingStrategy, outcome.Assessment.SampleSize,
+                CountJsonArray(outcome.Assessment.AnomalousFileIds),
+                outcome.Verdict.Error is null ? string.Empty : $", error={outcome.Verdict.Error}",
+                Trunc(json, 400));
+            return outcome;
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
-            result.Error = $"Ollama request timed out after {_options.TimeoutSeconds}s.";
             _logger.LogWarning("[Phase1] TIMEOUT ({Seconds}s) for '{Dir}'", _options.TimeoutSeconds, input.Directory.RelativePath);
+            return Failed($"Ollama request timed out after {_options.TimeoutSeconds}s.");
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            result.Error = ex.Message;
             _logger.LogError(ex, "[Phase1] Unexpected error for '{Dir}'", input.Directory.RelativePath);
+            return Failed(ex.Message);
         }
-
-        return result;
     }
 
-    private static string BuildPreAssessmentPrompt(DirectoryPreAssessmentInput input)
+    public static string BuildPreAssessmentPrompt(DirectoryPreAssessmentInput input, string summaryLanguage = "English")
     {
         var dir = input.Directory;
+        var profile = input.Profile;
         var sb = new StringBuilder();
-        sb.AppendLine("You are analyzing a directory to plan targeted file inspection.");
+        sb.AppendLine("You are judging a directory before files are moved: what lies here, and can it be handled as a whole?");
+        sb.AppendLine("You also plan targeted file inspection.");
         sb.AppendLine();
         sb.AppendLine($"Directory: {dir.Name}");
         sb.AppendLine($"Relative path: {dir.RelativePath}");
         sb.AppendLine($"Total direct files: {input.DirectFiles.Count}");
         sb.AppendLine($"Subdirectories: {input.SubdirectoryNames.Count}");
+
+        AppendProfile(sb, profile);
 
         if (input.SubdirectoryNames.Count > 0)
         {
@@ -476,16 +498,56 @@ public class OllamaService : IOllamaService
 
         sb.AppendLine();
         sb.AppendLine("Tasks:");
-        sb.AppendLine("1. Assess homogeneity: high=all same type/theme, medium=mostly similar, low=very mixed.");
-        sb.AppendLine("2. Identify anomalous files: different type from the majority, or dramatically larger/smaller than peers.");
-        sb.AppendLine("3. Choose a sampling strategy for deep vision/text analysis:");
+        sb.AppendLine("1. Judge the directory as a whole (field verdict), using the profile above:");
+        sb.AppendLine("   einheit = project, program, game or backup that only makes sense as a whole; never split into single files");
+        sb.AppendLine("   einheitlich = collection of similar content with one purpose (photos of one trip, invoices of one year)");
+        sb.AppendLine("   gemischt = storage without a common purpose (desktop, downloads, misc); files are handled one by one");
+        sb.AppendLine("   leer = nothing worth looking at");
+        sb.AppendLine("   system = operating system, application or cache data, not user content");
+        sb.AppendLine("2. purpose: what the directory is for, in one sentence.");
+        sb.AppendLine("3. retention: behalten = personal or hard to replace; pruefen = unclear, a human should look;");
+        sb.AppendLine("   entbehrlich = can be recreated or downloaded again (installers, caches, temporary files).");
+        sb.AppendLine("4. reason: one or two sentences why, naming the facts from the profile you relied on.");
+        sb.AppendLine("5. Assess homogeneity: high=all same type/theme, medium=mostly similar, low=very mixed.");
+        sb.AppendLine("6. Identify anomalous files: different type from the majority, or dramatically larger/smaller than peers.");
+        sb.AppendLine("7. Choose a sampling strategy for deep vision/text analysis:");
         sb.AppendLine("   analyze_all = ≤10 files or content is too mixed to sample");
         sb.AppendLine("   random_sample = pick a representative subset (use this for large homogeneous dirs)");
         sb.AppendLine("   skip = only dir name/path are enough to classify (e.g. a clearly-named system folder)");
-        sb.AppendLine("4. Suggest how many files to analyze (0 for skip, all count for analyze_all).");
+        sb.AppendLine("8. Suggest how many files to analyze (0 for skip, all count for analyze_all).");
         sb.AppendLine();
+        sb.AppendLine("Use the codes exactly as written for verdict and retention.");
+        if (!string.IsNullOrWhiteSpace(summaryLanguage) &&
+            !string.Equals(summaryLanguage, "English", StringComparison.OrdinalIgnoreCase))
+        {
+            sb.AppendLine($"Write the purpose and reason fields in: {summaryLanguage}.");
+        }
         sb.AppendLine("Return only JSON matching the provided schema.");
         return sb.ToString();
+    }
+
+    private static void AppendProfile(StringBuilder sb, DirectoryProfile profile)
+    {
+        sb.AppendLine();
+        sb.AppendLine("Profile (computed from scan data, reliable):");
+        sb.AppendLine($"  Direct files: {profile.FileCount}, {profile.TotalBytes} bytes");
+        if (profile.FileTypes.Count > 0)
+            sb.AppendLine($"  By file type: {string.Join(", ", profile.FileTypes.Select(b => $"{b.Key} {b.Count} ({b.Bytes} bytes)"))}");
+        if (profile.Extensions.Count > 0)
+        {
+            var shown = profile.Extensions.Take(12)
+                .Select(b => $"{(b.Key.Length == 0 ? "(none)" : b.Key)} {b.Count}");
+            var more = profile.Extensions.Count > 12 ? $", +{profile.Extensions.Count - 12} more" : string.Empty;
+            sb.AppendLine($"  By extension: {string.Join(", ", shown)}{more}");
+        }
+        if (profile.OldestWrite is { } oldest && profile.NewestWrite is { } newest)
+            sb.AppendLine($"  Last modified: {oldest:yyyy-MM-dd} to {newest:yyyy-MM-dd} ({profile.SpanDays} days)");
+        if (profile.NamePatterns.Count > 0)
+            sb.AppendLine($"  Name patterns: {string.Join(", ", profile.NamePatterns.Select(p => $"{p.Pattern} {p.Count}"))}");
+        if (profile.UnitMarkers.Count > 0)
+            sb.AppendLine($"  Unit markers: {string.Join(", ", profile.UnitMarkers)}");
+        if (profile.Suggests is { } suggests)
+            sb.AppendLine($"  Hint: the profile points to '{suggests.ToCode()}'. {profile.SuggestionReason}");
     }
 
     private static object BuildPreAssessmentSchema() => new
@@ -493,6 +555,10 @@ public class OllamaService : IOllamaService
         type = "object",
         properties = new
         {
+            verdict = new { type = "string", @enum = VerdictCodes.All<DirectoryVerdictKind>().ToArray() },
+            purpose = new { type = "string" },
+            retention = new { type = "string", @enum = VerdictCodes.All<RetentionValue>().ToArray() },
+            reason = new { type = "string" },
             homogeneity = new { type = "string", @enum = new[] { "high", "medium", "low" } },
             dominant_type = new { type = "string" },
             theme = new { type = "string" },
@@ -513,52 +579,12 @@ public class OllamaService : IOllamaService
             sampling_strategy = new { type = "string", @enum = new[] { "analyze_all", "random_sample", "skip" } },
             suggested_sample_size = new { type = "integer" }
         },
-        required = new[] { "homogeneity", "dominant_type", "theme", "anomalous_files", "sampling_strategy", "suggested_sample_size" }
+        required = new[]
+        {
+            "verdict", "purpose", "retention", "reason",
+            "homogeneity", "dominant_type", "theme", "anomalous_files", "sampling_strategy", "suggested_sample_size"
+        }
     };
-
-    private static void ParsePreAssessmentResponse(string json, DirectoryClassificationResult result)
-    {
-        try
-        {
-            using var doc = JsonDocument.Parse(json);
-            var root = doc.RootElement;
-
-            string? responseText = null;
-            if (root.TryGetProperty("message", out var messageProp) &&
-                messageProp.ValueKind == JsonValueKind.Object &&
-                messageProp.TryGetProperty("content", out var contentProp))
-            {
-                responseText = contentProp.GetString();
-            }
-            else if (root.TryGetProperty("response", out var responseProp))
-            {
-                responseText = responseProp.GetString();
-            }
-
-            if (string.IsNullOrWhiteSpace(responseText)) return;
-
-            var startIdx = responseText.IndexOf('{');
-            var endIdx = responseText.LastIndexOf('}');
-            if (startIdx < 0 || endIdx < 0 || endIdx <= startIdx) return;
-
-            var jsonBlock = responseText[startIdx..(endIdx + 1)];
-            using var innerDoc = JsonDocument.Parse(jsonBlock);
-            var inner = innerDoc.RootElement;
-
-            if (inner.TryGetProperty("homogeneity", out var hom)) result.Homogeneity = hom.GetString();
-            if (inner.TryGetProperty("dominant_type", out var dt)) result.DominantType = dt.GetString();
-            if (inner.TryGetProperty("theme", out var th)) result.Theme = th.GetString();
-            if (inner.TryGetProperty("sampling_strategy", out var ss)) result.SamplingStrategy = ss.GetString();
-            if (inner.TryGetProperty("suggested_sample_size", out var sss))
-                result.SampleSize = sss.ValueKind == JsonValueKind.Number ? sss.GetInt32() : 0;
-            if (inner.TryGetProperty("anomalous_files", out var anomaly) && anomaly.ValueKind == JsonValueKind.Array)
-                result.AnomalousFileIds = anomaly.GetRawText();
-        }
-        catch
-        {
-            // Malformed response — leave defaults
-        }
-    }
 
     // ─── Phase 3: Directory Summary ───────────────────────────────────────────
 
