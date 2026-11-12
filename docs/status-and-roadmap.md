@@ -15,8 +15,8 @@ its date, or delete it.
 ## What exists
 
 _Checked 12.11.2026 by reading the code on `master`; build and tests run
-locally (`dotnet build` 0 errors and 0 warnings, `dotnet test` 482 passed with
-https://github.com/crack666/smart_file_organizer/issues/23 on top of #22; the line said 454 with #22 on top of #8, 411 with #8 on top of the
+locally (`dotnet build` 0 errors and 0 warnings, `dotnet test` 551 passed with
+https://github.com/crack666/smart_file_organizer/issues/23 on top of the library review and the evaluation; the line said 454 with #22 on top of #8 and was not updated by those two, 411 with #8 on top of the
 scan rules, read commands and library comparison, 312 before that, 293 before that, 271 before that, and 47
 before that) and in CI on Windows and Linux._
 
