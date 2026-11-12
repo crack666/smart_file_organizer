@@ -148,6 +148,43 @@ public class SensitivePersistenceTests : IDisposable
         Assert.Equal(SensitiveMarker.None, (await repo.GetByFileNodeIdAsync(file.Id))!.SensitiveMarkers);
     }
 
+    [Theory]
+    [MemberData(nameof(EachMarker))]
+    public async Task EveryMarker_ReadsBack_FromFileNodesAndAiResults(SensitiveMarker marker)
+    {
+        // Dapper parses string columns into enums with Enum.Parse and skips type handlers; until the
+        // column map, a token that is not a member name (private_nachricht) failed every read.
+        var job = await _jobRepo.CreateAsync(new ScanJob { RootPath = "/Scan", Status = JobStatus.Created, CreatedAt = DateTime.UtcNow });
+        await _fileRepo.InsertBatchAsync([new FileNode
+        {
+            JobId = job.Id, FullPath = "/Scan/a.eml", Name = "a.eml", ParentPath = "/Scan", RootPath = "/Scan",
+            RelativePath = "a.eml", RelativeDir = ".", Extension = ".eml", FileType = FileType.Document,
+            LastWriteTime = DateTime.UtcNow, ScannedAt = DateTime.UtcNow,
+            SensitiveMarkers = marker | SensitiveMarker.Zugangsdaten, SensitiveRule = "test"
+        }]);
+        var id = (await _fileRepo.GetByDirectoryAsync(job.Id, "/Scan")).Single().Id;
+        await new ClassificationRepository(_db).UpsertAsync(new FileClassification
+        {
+            FileNodeId = id, AnalyzedAt = DateTime.UtcNow, IsAiResult = true, SensitiveMarkers = marker
+        });
+
+        var byDirectory = (await _fileRepo.GetByDirectoryAsync(job.Id, "/Scan")).Single();
+        var byId = await _fileRepo.GetByIdAsync(id);
+
+        Assert.Equal(marker | SensitiveMarker.Zugangsdaten, byDirectory.SensitiveMarkers);
+        Assert.Equal(marker, byDirectory.Classification!.SensitiveMarkers);
+        Assert.Equal(marker | SensitiveMarker.Zugangsdaten, byId!.SensitiveMarkers);
+        Assert.Equal(marker, byId.Classification!.SensitiveMarkers);
+    }
+
+    public static TheoryData<SensitiveMarker> EachMarker()
+    {
+        var data = new TheoryData<SensitiveMarker>();
+        foreach (var m in Enum.GetValues<SensitiveMarker>().Where(m => m != SensitiveMarker.None))
+            data.Add(m);
+        return data;
+    }
+
     // ------------------------------------------------------------------ model answer
 
     private sealed class CannedHandler(string content) : HttpMessageHandler

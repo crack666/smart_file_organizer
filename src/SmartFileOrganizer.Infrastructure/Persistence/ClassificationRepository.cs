@@ -87,10 +87,12 @@ public class ClassificationRepository : IClassificationRepository
     /// <summary>
     /// Reads <c>ai_results</c>. The coded columns are renamed so Dapper does not map them onto the nullable
     /// enums itself: it ignores type handlers for nullable enums and would try <c>Enum.Parse</c> on the code.
+    /// The same holds for the marker list: <c>Enum.Parse</c> threw for <c>private_nachricht</c>
+    /// (found by the evaluation corpus of https://github.com/crack666/smart_file_organizer/issues/36).
     /// </summary>
     internal const string SelectSql = """
         SELECT id, file_node_id, category, importance, confidence, summary, suggested_target, model_used,
-               analyzed_at, raw_response, error, is_ai_result, sensitive_markers,
+               analyzed_at, raw_response, error, is_ai_result, sensitive_markers AS sensitive_markers_code,
                origin AS origin_code, inherited_from_directory_node_id, keep_hint AS keep_hint_code, keep_reason
         FROM ai_results
         """;
@@ -100,9 +102,11 @@ public class ClassificationRepository : IClassificationRepository
     {
         public string? OriginCode { get; set; }
         public string? KeepHintCode { get; set; }
+        public string? SensitiveMarkersCode { get; set; }
 
         public FileClassification Finish()
         {
+            SensitiveMarkers = SensitiveMarkerNames.Parse(SensitiveMarkersCode);
             Origin = VerdictCodes.ParseNullable<ResultOrigin>(OriginCode);
             KeepHint = VerdictCodes.ParseNullable<KeepHint>(KeepHintCode);
             return this;
