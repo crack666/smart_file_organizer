@@ -211,8 +211,9 @@ public class ScanEngine : IScanEngine
                 };
 
                 // Sensitive-file rules run here, not in the AI phase, so they also cover files
-                // the model never sees. Only small, non-media files are probed for a header.
-                SensitiveFileRules.Apply(fileNode, maxBytes => _fs.ReadPrefix(filePath, maxBytes));
+                // the model never sees. Only small, non-media files are probed for a header, and
+                // a structure-only job opens no file at all: name, extension and folder rules only.
+                SensitiveFileRules.Apply(fileNode, job.StructureOnly ? null : maxBytes => _fs.ReadPrefix(filePath, maxBytes));
 
                 fileBatch.Add(fileNode);
                 job.TotalFiles++;

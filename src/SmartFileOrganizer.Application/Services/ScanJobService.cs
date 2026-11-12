@@ -51,7 +51,14 @@ public class ScanJobService
     /// Creates a job with <paramref name="rules"/> (null: the shipped rules) and a fixed <paramref name="role"/>;
     /// a <see cref="ScanRole.Library"/> job is only read, never analysed.
     /// </summary>
-    public async Task<ScanJob> CreateJobAsync(string rootPath, ScanRulesProfile? rules, ScanRole role, CancellationToken ct = default)
+    public Task<ScanJob> CreateJobAsync(string rootPath, ScanRulesProfile? rules, ScanRole role, CancellationToken ct = default) =>
+        CreateJobAsync(rootPath, rules, role, structureOnly: false, ct);
+
+    /// <summary>
+    /// Creates a job as above. With <paramref name="structureOnly"/> the scan records the tree without
+    /// opening any file, not even for the sensitive-file header probe.
+    /// </summary>
+    public async Task<ScanJob> CreateJobAsync(string rootPath, ScanRulesProfile? rules, ScanRole role, bool structureOnly, CancellationToken ct = default)
     {
         var job = new ScanJob
         {
@@ -59,7 +66,8 @@ public class ScanJobService
             Role = role,
             Status = JobStatus.Created,
             CreatedAt = DateTime.UtcNow,
-            Rules = rules
+            Rules = rules,
+            StructureOnly = structureOnly
         };
         return await _jobRepo.CreateAsync(job, ct);
     }

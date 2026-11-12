@@ -27,6 +27,12 @@ public class ScanJob
     public string? RulesHash { get; set; }
     public string? RulesJson { get; set; }
 
+    /// <summary>
+    /// Record names, sizes, times and types only: no file is opened, not even for the header probe of
+    /// the sensitive-file rules. Fixed at creation, so a resumed job keeps it.
+    /// </summary>
+    public bool StructureOnly { get; set; }
+
     /// <summary>The stored rules, or null if none are recorded yet.</summary>
     public ScanRulesProfile? Rules
     {
