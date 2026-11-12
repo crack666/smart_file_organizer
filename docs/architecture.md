@@ -337,8 +337,8 @@ Important tables:
 - `scan_jobs` — job lifecycle, counters, status, and the scan rules of the job (step 4: `rules_name`, `rules_source`, `rules_hash`, `rules_json`), role (`source`/`library`)
 - `directory_nodes` — scanned directories with heuristic metadata and stats; `dir_status = Error` for directories the scan could not read
 - `file_nodes` — scanned files with metadata, type, AI status, rule-based sensitive markers (`sensitive_markers`, `sensitive_rule`)
-- `ai_results` — Phase 2 per-file classification results, including model sensitive markers (`sensitive_markers`) and the evidence notes (`evidence`, step 5)
-- `file_facts` — facts per file read without the model (step 5): `file_node_id`, `fact`, `value`, `source`
+- `ai_results` — Phase 2 per-file classification results, including model sensitive markers (`sensitive_markers`) and the evidence notes (`evidence`, step 7)
+- `file_facts` — facts per file read without the model (step 7): `file_node_id`, `fact`, `value`, `source`
   (`metadata`, `rule`, `model`), `recorded_at`; one row per file and fact. Codes are defined on the Domain enums
   `FileFactKey` and `FactSource` (`FileFactCodes.cs`)
 - `ai_directory_results` — Phase 1 pre-assessment + Phase 3 directory summaries (distinguished by `phase` column)

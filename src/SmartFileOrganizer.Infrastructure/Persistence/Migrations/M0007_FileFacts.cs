@@ -1,7 +1,7 @@
 namespace SmartFileOrganizer.Infrastructure.Persistence.Migrations;
 
 /// <summary>
-/// Step 5: facts per file and the evidence notes of a result
+/// Step 7: facts per file and the evidence notes of a result
 /// (https://github.com/crack666/smart_file_organizer/issues/22).
 /// <list type="bullet">
 /// <item><c>file_facts</c>: what Phase 2 read from a file without the model (capture date, device,
@@ -11,9 +11,9 @@ namespace SmartFileOrganizer.Infrastructure.Persistence.Migrations;
 /// </list>
 /// Existing results get no facts here; they appear when a file is analysed again.
 /// </summary>
-internal sealed class M0005_FileFacts : SqlSchemaMigration
+internal sealed class M0007_FileFacts : SqlSchemaMigration
 {
-    public override int Version => 5;
+    public override int Version => 7;
     public override string Description => "File facts from metadata and rules; evidence notes on ai_results";
 
     protected override string Sql => """

@@ -15,8 +15,10 @@ its date, or delete it.
 ## What exists
 
 _Checked 12.11.2026 by reading the code on `master`; build and tests run
-locally (`dotnet build` 0 errors, `dotnet test` 411 passed with #8 on top of the scan rules, read commands and library comparison; the
-line said 312 before, 293 before that, 271 before that, and 47 before that) and in CI on Windows and Linux._
+locally (`dotnet build` 0 errors and 0 warnings, `dotnet test` 454 passed with
+https://github.com/crack666/smart_file_organizer/issues/22 on top of #8; the line said 411 with #8 on top of the
+scan rules, read commands and library comparison, 312 before that, 293 before that, 271 before that, and 47
+before that) and in CI on Windows and Linux._
 
 ### Scan and persistence
 
