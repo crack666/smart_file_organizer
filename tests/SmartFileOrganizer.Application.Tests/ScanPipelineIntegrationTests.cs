@@ -271,9 +271,13 @@ internal class FakeFileSystemAccessor : IFileSystemAccessor
     // dirPath → list of immediate subdirectory paths (built by explicit parent→child edges)
     private readonly Dictionary<string, List<string>> _dirChildren;
 
-    public FakeFileSystemAccessor(Dictionary<string, string[]> dirFiles)
+    // filePath → content; files without an entry read as empty
+    private readonly Dictionary<string, byte[]> _contents;
+
+    public FakeFileSystemAccessor(Dictionary<string, string[]> dirFiles, Dictionary<string, byte[]>? contents = null)
     {
         _dirFiles = dirFiles;
+        _contents = contents ?? new Dictionary<string, byte[]>(StringComparer.Ordinal);
         _dirChildren = new Dictionary<string, List<string>>(StringComparer.Ordinal);
 
         // Build parent→children index by splitting the path manually on '/'
@@ -298,7 +302,15 @@ internal class FakeFileSystemAccessor : IFileSystemAccessor
     public IEnumerable<string> EnumerateDirectories(string path)
         => _dirChildren.TryGetValue(path, out var children) ? children : [];
 
-    public long GetFileSize(string path) => 1024;
+    public long GetFileSize(string path) => _contents.TryGetValue(path, out var c) ? c.Length : 1024;
+
+    public List<string> PrefixReads { get; } = [];
+
+    public byte[] ReadPrefix(string path, int maxBytes)
+    {
+        PrefixReads.Add(path);
+        return _contents.TryGetValue(path, out var c) ? c[..Math.Min(c.Length, maxBytes)] : [];
+    }
     public DateTime GetLastWriteTime(string path) => DateTime.UtcNow;
 
     // Use forward-slash splitting so these work on both Windows and Linux

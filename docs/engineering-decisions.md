@@ -194,6 +194,53 @@ Known limitation:
 
 - long or multi-page documents are not yet fully understood
 
+## 8. Sensitive files: local and external readers
+
+Decided 12.11.2026 in
+[#9](https://github.com/crack666/smart_file_organizer/issues/9).
+
+Old drives hold keys, password lists, private messages, ID scans, financial
+and health records. Two kinds of reader see the results:
+
+- **Local:** the Ollama model on this machine, and the user at the GUI. They
+  may read the content of any file.
+- **External:** anything that receives output of the tool, in particular a
+  model outside the machine that drives the tool through the CLI, and anyone
+  who gets an export. For a marked file it sees path, file type, marker and
+  a neutral summary only. Never a text excerpt, the raw model response, the
+  model's own summary, the suggested target or an error text.
+
+How it is enforced:
+
+- Markers (`zugangsdaten`, `schluessel`, `private_nachricht`, `ausweis`,
+  `finanzen`, `gesundheit`; several per file) come from rules without a
+  model, run during the scan so they also cover files the model never sees,
+  and from an extra field in the regular classification schema (no second
+  model call).
+- `SensitiveOutputGuard.Project` in the Application project builds the only
+  output record of a file. CLI commands and exports format that record and
+  never read `FileNode` or `FileClassification` fields directly. The neutral
+  summary is written by the guard from markers and file type, not by the
+  model, so a model that quotes a password in its summary cannot leak it.
+- The guard re-evaluates the name rules, so rows from older scans are
+  protected without a backfill.
+- `--include-sensitive` (`SensitiveOutputOptions.IncludeSensitive`) lifts the
+  protection on purpose. It is meant for a human at the machine, never set by
+  an external caller.
+- Marked files are never proposed as disposable: a model `TrashCandidate`
+  becomes `ReviewNeeded`. A user override stays as the user set it.
+- Directory summaries are stored and shown as well, so a marked file enters
+  the directory-summary prompt with its neutral line, not with its model
+  summary.
+
+Trade-off: the rules prefer false positives (a presentation `.key`, a file
+named `Befund`), which only cost a manual review, over false negatives.
+
+Not covered by the guard: the GUI (local by definition), log output (prompts
+contain text excerpts), the SQLite file itself, directory-level output
+(pre-assessment theme and anomaly reasons are model text about file names),
+and the header rule for rows scanned before schema step 2.
+
 ## Design stance going forward
 
 Prefer:

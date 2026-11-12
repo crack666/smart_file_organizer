@@ -15,4 +15,11 @@ public interface IFileSystemAccessor
     string GetDirectoryName(string path);
     string GetExtension(string path);
     string GetRelativePath(string relativeTo, string path);
+
+    /// <summary>
+    /// Reads at most <paramref name="maxBytes"/> bytes from the start of the file.
+    /// Returns an empty array if the file cannot be read. Used for header rules
+    /// (for example a private-key header line); never for whole files.
+    /// </summary>
+    byte[] ReadPrefix(string path, int maxBytes);
 }

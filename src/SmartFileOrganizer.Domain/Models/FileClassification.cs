@@ -16,4 +16,8 @@ public class FileClassification
     public string? RawResponse { get; set; }
     public string? Error { get; set; }
     public bool IsAiResult { get; set; }
+
+    /// <summary>Markers the local model reported in the same classification call.
+    /// Stored as tokens in <c>ai_results.sensitive_markers</c>.</summary>
+    public SensitiveMarker SensitiveMarkers { get; set; }
 }

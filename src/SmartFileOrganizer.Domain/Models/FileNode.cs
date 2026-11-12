@@ -20,6 +20,14 @@ public class FileNode
     public FileNodeStatus Status { get; set; } = FileNodeStatus.Discovered;
     public DateTime ScannedAt { get; set; }
 
+    /// <summary>Markers set by the rules that need no model (name, extension, header line).
+    /// Stored as tokens in <c>file_nodes.sensitive_markers</c>.</summary>
+    public SensitiveMarker SensitiveMarkers { get; set; }
+
+    /// <summary>Id of the rule that set <see cref="SensitiveMarkers"/>, for example
+    /// <c>name:id_rsa</c> or <c>header:private-key</c>. Never contains file content.</summary>
+    public string? SensitiveRule { get; set; }
+
     // Navigation / denormalized for sorting/filtering
     public FileClassification? Classification { get; set; }
     public UserOverride? Override { get; set; }

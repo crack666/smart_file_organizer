@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Threading;
 using Microsoft.Extensions.Logging;
+using SmartFileOrganizer.Application.Sensitivity;
 using SmartFileOrganizer.Domain.Enums;
 using SmartFileOrganizer.Domain.Interfaces;
 using SmartFileOrganizer.Domain.Models;
@@ -103,13 +104,7 @@ public class DirectorySummaryService
                 var anomalyDescriptions = BuildAnomalyDescriptions(preAssessment);
 
                 foreach (var node in fileNodes)
-                {
-                    var category = node.Classification?.Category.ToString() ?? node.FileType.ToString();
-                    var line = node.Classification?.Summary is { } s
-                        ? $"{node.Name} — {category} — {(s.Length > 120 ? s[..120] + "\u2026" : s)}"
-                        : $"{node.Name} — {category}";
-                    summaryLines.Add(line);
-                }
+                    summaryLines.Add(BuildFileSummaryLine(node));
 
                 // Only call Ollama if we have something meaningful to say
                 if (summaryLines.Count == 0 && anomalyDescriptions.Count == 0)
@@ -158,6 +153,23 @@ public class DirectorySummaryService
         return new AiClassificationRunResult(true, pending.Count, processed, errorCount, completedMsg);
     }
 
+    /// <summary>
+    /// One input line for the directory summary. The directory summary is stored and may later
+    /// be shown outside the machine, so a marked file contributes its neutral summary, never the
+    /// model summary of its content.
+    /// </summary>
+    public static string BuildFileSummaryLine(FileNode node)
+    {
+        var markers = SensitiveOutputGuard.GetMarkers(node);
+        if (markers != SensitiveMarker.None)
+            return $"{node.Name} — {SensitiveOutputGuard.NeutralSummary(markers, node.FileType)}";
+
+        var category = node.Classification?.Category.ToString() ?? node.FileType.ToString();
+        return node.Classification?.Summary is { } s
+            ? $"{node.Name} — {category} — {(s.Length > 120 ? s[..120] + "\u2026" : s)}"
+            : $"{node.Name} — {category}";
+    }
+
     public async Task<DirectoryClassificationResult> SummarizeSingleAsync(
         long jobId,
         DirectoryNode dir,
@@ -179,13 +191,7 @@ public class DirectorySummaryService
         var anomalyDescriptions = BuildAnomalyDescriptions(preAssessment);
 
         foreach (var node in fileNodes)
-        {
-            var category = node.Classification?.Category.ToString() ?? node.FileType.ToString();
-            var line = node.Classification?.Summary is { } s
-                ? $"{node.Name} — {category} — {(s.Length > 120 ? s[..120] + "\u2026" : s)}"
-                : $"{node.Name} — {category}";
-            summaryLines.Add(line);
-        }
+            summaryLines.Add(BuildFileSummaryLine(node));
 
         DirectoryClassificationResult result;
         if (summaryLines.Count == 0 && anomalyDescriptions.Count == 0)

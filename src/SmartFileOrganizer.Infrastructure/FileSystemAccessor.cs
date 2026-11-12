@@ -42,4 +42,21 @@ public class FileSystemAccessor : IFileSystemAccessor
 
     public string GetRelativePath(string relativeTo, string path) =>
         Path.GetRelativePath(relativeTo, path);
+
+    public byte[] ReadPrefix(string path, int maxBytes)
+    {
+        if (maxBytes <= 0) return [];
+        try
+        {
+            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            var buffer = new byte[maxBytes];
+            var total = 0;
+            int read;
+            while (total < maxBytes && (read = stream.Read(buffer, total, maxBytes - total)) > 0)
+                total += read;
+            return total == maxBytes ? buffer : buffer[..total];
+        }
+        catch (UnauthorizedAccessException) { return []; }
+        catch (IOException) { return []; }
+    }
 }

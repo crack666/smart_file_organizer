@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Text;
+using SmartFileOrganizer.Application.Sensitivity;
 using SmartFileOrganizer.Domain.Interfaces;
 using SmartFileOrganizer.Domain.Models;
 
@@ -15,6 +16,10 @@ namespace SmartFileOrganizer.Application.Services;
 ///
 /// The export is deliberately read-only: it never touches a file on disk other than the
 /// output stream, and it never writes back into the database.
+///
+/// Every row goes through <see cref="SensitiveOutputGuard"/>: for a marked file the export
+/// contains path, type, marker and a neutral summary only, unless
+/// <see cref="SensitiveOutputOptions.IncludeSensitive"/> is set.
 /// </summary>
 public class ScanExportService
 {
@@ -40,7 +45,10 @@ public class ScanExportService
         "suggested_target",
         "model_used",
         "analyzed_at",
-        "error"
+        "error",
+        // Appended, not inserted: existing sheets address the columns above by position.
+        "sensitive",
+        "sensitive_rule"
     ];
 
     private readonly IDirectoryRepository _dirRepo;
@@ -56,8 +64,16 @@ public class ScanExportService
     /// Writes every file of <paramref name="jobId"/> to <paramref name="writer"/> as CSV
     /// and returns the number of data rows written (header not counted).
     /// </summary>
-    public async Task<int> ExportJobAsync(
+    public Task<int> ExportJobAsync(
         long jobId, TextWriter writer, CancellationToken ct = default)
+        => ExportJobAsync(jobId, writer, SensitiveOutputOptions.Default, ct);
+
+    /// <summary>
+    /// As <see cref="ExportJobAsync(long, TextWriter, CancellationToken)"/>, with explicit
+    /// protection options (<c>--include-sensitive</c>).
+    /// </summary>
+    public async Task<int> ExportJobAsync(
+        long jobId, TextWriter writer, SensitiveOutputOptions? options, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(writer);
 
@@ -73,7 +89,7 @@ public class ScanExportService
             var files = await _fileRepo.GetByDirectoryAsync(jobId, dir.FullPath, ct);
             foreach (var file in files)
             {
-                WriteRow(writer, file);
+                WriteRow(writer, file, options);
                 rows++;
             }
         }
@@ -89,6 +105,11 @@ public class ScanExportService
     /// </summary>
     public async Task<int> ExportJobToFileAsync(
         long jobId, string path, CancellationToken ct = default)
+        => await ExportJobToFileAsync(jobId, path, SensitiveOutputOptions.Default, ct);
+
+    /// <inheritdoc cref="ExportJobToFileAsync(long, string, CancellationToken)"/>
+    public async Task<int> ExportJobToFileAsync(
+        long jobId, string path, SensitiveOutputOptions? options, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
 
@@ -96,46 +117,40 @@ public class ScanExportService
             path, FileMode.Create, FileAccess.Write, FileShare.Read);
         await using var writer = new StreamWriter(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: true));
 
-        return await ExportJobAsync(jobId, writer, ct);
+        return await ExportJobAsync(jobId, writer, options, ct);
     }
 
     public static void WriteHeader(TextWriter writer)
         => writer.Write(string.Join(',', Columns) + "\r\n");
 
-    public static void WriteRow(TextWriter writer, FileNode file)
+    public static void WriteRow(TextWriter writer, FileNode file, SensitiveOutputOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(file);
 
-        var ai = file.Classification;
-        var ovr = file.Override;
-
-        // A human correction outranks the model. Whoever reads the sheet wants the
-        // category that is currently true, not the one the model guessed first.
-        var category = ovr is not null
-            ? ovr.OverriddenCategory.ToString()
-            : ai?.Category.ToString() ?? string.Empty;
-        var categorySource = ovr is not null ? "user" : ai is not null ? "ai" : string.Empty;
-        var suggestedTarget = ovr?.OverriddenTarget ?? ai?.SuggestedTarget;
+        // The guard decides what may leave the machine; this method only formats.
+        var r = SensitiveOutputGuard.Project(file, options);
 
         var fields = new[]
         {
-            file.FullPath,
-            file.Name,
-            file.RelativeDir,
-            file.Extension,
-            file.FileType.ToString(),
-            file.Size.ToString(CultureInfo.InvariantCulture),
-            FormatTimestamp(file.LastWriteTime),
-            file.Status.ToString(),
-            category,
-            categorySource,
-            ai?.Importance.ToString() ?? string.Empty,
-            ai is not null ? ai.Confidence.ToString("0.###", CultureInfo.InvariantCulture) : string.Empty,
-            ai?.Summary,
-            suggestedTarget,
-            ai?.ModelUsed,
-            ai is not null ? FormatTimestamp(ai.AnalyzedAt) : string.Empty,
-            ai?.Error
+            r.FullPath,
+            r.Name,
+            r.RelativeDir,
+            r.Extension,
+            r.FileType,
+            r.SizeBytes.ToString(CultureInfo.InvariantCulture),
+            r.LastWriteTime is { } lwt ? FormatTimestamp(lwt) : string.Empty,
+            r.Status,
+            r.Category,
+            r.CategorySource,
+            r.Importance,
+            r.Confidence is { } conf ? conf.ToString("0.###", CultureInfo.InvariantCulture) : string.Empty,
+            r.Summary,
+            r.SuggestedTarget,
+            r.ModelUsed,
+            r.AnalyzedAt is { } at ? FormatTimestamp(at) : string.Empty,
+            r.Error,
+            string.Join(',', r.Sensitive),
+            r.SensitiveRule
         };
 
         writer.Write(string.Join(',', fields.Select(Escape)) + "\r\n");
