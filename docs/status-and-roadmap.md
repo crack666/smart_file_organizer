@@ -15,7 +15,7 @@ its date, or delete it.
 ## What exists
 
 _Checked 12.11.2026 by reading the code on `master`; build and tests run
-locally (`dotnet build` 0 errors, `dotnet test` 391 passed with #8 on top of the scan rules and read commands; the
+locally (`dotnet build` 0 errors, `dotnet test` 411 passed with #8 on top of the scan rules, read commands and library comparison; the
 line said 312 before, 293 before that, 271 before that, and 47 before that) and in CI on Windows and Linux._
 
 ### Scan and persistence
@@ -81,7 +81,7 @@ line said 312 before, 293 before that, 271 before that, and 47 before that) and 
    extracted text or first PDF page rendered to an image (default limit
    5 MB), videos and audio by file name and path only. Returns category,
    importance, confidence, summary, suggested target and sensitive markers.
-   Stored in `ai_results`; samples in `directory_samples` (schema step 5).
+   Stored in `ai_results`; samples in `directory_samples` (schema step 6).
    A marked file is stored as `ReviewNeeded` instead of `TrashCandidate`
    and as `worth_keeping` instead of `temporary`. The thresholds are starting
    values until the measurement of

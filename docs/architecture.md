@@ -322,12 +322,12 @@ Important tables:
 - `directory_verdicts` — one verdict per directory (step 3): `verdict`, `source` (`regel`/`modell`), `rule`,
   `purpose`, `retention`, `reason`, `unit_directory_node_id` (the directory that is the whole, for `einheit`),
   `profile_json` (snake_case), `model_used`, `raw_response`, `judged_at`, `error`; either `verdict` or `error` is set;
-  `escalated_from` and `escalation_reason` when a sample raised the directory to `gemischt` (step 5)
-- `directory_samples` — one sample per uniform directory (step 5): `seed`, `state` (`open`, `confirmed`,
+  `escalated_from` and `escalation_reason` when a sample raised the directory to `gemischt` (step 6)
+- `directory_samples` — one sample per uniform directory (step 6): `seed`, `state` (`open`, `confirmed`,
   `escalated`), `eligible_count`, `members_json` (file id, name, `role` = `stratum`/`size`/`date`/`anomaly`/`sensitive`,
   category, `deviates`, error), `max_deviation_share`, `majority_category`, `deviating_count`, `failed_count`,
   `deviation_share`, `inherited_count`, `inherited_confidence`, `reason`, `drawn_at`, `decided_at`
-- `ai_results` columns of step 5: `origin` (`rule`, `model`, `inherited`, `human`, `agent`, `external`; NULL for
+- `ai_results` columns of step 6: `origin` (`rule`, `model`, `inherited`, `human`, `agent`, `external`; NULL for
   older rows, all judged by the model), `inherited_from_directory_node_id`, `keep_hint` (`temporary`,
   `worth_keeping`), `keep_reason`. File statuses `Deferred` (waits for its sample) and `Inherited` are new
 - `user_overrides` — manual category/target corrections
@@ -350,7 +350,7 @@ The schema is built from numbered steps in `src/SmartFileOrganizer.Infrastructur
 1. Add one file `Migrations/M000N_ShortName.cs` with a class implementing `ISchemaMigration`, or deriving from `SqlSchemaMigration` when plain SQL is enough. `Version` is `N`.
 2. Take the next free number on `master`. Steps are discovered by reflection, so no shared list is edited.
 3. Versions must be exactly `1..N`. If two branches picked the same number, startup and `SchemaMigrationTests` fail with a "Duplicate schema migration versions" message; the branch merged second renumbers its step (file name and `Version`).
-4. Never change a step that has been merged; add a new one. Step 1 (`M0001_InitialSchema`) is the schema as it existed before migrations. Step 2 (`M0002_SensitiveMarkers`) adds the sensitive-marker columns. Step 3 (`M0003_DirectoryVerdicts`) adds `directory_verdicts`. Step 4 (`M0004_ScanJobRules`) adds the scan rules of a job. Step 5 (`M0005_DirectorySamples`) adds `directory_samples`, the escalation columns and the origin and keep-hint columns of `ai_results`; its new codes are English.
+4. Never change a step that has been merged; add a new one. Step 1 (`M0001_InitialSchema`) is the schema as it existed before migrations. Step 2 (`M0002_SensitiveMarkers`) adds the sensitive-marker columns. Step 3 (`M0003_DirectoryVerdicts`) adds `directory_verdicts`. Step 4 (`M0004_ScanJobRules`) adds the scan rules of a job. Step 5 (`M0005_ContentComparison`) adds the comparison with the library. Step 6 (`M0006_DirectorySamples`) adds `directory_samples`, the escalation columns and the origin and keep-hint columns of `ai_results`; its new codes are English.
 5. Do not put `PRAGMA journal_mode` or other transaction-incompatible statements in a step.
 
 ## Architectural rules

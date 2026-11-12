@@ -1,7 +1,7 @@
 namespace SmartFileOrganizer.Infrastructure.Persistence.Migrations;
 
 /// <summary>
-/// Step 5: staged analysis (https://github.com/crack666/smart_file_organizer/issues/8).
+/// Step 6: staged analysis (https://github.com/crack666/smart_file_organizer/issues/8).
 /// <list type="bullet">
 /// <item><c>directory_samples</c>: the sample of a uniform directory, its members and its outcome.</item>
 /// <item><c>directory_verdicts.escalated_from</c> / <c>escalation_reason</c>: a directory whose sample
@@ -15,9 +15,9 @@ namespace SmartFileOrganizer.Infrastructure.Persistence.Migrations;
 /// New codes are English. Existing rows keep <c>NULL</c>: results written before this step were all judged
 /// by the model one by one.
 /// </summary>
-internal sealed class M0005_DirectorySamples : SqlSchemaMigration
+internal sealed class M0006_DirectorySamples : SqlSchemaMigration
 {
-    public override int Version => 5;
+    public override int Version => 6;
     public override string Description => "Directory samples, escalation and derivation of file results";
 
     protected override string Sql => """
