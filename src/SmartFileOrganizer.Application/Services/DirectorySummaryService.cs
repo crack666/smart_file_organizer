@@ -157,7 +157,8 @@ public class DirectorySummaryService
 
                 if (result.Error != null)
                 {
-                    _logger.LogWarning("Summary error for {Path}: {Err}", dir.FullPath, result.Error);
+                    // The error text can echo the prompt; it is stored and shown by sfo show, not logged here.
+                    _logger.LogWarning("Summary error for {Path}; see sfo show", dir.FullPath);
                     Interlocked.Increment(ref errorCount);
                 }
 

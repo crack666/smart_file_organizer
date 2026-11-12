@@ -2,6 +2,8 @@ using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+using SmartFileOrganizer.Application.Sensitivity;
 using SmartFileOrganizer.Domain.Enums;
 using SmartFileOrganizer.Domain.Interfaces;
 using SmartFileOrganizer.Domain.Models;
@@ -12,17 +14,25 @@ namespace SmartFileOrganizer.Infrastructure.Ollama;
 /// Calls the Ollama HTTP API to classify files semantically from the evidence built by
 /// <c>IClassificationInputPreparer</c>. Files decided by a rule never reach this class.
 /// </summary>
+/// <remarks>
+/// Two loggers: the regular one gets progress and errors without any text from or about file contents
+/// (it may end up on stderr, which an external caller reads); prompts, answers and error bodies go to
+/// <see cref="ModelTraffic"/> on level Debug, and for a marked file not even there
+/// (https://github.com/crack666/smart_file_organizer/issues/33).
+/// </remarks>
 public class OllamaService : IOllamaService
 {
     private readonly HttpClient _http;
     private readonly OllamaOptions _options;
     private readonly ILogger<OllamaService> _logger;
+    private readonly ILogger _traffic;
 
-    public OllamaService(HttpClient http, OllamaOptions options, ILogger<OllamaService> logger)
+    public OllamaService(HttpClient http, OllamaOptions options, ILogger<OllamaService> logger, ILogger<ModelTraffic>? traffic = null)
     {
         _http = http;
         _options = options;
         _logger = logger;
+        _traffic = (ILogger?)traffic ?? NullLogger.Instance;
     }
 
     public async Task<bool> IsAvailableAsync(CancellationToken ct = default)
@@ -92,14 +102,15 @@ public class OllamaService : IOllamaService
             IsAiResult = true
         };
 
+        // Marked by a rule before the call; the model may add markers in its answer (checked below).
+        var marked = SensitiveOutputGuard.IsSensitive(file);
+
         try
         {
             var prompt = BuildClassificationPrompt(input, _options.SummaryLanguage);
-            // The second call of a check carries more content and the names of neighbouring files: Debug only.
-            _logger.Log(input.Depth == EvidenceDepth.Extended ? LogLevel.Debug : LogLevel.Information,
-                "[Phase2] PROMPT for '{File}' (images={ImgCount}, textLen={TextLen}):\n{Prompt}",
-                file.Name, input.Base64Images.Count, input.ExtractedText?.Length ?? 0,
-                Trunc(prompt, 800));
+            _traffic.LogDebug("[Phase2] PROMPT for '{File}' (depth={Depth}, images={ImgCount}, textLen={TextLen}):\n{Prompt}",
+                file.Name, input.Depth, input.Base64Images.Count, input.ExtractedText?.Length ?? 0,
+                marked ? ModelTraffic.Withheld : Trunc(prompt, 8000));
 
             var requestBody = new
             {
@@ -130,8 +141,11 @@ public class OllamaService : IOllamaService
 
                 result.Error = errorMessage;
                 result.RawResponse = errorBody;
-                _logger.LogWarning("[Phase2] HTTP {Status} for '{File}' after {Elapsed:F1}s — {Message}\nBody: {Body}",
-                    (int)response.StatusCode, file.Name, sw.Elapsed.TotalSeconds, errorMessage, Trunc(errorBody, 500));
+                // The body can echo the prompt: only the status on the regular logger.
+                _logger.LogWarning("[Phase2] HTTP {Status} for '{File}' after {Elapsed:F1}s; the error is stored with the file",
+                    (int)response.StatusCode, file.Name, sw.Elapsed.TotalSeconds);
+                _traffic.LogDebug("[Phase2] HTTP {Status} for '{File}', body: {Body}",
+                    (int)response.StatusCode, file.Name, marked ? ModelTraffic.Withheld : Trunc(errorBody, 2000));
                 return result;
             }
 
@@ -139,9 +153,12 @@ public class OllamaService : IOllamaService
             result.RawResponse = json;
 
             ParseResponse(json, result);
+            marked |= result.SensitiveMarkers != SensitiveMarker.None;
             _logger.Log(input.Depth == EvidenceDepth.Extended ? LogLevel.Debug : LogLevel.Information,
-                "[Phase2] '{File}': {Category} ({Confidence:P0}) in {Elapsed:F1}s — RAW: {Raw}",
-                file.Name, result.Category, result.Confidence, sw.Elapsed.TotalSeconds, Trunc(json, 400));
+                "[Phase2] '{File}': {Category} ({Confidence:P0}) in {Elapsed:F1}s",
+                file.Name, result.Category, result.Confidence, sw.Elapsed.TotalSeconds);
+            _traffic.LogDebug("[Phase2] ANSWER for '{File}': {Raw}",
+                file.Name, marked ? ModelTraffic.Withheld : Trunc(json, 4000));
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
@@ -539,9 +556,10 @@ public class OllamaService : IOllamaService
         try
         {
             var prompt = BuildPreAssessmentPrompt(input, _options.SummaryLanguage);
-            _logger.LogInformation("[Phase1] PROMPT for '{Dir}' ({Files} files, {Subdirs} subdirs, {Len} chars):\n{Prompt}",
+            // Phase 1 sees names and the profile only, no file content; still a prompt, so not on the regular logger.
+            _traffic.LogDebug("[Phase1] PROMPT for '{Dir}' ({Files} files, {Subdirs} subdirs, {Len} chars):\n{Prompt}",
                 input.Directory.RelativePath, input.DirectFiles.Count, input.SubdirectoryNames.Count,
-                prompt.Length, Trunc(prompt, 800));
+                prompt.Length, Trunc(prompt, 8000));
 
             var requestBody = new
             {
@@ -565,9 +583,10 @@ public class OllamaService : IOllamaService
                 var errorBody = await response.Content.ReadAsStringAsync(cts.Token);
                 var error = TryExtractOllamaError(errorBody) ?? $"HTTP {(int)response.StatusCode}";
                 _logger.LogWarning(
-                    "[Phase1] HTTP {Status} for '{Dir}' after {Elapsed:F1}s — Error: {Err}\nBody: {Body}",
-                    (int)response.StatusCode, input.Directory.RelativePath, sw.Elapsed.TotalSeconds,
-                    error, Trunc(errorBody, 500));
+                    "[Phase1] HTTP {Status} for '{Dir}' after {Elapsed:F1}s; the error is stored with the directory",
+                    (int)response.StatusCode, input.Directory.RelativePath, sw.Elapsed.TotalSeconds);
+                _traffic.LogDebug("[Phase1] HTTP {Status} for '{Dir}', body: {Body}",
+                    (int)response.StatusCode, input.Directory.RelativePath, Trunc(errorBody, 2000));
                 return Failed(error, errorBody);
             }
 
@@ -576,13 +595,13 @@ public class OllamaService : IOllamaService
             outcome.Assessment.DirectoryNodeId = input.Directory.Id;
             outcome.Verdict.DirectoryNodeId = input.Directory.Id;
             _logger.LogInformation(
-                "[Phase1] '{Dir}' in {Elapsed:F1}s — verdict={Verdict}, retention={Retention}, strategy={Strat}, sample={Sample}, anomalies={Anom}{Err} — RAW: {Raw}",
+                "[Phase1] '{Dir}' in {Elapsed:F1}s — verdict={Verdict}, retention={Retention}, strategy={Strat}, sample={Sample}, anomalies={Anom}{Err}",
                 input.Directory.RelativePath, sw.Elapsed.TotalSeconds,
                 outcome.Verdict.Verdict.ToCode(), outcome.Verdict.Retention.ToCode(),
                 outcome.Assessment.SamplingStrategy, outcome.Assessment.SampleSize,
                 CountJsonArray(outcome.Assessment.AnomalousFileIds),
-                outcome.Verdict.Error is null ? string.Empty : $", error={outcome.Verdict.Error}",
-                Trunc(json, 400));
+                outcome.Verdict.Error is null ? string.Empty : ", error stored");
+            _traffic.LogDebug("[Phase1] ANSWER for '{Dir}': {Raw}", input.Directory.RelativePath, Trunc(json, 4000));
             return outcome;
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
@@ -737,6 +756,10 @@ public class OllamaService : IOllamaService
         try
         {
             var prompt = BuildSummaryPrompt(input);
+            // Marked files enter this prompt only as their neutral line (DirectorySummaryService), so the
+            // local log may hold it.
+            _traffic.LogDebug("[Phase3] PROMPT for '{Dir}' ({Len} chars):\n{Prompt}",
+                input.Directory.RelativePath, prompt.Length, Trunc(prompt, 8000));
             var requestBody = new
             {
                 model = _options.Model,
@@ -759,17 +782,19 @@ public class OllamaService : IOllamaService
                 var errorBody = await response.Content.ReadAsStringAsync(cts.Token);
                 result.Error = TryExtractOllamaError(errorBody) ?? $"HTTP {(int)response.StatusCode}";
                 _logger.LogWarning(
-                    "[Phase3] Ollama returned {Status} for '{Dir}' after {Elapsed:F1}s — Error: {Err}",
-                    (int)response.StatusCode, input.Directory.RelativePath, sw.Elapsed.TotalSeconds, result.Error);
+                    "[Phase3] Ollama returned {Status} for '{Dir}' after {Elapsed:F1}s; the error is stored with the directory",
+                    (int)response.StatusCode, input.Directory.RelativePath, sw.Elapsed.TotalSeconds);
+                _traffic.LogDebug("[Phase3] HTTP {Status} for '{Dir}', body: {Body}",
+                    (int)response.StatusCode, input.Directory.RelativePath, Trunc(errorBody, 2000));
                 return result;
             }
 
             var json = await response.Content.ReadAsStringAsync(cts.Token);
-            _logger.LogDebug("[Phase3] Summary for '{Dir}' in {Elapsed:F1}s", input.Directory.RelativePath, sw.Elapsed.TotalSeconds);
             ParseSummaryResponse(json, result);
 
-            _logger.LogInformation("[Phase3] '{Dir}': theme={Theme} — {Summary}",
-                input.Directory.RelativePath, result.Theme, result.Summary?.Length > 120 ? result.Summary[..120] + "…" : result.Summary);
+            _logger.LogInformation("[Phase3] '{Dir}' summarized in {Elapsed:F1}s",
+                input.Directory.RelativePath, sw.Elapsed.TotalSeconds);
+            _traffic.LogDebug("[Phase3] ANSWER for '{Dir}': {Raw}", input.Directory.RelativePath, Trunc(json, 4000));
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {

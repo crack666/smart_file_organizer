@@ -1,4 +1,6 @@
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+using SmartFileOrganizer.Application.Sensitivity;
 
 namespace SmartFileOrganizer.Cli.Contract;
 
@@ -22,7 +24,14 @@ public sealed class StderrLoggerProvider : ILoggerProvider
         this.jsonLines = jsonLines;
     }
 
-    public ILogger CreateLogger(string categoryName) => new StderrLogger(this, ShortName(categoryName));
+    /// <summary>
+    /// The model traffic (prompts with text excerpts, model answers) never reaches stderr, whatever the
+    /// level: an external caller reads stderr. It goes to the local debug log only.
+    /// </summary>
+    public ILogger CreateLogger(string categoryName) =>
+        categoryName == ModelTraffic.Category
+            ? NullLogger.Instance
+            : new StderrLogger(this, ShortName(categoryName));
 
     public void Dispose()
     {
