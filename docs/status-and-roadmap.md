@@ -173,9 +173,8 @@ against two temp folders and a temp database._
 - Not read at all: sound (no transcription), text of `.doc`/`.xls`/`.ppt`,
   listings of `.tar.gz`/`.gz`/`.bz2`/`.xz`/`.iso`, video frames when `ffmpeg`
   is not on the PATH. The evidence names each of these as missing.
-- Files that Phase 1 does not sample are still marked `Skipped` and get no
-  Phase 2 result (sampling is reworked in
-  https://github.com/crack666/smart_file_organizer/issues/8).
+- Files of units and system directories stay `Skipped` without a Phase 2
+  result of their own; their directory verdict carries it.
 - If the model gives a valid category but omits `confidence`, the parser
   sets `0.85`.
 - gemma4 ignores schema field names; the parser accepts aliases such as
