@@ -115,7 +115,9 @@ The post-scan AI pipeline runs as three sequential phases coordinated by `AiClas
    - **Document** (≤ `MaxDocumentUploadBytes`): rendered page image or extracted text preview
 3. `ClassifyAsync` sends a structured `/api/chat` request with `think: false`
 4. `ParseResponse` handles gemma4's field aliasing (`classification` → `category`, missing `confidence` → 0.85)
-5. Result stored in `ai_results`; file status updated to `AiAnalyzed` or `Error`
+5. The schema also asks for `sensitive` (array of marker tokens); parsed into `FileClassification.SensitiveMarkers`
+6. A marked file (rule or model) proposed as `TrashCandidate` is stored as `ReviewNeeded`
+7. Result stored in `ai_results`; file status updated to `AiAnalyzed` or `Error`
 
 ### Phase 3 — Directory Summaries (`DirectorySummaryService`)
 
@@ -133,6 +135,23 @@ The post-scan AI pipeline runs as three sequential phases coordinated by `AiClas
 - `think: false` in all three phase request bodies
 - Full prompt + truncated response logged at `Information` level per Ollama call
 - Pause/resume/cancel supported at any phase boundary via `WaitIfPausedAsync`
+
+## Sensitive files
+
+Spec: [#9](https://github.com/crack666/smart_file_organizer/issues/9); the decision and its limits are in [engineering-decisions.md](engineering-decisions.md#8-sensitive-files-local-and-external-readers).
+
+- `SensitiveMarker` (Domain, flags) with fixed tokens in `SensitiveMarkerNames`: `zugangsdaten`, `schluessel`, `private_nachricht`, `ausweis`, `finanzen`, `gesundheit`. Database and JSON use the tokens, comma-separated, `NULL` for none.
+- `SensitiveFileRules` (Application/Sensitivity) runs in `ScanEngine` and `ScopedRefreshService` for every file: exact names, extensions, folders, keywords, and for files up to 256 KB that are not image, video, audio, archive, executable, font or database a header probe of the first 8 KB through `IFileSystemAccessor.ReadPrefix`. Result: `FileNode.SensitiveMarkers` and `SensitiveRule` (rule ids such as `name:id_rsa`, `header:private-key`).
+- The local model reports markers in the Phase 2 call (`FileClassification.SensitiveMarkers`).
+- `SensitiveOutputGuard` (Application/Sensitivity) is the single exit for file data:
+
+```csharp
+var options = new SensitiveOutputOptions { IncludeSensitive = includeSensitiveFlag };
+FileOutputRecord record = SensitiveOutputGuard.Project(fileNode, options, textExcerpt);
+string json = SensitiveOutputGuard.ToJson(record);   // or ToJson(records) for an array
+```
+
+`fileNode` needs `Classification` and `Override` loaded (as `IFileRepository.GetByIdAsync` and `GetByDirectoryAsync` return them). A protected record has `protected: true`, the marker tokens in `sensitive`, a neutral `summary`, and `null` for excerpt, raw response, model summary, target, importance, confidence, model and error. `ScanExportService` formats the same record as CSV (columns `sensitive` and `sensitive_rule` appended at the end).
 
 ## Ollama configuration flow
 
@@ -167,8 +186,8 @@ Important tables:
 
 - `scan_jobs` — job lifecycle, counters, status
 - `directory_nodes` — scanned directories with heuristic metadata and stats
-- `file_nodes` — scanned files with metadata, type, AI status
-- `ai_results` — Phase 2 per-file classification results
+- `file_nodes` — scanned files with metadata, type, AI status, rule-based sensitive markers (`sensitive_markers`, `sensitive_rule`)
+- `ai_results` — Phase 2 per-file classification results, including model sensitive markers (`sensitive_markers`)
 - `ai_directory_results` — Phase 1 pre-assessment + Phase 3 directory summaries (distinguished by `phase` column)
 - `user_overrides` — manual category/target corrections
 - `db_version` — one row per applied schema step (`version`, `applied_at`)
@@ -187,7 +206,7 @@ The schema is built from numbered steps in `src/SmartFileOrganizer.Infrastructur
 1. Add one file `Migrations/M000N_ShortName.cs` with a class implementing `ISchemaMigration`, or deriving from `SqlSchemaMigration` when plain SQL is enough. `Version` is `N`.
 2. Take the next free number on `master`. Steps are discovered by reflection, so no shared list is edited.
 3. Versions must be exactly `1..N`. If two branches picked the same number, startup and `SchemaMigrationTests` fail with a "Duplicate schema migration versions" message; the branch merged second renumbers its step (file name and `Version`).
-4. Never change a step that has been merged; add a new one. Step 1 (`M0001_InitialSchema`) is the schema as it existed before migrations.
+4. Never change a step that has been merged; add a new one. Step 1 (`M0001_InitialSchema`) is the schema as it existed before migrations. Step 2 (`M0002_SensitiveMarkers`) adds the sensitive-marker columns.
 5. Do not put `PRAGMA journal_mode` or other transaction-incompatible statements in a step.
 
 ## Architectural rules

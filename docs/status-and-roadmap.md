@@ -15,8 +15,8 @@ its date, or delete it.
 ## What exists
 
 _Checked 12.11.2026 by reading the code on `master`; build and tests run
-locally (`dotnet build` 0 errors, `dotnet test` 47 passed) and in CI on
-Windows and Linux._
+locally (`dotnet build` 0 errors, `dotnet test` 209 passed after #9; the
+line said 47 before) and in CI on Windows and Linux._
 
 ### Scan and persistence
 
@@ -34,8 +34,19 @@ Windows and Linux._
   e.g. `Skip: matches skip pattern 'bin'` _(checked 12.11.2026, #19, by
   `HeuristicsEngineTests`)_.
 - Resume: directories already scanned are skipped on restart.
-- `ScanExportService` (CSV/JSON export) exists and is tested; it is
-  registered in DI but not reachable from the UI.
+- `ScanExportService` (CSV export) exists and is tested; it is
+  registered in DI but not reachable from the UI. Every row goes through
+  `SensitiveOutputGuard`. (Until 12.11.2026 this line said "CSV/JSON
+  export"; the service never wrote JSON. JSON output of a file is
+  `SensitiveOutputGuard.ToJson`.)
+- Sensitive files ([#9](https://github.com/crack666/smart_file_organizer/issues/9)):
+  rules without a model mark files during the scan
+  (`SensitiveFileRules`: names, extensions, folders, keywords, header probe
+  of small non-media files); the local model adds markers in the regular
+  classification call. Stored in `file_nodes.sensitive_markers` /
+  `sensitive_rule` and `ai_results.sensitive_markers` (schema step 2).
+  Outputs withhold their content by default; see
+  [engineering-decisions.md](engineering-decisions.md#8-sensitive-files-local-and-external-readers).
 
 ### AI pipeline (three phases, run after the scan, never inside it)
 
@@ -47,8 +58,9 @@ Windows and Linux._
    `OllamaService`): images as base64 (default limit 10 MB), documents as
    extracted text or first PDF page rendered to an image (default limit
    5 MB), videos and audio by file name and path only. Returns category,
-   importance, confidence, summary and suggested target. Stored in
-   `ai_results`.
+   importance, confidence, summary, suggested target and sensitive markers.
+   Stored in `ai_results`. A marked file is stored as `ReviewNeeded`
+   instead of `TrashCandidate`.
 3. **Directory summaries** (`DirectorySummaryService`): bottom-up, one
    Ollama call per directory. Stored in `ai_directory_results` with phase
    `summary`.
@@ -93,6 +105,11 @@ https://github.com/crack666/smart_file_organizer/issues/5: `dotnet test`
   `classification` for `category`. Other models may differ.
 - No bulk review, no review filters, no file operations (move, copy,
   archive) yet. See milestones C and D.
+- Sensitive-file protection covers what goes through `SensitiveOutputGuard`
+  (today: the CSV export). The GUI shows everything, as it is used at the
+  machine itself. The header probe runs only during a scan or rescan;
+  databases scanned before schema step 2 are protected by the name rules
+  (re-evaluated on output) and by model markers, not by the header rule.
 
 ## Operating notes
 
@@ -122,7 +139,9 @@ sessions of April 2026 and were not re-measured._
 - **Check model names.** Query `/api/tags` before testing; 404s seen during
   development came from a model name that was not installed.
 - **Logs.** Prompts and truncated responses are logged at `Information`
-  through the console and debug providers.
+  through the console and debug providers. The prompt contains the text
+  excerpt, also of sensitive files: do not hand console logs of an AI run
+  to an external reader.
 
 ## Known traps (UI and runtime)
 
