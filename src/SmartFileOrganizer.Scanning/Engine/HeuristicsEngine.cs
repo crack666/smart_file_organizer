@@ -42,30 +42,30 @@ public class HeuristicsEngine : IHeuristicsEngine
 
     public HeuristicsEngine(HeuristicsOptions opts) => _opts = opts;
 
-    public ScanDecision EvaluateDirectory(string fullPath, int depth)
+    public DirectoryEvaluation EvaluateDirectory(string rootPath, string fullPath, int depth)
     {
         var name = Path.GetFileName(fullPath);
 
         // Hidden directories (dotfiles) that aren't known user data
         if (name.StartsWith('.') && !IsLikelyUserData(fullPath))
-            return ScanDecision.Skip;
+            return new(ScanDecision.Skip, "Skip: hidden directory");
 
         // Matched skip patterns
         foreach (var pattern in _opts.SkipPatterns)
         {
             if (fullPath.Contains(pattern, StringComparison.OrdinalIgnoreCase))
-                return ScanDecision.Skip;
+                return new(ScanDecision.Skip, $"Skip: matches skip pattern '{pattern}'");
         }
 
         // Beyond max depth: always skip
         if (depth >= _opts.MaxDepth)
-            return ScanDecision.Skip;
+            return new(ScanDecision.Skip, $"Skip: depth {depth} reaches max depth {_opts.MaxDepth}");
 
         // Beyond shallow depth, go shallow unless looks like user data
         if (depth >= _opts.DefaultShallowDepth && !IsLikelyUserData(fullPath))
-            return ScanDecision.Shallow;
+            return new(ScanDecision.Shallow, $"Shallow: depth {depth} reaches shallow depth {_opts.DefaultShallowDepth}");
 
-        return ScanDecision.Descend;
+        return new(ScanDecision.Descend, "Descend");
     }
 
     public bool IsLikelyUserData(string fullPath)

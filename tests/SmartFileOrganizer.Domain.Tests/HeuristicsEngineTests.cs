@@ -17,8 +17,8 @@ public class HeuristicsEngineTests
     public void EvaluateDirectory_ReturnsExpectedDecision(string path, int depth, ScanDecision expected)
     {
         var engine = CreateEngine();
-        var result = engine.EvaluateDirectory(path, depth);
-        Assert.Equal(expected, result);
+        var result = engine.EvaluateDirectory("C:\\", path, depth);
+        Assert.Equal(expected, result.Decision);
     }
 
     [Theory]

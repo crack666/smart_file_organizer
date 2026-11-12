@@ -81,9 +81,10 @@ public class ScanEngine : IScanEngine
                 continue;
             }
 
-            var decision = depth == 0
-                ? ScanDecision.Descend   // always descend root
-                : _heuristics.EvaluateDirectory(dirPath, depth);
+            var evaluation = depth == 0
+                ? new DirectoryEvaluation(ScanDecision.Descend, "Descend: scan root")   // always descend root
+                : _heuristics.EvaluateDirectory(job.RootPath, dirPath, depth);
+            var decision = evaluation.Decision;
 
             var dirNode = new DirectoryNode
             {
@@ -95,7 +96,7 @@ public class ScanEngine : IScanEngine
                 RelativePath = _fs.GetRelativePath(job.RootPath, dirPath),
                 Depth = depth,
                 DirStatus = DecisionToStatus(decision),
-                DirReason = decision.ToString(),
+                DirReason = evaluation.Reason,
                 ScannedAt = DateTime.UtcNow
             };
 
@@ -103,7 +104,7 @@ public class ScanEngine : IScanEngine
             {
                 dirBatch.Add(dirNode);
                 await FlushDirBatchIfNeeded(dirBatch, ct);
-                _logger.LogDebug("Skipped: {Path}", dirPath);
+                _logger.LogDebug("Skipped: {Path} ({Reason})", dirPath, evaluation.Reason);
                 continue;
             }
 
