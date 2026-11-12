@@ -40,5 +40,7 @@ public static class ErrorCodes
     public const string TruthInvalid = "truth_invalid";
     public const string RunNotFound = "run_not_found";
     public const string OutputNotEmpty = "output_not_empty";
+    public const string BundleNotFound = "bundle_not_found";
+    public const string PatternsInvalid = "patterns_invalid";
     public const string InternalError = "internal_error";
 }

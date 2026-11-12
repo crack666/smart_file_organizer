@@ -28,6 +28,7 @@ public static class SfoApp
         root.Subcommands.Add(ExportCommand.Create(host, globals));
         root.Subcommands.Add(LibraryCommand.Create(host, globals));
         root.Subcommands.Add(EvalCommand.Create(host, globals));
+        root.Subcommands.Add(BundlesCommand.Create(host, globals));
         return root;
     }
 

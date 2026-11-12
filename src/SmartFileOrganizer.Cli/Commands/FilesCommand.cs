@@ -25,6 +25,11 @@ public static class FilesCommand
         {
             Description = "With --dir: include files in its subdirectories."
         };
+        var bundle = new Option<long?>("--bundle")
+        {
+            Description = "Only files of this bundle and its child bundles (id from sfo bundles list).",
+            HelpName = "id"
+        };
         var category = ReadFormat.EnumOption<FileCategory>("--category",
             "Category as shown in the output (unknown also matches unclassified files)");
         var status = ReadFormat.EnumOption<FileNodeStatus>("--status", "File status", PendingStatus);
@@ -53,7 +58,7 @@ public static class FilesCommand
 
         var command = new Command("files", "List files of a job with type, category, confidence, summary and status.")
         {
-            job, dir, recursive, category, status, type, maxConfidence, certainty, sort
+            job, dir, recursive, bundle, category, status, type, maxConfidence, certainty, sort
         };
         foreach (var option in read.Filters.Concat(read.Paging).Append(read.IncludeSensitive))
             command.Options.Add(option);
@@ -73,6 +78,7 @@ public static class FilesCommand
                 JobId = p.GetValue(job),
                 Directory = p.GetValue(dir),
                 Recursive = p.GetValue(recursive),
+                Bundle = p.GetValue(bundle),
                 Categories = ReadFormat.ParseEnums<FileCategory>(p.GetValue(category)),
                 Statuses = statuses.Distinct().ToList(),
                 Types = ReadFormat.ParseEnums<FileType>(p.GetValue(type)),

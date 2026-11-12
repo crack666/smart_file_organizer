@@ -183,6 +183,7 @@ public static class ReadFormat
     public static CliFailureException ToFailure(JobReadException ex) => ex.Failure switch
     {
         ReadFailure.JobNotFound => new CliFailureException(ExitCodes.Failure, ErrorCodes.JobNotFound, ex.Message),
+        ReadFailure.BundleNotFound => new CliFailureException(ExitCodes.Failure, ErrorCodes.BundleNotFound, ex.Message),
         _ => new CliFailureException(ExitCodes.Failure, ErrorCodes.PathNotFound, ex.Message)
     };
 
