@@ -37,14 +37,26 @@ public class ScanJobService
 
     /// <summary>Creates a job scanned with the shipped rules (recorded at the job on its first run).</summary>
     public Task<ScanJob> CreateJobAsync(string rootPath, CancellationToken ct = default) =>
-        CreateJobAsync(rootPath, rules: null, ct);
+        CreateJobAsync(rootPath, rules: null, ScanRole.Quelle, ct);
 
     /// <summary>Creates a job scanned with <paramref name="rules"/>; null means the shipped rules.</summary>
-    public async Task<ScanJob> CreateJobAsync(string rootPath, ScanRulesProfile? rules, CancellationToken ct = default)
+    public Task<ScanJob> CreateJobAsync(string rootPath, ScanRulesProfile? rules, CancellationToken ct = default) =>
+        CreateJobAsync(rootPath, rules, ScanRole.Quelle, ct);
+
+    /// <summary>Creates a job with a fixed <paramref name="role"/> and the shipped rules.</summary>
+    public Task<ScanJob> CreateJobAsync(string rootPath, ScanRole role, CancellationToken ct = default) =>
+        CreateJobAsync(rootPath, rules: null, role, ct);
+
+    /// <summary>
+    /// Creates a job with <paramref name="rules"/> (null: the shipped rules) and a fixed <paramref name="role"/>;
+    /// a <see cref="ScanRole.Bestand"/> job is only read, never analysed.
+    /// </summary>
+    public async Task<ScanJob> CreateJobAsync(string rootPath, ScanRulesProfile? rules, ScanRole role, CancellationToken ct = default)
     {
         var job = new ScanJob
         {
             RootPath = rootPath,
+            Role = role,
             Status = JobStatus.Created,
             CreatedAt = DateTime.UtcNow,
             Rules = rules
