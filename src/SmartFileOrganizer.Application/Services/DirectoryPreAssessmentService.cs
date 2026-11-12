@@ -22,13 +22,18 @@ namespace SmartFileOrganizer.Application.Services;
 /// from their subdirectories.</para>
 /// <para>Every directory ends with a row in <c>directory_verdicts</c>: a verdict or a stored error.
 /// Rows with an error are retried on the next run.</para>
-/// <para>The pre-assessment row in <c>ai_directory_results</c> (sampling for Phase 2) is still written for
-/// AI-relevant directories. Units and system directories decided by rule get <c>skip</c>, so their files are
-/// not analysed one by one.</para>
+/// <para>The pre-assessment row in <c>ai_directory_results</c> is still written for AI-relevant directories.
+/// Its sampling strategy now follows the verdict, not the model: units and system directories get
+/// <c>skip</c> (their files are not analysed one by one), uniform directories with more eligible files than
+/// the sample size get <see cref="StratifiedSample"/> (drawn in Phase 2 by <see cref="DirectorySamplingService"/>),
+/// everything else <c>analyze_all</c>.</para>
 /// </remarks>
 public class DirectoryPreAssessmentService
 {
     private const string PreAssessmentPhase = "pre_assessment";
+
+    /// <summary><c>sampling_strategy</c> of a uniform directory with more eligible files than the sample size.</summary>
+    public const string StratifiedSample = "stratified_sample";
 
     private readonly IDirectoryRepository _dirRepo;
     private readonly IFileRepository _fileRepo;
@@ -239,7 +244,7 @@ public class DirectoryPreAssessmentService
             }
             : NoFilesAssessment(dir);
 
-        await ApplySamplingAsync(dir, p.Files, assessment, ct);
+        await ApplyVerdictToFilesAsync(dir, p.Files, assessment, verdict, ct);
         await _dirClassRepo.UpsertAsync(assessment, ct);
     }
 
@@ -299,7 +304,7 @@ public class DirectoryPreAssessmentService
         if (IsAiCandidate(dir))
         {
             if (assessment.Error == null)
-                await ApplySamplingAsync(dir, p.Files, assessment, ct);
+                await ApplyVerdictToFilesAsync(dir, p.Files, assessment, verdict, ct);
             await _dirClassRepo.UpsertAsync(assessment, ct);
         }
 
@@ -327,59 +332,46 @@ public class DirectoryPreAssessmentService
         Error = null
     };
 
-    private async Task ApplySamplingAsync(
+    /// <summary>
+    /// What the verdict means for the files of a model-judged directory. The sampling fields of the model
+    /// answer are no longer followed: they could leave files without any result.
+    /// <list type="bullet">
+    /// <item>unit or system: no file is analysed (Skipped); the directory carries the result.</item>
+    /// <item>uniform: Phase 2 draws a stratified sample (<see cref="DirectorySamplingService"/>).</item>
+    /// <item>mixed, no valid verdict, or "empty" for a directory that has files: every file is judged.</item>
+    /// </list>
+    /// </summary>
+    private async Task ApplyVerdictToFilesAsync(
         DirectoryNode dir,
         IReadOnlyList<DirectoryFileInfo> fileInfos,
         DirectoryClassificationResult assessment,
+        DirectoryVerdict verdict,
         CancellationToken ct)
     {
         if (fileInfos.Count == 0) return;
 
-        var strategy = assessment.SamplingStrategy ?? "analyze_all";
-
-        if (strategy == "skip")
+        switch (verdict.Verdict)
         {
-            // Mark all AI-eligible files in this dir as Skipped
-            var allIds = fileInfos.Select(f => f.Id).ToList();
-            await _fileRepo.MarkAsSkippedAsync(allIds, ct);
-            _logger.LogDebug("Skipped all {Count} files in {Path} (strategy=skip)", allIds.Count, dir.FullPath);
-            return;
+            case DirectoryVerdictKind.Einheit or DirectoryVerdictKind.System:
+                assessment.SamplingStrategy = "skip";
+                assessment.SampleSize = 0;
+                await _fileRepo.MarkAsSkippedAsync(fileInfos.Select(f => f.Id).ToList(), ct);
+                _logger.LogDebug("Skipped all {Count} files in {Path} ({Verdict})", fileInfos.Count, dir.FullPath, verdict.Verdict);
+                break;
+            case DirectoryVerdictKind.Einheitlich:
+                var eligible = fileInfos.Count(f => DirectorySamplingService.IsEligible((FileType)f.FileType));
+                var sampled = eligible > _options.EffectiveSampleSize;
+                assessment.SamplingStrategy = sampled ? StratifiedSample : "analyze_all";
+                assessment.SampleSize = sampled ? _options.EffectiveSampleSize : eligible;
+                break;
+            default:
+                assessment.SamplingStrategy = "analyze_all";
+                assessment.SampleSize = fileInfos.Count;
+                break;
         }
 
-        if (strategy == "analyze_all") return; // Nothing to skip
-
-        // random_sample: keep anomalies + random sample up to cap
+        // Resolve anomaly names to ids for later use (the sample takes them as outliers).
         var anomalousNames = ParseAnomalousNames(assessment.AnomalousFileIds);
-        var anomalousIds = fileInfos
-            .Where(f => anomalousNames.Contains(f.Name, StringComparer.OrdinalIgnoreCase))
-            .Select(f => f.Id)
-            .ToHashSet();
-
-        var cap = Math.Min(
-            assessment.SampleSize > 0 ? assessment.SampleSize : _options.MaxSamplesPerDirectory,
-            _options.MaxSamplesPerDirectory);
-
-        var nonAnomalous = fileInfos.Where(f => !anomalousIds.Contains(f.Id)).ToList();
-        var sampleCount = Math.Max(0, cap - anomalousIds.Count);
-
-        var sampledIds = nonAnomalous
-            .OrderBy(_ => Guid.NewGuid())
-            .Take(sampleCount)
-            .Select(f => f.Id)
-            .ToHashSet();
-
-        var keepIds = anomalousIds.Union(sampledIds).ToHashSet();
-        var skipIds = fileInfos.Select(f => f.Id).Where(id => !keepIds.Contains(id)).ToList();
-
-        if (skipIds.Count > 0)
-        {
-            await _fileRepo.MarkAsSkippedAsync(skipIds, ct);
-            _logger.LogDebug(
-                "Sampled {Keep} / {Total} files in {Path} (strategy={Strategy}), skipped {Skip}",
-                keepIds.Count, fileInfos.Count, dir.FullPath, strategy, skipIds.Count);
-        }
-
-        // Also update stored AnomalousFileIds to resolve names → IDs for later use
         if (anomalousNames.Count > 0)
         {
             var resolved = fileInfos

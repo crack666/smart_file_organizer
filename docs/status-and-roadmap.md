@@ -15,8 +15,8 @@ its date, or delete it.
 ## What exists
 
 _Checked 12.11.2026 by reading the code on `master`; build and tests run
-locally (`dotnet build` 0 errors, `dotnet test` 293 passed with #7 on top of #9, #19 and #5; the
-line said 271 before, and 47 before that) and in CI on Windows and Linux._
+locally (`dotnet build` 0 errors, `dotnet test` 411 passed with #8 on top of the scan rules, read commands and library comparison; the
+line said 312 before, 293 before that, 271 before that, and 47 before that) and in CI on Windows and Linux._
 
 ### Scan and persistence
 
@@ -65,21 +65,35 @@ line said 271 before, and 47 before that) and in CI on Windows and Linux._
    every directory gets a verdict (`einheit`, `einheitlich`, `gemischt`, `leer`,
    `system`) with purpose, retention, reason and the profile it rests on, stored
    in `directory_verdicts`. Clear cases are decided by rule without Ollama; the
-   rest in one Ollama call that also returns the sampling strategy
-   (`analyze_all`, `random_sample`, `skip`). Files not sampled are marked
-   `Skipped`. Sampling stored in `ai_directory_results` with phase
-   `pre_assessment`. Not yet shown in the GUI
+   rest in one Ollama call. Files of units and system directories are marked
+   `Skipped` (the directory carries the result). The model's sampling fields
+   are still asked for but no longer followed. Not yet shown in the GUI
    ([#14](https://github.com/crack666/smart_file_organizer/issues/14)) or the CLI.
-2. **Per-file classification** (`ClassificationService`,
-   `OllamaService`): images as base64 (default limit 10 MB), documents as
+2. **Per-file classification, in stages** (`ClassificationService`,
+   `DirectorySamplingService`, `OllamaService`; since 12.11.2026 by
+   [#8](https://github.com/crack666/smart_file_organizer/issues/8)): a uniform
+   directory is judged by a reproducible stratified sample (at most 15 calls
+   plus its sensitive files); if the sample agrees, the other files inherit
+   category and target (`origin = inherited`, confidence at most 0.6), otherwise
+   the directory is raised to mixed (`escalated_from`) and every file is judged.
+   Mixed directories: every file, with a keep hint (`temporary`,
+   `worth_keeping`). Images as base64 (default limit 10 MB), documents as
    extracted text or first PDF page rendered to an image (default limit
    5 MB), videos and audio by file name and path only. Returns category,
    importance, confidence, summary, suggested target and sensitive markers.
-   Stored in `ai_results`. A marked file is stored as `ReviewNeeded`
-   instead of `TrashCandidate`.
-3. **Directory summaries** (`DirectorySummaryService`): bottom-up, one
-   Ollama call per directory. Stored in `ai_directory_results` with phase
-   `summary`.
+   Stored in `ai_results`; samples in `directory_samples` (schema step 6).
+   A marked file is stored as `ReviewNeeded` instead of `TrashCandidate`
+   and as `worth_keeping` instead of `temporary`. The thresholds are starting
+   values until the measurement of
+   [#10](https://github.com/crack666/smart_file_organizer/issues/10).
+   Files of other types (audio, archives, executables, ...) still get no
+   result in any directory. Samples and escalations are not yet shown by
+   the CLI (https://github.com/crack666/smart_file_organizer/issues/6).
+3. **Directory summaries** (`DirectorySummaryService`): bottom-up. One
+   Ollama call per mixed directory or directory without a verdict; the
+   others are summarized from verdict and sample outcome without a call
+   (until 12.11.2026 every directory with files cost a call). Stored in
+   `ai_directory_results` with phase `summary`.
 
 All three phases run with bounded concurrency set by `MaxParallelRequests`
 (default 4 in `appsettings.json`; `ClassificationService` clamps it to 1..8).
@@ -174,7 +188,9 @@ sessions of April 2026 and were not re-measured._
   done. After changing the AI pipeline, start a new scan job or delete the
   database, otherwise old results are reused. Exception: Phase 1 decides by
   `directory_verdicts`, so jobs analysed before #7 get their verdicts (and one
-  Ollama call per undecided directory) on the next AI run.
+  Ollama call per undecided directory) on the next AI run. Files that the old
+  random sampling (before #8) marked `Skipped` stay without a result; start a
+  new scan job for such data.
 - **Model warm-up.** The first request to a large vision model waits for it
   to load into VRAM. Warm-up and a long `KeepAlive` (default `60m`) help;
   Ollama still unloads after idle time or a restart.

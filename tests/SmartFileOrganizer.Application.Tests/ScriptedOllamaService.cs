@@ -47,11 +47,41 @@ internal sealed class ScriptedOllamaService : IOllamaService
         return Task.FromResult(new DirectoryPreAssessmentOutcome(assessment, verdict));
     }
 
-    public Task<FileClassification> ClassifyAsync(OllamaClassificationInput input, CancellationToken ct = default) =>
-        throw new NotSupportedException("Phase 2 is not part of these tests.");
+    /// <summary>Phase 2 answer per file; null (default) means Phase 2 is not part of the test and throws.</summary>
+    public Func<OllamaClassificationInput, FileClassification>? Classify { get; set; }
 
-    public Task<DirectoryClassificationResult> SummarizeDirectoryAsync(DirectorySummaryInput input, CancellationToken ct = default) =>
-        throw new NotSupportedException("Phase 3 is not part of these tests.");
+    /// <summary>Called before each classification, for example to cancel a run midway.</summary>
+    public Action<OllamaClassificationInput>? BeforeClassify { get; set; }
+
+    public ConcurrentBag<OllamaClassificationInput> ClassifyInputs { get; } = [];
+    public ConcurrentBag<DirectorySummaryInput> SummaryInputs { get; } = [];
+
+    public IReadOnlyList<string> ClassifiedNames => ClassifyInputs.Select(i => i.File.Name).OrderBy(n => n, StringComparer.Ordinal).ToList();
+
+    public Task<FileClassification> ClassifyAsync(OllamaClassificationInput input, CancellationToken ct = default)
+    {
+        if (Classify is null) throw new NotSupportedException("Phase 2 is not part of these tests.");
+        BeforeClassify?.Invoke(input);
+        ct.ThrowIfCancellationRequested();
+        ClassifyInputs.Add(input);
+        var result = Classify(input);
+        result.ModelUsed ??= "scripted";
+        result.AnalyzedAt = DateTime.UtcNow;
+        result.IsAiResult = true;
+        return Task.FromResult(result);
+    }
+
+    public Task<DirectoryClassificationResult> SummarizeDirectoryAsync(DirectorySummaryInput input, CancellationToken ct = default)
+    {
+        SummaryInputs.Add(input);
+        return Task.FromResult(new DirectoryClassificationResult
+        {
+            Phase = "summary",
+            Summary = $"model summary of {input.Directory.Name}",
+            ModelUsed = "scripted",
+            AnalyzedAt = DateTime.UtcNow
+        });
+    }
 
     public Task<bool> IsAvailableAsync(CancellationToken ct = default) => Task.FromResult(true);
 

@@ -9,17 +9,23 @@ using SmartFileOrganizer.Domain.Models;
 namespace SmartFileOrganizer.Application.Services;
 
 /// <summary>
-/// Phase 3 of the 3-phase AI pipeline.
-/// After Phase 2 has classified sampled files, this service builds a bottom-up
-/// directory summary by asking Ollama to synthesize file results into a single
-/// directory-level description.
+/// Phase 3 of the 3-phase AI pipeline: one summary per directory, bottom-up.
 /// </summary>
+/// <remarks>
+/// The model is asked only where it adds something: for mixed directories (including uniform ones the
+/// sample raised to mixed) and for directories without a valid verdict. A unit, system, empty or confirmed
+/// uniform directory already carries purpose and reason from its verdict, and its files either were not
+/// analysed or inherited one result; its summary is written from the verdict and the sample outcome without
+/// a model call (<see cref="BuildVerdictSummary"/>), with <c>model_used</c> left empty.
+/// </remarks>
 public class DirectorySummaryService
 {
     private readonly IDirectoryRepository _dirRepo;
     private readonly IFileRepository _fileRepo;
     private readonly IDirectoryClassificationRepository _dirClassRepo;
     private readonly IClassificationRepository _classRepo;
+    private readonly IDirectoryVerdictRepository _verdictRepo;
+    private readonly IDirectorySampleRepository _sampleRepo;
     private readonly IOllamaService _ollama;
     private readonly Func<int> _getMaxParallelRequests;
     private readonly ILogger<DirectorySummaryService> _logger;
@@ -29,6 +35,8 @@ public class DirectorySummaryService
         IFileRepository fileRepo,
         IDirectoryClassificationRepository dirClassRepo,
         IClassificationRepository classRepo,
+        IDirectoryVerdictRepository verdictRepo,
+        IDirectorySampleRepository sampleRepo,
         IOllamaService ollama,
         Func<int> getMaxParallelRequests,
         ILogger<DirectorySummaryService> logger)
@@ -37,6 +45,8 @@ public class DirectorySummaryService
         _fileRepo = fileRepo;
         _dirClassRepo = dirClassRepo;
         _classRepo = classRepo;
+        _verdictRepo = verdictRepo;
+        _sampleRepo = sampleRepo;
         _ollama = ollama;
         _getMaxParallelRequests = getMaxParallelRequests;
         _logger = logger;
@@ -72,7 +82,10 @@ public class DirectorySummaryService
 
         long processed = 0;
         var errorCount = 0;
+        var modelCalls = 0;
         var workerCount = Math.Clamp(_getMaxParallelRequests(), 1, 8);
+        var verdicts = (await _verdictRepo.GetForJobAsync(jobId, ct)).ToDictionary(v => v.DirectoryNodeId);
+        var samples = (await _sampleRepo.GetForJobAsync(jobId, ct)).ToDictionary(s => s.DirectoryNodeId);
 
         await Parallel.ForEachAsync(
             pending,
@@ -95,6 +108,18 @@ public class DirectorySummaryService
                     progress?.Report(new AiClassificationProgress(
                         jobId, progressedNoPre, pending.Count, Volatile.Read(ref errorCount), dir.FullPath,
                         $"Phase 3/3: Summarizing directories… {progressedNoPre}/{pending.Count} (parallel={workerCount})"));
+                    return;
+                }
+
+                // Verdict and sample already say what the directory is: no model call.
+                if (BuildVerdictSummary(dir, verdicts.GetValueOrDefault(dir.Id), samples.GetValueOrDefault(dir.Id), preAssessment)
+                    is { } fromVerdict)
+                {
+                    await _dirClassRepo.UpsertAsync(fromVerdict, token);
+                    var progressedVerdict = Interlocked.Increment(ref processed);
+                    progress?.Report(new AiClassificationProgress(
+                        jobId, progressedVerdict, pending.Count, Volatile.Read(ref errorCount), dir.FullPath,
+                        $"Phase 3/3: Summarizing directories… {progressedVerdict}/{pending.Count} (parallel={workerCount})"));
                     return;
                 }
 
@@ -124,6 +149,7 @@ public class DirectorySummaryService
                     AnomalyDescriptions = anomalyDescriptions
                 };
 
+                Interlocked.Increment(ref modelCalls);
                 var result = await _ollama.SummarizeDirectoryAsync(input, token);
                 result.DirectoryNodeId = dir.Id;
                 result.SamplingStrategy = preAssessment.SamplingStrategy;
@@ -146,11 +172,48 @@ public class DirectorySummaryService
         var completedMsg = errorCount > 0
             ? $"Phase 3/3 finished with {errorCount} error(s)."
             : "Phase 3/3: Directory summaries complete.";
+        _logger.LogInformation("Phase 3 for job {JobId}: {Done} directories summarized, {Calls} by the model.",
+            jobId, processed, modelCalls);
 
         progress?.Report(new AiClassificationProgress(
             jobId, processed, pending.Count, errorCount, string.Empty, completedMsg));
 
         return new AiClassificationRunResult(true, pending.Count, processed, errorCount, completedMsg);
+    }
+
+    /// <summary>
+    /// The summary of a directory whose verdict already describes it, or null when the model should
+    /// summarize: mixed directories (also raised ones), no or failed verdict, or a verdict without purpose
+    /// and reason. A confirmed sample adds its outcome. A uniform directory that the sample later raises to
+    /// mixed loses this summary (<see cref="IDirectorySampleRepository.EscalateAsync"/>), so the model
+    /// summarizes it on the next run.
+    /// </summary>
+    public static DirectoryClassificationResult? BuildVerdictSummary(
+        DirectoryNode dir, DirectoryVerdict? verdict, DirectorySample? sample, DirectoryClassificationResult preAssessment)
+    {
+        if (verdict?.Verdict is not { } kind || verdict.Error is not null) return null;
+        if (kind == DirectoryVerdictKind.Gemischt) return null;
+
+        var text = verdict.Purpose ?? verdict.Reason;
+        if (string.IsNullOrWhiteSpace(text)) return null;
+
+        if (kind == DirectoryVerdictKind.Einheitlich && sample is { State: SampleState.Confirmed })
+        {
+            text += $" Sample of {sample.Members.Count} confirmed {sample.MajorityCategory}; " +
+                    $"{sample.InheritedCount} file(s) inherited that result.";
+        }
+
+        return new DirectoryClassificationResult
+        {
+            DirectoryNodeId = dir.Id,
+            Phase = "summary",
+            Summary = text,
+            Theme = kind.ToCode(),
+            SamplingStrategy = preAssessment.SamplingStrategy,
+            SampleSize = preAssessment.SampleSize,
+            ModelUsed = null,
+            AnalyzedAt = DateTime.UtcNow
+        };
     }
 
     /// <summary>

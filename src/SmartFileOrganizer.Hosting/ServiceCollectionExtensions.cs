@@ -63,6 +63,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IDirectoryVerdictRepository, DirectoryVerdictRepository>();
         services.AddSingleton<IJobReadRepository, JobReadRepository>();
         services.AddSingleton<IContentComparisonRepository, ContentComparisonRepository>();
+        services.AddSingleton<IDirectorySampleRepository, DirectorySampleRepository>();
 
         // Infrastructure
         services.AddSingleton<IFileSystemAccessor, FileSystemAccessor>();
@@ -103,12 +104,19 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<IClassificationRepository>(),
             sp.GetRequiredService<IClassificationInputPreparer>(),
             sp.GetRequiredService<IOllamaService>(),
+            sp.GetRequiredService<DirectorySamplingService>(),
             () => sp.GetRequiredService<OllamaOptions>().MaxParallelRequests,
             sp.GetRequiredService<ILogger<ClassificationService>>()));
-        services.AddSingleton(sp => new DirectoryAnalysisOptions
+        services.AddSingleton(sp =>
         {
-            MaxSamplesPerDirectory = sp.GetRequiredService<OllamaOptions>().MaxSamplesPerDirectory
+            // Section "Sampling"; the sample size used to live under "Ollama" and is still read from there.
+            var section = sp.GetRequiredService<IConfiguration>().GetSection("Sampling");
+            var analysis = section.Get<DirectoryAnalysisOptions>() ?? new DirectoryAnalysisOptions();
+            if (section["MaxSamplesPerDirectory"] is null)
+                analysis.MaxSamplesPerDirectory = sp.GetRequiredService<OllamaOptions>().MaxSamplesPerDirectory;
+            return analysis;
         });
+        services.AddSingleton<DirectorySamplingService>();
         services.AddSingleton<DirectoryPreAssessmentService>(sp => new DirectoryPreAssessmentService(
             sp.GetRequiredService<IDirectoryRepository>(),
             sp.GetRequiredService<IFileRepository>(),
@@ -123,6 +131,8 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<IFileRepository>(),
             sp.GetRequiredService<IDirectoryClassificationRepository>(),
             sp.GetRequiredService<IClassificationRepository>(),
+            sp.GetRequiredService<IDirectoryVerdictRepository>(),
+            sp.GetRequiredService<IDirectorySampleRepository>(),
             sp.GetRequiredService<IOllamaService>(),
             () => sp.GetRequiredService<OllamaOptions>().MaxParallelRequests,
             sp.GetRequiredService<ILogger<DirectorySummaryService>>()));

@@ -43,7 +43,9 @@ public class JobStatisticsRepository : IJobStatisticsRepository
                 COALESCE(SUM(CASE WHEN file_type IN (1, 2, 4) AND status IN (@discovered, @processing) THEN 1 ELSE 0 END), 0) AS pending,
                 COALESCE(SUM(CASE WHEN file_type IN (1, 2, 4) AND status = @analyzed THEN 1 ELSE 0 END), 0) AS analyzed,
                 COALESCE(SUM(CASE WHEN file_type IN (1, 2, 4) AND status = @error THEN 1 ELSE 0 END), 0) AS errors,
-                COALESCE(SUM(CASE WHEN file_type IN (1, 2, 4) AND status = @skipped THEN 1 ELSE 0 END), 0) AS skipped
+                COALESCE(SUM(CASE WHEN file_type IN (1, 2, 4) AND status = @skipped THEN 1 ELSE 0 END), 0) AS skipped,
+                COALESCE(SUM(CASE WHEN file_type IN (1, 2, 4) AND status = @inherited THEN 1 ELSE 0 END), 0) AS inherited,
+                COALESCE(SUM(CASE WHEN file_type IN (1, 2, 4) AND status = @deferred THEN 1 ELSE 0 END), 0) AS deferred
             FROM file_nodes
             WHERE job_id = @jobId
             """,
@@ -54,7 +56,9 @@ public class JobStatisticsRepository : IJobStatisticsRepository
                 processing = (int)FileNodeStatus.Processing,
                 analyzed = (int)FileNodeStatus.AiAnalyzed,
                 error = (int)FileNodeStatus.Error,
-                skipped = (int)FileNodeStatus.Skipped
+                skipped = (int)FileNodeStatus.Skipped,
+                inherited = (int)FileNodeStatus.Inherited,
+                deferred = (int)FileNodeStatus.Deferred
             });
 
         var errors = maxErrors <= 0
@@ -89,6 +93,8 @@ public class JobStatisticsRepository : IJobStatisticsRepository
             FilesAiAnalyzed = files.Analyzed,
             FilesAiErrors = files.Errors,
             FilesAiSkipped = files.Skipped,
+            FilesAiInherited = files.Inherited,
+            FilesAiDeferred = files.Deferred,
             RecentErrors = errors
         };
     }
@@ -111,6 +117,8 @@ public class JobStatisticsRepository : IJobStatisticsRepository
         public long Analyzed { get; set; }
         public long Errors { get; set; }
         public long Skipped { get; set; }
+        public long Inherited { get; set; }
+        public long Deferred { get; set; }
     }
 
     private sealed class ErrorRow

@@ -151,19 +151,46 @@ call) or `modell`.
 5. Directories without direct files but with subdirectories are decided last, bottom-up, from their
    subdirectories (`container`): all empty → `leer`; only system → `system`; all units, or all
    `einheitlich` with the same dominant file type → `einheitlich`; otherwise `gemischt`.
-6. The verdict is stored in `directory_verdicts`; the pre-assessment for sampling in
-   `ai_directory_results` (phase=`pre_assessment`) for directories Phase 2 and 3 work on. Units and
-   system directories decided by rule get `sampling_strategy = skip`, so their files are marked
-   `Skipped`; directories inside a unit get no pre-assessment row and no summary of their own.
-7. `ApplySamplingAsync` marks non-sampled `FileNode` rows as `Skipped` (unchanged; reworked in
-   [#8](https://github.com/crack666/smart_file_organizer/issues/8)).
+6. The verdict is stored in `directory_verdicts`; the pre-assessment in `ai_directory_results`
+   (phase=`pre_assessment`) for directories Phase 2 and 3 work on. Directories inside a unit get no
+   pre-assessment row and no summary of their own.
+7. The verdict, not the model's sampling fields, decides what happens to the files
+   ([#8](https://github.com/crack666/smart_file_organizer/issues/8)): units and system directories
+   (by rule or by the model) get `sampling_strategy = skip` and their files are marked `Skipped`;
+   uniform directories with more eligible files than the sample size get `stratified_sample`;
+   everything else, including a model verdict "empty" for a directory that has files, `analyze_all`.
+   Anomalous file names from the model are resolved to ids and later drawn as outliers.
 
 `DirectoryQueryService.GetVerdictAsync` and `GetVerdictsAsync` read verdicts with their profile.
 The CLI read commands use `JobReadService` (see [Read side](#read-side-for-the-cli)).
 
-### Phase 2 — Per-File Classification (`ClassificationService`)
+### Phase 2 — Per-File Classification, in stages (`ClassificationService`, `DirectorySamplingService`)
 
-1. `GetPendingAiAnalysisAsync` selects `Discovered` files with `file_type IN (1, 2, 4)` — Image, Video, Document
+Staged since [#8](https://github.com/crack666/smart_file_organizer/issues/8): sample first, single
+judgement only where the sample disagrees or the directory is mixed. Quality comes before throughput:
+whenever something is unclear the directory is raised to mixed and every file is judged.
+
+**Plan.** For every directory judged `einheitlich` without a sample, `DirectorySampler.Draw` picks the
+members from its eligible files (image, video, document):
+
+- sensitive files (rule markers, `SensitiveOutputGuard.IsSensitive`): always, on top of the sample size;
+  they never inherit;
+- outliers, at most a third of the sample: files the pre-assessment named anomalous, smallest and
+  largest, oldest and newest, sizes ten times off the median;
+- strata: every extension group (`.jpeg` counts as `.jpg`, and so on) at least once, the remaining slots
+  by largest deficit against its proportional share.
+
+Within a group the order is FNV-1a of seed and file name; the seed is FNV-1a of job id and relative
+directory path. The same directory in the same job therefore always draws the same files, whatever the
+listing order. A directory with no more files than the sample size is drawn completely (nothing
+inherits, but the sample still checks the verdict). More extension groups than the sample size raise the
+directory to mixed at once. `IDirectorySampleRepository.CreateAsync` stores the sample (state `open`)
+and sets the other eligible files from `Discovered` to `Deferred` in one transaction.
+
+**Judge.** One producer-consumer pass over `Discovered` files, as before:
+
+1. `GetPendingAiAnalysisAsync` selects `Discovered` files with `file_type IN (1, 2, 4)` — Image, Video, Document;
+   `Deferred` files are not selected
 2. `IClassificationInputPreparer` (implemented by `AiClassificationInputPreparer` in `Infrastructure/Content`) builds evidence per file type:
    - **Image** (≤ `MaxImageUploadBytes`): base64 image payload
    - **Image** (oversized): text-only note about size
@@ -172,18 +199,54 @@ The CLI read commands use `JobReadService` (see [Read side](#read-side-for-the-c
 3. `ClassifyAsync` sends a structured `/api/chat` request with `think: false`
 4. `ParseResponse` handles gemma4's field aliasing (`classification` → `category`, missing `confidence` → 0.85)
 5. The schema also asks for `sensitive` (array of marker tokens); parsed into `FileClassification.SensitiveMarkers`
-6. A marked file (rule or model) proposed as `TrashCandidate` is stored as `ReviewNeeded`
-7. Result stored in `ai_results`; file status updated to `AiAnalyzed` or `Error`
+6. For files of mixed and uniform directories the schema also asks for `keep_hint` (`temporary` or
+   `worth_keeping`) with `keep_reason`; uniform ones too, so that the hint is there if the sample escalates
+7. A marked file (rule or model) proposed as `TrashCandidate` is stored as `ReviewNeeded`, one proposed as
+   `temporary` as `worth_keeping` (the model's reason is replaced by a neutral one)
+8. Result stored in `ai_results` with `origin = model`, even when the run is being stopped; file status
+   updated to `AiAnalyzed` or `Error`
+
+**Resolve.** `DirectorySamplingService.ResolveAsync` evaluates every `open` sample whose members are all
+done (`DirectorySampler.Evaluate`). Failed members count as deviating. The sample confirms only if
+
+- one category is the clear majority and it is a real category (not `Unknown` or `ReviewNeeded`),
+- the share of deviating and failed members is at most `MaxDeviationShare`, and
+- the model reported no sensitive marker for a member that the rules had not marked.
+
+Confirmed (`ConfirmAsync`, one transaction): every file still `Deferred` gets an `ai_results` row with
+`origin = inherited`, `is_ai_result = 0`, `inherited_from_directory_node_id`, the majority category, the
+most frequent importance and target of the agreeing members, `model_used` empty, and the lowest confidence
+of the agreeing members capped at `InheritedConfidenceCap`; status `Inherited`.
+Contradicted (`EscalateAsync`, one transaction): the verdict becomes `gemischt` with the old one in
+`escalated_from` and the reason in `escalation_reason`, the `Deferred` files return to `Discovered`, a
+summary written while it was uniform is dropped. Another pass then judges them; the loop ends when a
+resolve escalates nothing.
+
+A stopped run leaves samples `open` and their files `Deferred`; the next run skips planning for them,
+judges the remaining members and resolves. No directory is ever half inherited.
+
+Thresholds (`DirectoryAnalysisOptions`, configuration section `Sampling`; the sample size falls back to
+`Ollama:MaxSamplesPerDirectory`): `MaxSamplesPerDirectory` 15, `MaxDeviationShare` 0.1 (one outlier in
+15 is tolerated, two escalate), `InheritedConfidenceCap` 0.6. These are starting values; the measurement
+of [#10](https://github.com/crack666/smart_file_organizer/issues/10) should set them.
+
+A focused rescan of a directory forgets its sample, judges it again, draws a new sample if it is uniform,
+judges the members and resolves, so it spends the same calls as a run.
 
 ### Phase 3 — Directory Summaries (`DirectorySummaryService`)
 
 1. All directories ordered deepest-first (bottom-up synthesis)
 2. Directories already in `ai_directory_results` (phase=`summary`) are skipped
-3. For each directory: fetch pre-assessment + all file nodes via `GetByDirectoryAsync`
-4. Build `summaryLines`: for each file, use `Classification.Summary` if available, else `name — FileType`
-5. If `summaryLines` or `anomalyDescriptions` non-empty → call `SummarizeDirectoryAsync`
-6. Result stored in `ai_directory_results` (phase=`summary`)
-7. Displayed as a banner in the UI via `MainViewModel.SelectedDirSummary`
+3. Directories without a pre-assessment are skipped
+4. Mixed directories (also raised ones) and directories without a valid verdict go to the model. For all
+   others the verdict already carries purpose and reason, and their files were either not analysed or
+   inherited one result: `BuildVerdictSummary` writes the summary from the verdict (plus the outcome of a
+   confirmed sample) without a model call, `model_used` empty, `theme` the verdict code
+5. For the model: fetch all file nodes via `GetByDirectoryAsync` and build `summaryLines` (per file
+   `Classification.Summary` if available, else `name — FileType`)
+6. If `summaryLines` or `anomalyDescriptions` non-empty → call `SummarizeDirectoryAsync`
+7. Result stored in `ai_directory_results` (phase=`summary`)
+8. Displayed as a banner in the UI via `MainViewModel.SelectedDirSummary`
 
 ### Pipeline coordination
 
@@ -258,7 +321,15 @@ Important tables:
 - `ai_directory_results` — Phase 1 pre-assessment + Phase 3 directory summaries (distinguished by `phase` column)
 - `directory_verdicts` — one verdict per directory (step 3): `verdict`, `source` (`regel`/`modell`), `rule`,
   `purpose`, `retention`, `reason`, `unit_directory_node_id` (the directory that is the whole, for `einheit`),
-  `profile_json` (snake_case), `model_used`, `raw_response`, `judged_at`, `error`; either `verdict` or `error` is set
+  `profile_json` (snake_case), `model_used`, `raw_response`, `judged_at`, `error`; either `verdict` or `error` is set;
+  `escalated_from` and `escalation_reason` when a sample raised the directory to `gemischt` (step 6)
+- `directory_samples` — one sample per uniform directory (step 6): `seed`, `state` (`open`, `confirmed`,
+  `escalated`), `eligible_count`, `members_json` (file id, name, `role` = `stratum`/`size`/`date`/`anomaly`/`sensitive`,
+  category, `deviates`, error), `max_deviation_share`, `majority_category`, `deviating_count`, `failed_count`,
+  `deviation_share`, `inherited_count`, `inherited_confidence`, `reason`, `drawn_at`, `decided_at`
+- `ai_results` columns of step 6: `origin` (`rule`, `model`, `inherited`, `human`, `agent`, `external`; NULL for
+  older rows, all judged by the model), `inherited_from_directory_node_id`, `keep_hint` (`temporary`,
+  `worth_keeping`), `keep_reason`. File statuses `Deferred` (waits for its sample) and `Inherited` are new
 - `user_overrides` — manual category/target corrections
 - `content_fingerprints` — head-and-tail and full SHA-256 per path, with the size and modification time (`last_write_ticks`) they belong to and the time the full checksum was computed (`full_hash_at`); shared by all jobs
 - `comparisons` — one row per compared pair of source job and library job (`against_job_id` null: duplicates only), with `complete` and `error_count`
@@ -279,7 +350,7 @@ The schema is built from numbered steps in `src/SmartFileOrganizer.Infrastructur
 1. Add one file `Migrations/M000N_ShortName.cs` with a class implementing `ISchemaMigration`, or deriving from `SqlSchemaMigration` when plain SQL is enough. `Version` is `N`.
 2. Take the next free number on `master`. Steps are discovered by reflection, so no shared list is edited.
 3. Versions must be exactly `1..N`. If two branches picked the same number, startup and `SchemaMigrationTests` fail with a "Duplicate schema migration versions" message; the branch merged second renumbers its step (file name and `Version`).
-4. Never change a step that has been merged; add a new one. Step 1 (`M0001_InitialSchema`) is the schema as it existed before migrations. Step 2 (`M0002_SensitiveMarkers`) adds the sensitive-marker columns.
+4. Never change a step that has been merged; add a new one. Step 1 (`M0001_InitialSchema`) is the schema as it existed before migrations. Step 2 (`M0002_SensitiveMarkers`) adds the sensitive-marker columns. Step 3 (`M0003_DirectoryVerdicts`) adds `directory_verdicts`. Step 4 (`M0004_ScanJobRules`) adds the scan rules of a job. Step 5 (`M0005_ContentComparison`) adds the comparison with the library. Step 6 (`M0006_DirectorySamples`) adds `directory_samples`, the escalation columns and the origin and keep-hint columns of `ai_results`; its new codes are English.
 5. Do not put `PRAGMA journal_mode` or other transaction-incompatible statements in a step.
 
 ## Architectural rules

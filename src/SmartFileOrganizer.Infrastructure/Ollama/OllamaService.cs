@@ -106,7 +106,7 @@ public class OllamaService : IOllamaService
                 stream = false,
                 think = false,
                 keep_alive = _options.KeepAlive,
-                format = BuildClassificationSchema(),
+                format = BuildClassificationSchema(input.AskKeepHint),
                 messages = new object[]
                 {
                     new { role = "system", content = _options.SystemPrompt },
@@ -201,6 +201,14 @@ public class OllamaService : IOllamaService
         sb.AppendLine("If any marker applies: never use TrashCandidate, and keep the summary neutral (what kind of document it is),");
         sb.AppendLine("without quoting passwords, keys, numbers, names or message text.");
         sb.AppendLine();
+        if (input.AskKeepHint)
+        {
+            sb.AppendLine("Keep hint (field keep_hint, with a short keep_reason):");
+            sb.AppendLine("- temporary: installer, setup or update package, download remainder, partial download, duplicate or copy of another file, cache or log");
+            sb.AppendLine("- worth_keeping: personal, created by the user, or hard to get again");
+            sb.AppendLine("If unsure, use worth_keeping. Never temporary for a file with a sensitive marker.");
+            sb.AppendLine();
+        }
         if (!string.IsNullOrWhiteSpace(summaryLanguage) &&
             !string.Equals(summaryLanguage, "English", StringComparison.OrdinalIgnoreCase))
         {
@@ -211,12 +219,12 @@ public class OllamaService : IOllamaService
         return sb.ToString();
     }
 
-    private static object BuildClassificationSchema() => new
+    /// <summary>JSON schema of the classification answer; with <paramref name="askKeepHint"/> also keep hint and reason.</summary>
+    public static object BuildClassificationSchema(bool askKeepHint)
     {
-        type = "object",
-        properties = new
+        var properties = new Dictionary<string, object>
         {
-            category = new
+            ["category"] = new
             {
                 type = "string",
                 @enum = new[]
@@ -226,24 +234,34 @@ public class OllamaService : IOllamaService
                     "SoftwareInstaller", "SystemFile", "TrashCandidate", "ReviewNeeded", "Unknown"
                 }
             },
-            importance = new
+            ["importance"] = new
             {
                 type = "string",
                 @enum = new[] { "Low", "Medium", "High", "Critical", "Unknown" }
             },
-            confidence = new { type = "number" },
-            summary = new { type = "string" },
-            suggested_target = new { type = "string" },
-            sensitive = new
+            ["confidence"] = new { type = "number" },
+            ["summary"] = new { type = "string" },
+            ["suggested_target"] = new { type = "string" },
+            ["sensitive"] = new
             {
                 type = "array",
                 items = new { type = "string", @enum = SensitiveMarkerNames.AllTokens }
             }
-        },
-        required = new[] { "category", "importance", "confidence", "summary", "suggested_target", "sensitive" }
-    };
+        };
+        var required = new List<string> { "category", "importance", "confidence", "summary", "suggested_target", "sensitive" };
 
-    private static void ParseResponse(string json, FileClassification result)
+        if (askKeepHint)
+        {
+            properties["keep_hint"] = new { type = "string", @enum = VerdictCodes.All<KeepHint>().ToArray() };
+            properties["keep_reason"] = new { type = "string" };
+            required.AddRange(["keep_hint", "keep_reason"]);
+        }
+
+        return new { type = "object", properties, required };
+    }
+
+    /// <summary>Reads an <c>/api/chat</c> answer of the classification call into <paramref name="result"/>; malformed parts are left at their defaults.</summary>
+    public static void ParseResponse(string json, FileClassification result)
     {
         try
         {
@@ -301,6 +319,15 @@ public class OllamaService : IOllamaService
                 result.SuggestedTarget = target.GetString();
 
             result.SensitiveMarkers = ParseSensitiveMarkers(inner);
+
+            // Keep hint: only the fixed codes count; anything else stays unknown rather than guessed.
+            if (inner.TryGetProperty("keep_hint", out var keep) && keep.ValueKind == JsonValueKind.String
+                && VerdictCodes.TryParse<KeepHint>(keep.GetString(), out var hint))
+            {
+                result.KeepHint = hint;
+                if (inner.TryGetProperty("keep_reason", out var keepReason) && keepReason.ValueKind == JsonValueKind.String)
+                    result.KeepReason = keepReason.GetString();
+            }
         }
         catch
         {
