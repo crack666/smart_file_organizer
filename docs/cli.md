@@ -46,6 +46,7 @@ re-evaluate the folders stored as skipped or shallow; `rules_changed` is then `t
 | Option | Meaning |
 |---|---|
 | `--role source\|library` | Only with `<path>`. `source` (default): a medium to clean up. `library`: the user's organised archive (NAS, a folder on disk); it is only read, never changed and never analysed by a model (`sfo analyze` refuses it with `wrong_role`). The role is fixed when the job is created. |
+| `--structure-only` | Only with `<path>`. Records names, sizes and dates and opens no file: sensitive files are marked by name and extension only, without looking at their first bytes. The job keeps the flag (`structure_only` in the job view), so a later `--resume` scans the same way. Use it for `sfo library review`. |
 
 A directory the scan cannot read (access denied, network path gone) is stored with that error
 and counted in `error_count` instead of looking empty; the scan itself continues and completes.
@@ -575,6 +576,87 @@ nothing else. An existing file is replaced. `--include-sensitive` as above.
 Errors: `job_not_found` (1), `path_not_found` (1, the target folder does not exist),
 `export_failed` (1, the file could not be written).
 
+## Judging the structure
+
+Both commands judge how a library is filed and change nothing in it. Finding kinds,
+thresholds, the word file and the target file are described in
+[library-review.md](library-review.md).
+
+### `sfo library review <job>`
+
+Runs the structure rules on a completed job and, unless `--no-model` is given, asks the
+local model about roles and a few changes. It is meant for a job with the role `library`;
+a `source` job is judged too, with a note on stderr and in `role_note` (otherwise `null`).
+
+| Option | Meaning |
+|---|---|
+| `--no-model` | Rules only. |
+| `--model <name>` | Ollama model for this run. Default: `Ollama.Model`. |
+| `--refresh` | Ask the model again even if an answer to the same facts is stored. |
+| `--kind <code>` | Only findings of this kind. Repeatable. |
+| `--limit <n>`, `--offset <n>` | Paging over the findings, as in [Lists and paging](#lists-and-paging). Default limit 50. |
+| `--words <file>` | Word file with extra words and exceptions. |
+
+```bash
+sfo scan /media/archive --role library --structure-only --json
+sfo library review 7 --no-model --json
+```
+
+```json
+{
+  "job": { "id": 7, "status": "completed", "structure_only": true, "...": "..." },
+  "structure": { "directories": 80, "files": 374, "bytes": 3669301, "system_files": 1,
+                 "max_depth": 11, "median_depth": 2, "complete": false,
+                 "dumps": 2, "dump_directories": 24, "dump_files": 5, "dump_bytes": 17009 },
+  "by_kind": { "dump": 2, "naming_inconsistent": 2, "...": 1 },
+  "excluded_by_exceptions": 0,
+  "words": "built-in",
+  "role_note": null,
+  "job_id": 7, "total": 21, "limit": 50, "offset": 0, "next_offset": null,
+  "items": [
+    {
+      "kind": "dump", "impact": "high",
+      "path": "/media/archive/Handy", "relative_path": "Handy",
+      "reason": "device dump (holds Android, DCIM, LOST.DIR): ...",
+      "items": [], "more": 0, "directories": 21, "files": 3, "bytes": 15006,
+      "details": { "dump_kind": "device", "empty_dirs": 4, "levels": 7, "share_of_dirs": 0.262,
+                   "evidence": "holds Android, DCIM, LOST.DIR" }
+    }
+  ],
+  "advice": { "status": "skipped", "model": null, "created_at": null, "good": [], "roles": [],
+              "changes": [], "outline": [], "dropped": 0, "error": null }
+}
+```
+
+`structure.complete` is `false` when folders were skipped or recorded shallow by the scan
+rules; their contents are then unknown. `items[].items` names up to five members of a
+bundled finding (relative paths), `more` counts the rest. `sensitive_location` findings
+show path and marker only.
+
+Errors: `job_not_found` (1), `scan_not_completed` (1), `path_not_found` (1, word file),
+`words_invalid` (1), `ollama_unavailable` (3, with `result`: the rule findings are complete,
+`advice.status` is `unavailable`).
+
+### `sfo library propose <job>`
+
+Suggests a target structure and, with `--out`, writes it as a target file.
+
+| Option | Meaning |
+|---|---|
+| `--out <file>` | Write the target file here (replaced if it exists). Refused inside the job's folder. |
+| `--root <folder>` | Folder the targets go under, written into the file. Default: empty. |
+| `--lang <en\|de>` | Language of folder names when the rules build the structure. Default `en`. |
+| `--no-model`, `--model`, `--refresh`, `--words` | As for `review`. |
+
+The result holds `job`, `status` (as `advice.status`), `error`, `dropped`, `path` (the
+written file or `null`) and `target` (the target structure). When the model is unreachable
+(`status: "unavailable"`) or its answer cannot be used (`status: "failed"`, reason in
+`error`), the rule-built structure is returned with exit code 0 and a note on stderr.
+
+Errors: `job_not_found` (1), `scan_not_completed` (1), `output_inside_job` (1),
+`path_not_found` (1, missing target folder or word file), `export_failed` (1),
+`words_invalid` (1).
+
 ## Machine contract
 
 Applies to every command, including the ones added later.
@@ -612,7 +694,7 @@ one line per phase every 500 ms, plus the final line of a phase.
 | Code | Meaning | `error.code` |
 |---|---|---|
 | 0 | Done | |
-| 1 | The command ran but could not do its job | `job_not_found`, `path_not_found`, `scan_failed`, `scan_not_completed`, `wrong_role`, `compare_incomplete`, `database_error`, `model_missing`, `rules_invalid`, `export_failed`, `internal_error` |
+| 1 | The command ran but could not do its job | `job_not_found`, `path_not_found`, `scan_failed`, `scan_not_completed`, `wrong_role`, `compare_incomplete`, `database_error`, `model_missing`, `rules_invalid`, `words_invalid`, `output_inside_job`, `export_failed`, `internal_error` |
 | 2 | Wrong invocation: unknown command or option, missing or invalid value | `usage` |
 | 3 | Ollama not reachable | `ollama_unavailable` |
 | 130 | Interrupted with Ctrl+C; stored work stays and the command can be run again | `cancelled` |

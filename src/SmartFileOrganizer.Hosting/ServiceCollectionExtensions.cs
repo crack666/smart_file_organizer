@@ -2,6 +2,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
+using SmartFileOrganizer.Application.Library;
 using SmartFileOrganizer.Application.Services;
 using SmartFileOrganizer.Domain.Interfaces;
 using SmartFileOrganizer.Infrastructure;
@@ -65,6 +66,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IJobReadRepository, JobReadRepository>();
         services.AddSingleton<IContentComparisonRepository, ContentComparisonRepository>();
         services.AddSingleton<IDirectorySampleRepository, DirectorySampleRepository>();
+        services.AddSingleton<ILibraryRepository, LibraryRepository>();
 
         // Infrastructure
         services.AddSingleton<IFileSystemAccessor, FileSystemAccessor>();
@@ -90,6 +92,13 @@ public static class ServiceCollectionExtensions
             var opts = sp.GetRequiredService<OllamaOptions>();
             client.BaseAddress = new Uri(opts.BaseUrl);
         });
+        services.AddHttpClient<ILibraryAdvisor, OllamaLibraryAdvisor>((sp, client) =>
+        {
+            var opts = sp.GetRequiredService<OllamaOptions>();
+            client.BaseAddress = new Uri(opts.BaseUrl);
+            // The advisor applies its own, longer timeout per call.
+            client.Timeout = Timeout.InfiniteTimeSpan;
+        });
         services.AddSingleton(sp => new OllamaSettingsService(
             sp.GetRequiredService<OllamaOptions>(),
             paths.SettingsPath));
@@ -104,6 +113,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<FileQueryService>();
         services.AddSingleton<DirectoryQueryService>();
         services.AddSingleton<JobReadService>();
+        services.AddSingleton<LibraryService>();
         services.AddSingleton<ClassificationService>(sp => new ClassificationService(
             sp.GetRequiredService<IFileRepository>(),
             sp.GetRequiredService<IClassificationRepository>(),

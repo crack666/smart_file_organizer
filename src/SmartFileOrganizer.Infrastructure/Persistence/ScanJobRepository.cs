@@ -21,12 +21,12 @@ public class ScanJobRepository : IScanJobRepository
                 (root_path, role, status, created_at, started_at, completed_at,
                  total_files, processed_files, total_directories, processed_directories,
                  error_count, last_error,
-                 rules_name, rules_source, rules_hash, rules_json)
+                 rules_name, rules_source, rules_hash, rules_json, structure_only)
             VALUES
                 (@RootPath, @RoleValue, @Status, @CreatedAt, @StartedAt, @CompletedAt,
                  @TotalFiles, @ProcessedFiles, @TotalDirectories, @ProcessedDirectories,
                  @ErrorCount, @LastError,
-                 @RulesName, @RulesSource, @RulesHash, @RulesJson);
+                 @RulesName, @RulesSource, @RulesHash, @RulesJson, @StructureOnly);
             SELECT last_insert_rowid();
             """;
 
@@ -92,6 +92,7 @@ public class ScanJobRepository : IScanJobRepository
             DELETE FROM user_overrides     WHERE file_node_id IN (SELECT id FROM file_nodes WHERE job_id = @id);
             DELETE FROM ai_results          WHERE file_node_id IN (SELECT id FROM file_nodes WHERE job_id = @id);
             DELETE FROM ai_directory_results WHERE directory_node_id IN (SELECT id FROM directory_nodes WHERE job_id = @id);
+            DELETE FROM library_advice      WHERE job_id = @id;
             DELETE FROM file_nodes          WHERE job_id = @id;
             DELETE FROM directory_nodes     WHERE job_id = @id;
             DELETE FROM scan_jobs           WHERE id = @id;

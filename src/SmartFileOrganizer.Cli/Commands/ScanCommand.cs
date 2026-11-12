@@ -37,12 +37,19 @@ public static class ScanCommand
         };
         role.AcceptOnlyFromAmong([.. ScanRoleValues.All]);
 
+        var structureOnly = new Option<bool>("--structure-only")
+        {
+            Description = "Record the tree only (names, sizes, times, types); open no file, not even for the " +
+                          "sensitive-file header probe. Stored at the job, so --resume keeps it."
+        };
+
         var command = new Command("scan", "Create a scan job for a folder and scan it, or resume a job.")
         {
             path,
             resume,
             rulesFile,
-            role
+            role,
+            structureOnly
         };
         command.Validators.Add(result =>
         {
@@ -52,6 +59,8 @@ public static class ScanCommand
                 result.AddError("Give either a path or --resume <job>, not both and not neither.");
             else if (hasResume && result.GetValue(role) != null)
                 result.AddError("--role is set when a job is created; it cannot be given with --resume.");
+            if (hasResume && result.GetValue(structureOnly))
+                result.AddError("--structure-only is fixed when a job is created; a resumed job keeps its setting.");
         });
 
         CommandRunner.SetHandler(command, host, globals, async (ctx, ct) =>
@@ -79,8 +88,10 @@ public static class ScanCommand
                 if (!Directory.Exists(root))
                     throw new CliFailureException(ExitCodes.Failure, ErrorCodes.PathNotFound, $"Folder not found: {root}");
                 var scanRole = ctx.ParseResult.GetValue(role) is { } r ? ScanRoleValues.Parse(r) : ScanRole.Source;
-                jobId = (await jobs.CreateJobAsync(root, profile, scanRole, ct)).Id;
-                ctx.Note($"Created {scanRole.ToValue()} job {jobId} for {root} with rules '{profile.Name}'");
+                var shape = ctx.ParseResult.GetValue(structureOnly);
+                jobId = (await jobs.CreateJobAsync(root, profile, scanRole, shape, ct)).Id;
+                ctx.Note($"Created {scanRole.ToValue()} job {jobId} for {root} with rules '{profile.Name}'"
+                         + (shape ? ", structure only" : string.Empty));
             }
 
             var progress = new SynchronousProgress<ScanProgress>(p =>

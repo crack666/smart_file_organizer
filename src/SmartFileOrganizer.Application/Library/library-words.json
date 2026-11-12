@@ -1,0 +1,93 @@
+{
+  // Word lists of the library review (docs/library-review.md). German and English, compared
+  // case-insensitively with umlauts spelled out (ä -> ae, ß -> ss). A file given with
+  // `sfo library review --words <file>` adds to every list; it cannot remove entries.
+  "schema_version": 1,
+
+  // Files that do not count as content: a folder holding only these is empty.
+  "system_files": ["thumbs.db", "ehthumbs.db", "ehthumbs_vista.db", "desktop.ini", ".ds_store", ".picasa.ini", "picasa.ini", ".localized", "zbthumbnail.info"],
+  "system_file_prefixes": ["._"],
+
+  // Names that say "nothing decided yet".
+  "placeholder_names": [
+    "neuer ordner", "new folder", "neuer ordner (2)", "new folder (2)", "unbenannt", "unbenannter ordner",
+    "untitled", "untitled folder", "ordner", "folder", "temp", "tmp", "test", "kopie", "copy", "xxx", "asdf"
+  ],
+
+  // Names of collecting folders that tend to grow.
+  "catch_all_names": [
+    "sonstiges", "sonstige", "diverses", "divers", "verschiedenes", "allgemein", "rest", "unsortiert",
+    "zu sortieren", "sortieren", "aussortiert", "fertig", "neu", "alt", "ablage", "eingang",
+    "misc", "miscellaneous", "other", "others", "stuff", "unsorted", "to sort", "sort", "sorted out",
+    "done", "new", "old", "general", "inbox", "download", "downloads"
+  ],
+
+  // Words in a folder name that promise a kind of file. Matched against whole words of the name.
+  "type_words": {
+    "image": ["bilder", "bild", "fotos", "foto", "photos", "photo", "pictures", "images", "fotografie", "photography"],
+    "video": ["videos", "video", "filme", "film", "movies", "movie", "clips"],
+    "audio": ["musik", "music", "audio", "hoerbuecher", "hoerbuch", "audiobooks", "podcasts", "songs"],
+    "document": ["dokumente", "documents", "docs", "rechnungen", "invoices", "briefe", "letters", "vertraege",
+                 "contracts", "steuer", "steuern", "tax", "taxes", "unterlagen", "papers", "bescheide", "urkunden"]
+  },
+
+  // Spellings of the same level. A parent whose children (or grandchildren) use more than one
+  // variant of a group is reported.
+  "variant_groups": [
+    {
+      "role": "season",
+      "variants": [
+        { "id": "staffel_n", "pattern": "^staffel[ ._-]*\\d+$" },
+        { "id": "season_n", "pattern": "^season[ ._-]*\\d+$" },
+        { "id": "s_nn", "pattern": "^s\\d{1,2}$" },
+        { "id": "release_name", "pattern": "[ ._-]s\\d{2}(?:e\\d{2})?(?:[ ._-]|$)" }
+      ]
+    },
+    {
+      "role": "disc",
+      "variants": [
+        { "id": "cd_n", "pattern": "^cd[ ._-]*\\d+$" },
+        { "id": "disc_n", "pattern": "^dis[ck][ ._-]*\\d+$" },
+        { "id": "dvd_n", "pattern": "^dvd[ ._-]*\\d+$" }
+      ]
+    },
+    {
+      "role": "part",
+      "variants": [
+        { "id": "teil_n", "pattern": "^teil[ ._-]*\\d+$" },
+        { "id": "part_n", "pattern": "^part[ ._-]*\\d+$" }
+      ]
+    }
+  ],
+
+  // Names expected to repeat at many places; never reported as the same purpose kept twice.
+  "common_child_names": [
+    "extras", "bonus", "subs", "subtitles", "untertitel", "sample", "samples", "cover", "covers", "artwork",
+    "scans", "raw", "edited", "bearbeitet", "originale", "originals", "export", "exports", "thumbnails", "backup"
+  ],
+
+  // Words ignored when names are compared for similarity.
+  "stop_words": ["und", "and", "the", "der", "die", "das", "von", "of", "in", "im", "mit", "with", "bei", "at", "zum", "zur", "fuer", "for", "ein", "eine", "a", "an"],
+
+  // Extra words in file names that mark access data, beyond the scan's sensitive-file rules.
+  "sensitive_name_words": ["recovery", "wiederherstellung", "2fa", "backup codes", "backup-codes", "backupcodes", "mnemonic", "tan-liste", "tanliste", "puk"],
+
+  // Child folder names of a device dump. Two of them, or "lost.dir" alone, mark the parent.
+  // (Not "pictures" or "movies": an ordinary library has those, too.)
+  "device_markers": ["lost.dir", "android", "dcim", ".thumbnails", "miui", "whatsapp", "notifications", "ringtones", "alarms"],
+
+  // Child folder names of a computer or profile copy. Two of them mark the parent.
+  "computer_markers": ["windows", "program files", "program files (x86)", "programdata", "users", "documents and settings",
+                       "appdata", "$recycle.bin", "system volume information", "recovery", "perflogs", "boot", "efi"],
+
+  // Child folder names of a project or unpacked package. One marks the parent.
+  "package_markers": [".git", ".svn", ".hg", "node_modules", ".venv", "venv", "site-packages", "__pycache__", ".idea", ".vs", ".gradle"],
+
+  // App package names (com.example.app); this many children named like that mark a device dump.
+  "app_package_pattern": "^(?:com|org|net|de|io|tv|me|jp|cn|uk|fr|eu)\\.[a-z0-9_]+(?:\\.[a-z0-9_]+)+$",
+  "app_package_min_children": 3,
+
+  // Folders the person keeps on purpose the way they are. Only useful in a --words file:
+  // { "path": "photos/Scans of letters", "kinds": ["type_mismatch"], "why": "scanned letters belong to the trip" }
+  "exceptions": []
+}

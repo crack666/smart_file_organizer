@@ -75,7 +75,7 @@ public class ScopedRefreshService : IScopedRefreshService
         file.FileType = FileTypeDetector.Detect(file.Extension);
         file.Status = FileNodeStatus.Discovered;
         file.ScannedAt = DateTime.UtcNow;
-        SensitiveFileRules.Apply(file, maxBytes => _fs.ReadPrefix(file.FullPath, maxBytes));
+        SensitiveFileRules.Apply(file, job.StructureOnly ? null : maxBytes => _fs.ReadPrefix(file.FullPath, maxBytes));
 
         await _fileRepo.UpdateMetadataAsync(file, ct);
         return file;
@@ -103,7 +103,7 @@ public class ScopedRefreshService : IScopedRefreshService
                 Status = FileNodeStatus.Discovered,
                 ScannedAt = DateTime.UtcNow
             };
-            SensitiveFileRules.Apply(node, maxBytes => _fs.ReadPrefix(filePath, maxBytes));
+            SensitiveFileRules.Apply(node, job.StructureOnly ? null : maxBytes => _fs.ReadPrefix(filePath, maxBytes));
             yield return node;
         }
     }
