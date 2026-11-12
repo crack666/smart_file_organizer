@@ -1,7 +1,7 @@
 namespace SmartFileOrganizer.Infrastructure.Persistence.Migrations;
 
 /// <summary>
-/// Step 11: closes gaps around the sensitive-output boundary
+/// Step 12: closes gaps around the sensitive-output boundary
 /// (https://github.com/crack666/smart_file_organizer/issues/33).
 /// <list type="bullet">
 /// <item><c>directory_nodes.sensitive_markers</c> / <c>sensitive_rule</c>: markers of a folder the scan
@@ -15,9 +15,9 @@ namespace SmartFileOrganizer.Infrastructure.Persistence.Migrations;
 /// </list>
 /// Existing skipped folders are marked by the read commands, which evaluate the folder rules again.
 /// </summary>
-internal sealed class M0011_SensitiveGaps : SqlSchemaMigration
+internal sealed class M0012_SensitiveGaps : SqlSchemaMigration
 {
-    public override int Version => 11;
+    public override int Version => 12;
     public override string Description => "Sensitive markers on skipped folders; rule version per file; marked inputs of directory summaries";
 
     protected override string Sql => """
