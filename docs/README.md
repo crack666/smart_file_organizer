@@ -38,10 +38,15 @@ Phase 1 — Directory Verdict
    ↳ For every folder: profile of types, sizes, dates, naming patterns, project/program markers
    ↳ Verdict einheit / einheitlich / gemischt / leer / system, with purpose, retention, reason
    ↳ Clear cases (Git repo, program, empty, skipped) by rule without a model call
-   ↳ Decide sampling strategy (analyze_all / random_sample / skip)
-   ↳ Verdict stored in directory_verdicts, sampling in ai_directory_results (phase = 'pre_assessment')
+   ↳ Units and system folders: no file analysis, the folder carries the result
+   ↳ Verdict stored in directory_verdicts, pre-assessment in ai_directory_results (phase = 'pre_assessment')
 
-Phase 2 — Per-File Deep Analysis
+Phase 2 — Per-File Deep Analysis, in stages
+   ↳ Uniform folders: a reproducible stratified sample is judged first (at most 15 calls)
+   ↳ Sample agrees → the other files inherit category and target (marked 'inherited', confidence ≤ 0.6)
+   ↳ Sample disagrees → folder raised to mixed, every file judged on its own
+   ↳ Mixed folders: every file judged, plus a keep hint (temporary / worth_keeping)
+   ↳ Samples stored in directory_samples
    ↳ Raster images (jpg/png/gif/webp) → visual AI (base64, up to 10 MB)
    ↳ SVG → XML read as text, classified semantically
    ↳ Other image formats (bmp/tiff/heic/raw/ico/…) → metadata only
@@ -54,7 +59,8 @@ Phase 2 — Per-File Deep Analysis
    ↳ Result stored in ai_results
 
 Phase 3 — Directory Summaries (bottom-up)
-   ↳ Synthesizes Phase 2 results into one human-readable folder description
+   ↳ Mixed folders: the model synthesizes Phase 2 results into one folder description
+   ↳ Other folders: summary taken from verdict and sample outcome, no model call
    ↳ Shown as a green banner when you select a folder
    ↳ Result stored in ai_directory_results (phase = 'summary')
 ```

@@ -184,8 +184,10 @@ For each AI phase, `total = done + errors + pending + skipped`.
 
 - `pre_assessment` and `summary` count directories the AI phases consider: not skipped by the
   scan rules and not hidden (name starting with a dot).
-- `classification` counts files of the types it handles (image, video, document). `skipped`
-  are files the pre-assessment chose not to sample.
+- `classification` counts files of the types it handles (image, video, document). `done`
+  includes files that inherited the result of their directory's confirmed sample; `pending`
+  includes files waiting for that sample. `skipped` are files of units and system directories,
+  which are not analysed one by one.
 
 ### `sfo compare <job> --against <job>`
 
