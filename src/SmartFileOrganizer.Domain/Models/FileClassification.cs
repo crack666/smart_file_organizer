@@ -33,4 +33,9 @@ public class FileClassification
 
     /// <summary>Why the file has its <see cref="KeepHint"/>.</summary>
     public string? KeepReason { get; set; }
+
+    /// <summary>What the evidence held and lacked when this result was made, as JSON
+    /// (<c>{"contains":[...],"missing":[...]}</c>). Stored in <c>ai_results.evidence</c>, so a wrong
+    /// result can be traced to thin evidence or to a wrong judgement.</summary>
+    public string? Evidence { get; set; }
 }
