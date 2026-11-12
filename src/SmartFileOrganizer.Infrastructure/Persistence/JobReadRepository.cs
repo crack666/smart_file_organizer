@@ -18,6 +18,7 @@ public class JobReadRepository : IJobReadRepository
                a.suggested_target AS ai_suggested_target, a.model_used AS ai_model_used,
                a.analyzed_at AS ai_analyzed_at, {0} AS ai_raw_response, a.error AS ai_error,
                a.is_ai_result AS ai_is_ai_result, a.sensitive_markers AS ai_sensitive_markers,
+               a.certainty AS ai_certainty, a.attempts AS ai_attempts, a.previous_error AS ai_previous_error,
                o.id AS ovr_id, o.overridden_category AS ovr_category, o.overridden_target AS ovr_target,
                o.note AS ovr_note, o.overridden_at AS ovr_at,
                CASE WHEN dv.id IS NULL THEN NULL WHEN dv.verdict IS NULL THEN 'error' ELSE dv.verdict END AS dir_verdict,
@@ -32,6 +33,9 @@ public class JobReadRepository : IJobReadRepository
     private readonly DatabaseContext _db;
 
     public JobReadRepository(DatabaseContext db) => _db = db;
+
+    public Task<IReadOnlyList<ResultCheck>> GetResultChecksAsync(long fileNodeId, CancellationToken ct = default) =>
+        new ClassificationRepository(_db).GetChecksAsync(fileNodeId, ct);
 
     public async Task<IReadOnlyList<DirectoryReadRow>> GetDirectoriesAsync(long jobId, CancellationToken ct = default)
     {
@@ -168,6 +172,9 @@ public class JobReadRepository : IJobReadRepository
         public string? AiError { get; set; }
         public bool AiIsAiResult { get; set; }
         public string? AiSensitiveMarkers { get; set; }
+        public string? AiCertainty { get; set; }
+        public int? AiAttempts { get; set; }
+        public string? AiPreviousError { get; set; }
 
         public long? OvrId { get; set; }
         public int OvrCategory { get; set; }
@@ -217,7 +224,10 @@ public class JobReadRepository : IJobReadRepository
                     RawResponse = AiRawResponse,
                     Error = AiError,
                     IsAiResult = AiIsAiResult,
-                    SensitiveMarkers = SensitiveMarkerNames.Parse(AiSensitiveMarkers)
+                    SensitiveMarkers = SensitiveMarkerNames.Parse(AiSensitiveMarkers),
+                    Certainty = VerdictCodes.ParseNullable<ResultCertainty>(AiCertainty),
+                    Attempts = AiAttempts ?? 1,
+                    PreviousError = AiPreviousError
                 };
             }
 

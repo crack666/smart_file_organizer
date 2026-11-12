@@ -36,7 +36,11 @@ public static class ShowCommand
         string? SensitiveRule,
         bool Protected,
         string? DirVerdict,
-        string? DirRetention)
+        string? DirRetention,
+        string? Certainty,
+        int? Attempts,
+        string? PreviousError,
+        IReadOnlyList<CheckView> Checks)
     {
         public static FileDetailView From(FileItem f)
         {
@@ -44,8 +48,27 @@ public static class ShowCommand
             return new FileDetailView(r.FullPath, r.Name, r.RelativeDir, r.Extension, ReadFormat.Snake(r.FileType),
                 r.SizeBytes, r.LastWriteTime, ReadFormat.Snake(r.Status), ReadFormat.Snake(r.Category), r.CategorySource,
                 ReadFormat.Snake(r.Importance), r.Confidence, r.Summary, r.SuggestedTarget, r.ModelUsed, r.AnalyzedAt,
-                r.Error, r.RawResponse, r.Sensitive, r.SensitiveRule, r.Protected, f.DirectoryVerdict, f.DirectoryRetention);
+                r.Error, r.RawResponse, r.Sensitive, r.SensitiveRule, r.Protected, f.DirectoryVerdict, f.DirectoryRetention,
+                r.Certainty, r.Attempts, r.PreviousError, f.Checks.Select(CheckView.From).ToList());
         }
+    }
+
+    /// <summary>One second check of a file: reasons, outcome and both answers.</summary>
+    public sealed record CheckView(
+        IReadOnlyList<string> Reasons, string Outcome, string? RuleNote, AnswerView First, AnswerView? Second, DateTime CheckedAt)
+    {
+        public static CheckView From(CheckItem c) =>
+            new(c.Reasons, c.Outcome, c.RuleNote, AnswerView.From(c.First), c.Second is null ? null : AnswerView.From(c.Second), c.CheckedAt);
+    }
+
+    /// <summary>One answer of a check; model texts are null for a protected file.</summary>
+    public sealed record AnswerView(
+        string? Category, string? Importance, double? Confidence, string? KeepHint, string? Summary,
+        string? SuggestedTarget, string? KeepReason, string? ModelUsed, string? Error, string? RawResponse)
+    {
+        public static AnswerView From(CheckAnswerItem a) =>
+            new(ReadFormat.Snake(a.Category), ReadFormat.Snake(a.Importance), a.Confidence, a.KeepHint, a.Summary,
+                a.SuggestedTarget, a.KeepReason, a.ModelUsed, a.Error, a.RawResponse);
     }
 
     /// <summary>A directory with verdict, profile and the stored analyses.</summary>
@@ -138,6 +161,14 @@ public static class ShowCommand
             Line(sb, "status", f.Status);
             Line(sb, "category", f.Category is null ? null : $"{f.Category} ({f.CategorySource})");
             Line(sb, "confidence", f.Confidence?.ToString("0.00", CultureInfo.InvariantCulture));
+            Line(sb, "certainty", f.Certainty);
+            Line(sb, "attempts", f.Attempts is > 1 ? f.Attempts.Value.ToString(CultureInfo.InvariantCulture) : null);
+            Line(sb, "previous error", f.PreviousError);
+            foreach (var c in f.Checks)
+            {
+                Line(sb, "check", $"{c.Outcome} ({string.Join(", ", c.Reasons)}): first {c.First.Category}"
+                    + (c.Second is null ? string.Empty : $", second {c.Second.Error ?? c.Second.Category}"));
+            }
             Line(sb, "importance", f.Importance);
             Line(sb, "summary", f.Summary);
             Line(sb, "target", f.SuggestedTarget);

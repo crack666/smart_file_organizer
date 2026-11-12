@@ -397,6 +397,39 @@ public class SecondCheckTests : IDisposable
         Assert.DoesNotContain("download", c.KeepReason);
     }
 
+    [Fact]
+    public async Task Show_ListsBothAnswers_WithoutModelTextForAProtectedFile()
+    {
+        var job = await new ScanJobRepository(_db).CreateAsync(new ScanJob { RootPath = _dir, Status = JobStatus.Completed, CreatedAt = DateTime.UtcNow });
+        await _fileRepo.InsertBatchAsync(new[] { ("open.jpg", SensitiveMarker.None), ("pass.jpg", SensitiveMarker.Ausweis) }.Select(f => new FileNode
+        {
+            JobId = job.Id, FullPath = Path.Combine(_dir, f.Item1), Name = f.Item1, ParentPath = _dir, RootPath = _dir,
+            RelativePath = f.Item1, Extension = ".jpg", FileType = FileType.Image, Size = 10,
+            LastWriteTime = DateTime.UtcNow, ScannedAt = DateTime.UtcNow,
+            SensitiveMarkers = f.Item2, SensitiveRule = f.Item2 == SensitiveMarker.None ? null : "test"
+        }).ToList());
+        _ollama.Classify = input => input.Depth == EvidenceDepth.Standard ? Answer(FileCategory.Photo, 0.3) : Answer(FileCategory.DocumentScan);
+        await Service().RunAsync(job.Id);
+
+        var read = new JobReadService(new ScanJobRepository(_db), new JobReadRepository(_db), _verdictRepo);
+        var open = (await read.ShowAsync(job.Id, Path.Combine(_dir, "open.jpg"), null)).File!;
+        var openCheck = Assert.Single(open.Checks);
+        Assert.Equal("disagreed", openCheck.Outcome);
+        Assert.Equal(["low_confidence"], openCheck.Reasons);
+        Assert.Equal("looks like Photo", openCheck.First.Summary);
+        Assert.Equal("looks like DocumentScan", openCheck.Second!.Summary);
+        Assert.Equal("review", open.Record.Certainty);
+
+        var guarded = (await read.ShowAsync(job.Id, Path.Combine(_dir, "pass.jpg"), null)).File!;
+        Assert.True(guarded.Record.Protected);
+        var check = Assert.Single(guarded.Checks);
+        Assert.Equal("Photo", check.First.Category);
+        Assert.Null(check.First.Summary);
+        Assert.Null(check.Second!.Summary);
+        Assert.Null(check.Second.RawResponse);
+        Assert.Null(check.Second.SuggestedTarget);
+    }
+
     // ------------------------------------------------------------------ stop between the calls
 
     [Fact]

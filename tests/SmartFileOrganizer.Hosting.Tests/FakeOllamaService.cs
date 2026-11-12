@@ -15,6 +15,9 @@ internal sealed class FakeOllamaService : IOllamaService
     /// <summary>Called before each file classification, for example to cancel a run midway.</summary>
     public Action<OllamaClassificationInput>? BeforeClassify { get; set; }
 
+    /// <summary>Returns an error message to fail the classification of a file with, or null to answer normally.</summary>
+    public Func<OllamaClassificationInput, string?>? FailWith { get; set; }
+
     public Task<bool> IsAvailableAsync(CancellationToken ct = default) => Task.FromResult(true);
 
     public Task<IReadOnlyList<OllamaLocalModel>> GetLocalModelsAsync(CancellationToken ct = default) =>
@@ -27,6 +30,8 @@ internal sealed class FakeOllamaService : IOllamaService
         BeforeClassify?.Invoke(input);
         ct.ThrowIfCancellationRequested();
         FileInputs.Add(input);
+        if (FailWith?.Invoke(input) is { } error)
+            return Task.FromResult(new FileClassification { Error = error, ModelUsed = "fake-model", AnalyzedAt = DateTime.UtcNow, IsAiResult = true });
         return Task.FromResult(new FileClassification
         {
             Category = input.File.FileType == FileType.Image ? FileCategory.Photo : FileCategory.Document,

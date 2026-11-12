@@ -54,6 +54,16 @@ public sealed record FileOutputRecord
     [JsonPropertyName("importance")] public string? Importance { get; init; }
     [JsonPropertyName("confidence")] public double? Confidence { get; init; }
 
+    /// <summary>Code <c>certain</c>, <c>likely</c>, <c>uncertain</c> or <c>review</c>; null without a result or for
+    /// results written before schema step 8. Says nothing about the content, so it stays on protected records.</summary>
+    [JsonPropertyName("certainty")] public string? Certainty { get; init; }
+
+    /// <summary>How often the file went through Phase 2.</summary>
+    [JsonPropertyName("attempts")] public int? Attempts { get; init; }
+
+    /// <summary>Error of the attempt before the current result. Null for a protected record, like <see cref="Error"/>.</summary>
+    [JsonPropertyName("previous_error")] public string? PreviousError { get; init; }
+
     /// <summary>Model summary, or for a protected record the neutral summary.</summary>
     [JsonPropertyName("summary")] public string? Summary { get; init; }
 
@@ -159,7 +169,9 @@ public static class SensitiveOutputGuard
             Status = file.Status.ToString(),
             Sensitive = SensitiveMarkerNames.ToTokens(match.Markers),
             SensitiveRule = match.Rule,
-            Protected = isProtected
+            Protected = isProtected,
+            Certainty = ai?.Certainty.ToCode(),
+            Attempts = ai?.Attempts
         };
 
         if (isProtected)
@@ -203,6 +215,7 @@ public static class SensitiveOutputGuard
             ModelUsed = ai?.ModelUsed,
             AnalyzedAt = ai is null || ai.AnalyzedAt == default ? null : ai.AnalyzedAt,
             Error = ai?.Error,
+            PreviousError = ai?.PreviousError,
             TextExcerpt = textExcerpt,
             RawResponse = ai?.RawResponse
         };

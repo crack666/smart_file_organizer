@@ -243,18 +243,19 @@ public sealed record FileListView(
     string? Summary,
     IReadOnlyList<string> Sensitive,
     bool Protected,
-    string? DirVerdict)
+    string? DirVerdict,
+    string? Certainty)
 {
     public static FileListView From(FileItem f)
     {
         var r = f.Record;
         return new FileListView(r.FullPath, r.Name, ReadFormat.Snake(r.FileType), r.SizeBytes, r.LastWriteTime,
             ReadFormat.Snake(r.Status), ReadFormat.Snake(r.Category), r.CategorySource, r.Confidence, r.Summary,
-            r.Sensitive, r.Protected, f.DirectoryVerdict);
+            r.Sensitive, r.Protected, f.DirectoryVerdict, r.Certainty);
     }
 
     public string ToLine() =>
-        $"{Category ?? "-",-18} {(Confidence is { } c ? c.ToString("0.00", CultureInfo.InvariantCulture) : "-"),5}  {Status,-12}"
+        $"{Category ?? "-",-18} {(Confidence is { } c ? c.ToString("0.00", CultureInfo.InvariantCulture) : "-"),5}  {Certainty ?? "-",-9} {Status,-12}"
         + (Sensitive.Count > 0 ? $" [{string.Join(',', Sensitive)}]" : string.Empty)
         + $"  {Path}";
 }

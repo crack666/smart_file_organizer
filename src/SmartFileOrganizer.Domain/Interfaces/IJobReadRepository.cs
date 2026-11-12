@@ -25,4 +25,7 @@ public interface IJobReadRepository
 
     /// <summary>The Phase 1 pre-assessment and Phase 3 summary rows of one directory (either may be missing).</summary>
     Task<IReadOnlyList<DirectoryClassificationResult>> GetDirectoryAnalysesAsync(long directoryNodeId, CancellationToken ct = default);
+
+    /// <summary>The second checks of one file with both answers, oldest first.</summary>
+    Task<IReadOnlyList<ResultCheck>> GetResultChecksAsync(long fileNodeId, CancellationToken ct = default);
 }
