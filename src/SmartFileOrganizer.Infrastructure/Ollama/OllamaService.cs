@@ -155,6 +155,47 @@ public class OllamaService : IOllamaService
     }
 
     /// <summary>
+    /// Short hash over everything that shapes what the model is asked: system prompt, summary
+    /// language, the prompt templates (built for a fixed sample input) and their answer
+    /// schemas. Stored with every evaluation run, so two runs show whether the prompts differed.
+    /// </summary>
+    public static string PromptFingerprint(OllamaOptions options)
+    {
+        var file = new FileNode
+        {
+            Name = "sample.pdf", Extension = ".pdf", FileType = FileType.Document, Size = 1,
+            LastWriteTime = new DateTime(2000, 1, 1, 0, 0, 0, DateTimeKind.Utc), RelativeDir = "sample"
+        };
+        var dir = new DirectoryNode { Name = "sample", RelativePath = "sample" };
+        var parts = new[]
+        {
+            options.SystemPrompt,
+            options.SummaryLanguage,
+            BuildClassificationPrompt(new OllamaClassificationInput { File = file, ExtractedText = "sample" }, options.SummaryLanguage),
+            BuildClassificationPrompt(new OllamaClassificationInput { File = file, ExtractedText = "sample", AskKeepHint = true }, options.SummaryLanguage),
+            BuildPreAssessmentPrompt(new DirectoryPreAssessmentInput
+            {
+                Directory = dir,
+                DirectFiles = [new DirectoryFileInfo { Name = "sample.pdf", Size = 1 }],
+                SubdirectoryNames = ["sub"]
+            }, options.SummaryLanguage),
+            BuildSummaryPrompt(new DirectorySummaryInput
+            {
+                Directory = dir,
+                PreAssessment = new DirectoryClassificationResult(),
+                FileSummaryLines = ["sample.pdf"],
+                AnomalyDescriptions = ["sample.pdf: sample"]
+            }),
+            JsonSerializer.Serialize(BuildClassificationSchema(askKeepHint: false)),
+            JsonSerializer.Serialize(BuildClassificationSchema(askKeepHint: true)),
+            JsonSerializer.Serialize(BuildPreAssessmentSchema()),
+            JsonSerializer.Serialize(BuildSummarySchema())
+        };
+        var hash = System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(string.Join("\u0000", parts)));
+        return Convert.ToHexString(hash, 0, 8).ToLowerInvariant();
+    }
+
+    /// <summary>
     /// The Phase 2 prompt: file identity, facts read without the model (marked as reliable),
     /// what the evidence contains and what is missing, then the extracted text and the guidance.
     /// </summary>
