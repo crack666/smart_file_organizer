@@ -323,6 +323,30 @@ Trade-off: deep program trees without executables (game assets, source
 trees) are scanned in full. A profile can limit them with a `shallow` rule
 and `max_depth`. Format and order of precedence: [scan-rules.md](scan-rules.md).
 
+## 10. Library match: folder names in the output, rules before the model
+
+Decided 12.11.2026 in
+https://github.com/crack666/smart_file_organizer/issues/25.
+
+`sfo library show` and `sfo library match` print folder names and paths of the library in
+their CLI output, including to an external caller. Scanning a tree with `--role library` is
+the person's release of that archive as the target to file into: its folder names are what
+the tool is asked to continue. File contents are never read for it (the library is scanned
+`--structure-only`), and the model, which runs locally, gets folder names, counters and
+patterns only. File names of the library are not printed; the source side keeps the
+protection of [8](#8-sensitive-files-local-and-external-readers).
+
+The proposals are rules first: the map, the signals and the certainty are complete with
+`--no-model`. Certainty comes from how many independent signals agree (same content, period,
+name, neighbours) and from contradictions, not from a model number, so a person can check
+every proposal from its one-sentence reason. When nothing reaches the minimum score, a new
+folder is proposed instead of a forced hit, and a weak place at the target (review findings)
+caps the certainty instead of being continued silently. A named source folder is never
+renamed or split.
+
+Trade-off: the thresholds are starting values without a measured library yet; they are
+settings (`LibraryMatch`), not constants.
+
 ## Design stance going forward
 
 Prefer:

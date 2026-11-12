@@ -230,6 +230,7 @@ https://github.com/crack666/smart_file_organizer/milestones
 | [architecture.md](architecture.md) | Layer structure, runtime flows, DB schema |
 | [scan-rules.md](scan-rules.md) | Rule files (profiles): which folders a scan enters, records shallow or skips, and why |
 | [library-review.md](library-review.md) | Judging a library by its structure: dumps, finding kinds and thresholds, word file, model questions, target file |
+| [library-match.md](library-match.md) | Placing into a library: target map, match signals and certainty, weak places, new folder names, patterns file, settings |
 | [evaluation.md](evaluation.md) | Measuring verdicts, categories and markers: test corpus, truth file, test cases from corrections, comparing runs |
 | [engineering-decisions.md](engineering-decisions.md) | Library choices, trade-offs, lessons learned |
 | [code-guidelines.md](code-guidelines.md) | Repo-specific conventions and rules |

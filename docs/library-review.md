@@ -6,8 +6,9 @@ files contain. They work on a completed scan, ideally one made with
 opens no file. `review` is meant for a job with the role `library`; a `source` job is judged
 too, with a note (`role_note`). `propose` is meant for a source without an ordered library.
 Both commands only read: nothing in the judged folder is moved, renamed or written, and the
-suggestions they return are data. Per-file target suggestions are a separate topic
-(https://github.com/crack666/smart_file_organizer/issues/25).
+suggestions they return are data. Where a part of a source belongs in the library is answered by
+`sfo library show` and `sfo library match`, which build on these findings:
+[library-match.md](library-match.md).
 
 Background and the manual review the thresholds come from:
 https://github.com/crack666/smart_file_organizer/issues/29

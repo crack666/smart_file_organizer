@@ -54,6 +54,16 @@ without changing anything in it ([docs/library-review.md](docs/library-review.md
 dotnet run --project src/SmartFileOrganizer.Cli -- scan <library> --role library --structure-only
 dotnet run --project src/SmartFileOrganizer.Cli -- library review <job> --no-model
 ```
+
+Where a part of a source belongs in that library: the existing folders that fit, each
+with reasons and a certainty, or a new folder in the library's style
+([docs/library-match.md](docs/library-match.md)):
+
+```bash
+dotnet run --project src/SmartFileOrganizer.Cli -- library show <library-job> --depth 2
+dotnet run --project src/SmartFileOrganizer.Cli -- library match <source-job> "<folder>" --no-model
+```
+
 How good folder verdicts, categories and sensitive markers are is measured
 with `sfo eval` against a generated corpus with a known truth; corrections
 made in the review become test cases ([docs/evaluation.md](docs/evaluation.md)).

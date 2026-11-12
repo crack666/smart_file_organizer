@@ -801,6 +801,118 @@ Errors: `job_not_found` (1), `scan_not_completed` (1), `output_inside_job` (1),
 `path_not_found` (1, missing target folder or word file), `export_failed` (1),
 `words_invalid` (1).
 
+## Placing into the library
+
+Both commands read the target map of a library job; neither moves or renames anything. Map,
+signals, certainty, new folder names, the patterns file and the settings are described in
+[library-match.md](library-match.md). Issue:
+https://github.com/crack666/smart_file_organizer/issues/25
+
+### `sfo library show <job>`
+
+The target map of a `library` job, one page of folders in tree order.
+
+| Option | Meaning |
+|---|---|
+| `--under <path>` | Only this folder and its subtree (relative to the library root, or a full path). |
+| `--depth <n>` | Levels below `--under` (or the root); `0` lists only that folder. |
+| `--search <text>` | Only folders whose name contains the text (case and umlauts aside). |
+| `--from <date>`, `--to <date>` | Only folders whose period overlaps: a year (`2015`), month (`2015-07`) or day (`2015-07-12`). |
+| `--role <code>` | Only folders with this role. Repeatable. |
+| `--limit <n>`, `--offset <n>` | Paging as in [Lists and paging](#lists-and-paging). Default limit 100. |
+| `--reset-patterns` | Write the patterns file anew from the folders, replacing hand edits. |
+| `--no-model`, `--model`, `--refresh`, `--words` | As for `review`. The model writes the `purpose` of the upper folders. |
+
+```json
+{
+  "job": { "id": 8, "role": "library", "...": "..." },
+  "patterns": { "file": "/home/me/.local/share/SmartFileOrganizer/library-patterns/job-8.json",
+                "created": true, "ignored": [], "note": null, "targets": [ { "path": "Fotos", "pattern": "{occasion} {year}", "...": "..." } ] },
+  "job_id": 8, "total": 14, "limit": 100, "offset": 0, "next_offset": null,
+  "items": [
+    { "path": "/media/archive/Fotos", "relative_path": "Fotos", "name": "Fotos", "depth": 1, "parent": ".",
+      "role": "collection", "children_role": "occasion",
+      "purpose": "3 folders, mostly occasions named like '{occasion} {year}' (Grill 2016, Ostern 2018, Ski 2015): 15 image, taken 2015-02-07 to 2018-04-01.",
+      "purpose_source": "rule", "files": 15, "direct_files": 0, "subdirs": 3, "bytes": 82, "by_file_type": { "image": 15 },
+      "period": { "from": "2015-02-07T10:00:00", "to": "2018-04-01T12:30:00", "time_source": "file_name" },
+      "name_period": null,
+      "children_pattern": { "template": "{occasion} {year}", "name_pattern": "year_suffix", "count": 3, "of": 3,
+                            "examples": [ "Grill 2016", "Ostern 2018", "Ski 2015" ] },
+      "pattern": "{occasion} {year}", "findings": [], "weak": false, "dump_kind": null }
+  ],
+  "advice": { "status": "skipped", "model": null, "error": null, "dropped": 0 }
+}
+```
+
+`patterns.ignored` lists hand-edited targets whose folder no longer exists. Errors:
+`job_not_found` (1), `scan_not_completed` (1), `wrong_role` (1, not a library job),
+`path_not_found` (1, `--under` or word file), `words_invalid` (1), `library_patterns_invalid` (1),
+`settings_invalid` (1, a `LibraryMatch` value), `ollama_unavailable` (3, with `result`: the map is
+complete with rule purposes).
+
+### `sfo library match <job> [path]`
+
+Where a part of a `source` job belongs in the library: a file or folder (`path`, relative to the
+source root or full) or a bundle (`--bundle <id>`), exactly one of them.
+
+| Option | Meaning |
+|---|---|
+| `--bundle <id>` | Match a bundle of `sfo bundles build` as a whole. |
+| `--against <job>` | Library job. Default: the one of the latest `sfo compare`, else the newest completed library job. |
+| `--limit <n>` | Proposals to list, 1 to 50. Default `LibraryMatch.MaxCandidates` (3). |
+| `--no-model`, `--model`, `--refresh`, `--words` | As for `review`. The model only names a new folder the rules cannot complete. |
+
+```json
+{
+  "source": { "id": 9, "role": "source", "...": "..." },
+  "library": { "id": 8, "role": "library", "...": "..." },
+  "library_from": "comparison",
+  "status": "ok", "message": null,
+  "unit": { "kind": "folder", "path": "/media/usb/Neuer Ordner", "bundle_id": null, "bundle_kind": null,
+            "name": "Neuer Ordner", "keep_whole": false,
+            "keep_reason": "'Neuer Ordner' says nothing about its content; its files need a place.",
+            "role": "occasion", "files": 5, "by_file_type": { "image": 5 },
+            "period": { "from": "2015-02-07T10:00:00", "to": "2015-02-08T10:30:00", "time_source": "file_name" },
+            "words": [], "comparison": { "backed_up": 1, "new": 4 } },
+  "comparison": { "comparison_id": 3, "compared_at": "2026-11-12T20:18:51.998Z", "complete": true },
+  "considered": 9,
+  "candidates": [
+    { "rank": 1, "placement": "into_existing",
+      "target": "/media/archive/Fotos/Ski 2015", "target_relative": "Fotos/Ski 2015",
+      "target_role": "occasion", "target_purpose": "Photos and videos of one occasion: 6 image, taken 2015-02-07.",
+      "destination": "/media/archive/Fotos/Ski 2015", "destination_relative": "Fotos/Ski 2015",
+      "keeps_name": false, "score": 0.56, "certainty": "certain",
+      "reason": "Into Fotos/Ski 2015: 1 of 5 files already lie here with the same content; taken 2015-02-07 to 2015-02-08, within the folder's 2015-02-07; 100% of its files are photos and videos.",
+      "signals": [ { "signal": "content_neighbours", "value": 0.4, "weight": 0.4, "agrees": true, "contradicts": false,
+                     "detail": "1 of 5 files already lie here with the same content" } ],
+      "weak_place": null }
+  ],
+  "new_folder": null,
+  "patterns": { "file": "...", "created": false, "...": "..." },
+  "advice": { "status": "skipped", "model": null, "error": null, "dropped": 0 },
+  "notes": []
+}
+```
+
+- `placement`: `into_existing` (the files go into the folder), `as_subfolder` (a named source
+  folder goes under the target as a whole, `keeps_name: true`) or, in `new_folder`, `new_folder`.
+- `certainty`: `certain`, `likely`, `uncertain` or `review`, from agreeing signals;
+  `signal`: `content_neighbours`, `period`, `name`, `file_type`, `siblings`.
+- `weak_place`: `null`, or `{ "findings": [ { "kind", "impact", "relative_path" } ], "note" }`
+  when the review found the order at the target weak; the certainty is capped then.
+- `new_folder` when no candidate fits: `parent`, `parent_relative`, `name`, `name_source`
+  (`rule` or `model`), `name_complete` (`false` while a placeholder such as `{occasion}` is left),
+  `pattern`, `destination`, `destination_relative`, `certainty`, `reason`, `weak_place`.
+- `status: "no_library"` with a `message` and no proposals, exit code 0, when there is no library
+  to match against. `notes` says when there is no or an incomplete comparison, when the newest
+  library job was taken, or when every file is already backed up.
+
+Errors: `job_not_found` (1, source or `--against`), `scan_not_completed` (1), `wrong_role` (1, the
+source is a library or `--against` is not), `path_not_found` (1), `bundle_not_found` (1),
+`words_invalid` (1), `library_patterns_invalid` (1), `settings_invalid` (1), `usage` (2, both or
+neither of `path` and `--bundle`). An unreachable model is not an error here: the new folder keeps
+the name of the rules, `advice.status` says `unavailable`.
+
 ## Bundles
 
 ### `sfo bundles build <job>`
@@ -872,7 +984,8 @@ One page of bundles (paging as in [Lists and paging](#lists-and-paging)): the to
 - `files`, `total_bytes`, `directories`, `sensitive_files` and `comparison` cover the bundle with its
   children. `sensitive_files` and `comparison` (counts per state of the latest comparison with a
   library, `null` without one) are computed when read.
-- `styled_name` is always `null` until a model proposes names in the style of the library.
+- `styled_name` is always `null`. A name in the style of the library is proposed per match by
+  `sfo library match` (`new_folder.name`), not stored on the bundle.
 - `facts.directories` lists at most 20 directories (relative to the root) of a part or an event;
   `directories_total` counts all.
 
@@ -918,7 +1031,7 @@ one line per phase every 500 ms, plus the final line of a phase.
 | Code | Meaning | `error.code` |
 |---|---|---|
 | 0 | Done | |
-| 1 | The command ran but could not do its job | `job_not_found`, `path_not_found`, `scan_failed`, `scan_not_completed`, `wrong_role`, `compare_incomplete`, `database_error`, `model_missing`, `rules_invalid`, `words_invalid`, `output_inside_job`, `export_failed`, `truth_invalid`, `run_not_found`, `output_not_empty`, `bundle_not_found`, `patterns_invalid`, `internal_error` |
+| 1 | The command ran but could not do its job | `job_not_found`, `path_not_found`, `scan_failed`, `scan_not_completed`, `wrong_role`, `compare_incomplete`, `database_error`, `model_missing`, `rules_invalid`, `words_invalid`, `output_inside_job`, `export_failed`, `truth_invalid`, `run_not_found`, `output_not_empty`, `bundle_not_found`, `patterns_invalid`, `library_patterns_invalid`, `settings_invalid`, `internal_error` |
 | 2 | Wrong invocation: unknown command or option, missing or invalid value | `usage` |
 | 3 | Ollama not reachable | `ollama_unavailable` |
 | 130 | Interrupted with Ctrl+C; stored work stays and the command can be run again | `cancelled` |
