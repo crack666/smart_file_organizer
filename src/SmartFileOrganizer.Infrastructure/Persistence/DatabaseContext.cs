@@ -20,7 +20,9 @@ public class DatabaseContext
         DefaultTypeMap.MatchNamesWithUnderscores = true;
         SqlMapper.AddTypeHandler(new SensitiveMarkerTypeHandler());
         // ai_results is read through ClassificationRepository.Row, which parses the codes itself.
-        SqlMapper.SetTypeMap(typeof(Domain.Models.FileNode), new SensitiveMarkerColumnMap(typeof(Domain.Models.FileNode)));
+        // Skipped folders carry markers as well (directory_nodes.sensitive_markers, also read into DirectoryReadRow).
+        foreach (var type in new[] { typeof(Domain.Models.FileNode), typeof(Domain.Models.DirectoryNode), typeof(Domain.Models.DirectoryReadRow) })
+            SqlMapper.SetTypeMap(type, new SensitiveMarkerColumnMap(type));
     }
 
     public DatabaseContext(string dbPath, ILogger<DatabaseContext> logger)
