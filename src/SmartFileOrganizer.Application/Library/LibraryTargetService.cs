@@ -390,13 +390,56 @@ public sealed partial class LibraryTargetService
     private async Task<BuiltUnit> BuildUnitAsync(
         ScanJob source, IReadOnlyList<FileNode> files, UnitBase b, ComparisonHeader? comparison, LibraryWords words, CancellationToken ct)
     {
+        var captures = files.Count > 0 ? await _captures.GetAsync(source.Id, ct) : new Dictionary<long, CaptureInfo>();
+        var rows = comparison is null ? null : await _comparisons.GetFileComparisonsAsync(comparison.Id, ct);
+        return BuildUnit(source, files, b, captures, rows, words);
+    }
+
+    // ------------------------------------------------------------------ many groups at once
+
+    /// <summary>
+    /// The best existing folder of the library for each group of source files, by the rules alone (no model, no
+    /// new-folder name). The map, the capture facts and the comparison are read once for all groups, so findings can
+    /// ask for many groups (https://github.com/crack666/smart_file_organizer/issues/26). Nothing is written, not even
+    /// the patterns file. Null for a group no existing folder fits.
+    /// </summary>
+    public async Task<IReadOnlyList<MatchCandidate?>> BestPlacesAsync(
+        long sourceJobId, long libraryJobId, IReadOnlyList<IReadOnlyList<FileNode>> groups, CancellationToken ct = default)
+    {
+        ValidateOptions();
+        var source = await _jobs.GetByIdAsync(sourceJobId, ct)
+                     ?? throw new LibraryServiceException(LibraryFailure.JobNotFound, $"Job {sourceJobId} not found.");
+        var library = await _jobs.GetByIdAsync(libraryJobId, ct)
+                      ?? throw new LibraryServiceException(LibraryFailure.JobNotFound, $"Job {libraryJobId} not found.");
+        if (groups.Count == 0) return [];
+
+        var words = LibraryWords.Default;
+        var comparison = await _comparisons.GetComparisonAsync(source.Id, library.Id, ct);
+        var rows = comparison is null ? null : await _comparisons.GetFileComparisonsAsync(comparison.Id, ct);
+        var captures = await _captures.GetAsync(source.Id, ct);
+        var (_, map) = await LoadMapAsync(library.Id, words, ct);
+
+        var result = new List<MatchCandidate?>(groups.Count);
+        foreach (var files in groups)
+        {
+            ct.ThrowIfCancellationRequested();
+            var first = files.Count > 0 ? files[0].FullPath : source.RootPath;
+            var unit = BuildUnit(source, files, new UnitBase(MatchUnitKind.File, first, null, null), captures, rows, words).Unit;
+            result.Add(LibraryMatcher.Match(map, unit, _options, 1, words).Candidates.FirstOrDefault());
+        }
+        return result;
+    }
+
+    private BuiltUnit BuildUnit(
+        ScanJob source, IReadOnlyList<FileNode> files, UnitBase b, IReadOnlyDictionary<long, CaptureInfo> captures,
+        IReadOnlyList<FileComparison>? comparisonRows, LibraryWords words)
+    {
         var patterns = BundlePatterns.Default;
         var types = new long[Enum.GetValues<FileType>().Length];
         foreach (var f in files)
             types[Enum.IsDefined(f.FileType) ? (int)f.FileType : (int)FileType.Unknown]++;
 
         // Times: capture date, a date in the name, the modification time (as the bundles use them).
-        var captures = files.Count > 0 ? await _captures.GetAsync(source.Id, ct) : new Dictionary<long, CaptureInfo>();
         DateTime? from = null, to = null;
         var sources = new HashSet<TimeSource>();
         foreach (var f in files)
@@ -483,11 +526,11 @@ public sealed partial class LibraryTargetService
         // Comparison: states and where the same content lies in the library.
         Dictionary<string, long>? states = null;
         var matchDirs = new List<string>();
-        if (comparison is not null)
+        if (comparisonRows is not null)
         {
             var ids = files.Select(f => f.Id).ToHashSet();
             states = new Dictionary<string, long>(StringComparer.Ordinal);
-            foreach (var c in await _comparisons.GetFileComparisonsAsync(comparison.Id, ct))
+            foreach (var c in comparisonRows)
             {
                 if (!ids.Contains(c.FileNodeId)) continue;
                 var code = c.State?.ToValue() ?? "none";
