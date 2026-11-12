@@ -1,6 +1,7 @@
 using System.CommandLine;
 using System.Text;
 using Microsoft.Extensions.DependencyInjection;
+using SmartFileOrganizer.Application.Findings;
 using SmartFileOrganizer.Application.Services;
 using SmartFileOrganizer.Cli.Contract;
 using SmartFileOrganizer.Domain.Enums;
@@ -39,7 +40,21 @@ public static class SummaryCommand
         IReadOnlyDictionary<string, long> DirectoriesByVerdict,
         IReadOnlyDictionary<string, long> DirectoriesByRetention,
         IReadOnlyList<LargeDirectoryView> LargestDirectories,
-        BundleStatsView? Bundles);
+        BundleStatsView? Bundles,
+        FindingCountsView? Findings);
+
+    /// <summary>
+    /// Counts of the findings (<c>sfo findings</c>): listed ones (open and accepted) per kind and certainty, all per
+    /// state, and the steps still missing. Null for a library job.
+    /// </summary>
+    public sealed record FindingCountsView(
+        long Listed,
+        long Sure,
+        long Unsure,
+        IReadOnlyDictionary<string, long> ByKind,
+        IReadOnlyDictionary<string, long> ByCertainty,
+        IReadOnlyDictionary<string, long> ByState,
+        IReadOnlyList<string> MissingSteps);
 
     /// <summary>
     /// The job with and without dumps, from the last <c>sfo bundles build</c>; null when bundles were never built
@@ -102,12 +117,31 @@ public static class SummaryCommand
                 summary.LargestDirectories.Select(LargeDirectoryView.From).ToList(),
                 await services.GetRequiredService<BundleService>().GetOverviewAsync(summary.Job.Id, ct) is { } o
                     ? new BundleStatsView(o.BuiltAt, o.Stats.DumpCount, o.Stats.BundleCount, o.Stats.UnbundledFiles, o.Stats.Dumps, o.Stats.WithoutDumps)
-                    : null);
+                    : null,
+                await FindingCountsAsync(services, summary.Job, ct));
             var language = ReadFormat.Language(services);
             return CommandOutcome.Success(result, () => Render(result, language));
         });
 
         return command;
+    }
+
+    private static async Task<FindingCountsView?> FindingCountsAsync(IServiceProvider services, ScanJob job, CancellationToken ct)
+    {
+        if (job.Role == ScanRole.Library) return null;
+        try
+        {
+            var s = await services.GetRequiredService<FindingService>().SummarizeAsync(job.Id, 0, ct);
+            return new FindingCountsView(s.Listed, s.Sure, s.Unsure,
+                s.ByKind.ToDictionary(k => k.Key.ToCode(), k => k.Value.Findings),
+                s.ByCertainty.Where(c => c.Value > 0).ToDictionary(c => c.Key.ToCode(), c => c.Value),
+                s.ByState.Where(c => c.Value > 0).ToDictionary(c => c.Key.ToCode(), c => c.Value),
+                s.MissingSteps);
+        }
+        catch (ArgumentException ex)
+        {
+            throw new CliFailureException(ExitCodes.Failure, ErrorCodes.SettingsInvalid, ex.Message);
+        }
     }
 
     private static string Render(SummaryResult r, DisplayLanguage language)
@@ -128,6 +162,10 @@ public static class SummaryCommand
             sb.AppendLine($"  dumps       {b.DumpCount}: {BundlesCommand.Line(b.Dumps)}");
             sb.AppendLine($"  w/o dumps   {BundlesCommand.Line(b.WithoutDumps)}");
         }
+        if (r.Findings is { } f)
+            sb.AppendLine($"  findings    {f.Listed} ({f.Sure} sure, {f.Unsure} unsure): "
+                          + string.Join(", ", f.ByKind.Where(k => k.Value > 0).Select(k => $"{k.Key} {k.Value}"))
+                          + $"  (sfo findings {r.Job.Id} --summary)");
         if (r.LargestDirectories.Count > 0)
         {
             sb.AppendLine("  largest directories:");

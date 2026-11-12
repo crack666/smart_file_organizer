@@ -796,10 +796,16 @@ public sealed class FindingService
                 finding.Target = target;
                 finding.Action = new FindingAction(PlanActionKind.Move, $"Move to {target.RelativePath}: {target.Reason}");
             }
-            else if (lib is not null && index < 0 && candidates.Count > _options.MaxTargetLookups)
+            else if (lib is not null && index < 0)
+            {
                 finding.Notes.Add($"No place looked up: only the {_options.MaxTargetLookups} largest groups are matched against the library (Findings:MaxTargetLookups).");
+                finding.Action = new FindingAction(PlanActionKind.Leave, "Not matched against the library; look for a place with sfo library match.");
+            }
             else if (lib is not null && index >= 0)
+            {
                 finding.Notes.Add("No folder of the library fits these files.");
+                finding.Action = new FindingAction(PlanActionKind.Leave, "No folder of the library fits these files; decide where they belong.");
+            }
 
             finding.Certainty = FindingRules.MisplacedCertainty(fileCertainty, target);
             if (target is null || target.ContentCheck != TargetContentCheck.Fits)

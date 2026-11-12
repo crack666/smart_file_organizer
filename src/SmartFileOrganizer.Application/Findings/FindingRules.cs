@@ -268,7 +268,7 @@ public static class FindingRules
     public static string? KindGroup(FileType type) => type switch
     {
         FileType.Image or FileType.Video => "media",
-        FileType.Document => "documents",
+        FileType.Document => "document",
         FileType.Audio => "audio",
         _ => null
     };
@@ -284,15 +284,15 @@ public static class FindingRules
     /// <summary>"1 file" / "3 files".</summary>
     public static string Count(long n, string one, string many) => n == 1 ? $"1 {one}" : $"{n} {many}";
 
-    /// <summary>Bytes for a sentence: 1.2 GB, 340 MB, 12 kB.</summary>
+    /// <summary>Bytes for a sentence, as the read commands write them: 1.2 GB, 340 MB, 12 KB.</summary>
     public static string Size(long bytes)
     {
-        string[] units = ["B", "kB", "MB", "GB", "TB"];
+        string[] units = ["B", "KB", "MB", "GB", "TB"];
         double v = bytes;
         var u = 0;
-        while (v >= 1000 && u < units.Length - 1)
+        while (v >= 1024 && u < units.Length - 1)
         {
-            v /= 1000;
+            v /= 1024;
             u++;
         }
         return u == 0 ? $"{bytes} B" : v.ToString(v >= 100 ? "0" : "0.#", System.Globalization.CultureInfo.InvariantCulture) + " " + units[u];
