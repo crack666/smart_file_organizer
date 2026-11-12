@@ -11,7 +11,7 @@ namespace SmartFileOrganizer.Cli.Commands;
 /// <summary><c>sfo analyze &lt;job&gt;</c>: runs the AI phases for a scanned job and waits for them.</summary>
 public static class AnalyzeCommand
 {
-    public sealed record PhaseRunView(AiPhases Phase, long Total, long Processed, int Errors, string Message);
+    public sealed record PhaseRunView(AiPhases Phase, long Total, long Processed, int Errors, string Message, int Retried, int SecondChecks);
 
     public sealed record AnalyzeResult(long JobId, string Model, int Parallel, IReadOnlyList<PhaseRunView> Phases, int ErrorCount);
 
@@ -50,9 +50,14 @@ public static class AnalyzeCommand
             HelpName = "name"
         };
 
+        var retryErrors = new Option<bool>("--retry-errors")
+        {
+            Description = "Try files that failed in an earlier run again (classification phase). Files with a result are not called again."
+        };
+
         var command = new Command("analyze", "Run the AI phases (directory pre-assessment, file classification, directory summaries) for a job.")
         {
-            job, phase, parallel, model
+            job, phase, parallel, model, retryErrors
         };
 
         CommandRunner.SetHandler(command, host, globals, async (ctx, ct) =>
@@ -86,7 +91,8 @@ public static class AnalyzeCommand
             AiPipelineRunResult run;
             try
             {
-                run = await services.GetRequiredService<AiClassificationCoordinator>().RunAsync(jobId, phases, progress, ct);
+                run = await services.GetRequiredService<AiClassificationCoordinator>().RunAsync(
+                    jobId, phases, progress, ct, ctx.ParseResult.GetValue(retryErrors));
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -106,7 +112,8 @@ public static class AnalyzeCommand
                 jobId,
                 ollama.Model,
                 Math.Clamp(ollama.MaxParallelRequests, 1, 8),
-                run.Phases.Select(p => new PhaseRunView(p.Phase, p.Result.TotalFiles, p.Result.ProcessedFiles, p.Result.ErrorCount, p.Result.StatusText)).ToList(),
+                run.Phases.Select(p => new PhaseRunView(p.Phase, p.Result.TotalFiles, p.Result.ProcessedFiles, p.Result.ErrorCount, p.Result.StatusText,
+                    p.Result.RetriedFiles, p.Result.SecondChecks)).ToList(),
                 run.ErrorCount);
             return CommandOutcome.Success(result, () => Render(result));
         });

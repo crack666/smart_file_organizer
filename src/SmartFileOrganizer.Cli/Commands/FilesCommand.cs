@@ -42,6 +42,8 @@ public static class FilesCommand
             if (text is not null && ParseConfidence(text) is not (>= 0 and <= 1))
                 r.AddError("--max-confidence must be a number between 0 and 1, for example 0.5.");
         });
+        var certainty = ReadFormat.EnumOption<ResultCertainty>("--certainty",
+            "How far the result can be relied on (review: two answers disagree, a person should look)");
         var sort = new Option<string>("--sort")
         {
             Description = "path or size (largest first).",
@@ -51,7 +53,7 @@ public static class FilesCommand
 
         var command = new Command("files", "List files of a job with type, category, confidence, summary and status.")
         {
-            job, dir, recursive, category, status, type, maxConfidence, sort
+            job, dir, recursive, category, status, type, maxConfidence, certainty, sort
         };
         foreach (var option in read.Filters.Concat(read.Paging).Append(read.IncludeSensitive))
             command.Options.Add(option);
@@ -75,6 +77,7 @@ public static class FilesCommand
                 Statuses = statuses.Distinct().ToList(),
                 Types = ReadFormat.ParseEnums<FileType>(p.GetValue(type)),
                 MaxConfidence = p.GetValue(maxConfidence) is { } text ? ParseConfidence(text) : null,
+                Certainties = ReadFormat.ParseEnums<ResultCertainty>(p.GetValue(certainty)),
                 Sort = p.GetValue(sort) == "size" ? FileSort.Size : FileSort.Path
             }, ctx);
 

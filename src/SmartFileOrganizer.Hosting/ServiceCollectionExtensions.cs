@@ -125,7 +125,12 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<IOllamaService>(),
             sp.GetRequiredService<DirectorySamplingService>(),
             () => sp.GetRequiredService<OllamaOptions>().MaxParallelRequests,
-            sp.GetRequiredService<ILogger<ClassificationService>>()));
+            sp.GetRequiredService<ILogger<ClassificationService>>(),
+            sp.GetRequiredService<SecondCheckOptions>(),
+            sp.GetRequiredService<IUserOverrideRepository>()));
+        // Section "SecondCheck": when an uncertain or contradicted result is checked again.
+        services.AddSingleton(sp =>
+            sp.GetRequiredService<IConfiguration>().GetSection("SecondCheck").Get<SecondCheckOptions>() ?? new SecondCheckOptions());
         services.AddSingleton(sp =>
         {
             // Section "Sampling"; the sample size used to live under "Ollama" and is still read from there.

@@ -134,7 +134,10 @@ public class StagedAnalysisTests : IDisposable
     private sealed class PlainInputPreparer : IClassificationInputPreparer
     {
         public Task<OllamaClassificationInput> PrepareAsync(FileNode file, CancellationToken ct = default) =>
-            Task.FromResult(new OllamaClassificationInput { File = file });
+            PrepareAsync(file, EvidenceDepth.Standard, ct);
+
+        public Task<OllamaClassificationInput> PrepareAsync(FileNode file, EvidenceDepth depth, CancellationToken ct = default) =>
+            Task.FromResult(new OllamaClassificationInput { File = file, Depth = depth });
     }
 
     // ------------------------------------------------------------------ Fertig, wenn
@@ -161,6 +164,9 @@ public class StagedAnalysisTests : IDisposable
 
         var dirId = await DirIdAsync(jobId, trip);
         Assert.All(measured, f => Assert.Equal(ResultOrigin.Model, f.Classification!.Origin));
+        // Members agree with the confirmed sample of their directory: two signals; inherited ones were not looked at.
+        Assert.All(measured, f => Assert.Equal(ResultCertainty.Certain, f.Classification!.Certainty));
+        Assert.All(inherited, f => Assert.Equal(ResultCertainty.Likely, f.Classification!.Certainty));
         Assert.All(inherited, f =>
         {
             var c = f.Classification!;
@@ -328,8 +334,11 @@ public class StagedAnalysisTests : IDisposable
 
         var jobId = await RunAllAsync(downloads, _ => DirectoryVerdictKind.Gemischt);
 
-        Assert.Equal(5, _ollama.ClassifyInputs.Count);
+        Assert.Equal(5, _ollama.FirstLooks.Count);
         Assert.All(_ollama.ClassifyInputs, i => Assert.True(i.AskKeepHint));
+        // The scripted verdict says "keep": every temporary file contradicts it and is looked at again.
+        Assert.Equal(4, _ollama.SecondLooks.Count);
+        Assert.DoesNotContain(_ollama.SecondLooks, i => i.File.Name == "passwoerter.txt");
         Assert.Empty(await _sampleRepo.GetForJobAsync(jobId));
 
         var files = await _fileRepo.GetByDirectoryAsync(jobId, downloads);
@@ -373,8 +382,10 @@ public class StagedAnalysisTests : IDisposable
 
         var jobId = await RunAllAsync(odd, _ => DirectoryVerdictKind.Leer);
 
-        Assert.Equal(2, _ollama.ClassifyInputs.Count);
+        Assert.Equal(2, _ollama.FirstLooks.Count);
         Assert.All(await _fileRepo.GetByDirectoryAsync(jobId, odd), f => Assert.NotNull(f.Classification));
+        // "Photo" for a PDF breaks the kind rule twice: the PDF goes to review, the image is fine.
+        Assert.Equal("a.pdf", Assert.Single(_ollama.SecondLooks).File.Name);
     }
 
     [Fact]

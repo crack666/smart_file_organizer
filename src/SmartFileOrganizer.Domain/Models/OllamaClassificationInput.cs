@@ -25,4 +25,25 @@ public class OllamaClassificationInput
 
     /// <summary>A result decided by a rule (executable, font, unknown binary). Set: no model call.</summary>
     public FileClassification? RuleResult { get; init; }
+
+    /// <summary>How much evidence was gathered; <see cref="Enums.EvidenceDepth.Extended"/> for the second call of a check.</summary>
+    public Enums.EvidenceDepth Depth { get; init; }
+
+    /// <summary>The directory around the file, given to the second call of a check only. Null for the first call.</summary>
+    public ClassificationContext? Context { get; set; }
 }
+
+/// <summary>
+/// What the second call of a check learns about the directory of a file: its verdict, purpose and
+/// retention, and other files with the category they were given. Never the first answer for this file,
+/// and never summaries of other files.
+/// </summary>
+public sealed record ClassificationContext(
+    string? Verdict,
+    string? Purpose,
+    string? Retention,
+    IReadOnlyList<NeighbourFile> Neighbours,
+    int FilesInDirectory);
+
+/// <summary>Another file of the same directory; <see cref="Category"/> null when it has no result yet.</summary>
+public sealed record NeighbourFile(string Name, string? Category);

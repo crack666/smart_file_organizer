@@ -25,6 +25,11 @@ public sealed class Evidence
     /// <summary>Set when a rule decides the file without the model.</summary>
     public FileClassification? RuleResult { get; set; }
 
+    /// <summary>How much evidence to gather; set by the preparer.</summary>
+    public EvidenceDepth Depth { get; init; }
+
+    public bool Extended => Depth == EvidenceDepth.Extended;
+
     public void Fact(FileFactKey key, string? value, FactSource source = FactSource.Metadata)
     {
         if (string.IsNullOrWhiteSpace(value)) return;
@@ -73,6 +78,7 @@ public sealed class Evidence
         Facts = _facts.ToList(),
         Contains = _contains.ToList(),
         Missing = _missing.ToList(),
-        RuleResult = RuleResult
+        RuleResult = RuleResult,
+        Depth = Depth
     };
 }

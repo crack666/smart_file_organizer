@@ -1,3 +1,6 @@
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using System.Text.Json.Serialization;
 using Dapper;
 using SmartFileOrganizer.Domain.Enums;
 using SmartFileOrganizer.Domain.Interfaces;
@@ -24,13 +27,16 @@ public class ClassificationRepository : IClassificationRepository
             (file_node_id, category, importance, confidence, summary,
              suggested_target, model_used, analyzed_at, raw_response, error, is_ai_result,
              sensitive_markers, origin, inherited_from_directory_node_id, keep_hint, keep_reason,
-             evidence)
+             evidence, certainty, attempts)
         VALUES
             (@FileNodeId, @Category, @Importance, @Confidence, @Summary,
              @SuggestedTarget, @ModelUsed, @AnalyzedAt, @RawResponse, @Error, @IsAiResult,
              @SensitiveMarkers, @Origin, @InheritedFromDirectoryNodeId, @KeepHint, @KeepReason,
-             @Evidence)
+             @Evidence, @Certainty, 1)
         ON CONFLICT(file_node_id) DO UPDATE SET
+            attempts = ai_results.attempts + 1,
+            previous_error = CASE WHEN ai_results.error IS NOT NULL THEN ai_results.error ELSE ai_results.previous_error END,
+            certainty = excluded.certainty,
             category = excluded.category,
             importance = excluded.importance,
             confidence = excluded.confidence,
@@ -71,8 +77,106 @@ public class ClassificationRepository : IClassificationRepository
         c.InheritedFromDirectoryNodeId,
         KeepHint = c.KeepHint.ToCode(),
         c.KeepReason,
-        c.Evidence
+        c.Evidence,
+        Certainty = c.Certainty.ToCode()
     };
+
+    public async Task SaveAsync(FileClassification c, ResultCheck? check, CancellationToken ct = default)
+    {
+        await using var conn = _db.CreateConnection();
+        await conn.OpenAsync(ct);
+        await using var tx = await conn.BeginTransactionAsync(ct);
+        await conn.ExecuteAsync(UpsertSql, ToParameters(c), tx);
+        if (check is not null)
+        {
+            check.FileNodeId = c.FileNodeId;
+            check.Id = await conn.ExecuteScalarAsync<long>(InsertCheckSql, ToCheckParameters(check), tx);
+        }
+        await tx.CommitAsync(ct);
+    }
+
+    private const string InsertCheckSql = """
+        INSERT INTO result_checks (file_node_id, reasons, outcome, rule_note, first_answer, second_answer, checked_at)
+        VALUES (@FileNodeId, @Reasons, @Outcome, @RuleNote, @FirstAnswer, @SecondAnswer, @CheckedAt);
+        SELECT last_insert_rowid();
+        """;
+
+    private static readonly JsonSerializerOptions AnswerJson = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.SnakeCaseLower,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        Converters = { new JsonStringEnumConverter() }
+    };
+
+    private static object ToCheckParameters(ResultCheck check) => new
+    {
+        check.FileNodeId,
+        Reasons = string.Join(",", check.Reasons.Select(r => r.ToCode())),
+        Outcome = check.Outcome.ToCode(),
+        check.RuleNote,
+        FirstAnswer = SerializeAnswer(check.First),
+        SecondAnswer = check.Second is null ? null : SerializeAnswer(check.Second),
+        check.CheckedAt
+    };
+
+    /// <summary>Answers as JSON; the markers as their token list, like the column of <c>ai_results</c>.</summary>
+    internal static string SerializeAnswer(CheckAnswer a)
+    {
+        var node = JsonSerializer.SerializeToNode(a, AnswerJson)!.AsObject();
+        node["sensitive_markers"] = SensitiveMarkerNames.Format(a.SensitiveMarkers);
+        if (a.KeepHint is { } hint) node["keep_hint"] = hint.ToCode();
+        return node.ToJsonString();
+    }
+
+    internal static CheckAnswer? DeserializeAnswer(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return null;
+        var node = JsonNode.Parse(json)!.AsObject();
+        var markers = SensitiveMarkerNames.Parse(node["sensitive_markers"]?.GetValue<string>());
+        var keep = VerdictCodes.ParseNullable<KeepHint>(node["keep_hint"]?.GetValue<string>());
+        node.Remove("sensitive_markers");
+        node.Remove("keep_hint");
+        var answer = node.Deserialize<CheckAnswer>(AnswerJson)!;
+        answer.SensitiveMarkers = markers;
+        answer.KeepHint = keep;
+        return answer;
+    }
+
+    public async Task<IReadOnlyList<ResultCheck>> GetChecksAsync(long fileNodeId, CancellationToken ct = default)
+    {
+        await using var conn = _db.CreateConnection();
+        await conn.OpenAsync(ct);
+        var rows = await conn.QueryAsync<CheckRow>(
+            """
+            SELECT id, file_node_id, reasons, outcome, rule_note, first_answer, second_answer, checked_at
+            FROM result_checks WHERE file_node_id = @fileNodeId ORDER BY id
+            """,
+            new { fileNodeId });
+        return rows.Select(r => new ResultCheck
+        {
+            Id = r.Id,
+            FileNodeId = r.FileNodeId,
+            Reasons = (r.Reasons ?? string.Empty).Split(',', StringSplitOptions.RemoveEmptyEntries)
+                .Select(code => VerdictCodes.ParseNullable<CheckReason>(code)!.Value).ToList(),
+            Outcome = VerdictCodes.ParseNullable<CheckOutcome>(r.Outcome)!.Value,
+            RuleNote = r.RuleNote,
+            First = DeserializeAnswer(r.FirstAnswer) ?? new CheckAnswer(),
+            Second = DeserializeAnswer(r.SecondAnswer),
+            CheckedAt = r.CheckedAt
+        }).ToList();
+    }
+
+    private sealed class CheckRow
+    {
+        public long Id { get; set; }
+        public long FileNodeId { get; set; }
+        public string? Reasons { get; set; }
+        public string? Outcome { get; set; }
+        public string? RuleNote { get; set; }
+        public string? FirstAnswer { get; set; }
+        public string? SecondAnswer { get; set; }
+        public DateTime CheckedAt { get; set; }
+    }
 
     public async Task<FileClassification?> GetByFileNodeIdAsync(long fileNodeId, CancellationToken ct = default)
     {
@@ -93,7 +197,8 @@ public class ClassificationRepository : IClassificationRepository
     internal const string SelectSql = """
         SELECT id, file_node_id, category, importance, confidence, summary, suggested_target, model_used,
                analyzed_at, raw_response, error, is_ai_result, sensitive_markers AS sensitive_markers_code,
-               origin AS origin_code, inherited_from_directory_node_id, keep_hint AS keep_hint_code, keep_reason
+               origin AS origin_code, inherited_from_directory_node_id, keep_hint AS keep_hint_code, keep_reason,
+               evidence, certainty AS certainty_code, attempts, previous_error
         FROM ai_results
         """;
 
@@ -103,12 +208,14 @@ public class ClassificationRepository : IClassificationRepository
         public string? OriginCode { get; set; }
         public string? KeepHintCode { get; set; }
         public string? SensitiveMarkersCode { get; set; }
+        public string? CertaintyCode { get; set; }
 
         public FileClassification Finish()
         {
             SensitiveMarkers = SensitiveMarkerNames.Parse(SensitiveMarkersCode);
             Origin = VerdictCodes.ParseNullable<ResultOrigin>(OriginCode);
             KeepHint = VerdictCodes.ParseNullable<KeepHint>(KeepHintCode);
+            Certainty = VerdictCodes.ParseNullable<ResultCertainty>(CertaintyCode);
             return this;
         }
     }

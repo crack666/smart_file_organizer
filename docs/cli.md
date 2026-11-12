@@ -101,6 +101,7 @@ phase skips work already stored, so running it again after Ctrl+C or an error co
 | `--phase <name>` | `pre_assessment`, `classification`, `summary` or `all` (default). Repeatable; phases always run in this order. |
 | `--parallel <n>` | Concurrent Ollama requests, 1 to 8. Default: `Ollama.MaxParallelRequests`. |
 | `--model <name>` | Ollama model for this run. Default: `Ollama.Model`. |
+| `--retry-errors` | Classification: try files that failed in an earlier run again. Files with a result are never called again; files still pending are judged as in any run; files a person corrected are left alone. |
 
 ```bash
 sfo analyze 7 --phase classification --parallel 2 --json
@@ -118,7 +119,8 @@ sfo analyze 7 --phase classification --parallel 2 --json
     "parallel": 2,
     "phases": [
       { "phase": "classification", "total": 940, "processed": 940, "errors": 3,
-        "message": "AI classification finished with 3 error(s)." }
+        "message": "AI classification finished with 3 error(s). 41 result(s) checked a second time.",
+        "retried": 0, "second_checks": 41 }
     ],
     "error_count": 3
   },
@@ -126,7 +128,10 @@ sfo analyze 7 --phase classification --parallel 2 --json
 }
 ```
 
-Errors of single files or directories do not fail the command; they are counted here and
+`retried` is the number of failed files `--retry-errors` released, `second_checks` the number of
+second calls made for unsure or contradicted results (see
+[architecture.md](architecture.md#phase-2--per-file-classification-in-stages-classificationservice-directorysamplingservice));
+both are 0 for the other phases. Errors of single files or directories do not fail the command; they are counted here and
 listed by `sfo status`. Failures: `ollama_unavailable` (3), `scan_not_completed` (1),
 `job_not_found` (1), `wrong_role` (1, the job is a `library`), `cancelled` (130).
 
@@ -631,6 +636,7 @@ Files with type, category, confidence, summary and status.
 | `--status <value>` | `discovered`, `ai_analyzed`, `skipped`, `error`, ..., or `pending` (`discovered` or `processing`). Repeatable. |
 | `--type <value>` | `image`, `video`, `document`, `archive`, ... Repeatable. |
 | `--max-confidence <x>` | Confidence at most `x` (0 to 1, decimal point). Files without a confidence are left out. |
+| `--certainty <value>` | `certain`, `likely`, `uncertain` or `review`. Repeatable. `review` is the work list: two answers disagree or the model could not say what the file is. Files without a certainty (no result, or analysed before 12.11.2026) are left out. |
 | `--sort path\|size` | By path (default) or largest first. |
 
 `sfo files --help` lists every accepted value. Values are `snake_case`; `ReviewNeeded` is
@@ -648,13 +654,16 @@ sfo files 7 --dir photos --max-confidence 0.5 --json
       "file_type": "image", "size_bytes": 482113, "last_write_time": "2019-07-02T10:14:00.000Z",
       "status": "ai_analyzed", "category": "document_scan", "category_source": "ai",
       "confidence": 0.42, "summary": "Scanned page of a rental contract.",
-      "sensitive": [], "protected": false, "dir_verdict": "..." }
+      "sensitive": [], "protected": false, "dir_verdict": "...", "certainty": "likely" }
   ]
 }
 ```
 
 `category_source` is `ai`, `user` (an override), `sensitive` (forced to review by a marker) or
-`null`. `dir_verdict` is the verdict of the directory holding the file.
+`null`. `dir_verdict` is the verdict of the directory holding the file. `certainty` says how far the
+result can be relied on: `certain` (two independent signals agree), `likely` (one answer nothing
+contradicts, or inherited), `uncertain` (a due second check did not happen), `review` (a person should
+look); `null` without a result or for results written before 12.11.2026.
 
 ### `sfo show <job> <path>`
 
@@ -662,8 +671,12 @@ One directory or file with everything that is known about it. `kind` is `directo
 `file`; the other member is `null`.
 
 - File: every field of `files`, plus `relative_dir`, `extension`, `importance`,
-  `suggested_target`, `model_used`, `analyzed_at`, `error`, `raw_response`, `sensitive_rule`
-  and `dir_retention`.
+  `suggested_target`, `model_used`, `analyzed_at`, `error`, `raw_response`, `sensitive_rule`,
+  `dir_retention`, `attempts` (how often the file went through classification), `previous_error`
+  (the error a retry replaced) and `checks`: every second check with `reasons`, `outcome`
+  (`agreed`, `disagreed`, `corrected`, `rule_wins`, `failed`, `skipped`), `rule_note`, `first` and
+  `second` (category, importance, confidence, keep hint, summary, target, keep reason, model, error,
+  raw response; for a protected file only the codes, model texts are `null`) and `checked_at`.
 - Directory: every field of `dirs`, plus `verdict_rule`, `reason`, `verdict_error`,
   `unit_directory` (for a unit: the directory that is the whole), `verdict_model`,
   `judged_at`, `verdict_raw_response`, `profile` (the facts the verdict was based on, as

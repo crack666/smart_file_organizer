@@ -49,7 +49,11 @@ public class DirectorySamplingService
     /// <summary>What the classification needs to know per file.</summary>
     /// <param name="KeepHintDirectories">Full paths of directories whose files get a keep hint from the model:
     /// mixed ones, and uniform ones, so that the hint is already there if the sample escalates.</param>
-    public sealed record Context(IReadOnlySet<string> KeepHintDirectories);
+    /// <param name="Verdicts">Valid verdicts by directory full path, for the second check of a file against its directory.</param>
+    public sealed record Context(IReadOnlySet<string> KeepHintDirectories, IReadOnlyDictionary<string, DirectoryVerdict> Verdicts)
+    {
+        public DirectoryVerdict? VerdictOf(FileNode file) => Verdicts.GetValueOrDefault(file.ParentPath);
+    }
 
     public sealed record ResolveResult(int Confirmed, int Escalated, int Inherited, int StillOpen);
 
@@ -162,7 +166,10 @@ public class DirectorySamplingService
             .Where(v => v.Verdict is DirectoryVerdictKind.Gemischt or DirectoryVerdictKind.Einheitlich && v.DirectoryFullPath != null)
             .Select(v => v.DirectoryFullPath!)
             .ToHashSet(StringComparer.Ordinal);
-        return new Context(keepDirs);
+        var byPath = new Dictionary<string, DirectoryVerdict>(StringComparer.Ordinal);
+        foreach (var v in verdicts.Where(v => v.Error is null && v.DirectoryFullPath != null))
+            byPath[v.DirectoryFullPath!] = v;
+        return new Context(keepDirs, byPath);
     }
 
     // ------------------------------------------------------------------ resolve
@@ -254,7 +261,9 @@ public class DirectorySamplingService
                     AnalyzedAt = now,
                     IsAiResult = false,
                     Origin = ResultOrigin.Inherited,
-                    InheritedFromDirectoryNodeId = sample.DirectoryNodeId
+                    InheritedFromDirectoryNodeId = sample.DirectoryNodeId,
+                    // Not looked at, but the confirmed sample agrees; never certain.
+                    Certainty = ResultCertainty.Likely
                 };
                 // Defensive: marked files are always members, but a marked file must never inherit a trash category.
                 ClassificationService.ApplySensitiveReviewRule(f, c);

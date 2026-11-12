@@ -132,7 +132,11 @@ public class JobReadService
         if (file is not null)
         {
             var record = SensitiveOutputGuard.Project(file.File, output);
-            return new PathDetail(null, new FileItem(record, file.DirectoryVerdict, file.DirectoryRetention));
+            var checks = await _read.GetResultChecksAsync(file.File.Id, ct);
+            return new PathDetail(null, new FileItem(record, file.DirectoryVerdict, file.DirectoryRetention)
+            {
+                Checks = checks.Select(c => ToCheckItem(c, record.Protected)).ToList()
+            });
         }
 
         var index = await BuildIndexAsync(job.Id, visit: null, ct);
@@ -267,6 +271,27 @@ public class JobReadService
     private static bool Matches(IReadOnlyCollection<string> wanted, string code) =>
         wanted.Contains(code, StringComparer.OrdinalIgnoreCase);
 
+    private static CheckItem ToCheckItem(ResultCheck c, bool isProtected) => new(
+        c.Reasons.Select(r => r.ToCode()).ToList(),
+        c.Outcome.ToCode(),
+        c.RuleNote,
+        ToAnswerItem(c.First, isProtected),
+        c.Second is null ? null : ToAnswerItem(c.Second, isProtected),
+        c.CheckedAt);
+
+    /// <summary>For a protected file only the codes stay: no model text, target or raw response.</summary>
+    private static CheckAnswerItem ToAnswerItem(CheckAnswer a, bool isProtected) => new(
+        a.Category.ToString(),
+        a.Importance.ToString(),
+        a.Confidence,
+        a.KeepHint.ToCode(),
+        isProtected ? null : a.Summary,
+        isProtected ? null : a.SuggestedTarget,
+        isProtected ? null : a.KeepReason,
+        a.ModelUsed,
+        isProtected ? null : a.Error,
+        isProtected ? null : a.RawResponse);
+
     private static void Increment(Dictionary<string, long> counts, string key) =>
         counts[key] = counts.GetValueOrDefault(key) + 1;
 
@@ -292,6 +317,10 @@ public class JobReadService
         }
 
         if (query.MaxConfidence is { } max && (record.Confidence is not { } confidence || confidence > max))
+            return false;
+
+        if (query.Certainties.Count > 0
+            && (row.File.Classification?.Certainty is not { } certainty || !query.Certainties.Contains(certainty)))
             return false;
 
         if (query.Verdicts.Count > 0 && !Matches(query.Verdicts, row.DirectoryVerdict ?? ReadFilterCodes.None))

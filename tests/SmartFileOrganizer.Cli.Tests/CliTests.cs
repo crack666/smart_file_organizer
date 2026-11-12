@@ -4,6 +4,7 @@ using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using SmartFileOrganizer.Cli;
 using SmartFileOrganizer.Cli.Contract;
+using SmartFileOrganizer.Domain.Enums;
 using SmartFileOrganizer.Domain.Interfaces;
 using SmartFileOrganizer.Hosting.Tests;
 
@@ -198,6 +199,38 @@ public class CliTests : IDisposable
         Assert.Equal(Path.GetFullPath(_dbPath), result.GetProperty("database").GetProperty("path").GetString());
         Assert.False(result.GetProperty("ollama").GetProperty("reachable").GetBoolean());
         Assert.Equal(JsonValueKind.Null, result.GetProperty("model").GetProperty("available").ValueKind);
+    }
+
+    [Fact]
+    public async Task Analyze_RetryErrors_CallsOnlyFailedFiles_AndShowReportsTheAttempts()
+    {
+        var jobId = await ScanAsync();
+        var failing = new FakeOllamaService { FailWith = i => i.File.FileType == FileType.Image ? "HTTP 500 from the fake" : null };
+        var first = await SfoAsync(failing, "analyze", jobId.ToString(), "--phase", "classification", "--json");
+        Assert.Equal(ExitCodes.Ok, first.ExitCode);
+        var failedFiles = failing.FileInputs.Where(i => i.File.FileType == FileType.Image).Select(i => i.File.Name).Order().ToList();
+        Assert.NotEmpty(failedFiles);
+
+        var ollama = new FakeOllamaService();
+        var retry = await SfoAsync(ollama, "analyze", jobId.ToString(), "--phase", "classification", "--retry-errors", "--json");
+
+        Assert.True(retry.ExitCode == ExitCodes.Ok, retry.Stdout + retry.Stderr);
+        var phase = Assert.Single(retry.Json().GetProperty("result").GetProperty("phases").EnumerateArray());
+        Assert.Equal(failedFiles.Count, phase.GetProperty("retried").GetInt32());
+        Assert.Equal(0, phase.GetProperty("errors").GetInt32());
+        Assert.Equal(failedFiles, ollama.FileInputs.Select(i => i.File.Name).Order().ToList());
+
+        var path = failing.FileInputs.First(i => i.File.FileType == FileType.Image).File.FullPath;
+        var show = (await SfoAsync(null, "show", jobId.ToString(), path, "--json")).Json().GetProperty("result").GetProperty("file");
+        Assert.Equal(2, show.GetProperty("attempts").GetInt32());
+        Assert.Equal("HTTP 500 from the fake", show.GetProperty("previous_error").GetString());
+        Assert.Equal("likely", show.GetProperty("certainty").GetString());
+        Assert.Equal(0, show.GetProperty("checks").GetArrayLength());
+
+        var likely = (await SfoAsync(null, "files", jobId.ToString(), "--certainty", "likely", "--json")).Json().GetProperty("result");
+        Assert.Equal(failedFiles.Count + 2, likely.GetProperty("total").GetInt64()); // and the two text files
+        var review = (await SfoAsync(null, "files", jobId.ToString(), "--certainty", "review", "--json")).Json().GetProperty("result");
+        Assert.Equal(0, review.GetProperty("total").GetInt64());
     }
 
     [Fact]

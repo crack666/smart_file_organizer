@@ -108,11 +108,13 @@ public class AiClassificationCoordinator
     /// <see cref="StateChanged"/> events, no pause. Cancelling <paramref name="ct"/> throws
     /// <see cref="OperationCanceledException"/>; finished work is persisted, so a later run resumes.
     /// </summary>
+    /// <param name="retryErrors">Phase 2 first sets failed files back to Discovered and tries them again.</param>
     public Task<AiPipelineRunResult> RunAsync(
         long jobId,
         AiPhases phases = AiPhases.All,
         IProgress<AiPhaseProgress>? progress = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        bool retryErrors = false)
     {
         return RunPhasesAsync(
             jobId,
@@ -122,7 +124,8 @@ public class AiClassificationCoordinator
                 ? null
                 : new SynchronousProgress<AiClassificationProgress>(p => progress.Report(new AiPhaseProgress(phase, p))),
             waitIfPausedAsync: null,
-            ct);
+            ct,
+            retryErrors);
     }
 
     private async Task<AiPipelineRunResult> RunPhasesAsync(
@@ -131,7 +134,8 @@ public class AiClassificationCoordinator
         Action<AiPhases>? onPhaseStarting,
         Func<AiPhases, IProgress<AiClassificationProgress>?> progressFor,
         Func<CancellationToken, Task>? waitIfPausedAsync,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool retryErrors = false)
     {
         // Single availability check — avoids 3x /api/tags calls
         if (!await _ollama.IsAvailableAsync(ct))
@@ -151,7 +155,7 @@ public class AiClassificationCoordinator
         if (phases.HasFlag(AiPhases.Classification))
         {
             onPhaseStarting?.Invoke(AiPhases.Classification);
-            var r = await _classificationService.RunAsync(jobId, progressFor(AiPhases.Classification), waitIfPausedAsync, ct);
+            var r = await _classificationService.RunAsync(jobId, progressFor(AiPhases.Classification), waitIfPausedAsync, ct, retryErrors);
             results.Add(new AiPhaseRunResult(AiPhases.Classification, r));
         }
 

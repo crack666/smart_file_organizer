@@ -107,6 +107,9 @@ public sealed record FileListQuery : ReadQuery
     /// <summary>Only files with a reported confidence at or below this value.</summary>
     public double? MaxConfidence { get; init; }
 
+    /// <summary>Only files whose result has one of these certainties.</summary>
+    public IReadOnlyCollection<ResultCertainty> Certainties { get; init; } = [];
+
     public FileSort Sort { get; init; } = FileSort.Path;
 }
 
@@ -149,7 +152,34 @@ public sealed record DirectoryItem
 }
 
 /// <summary>A file through the output guard, with the verdict of its directory.</summary>
-public sealed record FileItem(FileOutputRecord Record, string? DirectoryVerdict, string? DirectoryRetention);
+public sealed record FileItem(FileOutputRecord Record, string? DirectoryVerdict, string? DirectoryRetention)
+{
+    /// <summary>Second checks of the file (only filled by <c>show</c>). For a protected file the answers
+    /// carry no model text.</summary>
+    public IReadOnlyList<CheckItem> Checks { get; init; } = [];
+}
+
+/// <summary>One second check as the read side shows it; codes throughout.</summary>
+public sealed record CheckItem(
+    IReadOnlyList<string> Reasons,
+    string Outcome,
+    string? RuleNote,
+    CheckAnswerItem First,
+    CheckAnswerItem? Second,
+    DateTime CheckedAt);
+
+/// <summary>One answer of a check. Summary, target, keep reason and raw response are null for a protected file.</summary>
+public sealed record CheckAnswerItem(
+    string Category,
+    string Importance,
+    double? Confidence,
+    string? KeepHint,
+    string? Summary,
+    string? SuggestedTarget,
+    string? KeepReason,
+    string? ModelUsed,
+    string? Error,
+    string? RawResponse);
 
 /// <summary>One stored directory analysis (Phase 1 pre-assessment or Phase 3 summary), protected like <see cref="DirectoryItem"/>.</summary>
 public sealed record DirectoryAnalysisItem

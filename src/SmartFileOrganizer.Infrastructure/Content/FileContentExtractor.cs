@@ -334,7 +334,9 @@ public class FileContentExtractor
     /// when the document has no text (a scan), so the model sees more than the cover.
     /// PDFium is not thread-safe; all PDF work shares one lock.
     /// </summary>
-    public PdfEvidence ReadPdf(string path, int maxTextChars, CancellationToken ct)
+    /// <param name="renderMorePages">For the second look of a check: also render the middle and the last
+    /// page, whether or not the document has text.</param>
+    public PdfEvidence ReadPdf(string path, int maxTextChars, CancellationToken ct, bool renderMorePages = false)
     {
         lock (PdfRenderLock)
         {
@@ -363,11 +365,13 @@ public class FileContentExtractor
             var rendered = new List<(int Page, byte[] Png)>();
             if (pageCount > 0)
                 rendered.Add((1, RenderPage(docReader, 0)));
-            if (pagesWithText == 0 && pageCount >= 3)
+            if ((pagesWithText == 0 || renderMorePages) && pageCount >= 3)
             {
                 var middle = pageCount / 2;
                 rendered.Add((middle + 1, RenderPage(docReader, middle)));
             }
+            if (renderMorePages && pageCount >= 2)
+                rendered.Add((pageCount, RenderPage(docReader, pageCount - 1)));
 
             return new PdfEvidence(pageCount, allText.TrimEnd(), pagesRead, truncated || pagesRead < pageCount, pagesWithText > 0, rendered);
         }

@@ -110,6 +110,15 @@ public class DirectorySampleRepository : IDirectorySampleRepository
             count++;
         }
 
+        // A member that agrees with the confirmed majority fits the verdict of its directory: two signals agree.
+        var agreeing = sample.Members.Where(m => m.Deviates == false).Select(m => m.FileNodeId).ToList();
+        if (agreeing.Count > 0)
+        {
+            await conn.ExecuteAsync(
+                "UPDATE ai_results SET certainty = @certain WHERE file_node_id IN @agreeing AND certainty = @likely",
+                new { certain = ResultCertainty.Certain.ToCode(), likely = ResultCertainty.Likely.ToCode(), agreeing }, tx);
+        }
+
         sample.InheritedCount = count;
         await conn.ExecuteScalarAsync<long>(UpsertSql, ToRow(sample), tx);
         await tx.CommitAsync(CancellationToken.None);
