@@ -105,7 +105,7 @@ public class EvalCliTests : IDisposable
 
         var perfect = (await OkAsync("eval", _corpus, "--stub", truthPath, "--json")).Result;
         Assert.Equal("corpus", perfect.GetProperty("mode").GetString());
-        Assert.Equal("small v1 seed 36", perfect.GetProperty("subject").GetString());
+        Assert.Equal("small v2 seed 36", perfect.GetProperty("subject").GetString());
         Assert.Equal("stub:truth.json", perfect.GetProperty("model").GetString());
         Assert.False(string.IsNullOrEmpty(perfect.GetProperty("prompt_fingerprint").GetString()));
         Assert.Equal(0, perfect.GetProperty("untracked_count").GetInt32());
@@ -196,12 +196,12 @@ public class EvalCliTests : IDisposable
             var photo = downloads.Single(f => f.Name == Path.GetFileName(WrongCategoryFile));
             var statement = downloads.Single(f => f.Name == "Kontoauszug_2024_03.pdf");
             Assert.Equal(FileCategory.Screenshot, photo.Classification!.Category);
-            // The answer sheet leaves the statement open, so the stub answered with its neutral category.
-            Assert.Equal(FileCategory.Document, statement.Classification!.Category);
+            Assert.Equal(FileCategory.PersonalDocument, statement.Classification!.Category);
 
+            // The human files bank statements as plain documents: a correction the answer sheet does not share.
             var review = services.GetRequiredService<ReviewService>();
             await review.ApplyOverrideAsync(photo.Id, FileCategory.Photo, null, null);
-            await review.ApplyOverrideAsync(statement.Id, FileCategory.PersonalDocument, null, null);
+            await review.ApplyOverrideAsync(statement.Id, FileCategory.Document, null, null);
 
             var cases = await services.GetRequiredService<IEvalCaseRepository>().GetAllAsync();
             Assert.Equal(2, cases.Count);
@@ -213,7 +213,7 @@ public class EvalCliTests : IDisposable
         Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
 
         // With the right answers the photo case is fixed; the bank statement is read again from
-        // disk (locally) and still gets no category from the answer sheet.
+        // disk (locally) and the answer sheet still disagrees with the human.
         var fixedRun = await OkAsync("eval", "--cases", "--stub", truthPath, "--json");
         var result = fixedRun.Result;
         Assert.Equal("cases", result.GetProperty("mode").GetString());
@@ -225,7 +225,7 @@ public class EvalCliTests : IDisposable
         var statementCase = byPath["Kontoauszug_2024_03.pdf"];
         Assert.Equal("wrong", statementCase.GetProperty("outcome").GetString());
         Assert.True(statementCase.GetProperty("sensitive").GetBoolean());
-        Assert.Equal(EvalCodes.Category(FileCategory.Document), statementCase.GetProperty("actual").GetString());
+        Assert.Equal(EvalCodes.Category(FileCategory.PersonalDocument), statementCase.GetProperty("actual").GetString());
 
         // Nothing of the evidence leaves the database.
         Assert.DoesNotContain("evidence", fixedRun.Stdout, StringComparison.OrdinalIgnoreCase);

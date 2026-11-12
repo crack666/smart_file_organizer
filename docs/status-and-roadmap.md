@@ -165,7 +165,8 @@ https://github.com/crack666/smart_file_organizer/issues/5: `dotnet test`
   with `--json` against a temp database). (Until 12.11.2026 this line said
   the read commands were not there yet.)
 - `sfo eval` measures directory verdicts, categories and sensitive markers
-  against the generated corpus (41 folders, 97 files) and names every
+  against the generated corpus (version 2: 42 folders, 100 files; until
+  12.11.2026 this line said 41 and 97, the counts of version 1) and names every
   failure; corrections in the review are kept as test cases
   (`sfo eval --cases`); runs are stored and compared (`sfo eval --compare`).
   See [evaluation.md](evaluation.md). _(checked 12.11.2026 on the branch for

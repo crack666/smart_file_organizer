@@ -3,6 +3,7 @@ using System.Text;
 using Dapper;
 using Microsoft.Extensions.Logging.Abstractions;
 using SmartFileOrganizer.Application.Evaluation;
+using SmartFileOrganizer.Application.Sensitivity;
 using SmartFileOrganizer.Application.Services;
 using SmartFileOrganizer.Domain.Enums;
 using SmartFileOrganizer.Domain.Interfaces;
@@ -66,6 +67,24 @@ public class EvaluationTests : IDisposable
         Assert.Contains(truth.Files.Values, f => f.Category == FileCategory.Photo);
         Assert.Contains(truth.Files.Values, f => f.Category == FileCategory.Invoice);
         Assert.Contains(truth.Files.Values, f => f.Category is null);
+    }
+
+    /// <summary>
+    /// The counter-samples of version 2 (issue 50) only measure the model if no name rule marks them first:
+    /// a bank statement and a payslip that must stay finance, a personal letter that must stay private_message.
+    /// </summary>
+    [Theory]
+    [InlineData("Dokumente/Bank/Umsaetze_Girokonto_2024_05.pdf", SensitiveMarker.Finance, FileCategory.PersonalDocument)]
+    [InlineData("Dokumente/Bank/Verdienstnachweis_2023_05.pdf", SensitiveMarker.Finance, FileCategory.PersonalDocument)]
+    [InlineData("Desktop/Brief_an_Lisa.txt", SensitiveMarker.PrivateMessage, FileCategory.Letter)]
+    public void Generator_CounterSamples_AreLeftToTheModel(string path, SensitiveMarker marker, FileCategory category)
+    {
+        var truth = EvalTruth.Load(SmallCorpusGenerator.Generate(Path.Combine(_dir, "c")).TruthPath);
+
+        var file = truth.Files[path];
+        Assert.Equal(marker, file.Sensitive);
+        Assert.Equal(category, file.Category);
+        Assert.Equal(SensitiveMarker.None, SensitiveFileRules.MatchName(Path.GetFileName(path), EvalTruth.ParentOf(path)).Markers);
     }
 
     [Fact]
