@@ -128,7 +128,8 @@ public static class FindingsCommand
     public sealed record DecisionsResult(long JobId, IReadOnlyList<DecisionResult> Items);
 
     public const int DefaultTop = 10;
-    public const int MaxTop = 50;
+    /// <summary>Largest --top: keeps the summary of a large job under 20 kB of JSON (measured in the tests).</summary>
+    public const int MaxTop = 20;
 
     public static Command Create(CliHost host, GlobalOptions globals)
     {
