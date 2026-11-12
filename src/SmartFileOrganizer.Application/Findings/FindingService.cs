@@ -482,7 +482,7 @@ public sealed class FindingService
         var label = b.Kind switch
         {
             BundleKind.DumpKeep => $"{part} part of the device copy at {rel}",
-            BundleKind.DumpNoise => $"app data of the device copy at {rel}",
+            BundleKind.DumpNoise => rel == "." ? "app data of the device copy" : $"app data of the device copy at {rel}",
             BundleKind.Dump => $"{part} copy at {rel}",
             _ => $"folder {rel}"
         };
@@ -603,21 +603,30 @@ public sealed class FindingService
 
     private IEnumerable<Finding> Sensitive(ScanJob job, IReadOnlyList<FileFacts> facts, IReadOnlyList<DirectoryReadRow> dirs, bool withLibrary)
     {
+        // Outside noise one finding per folder and marker set: the person looks at each place. Inside app data or a
+        // program folder one per noise bundle and marker set, so the browser and mail profiles of an old user
+        // profile do not fill the list.
         foreach (var g in facts.Where(x => x.Match.IsMatch)
-                     .GroupBy(x => (Dir: x.File.ParentPath, x.Match.Markers)))
+                     .GroupBy(x => (Place: x.Unit is { Bundle: not null, Noise: not null } u ? u.Subject : "dir|" + x.File.ParentPath, x.Match.Markers)))
         {
             var files = g.ToList();
-            var first = files[0].File;
-            var rel = FindingRules.Rel(first.RelativeDir);
+            var first = files[0];
+            var inNoise = first.Unit is { Bundle: not null, Noise: not null };
+            var rel = inNoise ? first.Unit.Rel : FindingRules.Rel(first.File.RelativeDir);
+            var where = inNoise ? first.Unit.Label : rel;
             var tokens = SensitiveMarkerNames.ToTokens(g.Key.Markers);
             var rules = files.SelectMany(x => FindingRules.SplitRules(x.Match.Rule)).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList();
+            var shownRules = rules.Count <= 5 ? string.Join(", ", rules) : string.Join(", ", rules.Take(5)) + $" and {rules.Count - 5} more";
             var certainty = FindingRules.Weakest(
                 files.Select(x => FindingRules.SensitiveCertainty(x.Match.Rule, x.File.Classification?.Certainty)), ResultCertainty.Uncertain);
             var n = FindingRules.Count(files.Count, "file", "files");
-            var unit = new Unit($"dir|{rel}|{string.Join(",", tokens)}", g.Key.Dir, rel, $"folder {rel}", null, null);
+            var folders = files.Select(x => x.File.ParentPath).Distinct(StringComparer.Ordinal).Count();
+            var unit = inNoise
+                ? first.Unit with { Subject = $"{first.Unit.Subject}|{string.Join(",", tokens)}" }
+                : new Unit($"dir|{rel}|{string.Join(",", tokens)}", first.File.ParentPath, rel, $"folder {rel}", null, null);
             var finding = NewFinding(job, FindingKind.Sensitive, string.Empty, unit, files, certainty,
-                $"{n} marked {string.Join(", ", tokens)} in {rel}",
-                $"{n} in {rel} {(files.Count == 1 ? "is" : "are")} marked {string.Join(", ", tokens)} by the rule{(rules.Count == 1 ? "" : "s")} {string.Join(", ", rules)}; only path and marker are shown, never the content.",
+                $"{n} marked {string.Join(", ", tokens)} in {where}",
+                $"{n} in {where}{(folders > 1 ? $" ({folders} folders)" : string.Empty)} {(files.Count == 1 ? "is" : "are")} marked {string.Join(", ", tokens)} by the rule{(rules.Count == 1 ? "" : "s")} {shownRules}; only path and marker are shown, never the content.",
                 SensitiveAction, withComparison: withLibrary);
             finding.Markers = tokens;
             finding.SensitiveRules = rules;

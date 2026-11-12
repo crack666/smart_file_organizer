@@ -88,8 +88,13 @@ public static class FindingRules
             var basis = c.Origin is { } origin ? origin.ToCode() : "model";
             if (c.KeepHint == KeepHint.WorthKeeping) return new FileValue(FileWorth.Keep, certainty, basis);
             if (c.KeepHint == KeepHint.Temporary) return new FileValue(FileWorth.Disposable, certainty, basis);
+            // "Look at it" is no sign of worth. It counts (as review) only for the kinds a person keeps, and never
+            // among noise: there a database or cache file the rules sent to review would fill the list.
             if (c.Category is FileCategory.ReviewNeeded or FileCategory.Unknown)
-                return new FileValue(FileWorth.Keep, ResultCertainty.Review, basis);
+                return place.NoiseByBundle || place.NoiseByDirectory
+                       || file.FileType is not (FileType.Image or FileType.Video or FileType.Document or FileType.Audio)
+                    ? FileValue.None
+                    : new FileValue(FileWorth.Keep, ResultCertainty.Review, basis);
             var w = WorthOfCategory(c.Category, c.Importance);
             return w == FileWorth.None ? FileValue.None : new FileValue(w, certainty, basis);
         }
