@@ -38,6 +38,11 @@ Creates a job for `<path>` and scans it, or continues an interrupted job. Give e
 the two. Ctrl+C stores the job as `paused`; `--resume` continues it. Resuming a completed job
 returns it unchanged.
 
+`--rules <file>` scans with a rule file (profile, see [scan-rules.md](scan-rules.md)) and
+stores it at the job; without it the shipped rules are used. With `--resume`, rules that
+differ from the stored ones switch the job to them, reopen it even if it was completed, and
+re-evaluate the folders stored as skipped or shallow; `rules_changed` is then `true`.
+
 ```bash
 sfo scan /media/usb-stick --json
 ```
@@ -61,16 +66,20 @@ sfo scan /media/usb-stick --json
       "directories_total": 112,
       "directories_processed": 112,
       "error_count": 0,
-      "last_error": null
+      "last_error": null,
+      "rules": { "name": "default", "source": "built-in", "hash": "3f9c…" }
     },
-    "resumed": false
+    "resumed": false,
+    "rules_changed": false
   },
   "error": null
 }
 ```
 
 `status` is one of `created`, `running`, `paused`, `completed`, `cancelled`, `failed`.
-Errors: `path_not_found` (1), `job_not_found` (1), `scan_failed` (1, with `result`).
+`rules` is `null` for a job created before rules were stored and not run since.
+Errors: `path_not_found` (1, also for a missing rule file), `rules_invalid` (1),
+`job_not_found` (1), `scan_failed` (1, with `result`).
 
 ### `sfo analyze <job>`
 
@@ -200,6 +209,63 @@ sfo doctor --json
 error (`database_error`), 3 if Ollama is unreachable, 1 if the model is missing
 (`model_missing`), else 0.
 
+### `sfo rules check <path>...`
+
+Shows for each path which rule applies and why, without scanning and without opening the
+database. The paths need not exist; if one does, its files are looked at where the decision
+depends on them (beyond `shallow_from`), otherwise that check reports `content_unknown`.
+
+| Option | Meaning |
+|---|---|
+| `--root <dir>` | Scan root the paths are checked against. Default: the drive or file system root of each path. A path outside the root is a usage error (2). |
+| `--rules <file>` | Rule file to check with. Default: the shipped rules. |
+
+```bash
+sfo rules check /media/disk/app/bin /media/disk/Documents /media/disk/app/bin/Documents --root /media/disk --json
+```
+
+```json
+{
+  "schema_version": 1,
+  "command": "rules check",
+  "ok": true,
+  "exit_code": 0,
+  "result": {
+    "rules": { "name": "default", "source": "built-in", "hash": "3f9c…" },
+    "checks": [
+      { "path": "/media/disk/app/bin", "root": "/media/disk", "depth": 2, "exists": true,
+        "decision": "skip", "basis": "rule",
+        "reason": "Skip: matches skip rule 'bin' of rules 'default': build output",
+        "rule": { "index": 4, "match": "bin", "action": "skip", "max_depth": null, "why": "build output" },
+        "content": null, "reached": true, "blocked_by": null },
+      { "path": "/media/disk/Documents", "...": "decision descend, rule user_data" },
+      { "path": "/media/disk/app/bin/Documents", "decision": "descend", "reached": false,
+        "blocked_by": { "path": "/media/disk/app/bin", "decision": "skip",
+                        "reason": "Skip: matches skip rule 'bin' of rules 'default': build output" },
+        "...": "" }
+    ]
+  },
+  "error": null
+}
+```
+
+- `decision`: `descend`, `shallow` or `skip`.
+- `basis`: `scan_root`, `rule`, `safety_limit`, `hidden`, `no_rule`, `user_content`,
+  `program_content`, `no_program_content`, `content_unknown`.
+- `rule`: the matching rule and its position in the file, or `null`.
+- `content`: `{ "files", "user_files", "program_files" }` when the content decided, else `null`.
+- `reached`: `false` if a folder between root and path is skipped or shallow; `blocked_by` names
+  the first one. The path's own `decision` is then what would apply if it were reached.
+
+Errors: `path_not_found` (1) or `rules_invalid` (1) for the rule file, `usage` (2).
+
+### `sfo rules show`
+
+Prints the rules with every setting spelled out; `--rules <file>` shows that file instead of
+the shipped rules. Without `--json` the output is a valid rule file, so
+`sfo rules show > my-disk.json` starts a profile. With `--json`, `result` is
+`{ "rules": { "name", "source", "hash" }, "content": { ...the rule file... } }`.
+
 ## Machine contract
 
 Applies to every command, including the ones added later.
@@ -237,7 +303,7 @@ one line per phase every 500 ms, plus the final line of a phase.
 | Code | Meaning | `error.code` |
 |---|---|---|
 | 0 | Done | |
-| 1 | The command ran but could not do its job | `job_not_found`, `path_not_found`, `scan_failed`, `scan_not_completed`, `database_error`, `model_missing`, `internal_error` |
+| 1 | The command ran but could not do its job | `job_not_found`, `path_not_found`, `scan_failed`, `scan_not_completed`, `database_error`, `model_missing`, `rules_invalid`, `internal_error` |
 | 2 | Wrong invocation: unknown command or option, missing or invalid value | `usage` |
 | 3 | Ollama not reachable | `ollama_unavailable` |
 | 130 | Interrupted with Ctrl+C; stored work stays and the command can be run again | `cancelled` |

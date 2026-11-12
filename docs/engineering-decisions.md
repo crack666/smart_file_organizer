@@ -241,6 +241,31 @@ contain text excerpts), the SQLite file itself, directory-level output
 (pre-assessment theme and anomaly reasons are model text about file names),
 and the header rule for rows scanned before schema step 2.
 
+## 9. Scan rules: in doubt, enter the folder
+
+Decided 12.11.2026 in
+[#21](https://github.com/crack666/smart_file_organizer/issues/21).
+
+The tool exists to find user data on old drives. A user folder that a scan
+skips or records only shallow is lost to every later phase; a program folder
+scanned in full only costs time. The rules are weighted accordingly:
+
+- The depth limit applies only to folders recognised as program folders
+  (program files and no user files among their own files). Every other
+  folder beyond `shallow_from` is entered, including folders whose content
+  is not known. The former fixed skip from depth 12 became a safety limit
+  (32) that records shallow, only against loops through links.
+- Rules are explicit: a `shallow` or `skip` rule in a profile wins over the
+  content check, because the person who wrote it decided.
+- On resume only wider decisions are applied to stored folders; a narrower
+  rule never deletes data already collected.
+- The job stores its rules, not only the file path, so a resume or an
+  investigation months later sees exactly the rules that produced the data.
+
+Trade-off: deep program trees without executables (game assets, source
+trees) are scanned in full. A profile can limit them with a `shallow` rule
+and `max_depth`. Format and order of precedence: [scan-rules.md](scan-rules.md).
+
 ## Design stance going forward
 
 Prefer:

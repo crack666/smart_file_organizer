@@ -13,6 +13,7 @@ The repository is intentionally split into focused layers.
   - `Content/`: UI-free file evidence extraction (`FileContentExtractor`) and the model input builder (`AiClassificationInputPreparer`)
 - `src/SmartFileOrganizer.Scanning`
   - scan engine, heuristics, file type detection
+  - `Rules/`: scan rule files (`ScanRulesFile`, `ScanRuleSet`) and the shipped `default-rules.json` (embedded); format in [scan-rules.md](scan-rules.md)
 - `src/SmartFileOrganizer.Hosting`
   - composition root for everything except the GUI; no Avalonia reference
   - resolves database and settings paths, ships the default `appsettings.json`
@@ -45,7 +46,7 @@ The CLI calls it once per invocation with `ReloadSettingsOnChange = false`, the 
 
 The GUI starts work in the background and follows it through events: `ScanJobService.StartAsync` (`JobStateChanged`) and `AiClassificationCoordinator.StartOrResumeAsync` (`StateChanged`, with pause and resume). Hosts without an event loop await the same work instead:
 
-- `ScanJobService.RunAsync(jobId, progress, ct)` returns the persisted job. Cancelling stores the job as `Paused`, so it can be resumed, and throws `OperationCanceledException`.
+- `ScanJobService.RunAsync(jobId, progress, ct)` returns the persisted job; the overload with `ScanRulesProfile rules` first switches the job to other scan rules (reopening a finished job). Cancelling stores the job as `Paused`, so it can be resumed, and throws `OperationCanceledException`.
 - `AiClassificationCoordinator.RunAsync(jobId, phases, progress, ct)` runs the selected `AiPhases` and returns one result per phase; `OllamaAvailable = false` means nothing ran. Both paths share the phase loop.
 - `JobStatusService.GetAsync(jobId)` returns the job with counters per phase and recent errors (`IJobStatisticsRepository`).
 
@@ -69,7 +70,7 @@ Other options: `AppSettingsDirectory` (where the shipped `appsettings.json` defa
 1. user selects a root folder in the desktop UI
 2. `MainViewModel` creates a scan job through `ScanJobService`
 3. `ScanJobService` starts `IScanEngine`
-4. `ScanEngine` walks directories iteratively, applies heuristics, and writes batches to SQLite
+4. `ScanEngine` builds a `HeuristicsEngine` from the rules stored at the job (the shipped rules if none), walks directories iteratively, decides each one with its reason (`dir_reason`), and writes batches to SQLite. On resume, directories stored as skipped or shallow are re-evaluated with the current rules (see [scan-rules.md](scan-rules.md))
 5. progress events flow back into the UI
 6. tree and file views query persisted state from repositories/services
 
@@ -220,7 +221,7 @@ SQLite is the local source of truth. It stores both operational state and review
 
 Important tables:
 
-- `scan_jobs` — job lifecycle, counters, status
+- `scan_jobs` — job lifecycle, counters, status, and the scan rules of the job (step 4: `rules_name`, `rules_source`, `rules_hash`, `rules_json`)
 - `directory_nodes` — scanned directories with heuristic metadata and stats
 - `file_nodes` — scanned files with metadata, type, AI status, rule-based sensitive markers (`sensitive_markers`, `sensitive_rule`)
 - `ai_results` — Phase 2 per-file classification results, including model sensitive markers (`sensitive_markers`)
@@ -263,7 +264,6 @@ The current architecture leaves room for:
 
 - richer review workflows
 - more complete multimodal document understanding (multi-page PDF, OCR, Office formats)
-- configurable scan rules
 - additional preview providers
 - more advanced AI pipelines
 - action planning/execution services
