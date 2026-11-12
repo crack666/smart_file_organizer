@@ -20,4 +20,17 @@ public class FileClassification
     /// <summary>Markers the local model reported in the same classification call.
     /// Stored as tokens in <c>ai_results.sensitive_markers</c>.</summary>
     public SensitiveMarker SensitiveMarkers { get; set; }
+
+    /// <summary>Where the result came from; null for rows written before schema step 4 (all judged by the model).
+    /// An <see cref="ResultOrigin.Inherited"/> result has <see cref="IsAiResult"/> false and a capped confidence.</summary>
+    public ResultOrigin? Origin { get; set; }
+
+    /// <summary>For an inherited result: the directory whose sample it came from.</summary>
+    public long? InheritedFromDirectoryNodeId { get; set; }
+
+    /// <summary>For files in a mixed (or sampled uniform) directory: temporary or worth keeping, as the model judged.</summary>
+    public KeepHint? KeepHint { get; set; }
+
+    /// <summary>Why the file has its <see cref="KeepHint"/>.</summary>
+    public string? KeepReason { get; set; }
 }

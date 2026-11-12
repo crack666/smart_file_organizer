@@ -19,6 +19,8 @@ public class DatabaseContext
         // Set here so every composition (GUI, CLI, tests) gets the same mapping.
         DefaultTypeMap.MatchNamesWithUnderscores = true;
         SqlMapper.AddTypeHandler(new SensitiveMarkerTypeHandler());
+        SqlMapper.AddTypeHandler(new CodeEnumTypeHandler<Domain.Enums.ResultOrigin>());
+        SqlMapper.AddTypeHandler(new CodeEnumTypeHandler<Domain.Enums.KeepHint>());
     }
 
     public DatabaseContext(string dbPath, ILogger<DatabaseContext> logger)

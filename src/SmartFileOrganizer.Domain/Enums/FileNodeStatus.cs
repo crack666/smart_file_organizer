@@ -9,5 +9,11 @@ public enum FileNodeStatus
     Approved,
     Skipped,
     Error,
-    Processing   // reserved by producer — prevents double-fetch
+    Processing,  // reserved by producer — prevents double-fetch
+
+    /// <summary>Waits for the sample of its uniform directory; then inherits (<see cref="Inherited"/>) or is judged on its own.</summary>
+    Deferred,
+
+    /// <summary>Carries a result inherited from the confirmed sample of its directory (<c>ai_results.derivation = geerbt</c>).</summary>
+    Inherited
 }

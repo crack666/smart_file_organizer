@@ -40,6 +40,15 @@ public sealed class DirectoryVerdict
     public DateTime JudgedAt { get; set; }
     public string? Error { get; set; }
 
+    /// <summary>
+    /// Set when the sample contradicted the verdict and the directory was raised to
+    /// <see cref="DirectoryVerdictKind.Gemischt"/>: the verdict it had before (<see cref="DirectoryVerdictKind.Einheitlich"/>). The sample itself is in <c>directory_samples</c>.
+    /// </summary>
+    public DirectoryVerdictKind? EscalatedFrom { get; set; }
+
+    /// <summary>Why the directory was raised to mixed, for example which share of the sample deviated.</summary>
+    public string? EscalationReason { get; set; }
+
     // Filled when reading, from directory_nodes; not stored in directory_verdicts.
     public string? DirectoryFullPath { get; set; }
     public string? DirectoryRelativePath { get; set; }

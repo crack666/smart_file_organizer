@@ -24,8 +24,14 @@ public sealed class JobStatistics
     public long FilesAiAnalyzed { get; init; }
     public long FilesAiErrors { get; init; }
 
-    /// <summary>Eligible files the pre-assessment chose not to sample.</summary>
+    /// <summary>Eligible files not analysed because their directory is a unit or system data.</summary>
     public long FilesAiSkipped { get; init; }
+
+    /// <summary>Eligible files that inherited the result of the confirmed sample of their directory (not looked at).</summary>
+    public long FilesAiInherited { get; init; }
+
+    /// <summary>Eligible files waiting for the sample of their directory.</summary>
+    public long FilesAiDeferred { get; init; }
 
     /// <summary>The most recent errors, newest first.</summary>
     public IReadOnlyList<JobErrorEntry> RecentErrors { get; init; } = [];

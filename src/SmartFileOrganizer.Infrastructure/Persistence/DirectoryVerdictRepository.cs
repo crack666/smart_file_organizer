@@ -24,7 +24,7 @@ public class DirectoryVerdictRepository : IDirectoryVerdictRepository
     private const string SelectColumns = """
         SELECT dv.id, dv.directory_node_id, dv.verdict, dv.source, dv.rule, dv.purpose, dv.retention,
                dv.reason, dv.unit_directory_node_id, dv.profile_json, dv.model_used, dv.raw_response,
-               dv.judged_at, dv.error,
+               dv.judged_at, dv.error, dv.escalated_from, dv.escalation_reason,
                dn.full_path AS directory_full_path, dn.relative_path AS directory_relative_path
         FROM directory_verdicts dv
         JOIN directory_nodes dn ON dn.id = dv.directory_node_id
@@ -44,10 +44,12 @@ public class DirectoryVerdictRepository : IDirectoryVerdictRepository
             """
             INSERT INTO directory_verdicts
                 (directory_node_id, verdict, source, rule, purpose, retention, reason,
-                 unit_directory_node_id, profile_json, model_used, raw_response, judged_at, error)
+                 unit_directory_node_id, profile_json, model_used, raw_response, judged_at, error,
+                 escalated_from, escalation_reason)
             VALUES
                 (@DirectoryNodeId, @Verdict, @Source, @Rule, @Purpose, @Retention, @Reason,
-                 @UnitDirectoryNodeId, @ProfileJson, @ModelUsed, @RawResponse, @JudgedAt, @Error)
+                 @UnitDirectoryNodeId, @ProfileJson, @ModelUsed, @RawResponse, @JudgedAt, @Error,
+                 @EscalatedFrom, @EscalationReason)
             ON CONFLICT(directory_node_id) DO UPDATE SET
                 verdict                = excluded.verdict,
                 source                 = excluded.source,
@@ -60,7 +62,9 @@ public class DirectoryVerdictRepository : IDirectoryVerdictRepository
                 model_used             = excluded.model_used,
                 raw_response           = excluded.raw_response,
                 judged_at              = excluded.judged_at,
-                error                  = excluded.error
+                error                  = excluded.error,
+                escalated_from         = excluded.escalated_from,
+                escalation_reason      = excluded.escalation_reason
             RETURNING id
             """,
             ToRow(verdict));
@@ -108,7 +112,9 @@ public class DirectoryVerdictRepository : IDirectoryVerdictRepository
         ModelUsed = v.ModelUsed,
         RawResponse = v.RawResponse,
         JudgedAt = v.JudgedAt,
-        Error = v.Error
+        Error = v.Error,
+        EscalatedFrom = v.EscalatedFrom.ToCode(),
+        EscalationReason = v.EscalationReason
     };
 
     private static DirectoryVerdict FromRow(Row r) => new()
@@ -129,6 +135,8 @@ public class DirectoryVerdictRepository : IDirectoryVerdictRepository
         RawResponse = r.RawResponse,
         JudgedAt = r.JudgedAt,
         Error = r.Error,
+        EscalatedFrom = VerdictCodes.ParseNullable<DirectoryVerdictKind>(r.EscalatedFrom),
+        EscalationReason = r.EscalationReason,
         DirectoryFullPath = r.DirectoryFullPath,
         DirectoryRelativePath = r.DirectoryRelativePath
     };
@@ -150,6 +158,8 @@ public class DirectoryVerdictRepository : IDirectoryVerdictRepository
         public string? RawResponse { get; set; }
         public DateTime JudgedAt { get; set; }
         public string? Error { get; set; }
+        public string? EscalatedFrom { get; set; }
+        public string? EscalationReason { get; set; }
         public string? DirectoryFullPath { get; set; }
         public string? DirectoryRelativePath { get; set; }
     }
