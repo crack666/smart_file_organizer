@@ -84,7 +84,9 @@ Current posture:
 
 - scan first
 - classify afterward in a separate coordinator
-- keep the AI path sequential/bounded until profiling proves a more parallel design is necessary
+- keep AI concurrency bounded: each phase runs `MaxParallelRequests` workers
+  (default 4, checked in code 12.11.2026; this section previously said the
+  path was kept sequential, which was no longer true)
 
 ## Important caveats encountered so far
 

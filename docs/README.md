@@ -215,9 +215,8 @@ Each result also includes an **importance rating** (`Low / Medium / High / Criti
 
 | Doc | Purpose |
 |---|---|
-| [status-and-roadmap.md](status-and-roadmap.md) | What's done, what's limited, what's next |
+| [status-and-roadmap.md](status-and-roadmap.md) | What exists (dated), known limits, operating notes, traps |
 | [architecture.md](architecture.md) | Layer structure, runtime flows, DB schema |
-| [next-session-handover.md](next-session-handover.md) | Practical handover for next dev/agent session |
 | [engineering-decisions.md](engineering-decisions.md) | Library choices, trade-offs, lessons learned |
 | [code-guidelines.md](code-guidelines.md) | Repo-specific conventions and rules |
 | [product-overview.md](product-overview.md) | Vision, use cases, non-goals |

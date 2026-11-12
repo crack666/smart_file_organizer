@@ -1,284 +1,120 @@
 # Status and Roadmap
 
-_Last updated: April 2026_
+This page records what exists and the traps worth knowing. It does not plan
+work: everything open is tracked as issues in the milestones
 
----
+- [A: Kern ohne GUI und CLI](https://github.com/crack666/smart_file_organizer/milestone/1) (core runnable without the GUI, plus a CLI)
+- [B: Ordner-Urteil](https://github.com/crack666/smart_file_organizer/milestone/2) (folder verdict)
+- [C: Plan und Ausfuehrung](https://github.com/crack666/smart_file_organizer/milestone/3) (target structure, plan and execution)
+- [D: GUI-Anschluss](https://github.com/crack666/smart_file_organizer/milestone/4) (GUI integration)
 
-## ✅ Implemented and working
+Every statement about the current state below carries the date it was
+checked and how. If you change what a line describes, update the line and
+its date, or delete it.
 
-### Scan and persistence
+## What exists
 
-- Layered solution structure (Domain / Application / Infrastructure / Scanning / Desktop)
-- Recursive scan engine with iterative queue (no stack overflow on deep trees)
-- SQLite persistence for scan jobs, directory nodes, file nodes, AI results, user overrides
-- File type detection (`FileTypeDetector`) by extension
-- Heuristic scan pruning: skip dot-dirs, `AppData`, `Windows`, `node_modules`, `$Recycle.Bin`, etc.
-- Resume support: already-scanned directories are skipped on restart
-- Tests for scan heuristics, file type detection, and scan pipeline persistence
-
-### Desktop UI
-
-- Root folder selection, scan start/pause/cancel
-- AI classification start/pause/resume/cancel (independent of scan)
-- Folder tree with lazy child loading and expand/collapse
-- **Right-click → "Im Explorer öffnen"** on any folder node
-- File table for the selected directory (color-coded category strip, confidence, summary)
-- **Directory AI summary banner** above the file table (green bar with folder-level description)
-- File detail panel with metadata, image preview, text preview, PDF first-page preview
-- Resizable splitters for tree / table / detail areas
-- Ollama settings (base URL, model, keep-alive) editable and persisted in toolbar
-- Local Ollama models loaded from `/api/tags` and selectable in UI
-- Manual model warm-up action
-- Recent scan history shown on welcome screen
-
-### AI pipeline (3-phase)
-
-**Phase 1 — Directory Pre-Assessment**
-- Runs for every directory before per-file analysis
-- Sends file list (names, types, sizes) to Ollama
-- Determines sampling strategy: `analyze_all`, `random_sample`, or `skip`
-- Marks non-sampled files as `Skipped` so Phase 2 ignores them
-- Result stored in `ai_directory_results` (phase = `pre_assessment`)
-
-**Phase 2 — Per-File Deep Classification**
-- Processes `Discovered` files of type Image / Video / Document in batches
-- Images: uploaded as base64 (≤ 10 MB), visual AI analysis
-- Documents: text extraction + semantic classification (≤ 5 MB)
-- Videos: filename + path heuristics only (no bytes uploaded)
-- Returns: `category`, `importance`, `confidence`, `summary`, `suggested_target`
-- Handles gemma4's non-standard field aliases (`classification` → `category`)
-- Result stored in `ai_results`
-
-**Phase 3 — Directory Summaries**
-- Bottom-up: deepest directories first
-- Builds `summaryLines` from Phase 2 results (falls back to `name — FileType` if no summary)
-- Calls Ollama once per directory for a human-readable folder description
-- Result shown as a banner in the UI when the folder is selected
-- Result stored in `ai_directory_results` (phase = `summary`)
-
-**Pipeline runtime behavior**
-- Single Ollama availability check at pipeline start (not once per phase)
-- `think: false` sent in all Ollama requests (prevents gemma4 reasoning tokens from inflating response time)
-- Detailed prompt + truncated response logged at `Information` level (visible in VS Output → Debug channel)
-- `Microsoft.Extensions.Logging.Debug` provider active in desktop app
-
-### Manual review
-
-- `UserOverride` model and `ReviewService` exist
-- Override persistence implemented
-- UI for overrides: **done** (category correction visible in file detail panel)
-
----
-
-## ⚠️ Implemented but limited
-
-### Document understanding
-
-- PDFs: first rendered page only — no multi-page reasoning
-- Text extraction: preview-sized only (not full-document ingestion)
-- No OCR beyond what the vision model infers from rendered images
-- Office formats (`.docx`, `.xlsx`) not deeply parsed
-
-### AI quality / robustness
-
-- Confidence derivation: if model omits `confidence` but gives a valid category, defaults to `0.85`
-- Prompt schema field names are often ignored by gemma4 — alias parsing handles this but other models may behave differently
-- No adaptive throttling — pipeline is strictly sequential per-file
-
-### Review workflow
-
-- Override UI exists but is minimal
-- No confirm/reject bulk workflow
-- No review filters
-- Approval-driven action planning not yet built
-
----
-
-## 🔜 Planned next priorities
-
-### 1 — Action pipeline
-- Generate file operation plans from approved classifications
-- Preview actions (move / copy / archive) before execution
-- Execute with per-file logging and rollback-friendly design
-
-### 2 — Richer document understanding
-- Multi-page PDF support
-- OCR / text extraction for more binary formats
-- Improved prompts for "valuable personal data vs. trash" distinction
-
-### 3 — Review UX improvements
-- Bulk approve / reject
-- Filter by category, confidence, trash candidates
-- Surface AI errors and model info per file
-
-### 4 — Performance and scale
-- Profile on large datasets (100k+ files)
-- Evaluate bounded concurrency for Phase 2
-- Improve tree virtualization for very large directory trees
-
-### 5 — Polish and packaging
-- Custom skip-pattern editor in UI
-- Export scan results (CSV / JSON)
-- macOS / Linux packaging
-
----
-
-## 📋 Known caveats
-
-- Avalonia `DataGrid` requires explicit theme include or renders as a black slab
-- Dark theme defaults caused black panels until explicit backgrounds were set
-- PDF previews initially rendered transparent — fixed with forced white background
-- Large Ollama vision models need time for initial VRAM load — warm-up + `keep_alive` mitigates this
-- `think: false` is required for gemma4 — without it, responses take 90–150 s even for trivial prompts
-- `%APPDATA%\SmartFileOrganizer\settings.json` overrides `appsettings.json` — check it first when debugging unexpected behavior
-- Ollama continues processing after a client-side timeout; the next request queues behind it — this was the root cause of Phase 3 hanging on video files
-- PDFium native runtimes may interact with Windows application control policies in enterprise environments
-
----
-
-## 🏁 MVP definition
-
-MVP is complete when:
-
-- [x] Scan + persist + browse works reliably
-- [x] 3-phase AI pipeline runs end-to-end with real results
-- [x] Configurable Ollama settings
-- [x] Directory summaries visible in UI
-- [ ] Review and override workflow fully exposed
-- [ ] Basic file action (move/copy) executable after approval
-
+_Checked 12.11.2026 by reading the code on `master`; build and tests run
+locally (`dotnet build` 0 errors, `dotnet test` 47 passed) and in CI on
+Windows and Linux._
 
 ### Scan and persistence
 
-- solution and layered project structure created
-- recursive scan engine implemented
-- SQLite persistence implemented for:
-  - scan jobs
-  - directory nodes
-  - file nodes
-  - AI results
-  - user overrides
-- file type detection and heuristic scan pruning implemented
-- tests exist for core scan heuristics/file type behavior and scan pipeline persistence
+- Layered solution: Domain / Application / Infrastructure / Scanning / Desktop.
+- Recursive scan engine with an iterative queue, so deep trees do not
+  overflow the stack.
+- SQLite persistence (Dapper) for scan jobs, directory nodes, file nodes,
+  AI results, directory AI results and user overrides.
+- File type detection by extension (`FileTypeDetector`).
+- Scan pruning (`HeuristicsEngine`): dot-directories and skip patterns such
+  as `AppData`, `Windows`, `node_modules`, `$Recycle.Bin`.
+- Resume: directories already scanned are skipped on restart.
+- `ScanExportService` (CSV/JSON export) exists and is tested; it is
+  registered in DI but not reachable from the UI.
 
-### Desktop UI
+### AI pipeline (three phases, run after the scan, never inside it)
 
-- root folder selection works
-- scan start works
-- pause/cancel controls exist
-- asynchronous AI classification starts automatically after a completed scan job
-- AI classification can be paused, resumed, or cancelled independently of the scanner
-- folder tree loads and expands lazily
-- file table loads selected directory contents correctly
-- file details panel works
-- image preview works
-- text preview works
-- first-page PDF preview works
-- bottom details area and inner details/preview area are resizable via splitters
-- Ollama base URL, model, and keep-alive are configurable in the toolbar
-- local Ollama models can be queried from the running server and selected in the UI
-- a manual model warm-up action exists so the chosen model can be preloaded into VRAM before a bigger run
+1. **Directory pre-assessment** (`DirectoryPreAssessmentService`): sends the
+   file list of each directory to Ollama and gets a sampling strategy
+   (`analyze_all`, `random_sample`, `skip`). Files not sampled are marked
+   `Skipped`. Stored in `ai_directory_results` with phase `pre_assessment`.
+2. **Per-file classification** (`ClassificationService`,
+   `OllamaService`): images as base64 (default limit 10 MB), documents as
+   extracted text or first PDF page rendered to an image (default limit
+   5 MB), videos and audio by file name and path only. Returns category,
+   importance, confidence, summary and suggested target. Stored in
+   `ai_results`.
+3. **Directory summaries** (`DirectorySummaryService`): bottom-up, one
+   Ollama call per directory. Stored in `ai_directory_results` with phase
+   `summary`.
 
-### Ollama and AI classification
+All three phases run with bounded concurrency set by `MaxParallelRequests`
+(default 4 in `appsettings.json`; `ClassificationService` clamps it to 1..8).
 
-- `AiClassificationCoordinator` runs the post-scan classification pipeline separately from the scan engine
-- the classification pipeline is sequential/batch-oriented so the scanner is not blocked by long model inference times
-- AI status and progress are shown in the UI
-- file table/details refresh while AI results arrive
-- Ollama settings are persisted to `%AppData%\SmartFileOrganizer\settings.json`
-- `keep_alive` is sent to Ollama requests so models stay loaded longer than the default `5m` if configured
-- classification now uses real multimodal requests through `/api/chat`
-- image files are sent as base64 image payloads
-- PDFs are represented by the rendered first page image already used by the preview system
-- text-like files contribute extracted preview text
-- metadata is still included so the model can reason about path, extension, and file context
+### Desktop UI (Avalonia)
 
-### Architectural groundwork
+- Root folder selection; scan start, pause, cancel.
+- AI classification start, pause, resume, cancel, independent of the scan.
+- Lazy folder tree; file table with category colour, confidence, summary.
+- Directory summary banner above the file table.
+- File detail panel with metadata and image, text and first-page PDF preview.
+- Manual review: accept or override category and target per file, in the
+  detail panel and in the table row (`ReviewService`, `UserOverride`).
+- Ollama settings (base URL, model, keep-alive) editable and persisted;
+  installed models listed from `/api/tags`; manual model warm-up.
+- Recent scans on the welcome screen.
+- Right-click on a folder opens it in the file manager. This calls
+  `explorer.exe` and therefore only works on Windows.
 
-- Domain / Application / Infrastructure / Desktop separation in place
-- repositories and services abstract persistence and integrations
-- Ollama service contract and implementation exist
-- classification pipeline service exists
-- manual override service exists
+### Known limits
 
-## Implemented but still limited
+- PDFs: only the first page is seen; text extraction is preview-sized; no
+  OCR beyond what the vision model reads from rendered pages.
+- If the model gives a valid category but omits `confidence`, the parser
+  sets `0.85`.
+- gemma4 ignores schema field names; the parser accepts aliases such as
+  `classification` for `category`. Other models may differ.
+- No bulk review, no review filters, no file operations (move, copy,
+  archive) yet. See milestones C and D.
 
-### Ollama classification quality and document understanding
+## Operating notes
 
-- model selection, keep-alive, warm-up, and post-scan triggering are implemented
-- the current multimodal path is intentionally practical rather than exhaustive:
-   - images: original image bytes
-   - PDFs: first-page visual render only
-   - text-like docs: preview-sized extracted text only
+_Checked 12.11.2026 against the code: `think = false` in all three request
+builders of `OllamaService`, `TimeoutSeconds` default 180 in
+`OllamaOptions` and `appsettings.json`, configuration order in
+`ServiceConfigurator`. The timing figures come from the development
+sessions of April 2026 and were not re-measured._
 
-What is still missing:
+- **`think: false` stays.** Every Ollama request sends it. Without it gemma4
+  emits reasoning tokens and trivial prompts took 90 to 150 s (April 2026).
+- **Timeout 180 s.** Keep `Ollama:TimeoutSeconds` at 180. With 90 s, Phase 3
+  hung: Ollama keeps working after a client-side timeout, so the next
+  request queues behind the abandoned one.
+- **`settings.json` wins.** The per-user `settings.json` in the
+  application data folder (`%APPDATA%\SmartFileOrganizer\` on Windows,
+  `~/.config/SmartFileOrganizer/` on Linux) is loaded after the shipped
+  `appsettings.json` and overrides it. Check it first when the app does not
+  behave as `appsettings.json` suggests. The SQLite database `data.db` lives
+  in the same folder.
+- **Stale AI results.** Phases treat existing `ai_directory_results` rows as
+  done. After changing the AI pipeline, start a new scan job or delete the
+  database, otherwise old results are reused.
+- **Model warm-up.** The first request to a large vision model waits for it
+  to load into VRAM. Warm-up and a long `KeepAlive` (default `60m`) help;
+  Ollama still unloads after idle time or a restart.
+- **Check model names.** Query `/api/tags` before testing; 404s seen during
+  development came from a model name that was not installed.
+- **Logs.** Prompts and truncated responses are logged at `Information`
+  through the console and debug providers.
 
-- deeper multi-page document understanding
-- OCR or richer text extraction for more binary document formats
-- better model-specific prompting/evaluation for “valuable user data vs trash” decisions
-- adaptive throttling/concurrency strategy for large datasets if/when sequential processing becomes too slow
-- stronger surfacing of per-file AI error details in the review UX
+## Known traps (UI and runtime)
 
-### Review workflow
+Root causes and fixes are in
+[engineering-decisions.md](engineering-decisions.md).
 
-The following groundwork exists:
-
-- `UserOverride` model
-- `ReviewService`
-- override persistence
-
-What is still missing:
-
-- override UI
-- confirm/reject workflow
-- review filters
-- approval-driven file action planning
-
-## Planned next priorities
-
-1. **Wire Ollama into the real job lifecycle**
-   - done for the post-scan path
-   - next iteration should focus on classification quality, richer evidence, and better review UX
-
-2. **Richer document/vision understanding**
-   - improve multi-page PDF handling
-   - consider OCR/text extraction for additional document types
-   - refine prompts/schema around “valuable user data” vs “trash candidate”
-
-3. **Review UX**
-   - edit category/target suggestions
-   - show AI summary/confidence inline
-   - expose AI errors and model-used information more clearly
-   - add manual approval state transitions
-
-4. **Action pipeline**
-   - plan file operations from approved items
-   - preview actions before execution
-   - execute with logging and rollback-friendly design where possible
-
-5. **Performance and scale improvements**
-   - larger dataset profiling
-   - better virtualization strategy for large tables/trees
-   - decide whether the AI path should stay strictly sequential or introduce bounded concurrency/queue workers
-
-## Known caveats from development so far
-
-- Avalonia `DataGrid` requires an explicit theme include; without it the grid can bind data but render like a black slab
-- dark theme defaults caused several areas to appear fully black until explicit panel backgrounds/styles were applied
-- preview sizing initially used an unconstrained layout; image previews did not respond to pane size until the preview area was converted to a bounded grid-based layout
-- PDF previews initially rendered transparent backgrounds; this was fixed by forcing white background rendering
-- integrating native PDFium runtimes may interact with Windows application control policies; this should be verified in restricted enterprise environments
-- the first request to a large Ollama vision model can take a long time because the model is first loaded into VRAM; this is expected and can be mitigated with warm-up + longer `keep_alive`
-- `keep_alive` helps but does not make the model immortal; if it is idle long enough or the server is restarted, Ollama can still unload it
-- current PDF understanding is based on the first rendered page, not full document comprehension
-
-## Definition of “MVP complete”
-
-A meaningful MVP for this repository should include:
-
-- scan + persist + browse working reliably
-- AI classification actually running in product flow
-- configurable Ollama settings and workable multimodal evidence for files/documents
-- review and override workflow exposed in UI
-- basic settings/configuration
-- enough documentation for new contributors to reason about architecture and direction
+- Avalonia `DataGrid` needs its theme included explicitly or renders as a
+  black slab.
+- Dark theme defaults left panels black until explicit backgrounds were set.
+- PDF previews rendered transparent until a white background was forced.
+- Native PDFium runtimes (Docnet.Core) may be blocked by application control
+  policies in managed Windows environments.
