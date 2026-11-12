@@ -147,6 +147,26 @@ public class EvalCliTests : IDisposable
         Assert.Contains("Fixed (4)", text.Stdout);
     }
 
+    /// <summary>
+    /// The scan does not enter <c>.ssh</c>, so its files are never listed; since the sensitive gaps were closed
+    /// the skipped folder itself carries the marker. The evaluation reads that marker for the files inside, on
+    /// both sides: the private key counts as found, and the public key next to it as a false alarm, because the
+    /// folder marker withholds it as well (issue 50; docs/evaluation.md).
+    /// </summary>
+    [Fact]
+    public async Task Eval_FilesInASkippedMarkedFolder_CarryTheMarkerOfTheFolder()
+    {
+        await GenerateAsync();
+        var perfect = (await OkAsync("eval", _corpus, "--stub", Path.Combine(_corpus, "truth.json"), "--json")).Result;
+        var failures = FailuresByKey(perfect);
+
+        Assert.DoesNotContain(Key(EvalKind.Sensitive, ".ssh/id_ed25519"), failures.Keys);
+        var pub = failures[Key(EvalKind.Sensitive, ".ssh/id_ed25519.pub")];
+        AssertFailure(pub, "wrong", EvalCodes.MarkerList(SensitiveMarker.None), EvalCodes.MarkerList(SensitiveMarker.Keys));
+        Assert.Contains("skipped folder .ssh", pub.GetProperty("detail").GetString());
+        Assert.Contains("dir:ssh", pub.GetProperty("decided_by").GetString());
+    }
+
     private static void AssertFailure(JsonElement failure, string outcome, string expected, string actual)
     {
         Assert.Equal(outcome, failure.GetProperty("outcome").GetString());
