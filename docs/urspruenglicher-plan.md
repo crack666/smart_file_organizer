@@ -1,3 +1,9 @@
+> **Historical document — not maintained.** This is the original planning
+> brief the project started from (moved here from `Plan.md` on 12.11.2026).
+> It describes intentions, not the current state. What exists today is in
+> [status-and-roadmap.md](status-and-roadmap.md); open work is tracked in the
+> milestones at https://github.com/crack666/smart_file_organizer/milestones.
+
 **ChatGPT:**
 
 Gern — hier ist eine saubere Vorlage für die nächste Agent-Coding-Session.
