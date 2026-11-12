@@ -60,6 +60,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IUserOverrideRepository, UserOverrideRepository>();
         services.AddSingleton<IDirectoryClassificationRepository, DirectoryClassificationRepository>();
         services.AddSingleton<IJobStatisticsRepository, JobStatisticsRepository>();
+        services.AddSingleton<IDirectoryVerdictRepository, DirectoryVerdictRepository>();
 
         // Infrastructure
         services.AddSingleton<IFileSystemAccessor, FileSystemAccessor>();
@@ -111,6 +112,7 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<IDirectoryRepository>(),
             sp.GetRequiredService<IFileRepository>(),
             sp.GetRequiredService<IDirectoryClassificationRepository>(),
+            sp.GetRequiredService<IDirectoryVerdictRepository>(),
             sp.GetRequiredService<IOllamaService>(),
             () => sp.GetRequiredService<OllamaOptions>().MaxParallelRequests,
             sp.GetRequiredService<DirectoryAnalysisOptions>(),

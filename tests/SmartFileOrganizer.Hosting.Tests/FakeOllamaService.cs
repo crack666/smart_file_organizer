@@ -39,11 +39,11 @@ internal sealed class FakeOllamaService : IOllamaService
         });
     }
 
-    public Task<DirectoryClassificationResult> PreAssessDirectoryAsync(
+    public Task<DirectoryPreAssessmentOutcome> PreAssessDirectoryAsync(
         DirectoryPreAssessmentInput input, CancellationToken ct = default)
     {
         PreAssessedDirectories.Add(input.Directory.FullPath);
-        return Task.FromResult(new DirectoryClassificationResult
+        var assessment = new DirectoryClassificationResult
         {
             Phase = "pre_assessment",
             SamplingStrategy = "analyze_all",
@@ -51,7 +51,18 @@ internal sealed class FakeOllamaService : IOllamaService
             Homogeneity = "high",
             ModelUsed = "fake-model",
             AnalyzedAt = DateTime.UtcNow
-        });
+        };
+        var verdict = new DirectoryVerdict
+        {
+            Verdict = input.Profile.Suggests ?? DirectoryVerdictKind.Gemischt,
+            Source = VerdictSource.Modell,
+            Purpose = $"fake purpose of {input.Directory.Name}",
+            Retention = RetentionValue.Pruefen,
+            Reason = "fake reason",
+            ModelUsed = "fake-model",
+            JudgedAt = DateTime.UtcNow
+        };
+        return Task.FromResult(new DirectoryPreAssessmentOutcome(assessment, verdict));
     }
 
     public Task<DirectoryClassificationResult> SummarizeDirectoryAsync(

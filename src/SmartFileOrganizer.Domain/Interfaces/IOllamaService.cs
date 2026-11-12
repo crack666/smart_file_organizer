@@ -25,8 +25,11 @@ public interface IOllamaService
     /// </summary>
     Task WarmModelAsync(string? model = null, CancellationToken ct = default);
 
-    /// <summary>Phase 1: cheap text-only LLM call that assesses a directory's content and recommends a sampling strategy.</summary>
-    Task<DirectoryClassificationResult> PreAssessDirectoryAsync(DirectoryPreAssessmentInput input, CancellationToken ct = default);
+    /// <summary>
+    /// Phase 1: cheap text-only LLM call that judges a directory (verdict, purpose, retention, reason)
+    /// from its file list and profile, and recommends a sampling strategy. On failure both parts carry the error.
+    /// </summary>
+    Task<DirectoryPreAssessmentOutcome> PreAssessDirectoryAsync(DirectoryPreAssessmentInput input, CancellationToken ct = default);
 
     /// <summary>Phase 3: summarize a directory bottom-up from analyzed file results.</summary>
     Task<DirectoryClassificationResult> SummarizeDirectoryAsync(DirectorySummaryInput input, CancellationToken ct = default);

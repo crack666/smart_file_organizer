@@ -7,6 +7,9 @@ public class DirectoryFileInfo
     public string Name { get; set; } = string.Empty;
     public long Size { get; set; }
     public int FileType { get; set; }
+    /// <summary>Lower-case extension including the dot, or empty.</summary>
+    public string Extension { get; set; } = string.Empty;
+    public DateTime LastWriteTime { get; set; }
 }
 
 public class DirectoryPreAssessmentInput
@@ -14,6 +17,8 @@ public class DirectoryPreAssessmentInput
     public DirectoryNode Directory { get; init; } = null!;
     public IReadOnlyList<DirectoryFileInfo> DirectFiles { get; init; } = [];
     public IReadOnlyList<string> SubdirectoryNames { get; init; } = [];
+    /// <summary>Facts computed without the model; sent along so the model judges from them, not from names alone.</summary>
+    public DirectoryProfile Profile { get; init; } = new();
 }
 
 public class DirectorySummaryInput
