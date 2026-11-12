@@ -421,13 +421,16 @@ public static partial class LibraryMatcher
         var children = p.Children.Where(c => c.Files > 0 || c.Dump is not null).ToList();
         if (children.Count == 0)
             return new SignalResult(MatchSignal.Siblings, 0, weight, false, false, false, "no folders with content here");
-        var same = children.Where(c => c.Role == unit.Role).ToList();
+        // Loose files with a time also fit next to year folders: they would get one of their own.
+        var byYear = !unit.KeepWhole && unit.From is not null && children.Count(c => c.Role == FolderRole.Time) * 2 > children.Count;
+        var role = byYear ? FolderRole.Time : unit.Role;
+        var same = children.Where(c => c.Role == role).ToList();
         var share = (double)same.Count / children.Count;
         var agrees = same.Count > 0 && share >= o.MinSiblingShare;
         var examples = same.Take(2).Select(c => c.Name).ToList();
         var detail = same.Count == 0
-            ? $"none of the {children.Count} folders here are {LibraryMap.RoleWords(unit.Role)}"
-            : $"{same.Count} of {children.Count} folders here are {LibraryMap.RoleWords(unit.Role)} ({string.Join(", ", examples)})";
+            ? $"none of the {children.Count} folders here are {LibraryMap.RoleWords(role)}"
+            : $"{same.Count} of {children.Count} folders here are {LibraryMap.RoleWords(role)} ({string.Join(", ", examples)})";
         return new SignalResult(MatchSignal.Siblings, share, weight, agrees, agrees, false, detail);
     }
 

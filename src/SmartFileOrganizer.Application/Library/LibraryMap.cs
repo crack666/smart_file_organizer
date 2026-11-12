@@ -267,8 +267,13 @@ public sealed partial class LibraryMap
             return;
         }
 
-        // A folder of named folders with content is a collection, judged by what its children are.
-        var named = e.Children.Where(c => c.Files > 0 && !patterns.IsGenericName(c.Name)).ToList();
+        // A folder of named folders with content is a collection, judged by what its children are. Area names such as
+        // "Fotos" count as named here; camera folders, bare dates and "Tag 1" do not (an occasion split by day).
+        // Year folders count too: a folder of years is a collection of times.
+        var named = e.Children.Where(c => c.Files > 0 && LibraryRules.PlaceholderKind(c.Name, words) is null
+                                          && (c.Role == FolderRole.Time
+                                              || !patterns.GenericRegexes.Any(r => r.IsMatch(c.Name.Trim())) && c.Name.Count(char.IsLetter) >= 3))
+            .ToList();
         if (named.Count >= 2 && e.DirectFiles * 2 <= e.Files)
         {
             e.Role = FolderRole.Collection;
@@ -355,7 +360,7 @@ public sealed partial class LibraryMap
     {
         if (e.From is not { } from || e.To is not { } to) return string.Empty;
         return e.TimeSource == Domain.Enums.TimeSource.FileName
-            ? $", taken {Day(from)} to {Day(to)}"
+            ? from.Date == to.Date ? $", taken {Day(from)}" : $", taken {Day(from)} to {Day(to)}"
             : from.Year == to.Year ? $", files from {from.Year}" : $", files from {from.Year} to {to.Year}";
     }
 
