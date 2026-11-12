@@ -43,9 +43,8 @@ public class HostingTests : IDisposable
         if (ollama != null)
             services.AddSingleton<IOllamaService>(ollama);
 
-        // The temp directory lives under "AppData" on Windows, which the default skip patterns
-        // match anywhere in the path. Scan rules are not under test here.
-        services.AddSingleton(new HeuristicsOptions { SkipPatterns = [] });
+        // Default scan rules on purpose: the temp directory lives under "AppData" on Windows,
+        // and folders above the scan root must not cause a skip.
         return services.BuildServiceProvider();
     }
 
