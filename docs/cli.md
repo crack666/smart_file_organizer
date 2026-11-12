@@ -365,6 +365,118 @@ the shipped rules. Without `--json` the output is a valid rule file, so
 `sfo rules show > my-disk.json` starts a profile. With `--json`, `result` is
 `{ "rules": { "name", "source", "hash" }, "content": { ...the rule file... } }`.
 
+### `sfo eval <corpus>`
+
+Scans `<corpus>/<root>` (from `<corpus>/truth.json`) into a new job, runs the pre-assessment and
+the classification, and scores directory verdicts, categories and sensitive markers against the
+truth. The run is stored for `--compare`. Corpus, truth format and what counts:
+[evaluation.md](evaluation.md).
+
+| Option | Meaning |
+|---|---|
+| `--stub <answers.json>` | Answer from this file instead of Ollama. Same shape as `truth.json`; the truth itself is a perfect answer sheet. |
+| `--model <name>` | Ollama model for this run. Not saved. |
+| `--parallel <n>` | Concurrent Ollama requests for this run, 1 to 8. |
+
+```bash
+sfo eval ~/sfo-eval --db ~/sfo-eval.db --json
+```
+
+```json
+{
+  "schema_version": 1,
+  "command": "eval",
+  "ok": true,
+  "exit_code": 0,
+  "result": {
+    "run_id": 4,
+    "mode": "corpus",
+    "subject": "small v1 seed 36",
+    "job_id": 9,
+    "model": "gemma4:26b",
+    "stub": null,
+    "prompt_fingerprint": "c5304d1e2d5295a4",
+    "app_version": "1.0.0+525c535…",
+    "settings": { "ollama.max_parallel_requests": "4", "scan.rules": "default 3f9c…", "...": "" },
+    "scan_seconds": 0.41,
+    "analyze_seconds": 212.7,
+    "scores": [
+      { "kind": "directory_verdict", "total": 41, "hits": 35, "wrong": 6, "missing": 0, "accuracy": 0.8537, "sensitive": null },
+      { "kind": "file_category", "total": 49, "hits": 44, "wrong": 5, "missing": 0, "accuracy": 0.898, "sensitive": null },
+      { "kind": "sensitive", "total": 97, "hits": 93, "wrong": 3, "missing": 1, "accuracy": 0.9588,
+        "sensitive": { "expected_marked": 13, "fully_found": 10, "missed": 3, "false_alarms": 1 } }
+    ],
+    "failures": [
+      { "kind": "file_category", "key": "file_category:Fotos/2019 Skifahrt/IMG_20190212_101530.jpg",
+        "path": "Fotos/2019 Skifahrt/IMG_20190212_101530.jpg", "outcome": "wrong",
+        "expected": "photo", "actual": "screenshot", "decided_by": "model gemma4:26b", "detail": null }
+    ],
+    "untracked_count": 0,
+    "untracked": [],
+    "cases": null
+  },
+  "error": null
+}
+```
+
+(Numbers illustrative.) `kind` is `directory_verdict`, `file_category` or `sensitive`; `outcome`
+is `wrong` or `missing` (`hit` appears only in `cases`). `expected` and `actual` are codes; markers
+are comma-separated, `none` for no marker. `decided_by` is `rule <id>`, `model <name>`, both
+for markers, or `sample` when the sample check of the staged analysis raised a uniform folder to
+mixed or a file took its category from a confirmed sample. `key` is stable across runs. `untracked` lists (up to 50) paths the scan found that the
+truth does not list.
+
+Errors: `path_not_found` (1, corpus, truth or answer file), `truth_invalid` (1, with every problem
+in the message), `scan_failed` (1), `ollama_unavailable` (3), `cancelled` (130).
+
+### `sfo eval --cases`
+
+Runs every stored test case (corrections made in the review, see
+[evaluation.md](evaluation.md#test-cases-from-corrections)) against the current model and prompts,
+and stores the run. Accepts `--stub`, `--model`, `--parallel`. `result` has the shape above with
+`mode` `cases`, `job_id` and `scan_seconds` `null`, one score (`file_category`), and `cases`:
+
+```json
+"cases": [
+  { "case_id": 3, "kind": "file_category", "path": "/media/usb-stick/Fotos/IMG_0001.jpg",
+    "expected": "photo", "corrected_from": "screenshot", "actual": "photo", "outcome": "hit",
+    "sensitive": false, "detail": null }
+]
+```
+
+`corrected_from` is the model's answer when the human corrected it; `actual` is the answer now.
+No output ever contains the stored evidence. Progress phase: `eval_cases`.
+
+### `sfo eval --compare [<run> [<run>]]`
+
+Sets two stored runs side by side. No id: the newest run against the newest earlier run with the
+same mode and subject. One id: that run against the one before it. Two ids: the first as before,
+the second as after.
+
+```json
+"result": {
+  "before": { "id": 3, "mode": "corpus", "subject": "small v1 seed 36", "model": "gemma4:26b", "...": "" },
+  "after": { "id": 4, "...": "" },
+  "same_subject": true,
+  "changes": [ { "name": "model", "before": "gemma4:26b", "after": "other-model" } ],
+  "scores": [ { "kind": "file_category", "before_hits": 44, "before_total": 49, "before_accuracy": 0.898,
+                "after_hits": 46, "after_total": 49, "after_accuracy": 0.9388, "change": 0.0408 } ],
+  "fixed": [ { "kind": "file_category", "key": "...", "...": "failure of the earlier run" } ],
+  "new_failures": [ { "...": "failure of the later run" } ],
+  "still_failing": 3
+}
+```
+
+`changes` covers model, stub, prompt fingerprint, app version and every stored setting.
+Errors: `run_not_found` (1, unknown id or no earlier run to compare with).
+
+### `sfo eval generate <dir>`
+
+Writes the small built-in corpus to `<dir>` (must be empty or missing): `<dir>/tree/` and
+`<dir>/truth.json`. `--seed <n>` (default 36) selects the variant; the same seed gives the same
+corpus. `result`: `{ "directory", "truth", "root", "name", "generator_version", "seed",
+"directories", "files" }`. Errors: `output_not_empty` (1).
+
 ## Reading results
 
 Issue: https://github.com/crack666/smart_file_organizer/issues/6
@@ -686,7 +798,7 @@ one JSON object with `schema_version` and `type`:
 {"schema_version":1,"type":"log","level":"warning","category":"ClassificationService","message":"...","exception":null}
 ```
 
-`phase` is `scan`, `pre_assessment`, `classification`, `summary` or `compare`. Progress is throttled to
+`phase` is `scan`, `pre_assessment`, `classification`, `summary`, `compare` or `eval_cases`. Progress is throttled to
 one line per phase every 500 ms, plus the final line of a phase.
 
 **Exit codes.**
@@ -694,7 +806,7 @@ one line per phase every 500 ms, plus the final line of a phase.
 | Code | Meaning | `error.code` |
 |---|---|---|
 | 0 | Done | |
-| 1 | The command ran but could not do its job | `job_not_found`, `path_not_found`, `scan_failed`, `scan_not_completed`, `wrong_role`, `compare_incomplete`, `database_error`, `model_missing`, `rules_invalid`, `words_invalid`, `output_inside_job`, `export_failed`, `internal_error` |
+| 1 | The command ran but could not do its job | `job_not_found`, `path_not_found`, `scan_failed`, `scan_not_completed`, `wrong_role`, `compare_incomplete`, `database_error`, `model_missing`, `rules_invalid`, `words_invalid`, `output_inside_job`, `export_failed`, `truth_invalid`, `run_not_found`, `output_not_empty`, `internal_error` |
 | 2 | Wrong invocation: unknown command or option, missing or invalid value | `usage` |
 | 3 | Ollama not reachable | `ollama_unavailable` |
 | 130 | Interrupted with Ctrl+C; stored work stays and the command can be run again | `cancelled` |
@@ -711,7 +823,9 @@ The contract is enforced in one place, so a new command does not repeat it:
 2. In the handler, get services from `ctx.GetServicesAsync(ct)`, report progress through
    `ctx.Progress`, and return a `CommandOutcome`: `Success(result, text)` or
    `Fail(exitCode, ErrorCodes.X, message)`. Throwing `CliFailureException` does the same.
-   Never write to stdout.
+   Never write to stdout. A command that needs another service for one run (for example
+   `sfo eval --stub` replacing Ollama) calls `ctx.ConfigureServices` before the first
+   `GetServicesAsync`.
 3. Define the result as records in the command class; `CliJson` turns them into `snake_case`.
    Reuse `JobView` for jobs. A command that lists or prints files reuses `ReadOptions` (paging,
    filters, `--include-sensitive`) and gets its files from `JobReadService`, which applies

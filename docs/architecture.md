@@ -8,9 +8,11 @@ The repository is intentionally split into focused layers.
   - domain models, enums, and core interfaces
 - `src/SmartFileOrganizer.Application`
   - orchestration services and use-case oriented business logic
+  - `Evaluation/`: truth files, scoring against them (`CorpusEvaluator`), test cases from corrections (`EvalCaseService`), stored runs and comparison (`EvalRunService`), scripted answers instead of Ollama; see [evaluation.md](evaluation.md)
 - `src/SmartFileOrganizer.Infrastructure`
   - persistence and schema migrations, filesystem access, Ollama HTTP integration
   - `Content/`: UI-free file evidence extraction (`FileContentExtractor`), metadata readers (`MediaMetadataReader`, `AudioMetadataReader`, `OfficePropertiesReader`, `ArchiveListingReader`, `FileSignature`), optional video frames (`VideoFrameExtractor`), the model input builder (`AiClassificationInputPreparer`) and the checksums for the library comparison (`ContentHasher`)
+  - `Evaluation/`: generator of the small evaluation corpus (`SmallCorpusGenerator`) with minimal PNG and PDF writers
 - `src/SmartFileOrganizer.Scanning`
   - scan engine, heuristics, file type detection
   - `Rules/`: scan rule files (`ScanRulesFile`, `ScanRuleSet`) and the shipped `default-rules.json` (embedded); format in [scan-rules.md](scan-rules.md)
@@ -279,7 +281,7 @@ judges the members and resolves, so it spends the same calls as a run.
 
 Spec: [#9](https://github.com/crack666/smart_file_organizer/issues/9); the decision and its limits are in [engineering-decisions.md](engineering-decisions.md#8-sensitive-files-local-and-external-readers).
 
-- `SensitiveMarker` (Domain, flags) with fixed tokens in `SensitiveMarkerNames`: `zugangsdaten`, `schluessel`, `private_nachricht`, `ausweis`, `finanzen`, `gesundheit`. Database and JSON use the tokens, comma-separated, `NULL` for none.
+- `SensitiveMarker` (Domain, flags) with fixed tokens in `SensitiveMarkerNames`: `zugangsdaten`, `schluessel`, `private_nachricht`, `ausweis`, `finanzen`, `gesundheit`. Database and JSON use the tokens, comma-separated, `NULL` for none. Dapper cannot read an enum through a type handler (it calls `Enum.Parse`), so `SensitiveMarkerColumnMap` maps the column `sensitive_markers` of `file_nodes` to a private string property that parses the tokens, and `ClassificationRepository` reads it from `ai_results` under another name and parses it in `Row.Finish`; until 12.11.2026 every read of a folder with a `private_nachricht` marker failed.
 - `SensitiveFileRules` (Application/Sensitivity) runs in `ScanEngine` and `ScopedRefreshService` for every file: exact names, extensions, folders, keywords, and for files up to 256 KB that are not image, video, audio, archive, executable, font or database a header probe of the first 8 KB through `IFileSystemAccessor.ReadPrefix`. Result: `FileNode.SensitiveMarkers` and `SensitiveRule` (rule ids such as `name:id_rsa`, `header:private-key`).
 - The local model reports markers in the Phase 2 call (`FileClassification.SensitiveMarkers`).
 - `SensitiveOutputGuard` (Application/Sensitivity) is the single exit for file data:
@@ -337,7 +339,10 @@ Represents a scanned file, its metadata, and optional AI/user-derived enrichment
 Stores the AI/heuristic classification result for a file.
 
 ### `UserOverride`
-Stores a manual correction to category/target decisions.
+Stores a manual correction to category/target decisions. A category that differs from the model's answer is also kept as an `EvalCase`.
+
+### `EvalCase` and `EvalRun`
+A correction kept as a test case with the evidence the model saw, and a stored evaluation run with model, prompt fingerprint, settings and report.
 
 ## Persistence model
 
@@ -369,6 +374,12 @@ Important tables:
 - `comparisons` — one row per compared pair of source job and library job (`against_job_id` null: duplicates only), with `complete` and `error_count`
 - `comparison_files` — per source file: `state` (`backed_up`, `new`, `differs`, `error`; null without library), `match_file_node_id`, `match_count`, `match_hash`, `match_verified_at`, `duplicate_group`, `error`
 - `library_advice` — model answers of `sfo library` (step 8): `job_id`, `task` (`review`/`propose`), `input_hash`, `model`, `created_at`, `content`, `raw_response`, `error`
+- `eval_cases` — test cases from corrections (step 9): `kind`, `origin`, `job_id`, `file_node_id`,
+  `subject_path`, `relative_path`, `expected`, `observed`, `observed_model`, `sensitive_markers`,
+  `evidence_json` (what the model saw; `NULL` for sensitive files), `created_at`, `updated_at`; one
+  row per kind, job and path. Local only, never exported ([evaluation.md](evaluation.md))
+- `eval_runs` — stored evaluation runs (step 9): `mode`, `subject`, `job_id`, `model`, `stub`,
+  `prompt_fingerprint`, `app_version`, `settings_json`, `report_json`, start and end
 - `db_version` — one row per applied schema step (`version`, `applied_at`)
 
 ## Schema migrations
@@ -385,7 +396,7 @@ The schema is built from numbered steps in `src/SmartFileOrganizer.Infrastructur
 1. Add one file `Migrations/M000N_ShortName.cs` with a class implementing `ISchemaMigration`, or deriving from `SqlSchemaMigration` when plain SQL is enough. `Version` is `N`.
 2. Take the next free number on `master`. Steps are discovered by reflection, so no shared list is edited.
 3. Versions must be exactly `1..N`. If two branches picked the same number, startup and `SchemaMigrationTests` fail with a "Duplicate schema migration versions" message; the branch merged second renumbers its step (file name and `Version`).
-4. Never change a step that has been merged; add a new one. Step 1 (`M0001_InitialSchema`) is the schema as it existed before migrations. Step 2 (`M0002_SensitiveMarkers`) adds the sensitive-marker columns. Step 3 (`M0003_DirectoryVerdicts`) adds `directory_verdicts`. Step 4 (`M0004_ScanJobRules`) adds the scan rules of a job. Step 5 (`M0005_ContentComparison`) adds the comparison with the library. Step 6 (`M0006_DirectorySamples`) adds `directory_samples`, the escalation columns and the origin and keep-hint columns of `ai_results`; its new codes are English. Step 8 (`M0008_LibraryReview`) adds `scan_jobs.structure_only` and `library_advice`.
+4. Never change a step that has been merged; add a new one. Step 1 (`M0001_InitialSchema`) is the schema as it existed before migrations. Step 2 (`M0002_SensitiveMarkers`) adds the sensitive-marker columns. Step 3 (`M0003_DirectoryVerdicts`) adds `directory_verdicts`. Step 4 (`M0004_ScanJobRules`) adds the scan rules of a job. Step 5 (`M0005_ContentComparison`) adds the comparison with the library. Step 6 (`M0006_DirectorySamples`) adds `directory_samples`, the escalation columns and the origin and keep-hint columns of `ai_results`; its new codes are English. Step 7 (`M0007_FileFacts`) adds `file_facts` and `ai_results.evidence`. Step 8 (`M0008_LibraryReview`) adds `scan_jobs.structure_only` and `library_advice`. Step 9 (`M0009_Evaluation`) adds `eval_cases` and `eval_runs`.
 5. Do not put `PRAGMA journal_mode` or other transaction-incompatible statements in a step.
 
 ## Architectural rules
