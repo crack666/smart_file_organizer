@@ -161,6 +161,7 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<IOllamaService>(),
             () => sp.GetRequiredService<OllamaOptions>().MaxParallelRequests,
             sp.GetRequiredService<ILogger<DirectorySummaryService>>()));
+        services.AddSingleton<SmartFileOrganizer.Application.Sensitivity.SensitiveRulesBackfill>();
         services.AddSingleton<AiClassificationCoordinator>();
         services.AddSingleton<ReviewService>();
         services.AddSingleton<EvalCaseService>();

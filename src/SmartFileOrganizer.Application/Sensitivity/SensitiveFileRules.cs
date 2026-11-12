@@ -38,6 +38,13 @@ public readonly record struct SensitiveMatch(SensitiveMarker Markers, string? Ru
 /// </remarks>
 public static class SensitiveFileRules
 {
+    /// <summary>
+    /// Version of the rules that read the file (<see cref="MatchHeader"/>), stored per file in
+    /// <c>file_nodes.sensitive_rules_version</c>. Raise it when a header rule is added: the next analysis
+    /// then runs the rules again for older rows before their content reaches a model (<c>SensitiveRulesBackfill</c>).
+    /// </summary>
+    public const int Version = 1;
+
     /// <summary>Bytes read from the start of a file for the header rules.</summary>
     public const int HeaderProbeBytes = 8 * 1024;
 
@@ -297,6 +304,7 @@ public static class SensitiveFileRules
         var match = Detect(node.Name, node.ParentPath, node.FileType, node.Size, readPrefix);
         node.SensitiveMarkers = match.Markers;
         node.SensitiveRule = match.Rule;
+        node.SensitiveRulesVersion = Version;
     }
 
     private static bool ContainsPemPrivateKeyHeader(string text)

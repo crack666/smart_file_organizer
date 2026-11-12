@@ -36,6 +36,10 @@ public class FileNode
         set => SensitiveMarkers = SensitiveMarkerNames.Parse(value);
     }
 
+    /// <summary>Version of the file rules that ran on this row (<c>SensitiveFileRules.Version</c>); null for rows
+    /// scanned before versions were stored, whose header lines were possibly never checked.</summary>
+    public int? SensitiveRulesVersion { get; set; }
+
     // Navigation / denormalized for sorting/filtering
     public FileClassification? Classification { get; set; }
     public UserOverride? Override { get; set; }

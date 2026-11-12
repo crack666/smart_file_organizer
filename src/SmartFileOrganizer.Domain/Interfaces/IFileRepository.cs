@@ -27,4 +27,8 @@ public interface IFileRepository
     /// Returns the number of files released.
     /// </summary>
     Task<int> ReleaseFailedAsync(long jobId, CancellationToken ct = default);
+    /// <summary>Files of a job whose stored rule version is missing or lower than <paramref name="version"/>.</summary>
+    Task<IReadOnlyList<FileNode>> GetBelowRulesVersionAsync(long jobId, int version, CancellationToken ct = default);
+    /// <summary>Writes markers, rule id and rule version of the given files; nothing else.</summary>
+    Task UpdateSensitiveAsync(IReadOnlyList<FileNode> nodes, CancellationToken ct = default);
 }
