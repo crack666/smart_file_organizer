@@ -29,15 +29,18 @@ public static class FilesCommand
             "Category as shown in the output (unknown also matches unclassified files)");
         var status = ReadFormat.EnumOption<FileNodeStatus>("--status", "File status", PendingStatus);
         var type = ReadFormat.EnumOption<FileType>("--type", "File type");
-        var maxConfidence = new Option<double?>("--max-confidence")
+        // A string, parsed with the invariant culture: a typed double option follows the machine's culture
+        // and read "0.5" as 5 on a German system.
+        var maxConfidence = new Option<string?>("--max-confidence")
         {
-            Description = "Only files the model classified with at most this confidence (0 to 1). Files without a confidence are left out.",
+            Description = "Only files the model classified with at most this confidence (0 to 1, decimal point). Files without a confidence are left out.",
             HelpName = "value"
         };
         maxConfidence.Validators.Add(r =>
         {
-            if (r.GetValueOrDefault<double?>() is < 0 or > 1)
-                r.AddError("--max-confidence must be between 0 and 1.");
+            var text = r.GetValueOrDefault<string?>();
+            if (text is not null && ParseConfidence(text) is not (>= 0 and <= 1))
+                r.AddError("--max-confidence must be a number between 0 and 1, for example 0.5.");
         });
         var sort = new Option<string>("--sort")
         {
@@ -71,7 +74,7 @@ public static class FilesCommand
                 Categories = ReadFormat.ParseEnums<FileCategory>(p.GetValue(category)),
                 Statuses = statuses.Distinct().ToList(),
                 Types = ReadFormat.ParseEnums<FileType>(p.GetValue(type)),
-                MaxConfidence = p.GetValue(maxConfidence),
+                MaxConfidence = p.GetValue(maxConfidence) is { } text ? ParseConfidence(text) : null,
                 Sort = p.GetValue(sort) == "size" ? FileSort.Size : FileSort.Path
             }, ctx);
 
@@ -91,6 +94,11 @@ public static class FilesCommand
 
         return command;
     }
+
+    private static double? ParseConfidence(string text) =>
+        double.TryParse(text, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var value)
+            ? value
+            : null;
 
     private static string Render(PageView<FileListView> result, ReadPage<FileItem> page)
     {

@@ -14,6 +14,17 @@ public static class SummaryCommand
 {
     public sealed record FileCounts(long Total, long Pending, long Errors, long Sensitive, long TotalBytes);
 
+    /// <summary>
+    /// A large directory, kept short: the path relative to the job root (usable with
+    /// <c>dirs --under</c> and <c>show</c>) and codes only, no model text.
+    /// </summary>
+    public sealed record LargeDirectoryView(
+        string RelativePath, long SizeBytes, long Files, string? Verdict, string? Retention, long SensitiveFiles)
+    {
+        public static LargeDirectoryView From(DirectoryItem d) => new(
+            d.RelativePath, d.SizeBytes, d.Files, d.VerdictFilterCode, d.Retention, d.SensitiveFiles);
+    }
+
     public sealed record SummaryResult(
         JobView Job,
         long Directories,
@@ -24,7 +35,7 @@ public static class SummaryCommand
         IReadOnlyDictionary<string, long> BySensitiveMarker,
         IReadOnlyDictionary<string, long> DirectoriesByVerdict,
         IReadOnlyDictionary<string, long> DirectoriesByRetention,
-        IReadOnlyList<DirectoryView> LargestDirectories);
+        IReadOnlyList<LargeDirectoryView> LargestDirectories);
 
     public static Command Create(CliHost host, GlobalOptions globals)
     {
@@ -70,7 +81,7 @@ public static class SummaryCommand
                 summary.BySensitiveMarker,
                 summary.DirectoriesByVerdict,
                 summary.DirectoriesByRetention,
-                summary.LargestDirectories.Select(DirectoryView.From).ToList());
+                summary.LargestDirectories.Select(LargeDirectoryView.From).ToList());
             return CommandOutcome.Success(result, () => Render(result));
         });
 
@@ -93,7 +104,9 @@ public static class SummaryCommand
         {
             sb.AppendLine("  largest directories:");
             foreach (var d in r.LargestDirectories)
-                sb.AppendLine("  " + d.ToLine());
+                sb.AppendLine($"  {ReadFormat.Size(d.SizeBytes),10}  {d.Files,7} files  {d.Verdict,-11} {d.Retention ?? "-",-11}"
+                              + (d.SensitiveFiles > 0 ? $" [{d.SensitiveFiles} sensitive]" : string.Empty)
+                              + $"  {d.RelativePath}");
         }
         return sb.ToString().TrimEnd();
     }
