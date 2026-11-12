@@ -1,0 +1,96 @@
+using System.CommandLine;
+using Microsoft.Extensions.DependencyInjection;
+using SmartFileOrganizer.Application.Services;
+using SmartFileOrganizer.Cli.Contract;
+using SmartFileOrganizer.Domain.Enums;
+using SmartFileOrganizer.Domain.Interfaces;
+
+namespace SmartFileOrganizer.Cli.Commands;
+
+/// <summary><c>sfo scan &lt;path&gt;</c> or <c>sfo scan --resume &lt;job&gt;</c>.</summary>
+public static class ScanCommand
+{
+    public sealed record ScanResult(JobView Job, bool Resumed);
+
+    public static Command Create(CliHost host, GlobalOptions globals)
+    {
+        var path = new Argument<string?>("path")
+        {
+            Description = "Folder to scan. Creates a new job.",
+            Arity = ArgumentArity.ZeroOrOne
+        };
+        var resume = new Option<long?>("--resume")
+        {
+            Description = "Continue an interrupted job instead of creating a new one.",
+            HelpName = "job"
+        };
+
+        var command = new Command("scan", "Create a scan job for a folder and scan it, or resume a job.")
+        {
+            path,
+            resume
+        };
+        command.Validators.Add(result =>
+        {
+            var hasPath = !string.IsNullOrWhiteSpace(result.GetValue(path));
+            var hasResume = result.GetValue(resume) != null;
+            if (hasPath == hasResume)
+                result.AddError("Give either a path or --resume <job>, not both and not neither.");
+        });
+
+        CommandRunner.SetHandler(command, host, globals, async (ctx, ct) =>
+        {
+            var services = await ctx.GetServicesAsync(ct);
+            var jobs = services.GetRequiredService<ScanJobService>();
+
+            long jobId;
+            var resumeId = ctx.ParseResult.GetValue(resume);
+            if (resumeId is { } id)
+            {
+                jobId = (await JobArguments.RequireJobAsync(jobs, id, ct)).Id;
+            }
+            else
+            {
+                var root = Path.GetFullPath(ctx.ParseResult.GetValue(path)!);
+                if (!Directory.Exists(root))
+                    throw new CliFailureException(ExitCodes.Failure, ErrorCodes.PathNotFound, $"Folder not found: {root}");
+                jobId = (await jobs.CreateJobAsync(root, ct)).Id;
+                ctx.Note($"Created job {jobId} for {root}");
+            }
+
+            var progress = new SynchronousProgress<ScanProgress>(p =>
+                ctx.Progress.Report("scan", p.ProcessedFiles, p.TotalFiles, p.ErrorCount, p.CurrentPath));
+
+            try
+            {
+                var job = await jobs.RunAsync(jobId, progress, ct);
+                var result = new ScanResult(JobView.From(job), resumeId != null);
+                return job.Status switch
+                {
+                    JobStatus.Completed => CommandOutcome.Success(result, () => result.Job.ToLine()),
+                    JobStatus.Failed => CommandOutcome.Fail(ExitCodes.Failure, ErrorCodes.ScanFailed,
+                        $"Scan of job {jobId} failed: {job.LastError}", result, () => result.Job.ToLine()),
+                    _ => CommandOutcome.Fail(ExitCodes.Failure, ErrorCodes.ScanFailed,
+                        $"Scan of job {jobId} ended as {job.Status}.", result, () => result.Job.ToLine())
+                };
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                var job = await jobs.GetJobAsync(jobId, CancellationToken.None);
+                var result = job == null ? null : new ScanResult(JobView.From(job), resumeId != null);
+                return CommandOutcome.Cancelled(
+                    $"Scan interrupted. Resume with: sfo scan --resume {jobId}",
+                    result,
+                    result == null ? null : () => result.Job.ToLine());
+            }
+        });
+
+        return command;
+    }
+}
+
+/// <summary>Reports on the calling thread, so no report arrives after the run returned.</summary>
+internal sealed class SynchronousProgress<T>(Action<T> report) : IProgress<T>
+{
+    public void Report(T value) => report(value);
+}
