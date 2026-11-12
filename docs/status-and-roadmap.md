@@ -185,6 +185,26 @@ against two temp folders and a temp database._
   per-directory counts say which ones need no analysis
   (https://github.com/crack666/smart_file_organizer/issues/42).
 
+### Bundles
+
+_Checked 12.11.2026 on the branch for
+https://github.com/crack666/smart_file_organizer/issues/39, rebased on master after the library review, the evaluation corpus and the second check (bundles migration is step 11):
+`dotnet test` 483 passed; `sfo scan`, `bundles build`, `bundles list`, `bundles show` and `summary` run by hand
+with `--json` on a generated tree (a phone copy nested in two folders, 60 loose photos from three periods, one
+named folder) against a temp database, output checked with a JSON parser: one `phone` dump with `camera`,
+`chat_media` and noise parts, three events of 20, one folder._
+
+- `sfo bundles build <job>` groups a scanned job without a model: dumps (`phone`, `computer`,
+  `removable_drive`, `software`) with worth-keeping parts and noise, named folders taken as they are, loose
+  photos and videos as events by pauses (capture date from `file_facts`, else date in the name, else
+  modification time). `sfo bundles list|show`, `sfo files --bundle`, and `summary` with and without dumps;
+  see [bundles.md](bundles.md).
+- Capture dates exist only after `sfo analyze` has run Phase 2 on the photos; for a job that was only
+  scanned, events rest on names and modification times (`period.time_source` says which).
+- Not yet used by anything else: findings
+  (https://github.com/crack666/smart_file_organizer/issues/26) and the plan
+  (https://github.com/crack666/smart_file_organizer/issues/11) are meant to work per bundle.
+
 ### Known limits
 
 - PDFs: embedded text of the first pages up to 6,000 characters, page 1 as

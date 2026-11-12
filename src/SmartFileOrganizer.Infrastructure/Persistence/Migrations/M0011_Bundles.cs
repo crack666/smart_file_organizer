@@ -1,7 +1,7 @@
 namespace SmartFileOrganizer.Infrastructure.Persistence.Migrations;
 
 /// <summary>
-/// Step 10: bundles, the units the person decides once (https://github.com/crack666/smart_file_organizer/issues/39).
+/// Step 11: bundles, the units the person decides once (https://github.com/crack666/smart_file_organizer/issues/39).
 /// <list type="bullet">
 /// <item><c>bundles</c>: one row per bundle, as a tree per job (<c>parent_bundle_id</c>). <c>kind</c>, <c>origin</c>,
 /// <c>part</c> and <c>time_source</c> are fixed English codes; <c>facts_json</c> holds distributions, markers and
@@ -11,9 +11,9 @@ namespace SmartFileOrganizer.Infrastructure.Persistence.Migrations;
 /// </list>
 /// A rescan of a directory or deleting the job drops the bundles of the job; they are built again on request.
 /// </summary>
-internal sealed class M0010_Bundles : SqlSchemaMigration
+internal sealed class M0011_Bundles : SqlSchemaMigration
 {
-    public override int Version => 10;
+    public override int Version => 11;
     public override string Description => "Bundles: dumps, folders and events per job";
 
     protected override string Sql => """

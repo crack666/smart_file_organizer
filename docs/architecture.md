@@ -9,6 +9,7 @@ The repository is intentionally split into focused layers.
 - `src/SmartFileOrganizer.Application`
   - orchestration services and use-case oriented business logic
   - `Evaluation/`: truth files, scoring against them (`CorpusEvaluator`), test cases from corrections (`EvalCaseService`), stored runs and comparison (`EvalRunService`), scripted answers instead of Ollama; see [evaluation.md](evaluation.md)
+  - `Bundles/`: the bundle builder (`BundleBuilder`, `EventGrouper`, `FileNameDates`) and its shipped `bundle-patterns.json` (embedded); see [bundles.md](bundles.md)
 - `src/SmartFileOrganizer.Infrastructure`
   - persistence and schema migrations, filesystem access, Ollama HTTP integration
   - `Content/`: UI-free file evidence extraction (`FileContentExtractor`), metadata readers (`MediaMetadataReader`, `AudioMetadataReader`, `OfficePropertiesReader`, `ArchiveListingReader`, `FileSignature`), optional video frames (`VideoFrameExtractor`), the model input builder (`AiClassificationInputPreparer`) and the checksums for the library comparison (`ContentHasher`)
@@ -111,6 +112,20 @@ A scan job has a role (`ScanJob.Role`, column `scan_jobs.role`): `source`, a med
 6. Stores checksums in `content_fingerprints` (by path, reused while size and modification time match, flushed every 256 entries and on cancel) and the result in `comparisons`/`comparison_files`, replacing an earlier result for the same pair.
 
 `ContentComparisonService.GetStoredAsync(sourceJobId, againstJobId)` reads a stored result back, with duplicate groups, per-directory counts (`SummarizeDirectories`, recursive) and errors (file errors plus directories the scans could not read). Later steps (target suggestions, findings) read the comparison through this method.
+
+## Bundle flow
+
+Issue: https://github.com/crack666/smart_file_organizer/issues/39; rules and thresholds in [bundles.md](bundles.md).
+
+`BundleService.BuildAsync(jobId, options?, ct)` (Application) needs a `completed` job. It reads the directories and
+files through `IJobReadRepository`, capture date, device and image origin through `ICaptureInfoSource`
+(`FileFactCaptureInfoSource` reads the `taken_at`, `device` and `image_origin` rows of `file_facts`), and runs
+`BundleBuilder` in memory: dumps by `DumpSignature` (outermost match wins), their parts by `keep_parts` and
+`noise_paths`, named folders by `IsGenericName`, events by `EventGrouper`. `IBundleRepository.ReplaceAsync` stores
+the tree in one transaction. `ListAsync` and `GetAsync` add, when read, the marked files per bundle
+(`SensitiveOutputGuard.GetMatch`, rolled up along `parent_bundle_id`) and the comparison states of the latest
+comparison with a library. `JobReadService.ListFilesAsync` filters by a bundle and its descendants
+(`FileListFilter.BundleIds`), so files of a bundle pass the output guard like every other listing.
 
 ## AI flow (current architecture)
 
@@ -446,6 +461,13 @@ Important tables:
   row per kind, job and path. Local only, never exported ([evaluation.md](evaluation.md))
 - `eval_runs` — stored evaluation runs (step 9): `mode`, `subject`, `job_id`, `model`, `stub`,
   `prompt_fingerprint`, `app_version`, `settings_json`, `report_json`, start and end
+- `bundles` — one row per bundle (step 11): `job_id`, `parent_bundle_id`, `kind` (`dump`, `dump_keep`, `dump_noise`,
+  `folder`, `event`, `scattered`), `origin`, `part`, `root_path`, `root_directory_node_id`, `suggested_name`,
+  `styled_name` (empty until a model names bundles), `first_time`/`last_time` (local wall-clock time), `time_source`,
+  `file_count`, `total_bytes`, `directory_count`, `empty_directory_count`, `reason`, `facts_json`, `built_at`
+- `bundle_files` — the bundle each file belongs to directly (step 11); a file is in at most one
+- `bundle_builds` — per job the last build (step 11): `built_at`, `settings_json`, `stats_json` (with and without dumps).
+  Bundles of a job are dropped with a rescan of one of its directories and with the job
 - `db_version` — one row per applied schema step (`version`, `applied_at`)
 
 ## Schema migrations
@@ -462,8 +484,7 @@ The schema is built from numbered steps in `src/SmartFileOrganizer.Infrastructur
 1. Add one file `Migrations/M000N_ShortName.cs` with a class implementing `ISchemaMigration`, or deriving from `SqlSchemaMigration` when plain SQL is enough. `Version` is `N`.
 2. Take the next free number on `master`. Steps are discovered by reflection, so no shared list is edited.
 3. Versions must be exactly `1..N`. If two branches picked the same number, startup and `SchemaMigrationTests` fail with a "Duplicate schema migration versions" message; the branch merged second renumbers its step (file name and `Version`).
-<<<<<<< HEAD
-4. Never change a step that has been merged; add a new one. Step 1 (`M0001_InitialSchema`) is the schema as it existed before migrations. Step 2 (`M0002_SensitiveMarkers`) adds the sensitive-marker columns. Step 3 (`M0003_DirectoryVerdicts`) adds `directory_verdicts`. Step 4 (`M0004_ScanJobRules`) adds the scan rules of a job. Step 5 (`M0005_ContentComparison`) adds the comparison with the library. Step 6 (`M0006_DirectorySamples`) adds `directory_samples`, the escalation columns and the origin and keep-hint columns of `ai_results`; its new codes are English. Step 7 (`M0007_FileFacts`) adds `file_facts` and `ai_results.evidence`. Step 8 (`M0008_LibraryReview`) adds `scan_jobs.structure_only` and `library_advice`. Step 9 (`M0009_Evaluation`) adds `eval_cases` and `eval_runs`. Step 10 (`M0010_ResultChecks`) adds certainty, attempts and previous error to `ai_results` and the table `result_checks`.
+4. Never change a step that has been merged; add a new one. Step 1 (`M0001_InitialSchema`) is the schema as it existed before migrations. Step 2 (`M0002_SensitiveMarkers`) adds the sensitive-marker columns. Step 3 (`M0003_DirectoryVerdicts`) adds `directory_verdicts`. Step 4 (`M0004_ScanJobRules`) adds the scan rules of a job. Step 5 (`M0005_ContentComparison`) adds the comparison with the library. Step 6 (`M0006_DirectorySamples`) adds `directory_samples`, the escalation columns and the origin and keep-hint columns of `ai_results`; its new codes are English. Step 7 (`M0007_FileFacts`) adds `file_facts` and `ai_results.evidence`. Step 8 (`M0008_LibraryReview`) adds `scan_jobs.structure_only` and `library_advice`. Step 9 (`M0009_Evaluation`) adds `eval_cases` and `eval_runs`. Step 10 (`M0010_ResultChecks`) adds certainty, attempts and previous error to `ai_results` and the table `result_checks`. Step 11 (`M0011_Bundles`) adds `bundles`, `bundle_files` and `bundle_builds`.
 5. Do not put `PRAGMA journal_mode` or other transaction-incompatible statements in a step.
 
 ## Architectural rules

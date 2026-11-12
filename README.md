@@ -42,6 +42,9 @@ dotnet run --project src/SmartFileOrganizer.Cli -- summary <job> --json
 # what on an old medium is not yet in the library, by content:
 dotnet run --project src/SmartFileOrganizer.Cli -- scan <library> --role library
 dotnet run --project src/SmartFileOrganizer.Cli -- compare <job> --against <library-job>
+# decide in bundles: phone and computer copies, named folders, events (docs/bundles.md):
+dotnet run --project src/SmartFileOrganizer.Cli -- bundles build <job>
+dotnet run --project src/SmartFileOrganizer.Cli -- bundles list <job> --json
 ```
 
 To judge how an existing library is filed, without opening a file and
