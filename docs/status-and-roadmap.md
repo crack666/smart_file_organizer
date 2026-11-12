@@ -50,10 +50,16 @@ line said 47 before) and in CI on Windows and Linux._
 
 ### AI pipeline (three phases, run after the scan, never inside it)
 
-1. **Directory pre-assessment** (`DirectoryPreAssessmentService`): sends the
-   file list of each directory to Ollama and gets a sampling strategy
+1. **Directory verdict and pre-assessment** (`DirectoryPreAssessmentService`,
+   since 12.11.2026 by [#7](https://github.com/crack666/smart_file_organizer/issues/7)):
+   every directory gets a verdict (`einheit`, `einheitlich`, `gemischt`, `leer`,
+   `system`) with purpose, retention, reason and the profile it rests on, stored
+   in `directory_verdicts`. Clear cases are decided by rule without Ollama; the
+   rest in one Ollama call that also returns the sampling strategy
    (`analyze_all`, `random_sample`, `skip`). Files not sampled are marked
-   `Skipped`. Stored in `ai_directory_results` with phase `pre_assessment`.
+   `Skipped`. Sampling stored in `ai_directory_results` with phase
+   `pre_assessment`. Not yet shown in the GUI
+   ([#14](https://github.com/crack666/smart_file_organizer/issues/14)) or the CLI.
 2. **Per-file classification** (`ClassificationService`,
    `OllamaService`): images as base64 (default limit 10 MB), documents as
    extracted text or first PDF page rendered to an image (default limit
@@ -132,7 +138,9 @@ sessions of April 2026 and were not re-measured._
   in the same folder.
 - **Stale AI results.** Phases treat existing `ai_directory_results` rows as
   done. After changing the AI pipeline, start a new scan job or delete the
-  database, otherwise old results are reused.
+  database, otherwise old results are reused. Exception: Phase 1 decides by
+  `directory_verdicts`, so jobs analysed before #7 get their verdicts (and one
+  Ollama call per undecided directory) on the next AI run.
 - **Model warm-up.** The first request to a large vision model waits for it
   to load into VRAM. Warm-up and a long `KeepAlive` (default `60m`) help;
   Ollama still unloads after idle time or a restart.
