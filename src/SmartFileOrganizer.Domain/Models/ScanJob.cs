@@ -6,6 +6,10 @@ public class ScanJob
 {
     public long Id { get; set; }
     public string RootPath { get; set; } = string.Empty;
+
+    /// <summary>Set when the job is created and never changed afterwards.</summary>
+    public ScanRole Role { get; set; } = ScanRole.Source;
+
     public JobStatus Status { get; set; } = JobStatus.Created;
     public DateTime CreatedAt { get; set; }
     public DateTime? StartedAt { get; set; }

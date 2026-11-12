@@ -43,8 +43,16 @@ stores it at the job; without it the shipped rules are used. With `--resume`, ru
 differ from the stored ones switch the job to them, reopen it even if it was completed, and
 re-evaluate the folders stored as skipped or shallow; `rules_changed` is then `true`.
 
+| Option | Meaning |
+|---|---|
+| `--role source\|library` | Only with `<path>`. `source` (default): a medium to clean up. `library`: the user's organised archive (NAS, a folder on disk); it is only read, never changed and never analysed by a model (`sfo analyze` refuses it with `wrong_role`). The role is fixed when the job is created. |
+
+A directory the scan cannot read (access denied, network path gone) is stored with that error
+and counted in `error_count` instead of looking empty; the scan itself continues and completes.
+
 ```bash
 sfo scan /media/usb-stick --json
+sfo scan /mnt/nas/library --role library --json
 ```
 
 ```json
@@ -57,6 +65,7 @@ sfo scan /media/usb-stick --json
     "job": {
       "id": 7,
       "root_path": "/media/usb-stick",
+      "role": "source",
       "status": "completed",
       "created_at": "2026-11-12T13:36:42.138Z",
       "started_at": "2026-11-12T13:36:42.176Z",
@@ -118,7 +127,7 @@ sfo analyze 7 --phase classification --parallel 2 --json
 
 Errors of single files or directories do not fail the command; they are counted here and
 listed by `sfo status`. Failures: `ollama_unavailable` (3), `scan_not_completed` (1),
-`job_not_found` (1), `cancelled` (130).
+`job_not_found` (1), `wrong_role` (1, the job is a `library`), `cancelled` (130).
 
 ### `sfo jobs`
 
@@ -177,6 +186,92 @@ For each AI phase, `total = done + errors + pending + skipped`.
   scan rules and not hidden (name starting with a dot).
 - `classification` counts files of the types it handles (image, video, document). `skipped`
   are files the pre-assessment chose not to sample.
+
+### `sfo compare <job> --against <job>`
+
+Which files of a `source` scan are already in the `library` (the user's organised archive), by
+content, not by name. Codes in JSON and on the command line are English; this command never
+deletes or changes anything. Both scans must be `completed` and both roots reachable. Issue:
+https://github.com/crack666/smart_file_organizer/issues/24
+
+| Option | Meaning |
+|---|---|
+| `--against <job>` | The `library` job. Without it, only duplicates within the source are found and every `state` is `null`. |
+| `--files <state>` | List the files with this state (`backed_up`, `new`, `differs`, `error`, or `all`). Repeatable. Default: no file list. |
+| `--limit <n>` | Maximum entries per list (`directories`, `errors`, `duplicates.groups`, `files`); default 100, `0` lists everything. The `*_total` fields count all. |
+
+State per source file:
+
+| `state` | Meaning |
+|---|---|
+| `backed_up` | A file with exactly the same content is in the library: the full SHA-256 of both files is equal (head and tail alone never count). `match_path` is one of them (first by path), `match_count` how many, `match_hash` the shared full SHA-256 and `match_verified_at` the older of the two times that checksum was computed from the files (possibly in an earlier run, see the cache below). A step that deletes the source file must read both files again and compare with `match_hash` first. |
+| `new` | No library file has this content, and none has the same name in a folder of the same name. |
+| `differs` | Not in the library by content, but a file with the same name lies in a folder of the same name there (`match_path`): probably another version. |
+| `error` | The content could not be determined: the source file is unreadable, gone or changed since its scan, or a library file of the same size that could hold this content cannot be read. `error` says which. Never counted as `new` or `backed_up`. |
+
+How content is compared, so a large library on a network drive is read as little as possible:
+size first; for files sharing a size, SHA-256 over the size and the first and last 64 KiB; only
+where those agree, SHA-256 over the whole file. Files up to 128 KiB are read whole at once.
+Checksums are stored per path and reused while size and modification time are unchanged, so a
+second run without changes reads no file content (`hashing` shows the counts). A file never
+matches itself, even when the source lies inside the library.
+
+`duplicates` groups source files with identical content (empty files excluded); a file's
+`duplicate_group` points to its group. `directories` counts each source directory including its
+subdirectories: a directory with `backed_up_share` 1.0 is fully in the library and needs no model
+analysis; otherwise only its files that are not `backed_up` do.
+
+```bash
+sfo compare 7 --against 8 --files new --files error --json
+```
+
+```json
+{
+  "schema_version": 1,
+  "command": "compare",
+  "ok": true,
+  "exit_code": 0,
+  "result": {
+    "comparison_id": 3,
+    "source": { "id": 7, "root_path": "/media/usb-stick", "role": "source", "...": "same fields as scan" },
+    "against": { "id": 8, "root_path": "/mnt/nas/library", "role": "library", "...": "same fields as scan" },
+    "compared_at": "2026-11-12T15:02:11.410Z",
+    "complete": true,
+    "counts": { "files": 1830, "backed_up": 1712, "new": 101, "differs": 17, "errors": 0 },
+    "duplicates": {
+      "groups_total": 1, "files": 2,
+      "groups": [ { "group": 1, "size": 48211, "paths": [ "/media/usb-stick/a.jpg", "/media/usb-stick/copy/a.jpg" ] } ]
+    },
+    "directories_total": 112,
+    "directories": [
+      { "path": "/media/usb-stick", "files": 1830, "backed_up": 1712, "new": 101, "differs": 17, "errors": 0,
+        "backed_up_share": 0.9355 }
+    ],
+    "errors_total": 0,
+    "errors": [],
+    "files_total": 101,
+    "files": [
+      { "path": "/media/usb-stick/notes/2014.txt", "state": "new", "match_path": null, "match_count": 0,
+        "match_hash": null, "match_verified_at": null, "duplicate_group": null, "error": null }
+    ],
+    "hashing": { "head_tail_computed": 240, "full_computed": 1716, "reused": 0 }
+  },
+  "error": null
+}
+```
+
+Errors are listed in `errors` with `role` (`source` or `library`), `kind` (`scan`: a directory the
+scan could not read, so its files are missing from the job; `read`: a file that could not be read
+now) and `path`. If there is any, `complete` is `false` and the command exits 1 with
+`compare_incomplete`; the result is still returned and stored. Other failures: `job_not_found` (1),
+`scan_not_completed` (1), `wrong_role` (1, the first job is not a `source` or `--against` not a
+`library`), `path_not_found` (1, a root is not reachable), `cancelled` (130; checksums computed so
+far are kept).
+
+The result is stored per source and library job (a new run replaces it) and dropped when either
+job is deleted or a directory of it is rescanned. Not decided here: a file the library holds
+under the same content but whose scan was skipped by the scan rules counts as `new`; files that
+changed in the library after its scan are judged by the library scan's sizes.
 
 ### `sfo doctor`
 
@@ -506,7 +601,7 @@ one JSON object with `schema_version` and `type`:
 {"schema_version":1,"type":"log","level":"warning","category":"ClassificationService","message":"...","exception":null}
 ```
 
-`phase` is `scan`, `pre_assessment`, `classification` or `summary`. Progress is throttled to
+`phase` is `scan`, `pre_assessment`, `classification`, `summary` or `compare`. Progress is throttled to
 one line per phase every 500 ms, plus the final line of a phase.
 
 **Exit codes.**
@@ -514,7 +609,7 @@ one line per phase every 500 ms, plus the final line of a phase.
 | Code | Meaning | `error.code` |
 |---|---|---|
 | 0 | Done | |
-| 1 | The command ran but could not do its job | `job_not_found`, `path_not_found`, `scan_failed`, `scan_not_completed`, `database_error`, `model_missing`, `rules_invalid`, `export_failed`, `internal_error` |
+| 1 | The command ran but could not do its job | `job_not_found`, `path_not_found`, `scan_failed`, `scan_not_completed`, `wrong_role`, `compare_incomplete`, `database_error`, `model_missing`, `rules_invalid`, `export_failed`, `internal_error` |
 | 2 | Wrong invocation: unknown command or option, missing or invalid value | `usage` |
 | 3 | Ollama not reachable | `ollama_unavailable` |
 | 130 | Interrupted with Ctrl+C; stored work stays and the command can be run again | `cancelled` |

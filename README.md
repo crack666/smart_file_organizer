@@ -39,6 +39,9 @@ and models ([docs/cli.md](docs/cli.md)):
 dotnet run --project src/SmartFileOrganizer.Cli -- scan <folder>
 dotnet run --project src/SmartFileOrganizer.Cli -- status <job>
 dotnet run --project src/SmartFileOrganizer.Cli -- summary <job> --json
+# what on an old medium is not yet in the library, by content:
+dotnet run --project src/SmartFileOrganizer.Cli -- scan <library> --role library
+dotnet run --project src/SmartFileOrganizer.Cli -- compare <job> --against <library-job>
 ```
 
 ## Roadmap

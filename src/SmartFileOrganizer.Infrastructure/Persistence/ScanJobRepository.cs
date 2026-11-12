@@ -1,4 +1,5 @@
 using Dapper;
+using SmartFileOrganizer.Domain.Enums;
 using SmartFileOrganizer.Domain.Interfaces;
 using SmartFileOrganizer.Domain.Models;
 
@@ -17,19 +18,22 @@ public class ScanJobRepository : IScanJobRepository
 
         var sql = """
             INSERT INTO scan_jobs
-                (root_path, status, created_at, started_at, completed_at,
+                (root_path, role, status, created_at, started_at, completed_at,
                  total_files, processed_files, total_directories, processed_directories,
                  error_count, last_error,
                  rules_name, rules_source, rules_hash, rules_json)
             VALUES
-                (@RootPath, @Status, @CreatedAt, @StartedAt, @CompletedAt,
+                (@RootPath, @RoleValue, @Status, @CreatedAt, @StartedAt, @CompletedAt,
                  @TotalFiles, @ProcessedFiles, @TotalDirectories, @ProcessedDirectories,
                  @ErrorCount, @LastError,
                  @RulesName, @RulesSource, @RulesHash, @RulesJson);
             SELECT last_insert_rowid();
             """;
 
-        job.Id = await conn.ExecuteScalarAsync<long>(sql, job);
+        // Dapper writes enums as integers; the role column holds the fixed string.
+        var parameters = new DynamicParameters(job);
+        parameters.Add("RoleValue", job.Role.ToValue());
+        job.Id = await conn.ExecuteScalarAsync<long>(sql, parameters);
         return job;
     }
 
@@ -83,7 +87,9 @@ public class ScanJobRepository : IScanJobRepository
         // Cascade manually (SQLite FK cascade requires ON DELETE CASCADE in DDL;
         // we delete in dependency order instead).
         const string sql = """
-            DELETE FROM user_overrides      WHERE file_node_id IN (SELECT id FROM file_nodes WHERE job_id = @id);
+            DELETE FROM comparison_files    WHERE comparison_id IN (SELECT id FROM comparisons WHERE source_job_id = @id OR against_job_id = @id);
+            DELETE FROM comparisons         WHERE source_job_id = @id OR against_job_id = @id;
+            DELETE FROM user_overrides     WHERE file_node_id IN (SELECT id FROM file_nodes WHERE job_id = @id);
             DELETE FROM ai_results          WHERE file_node_id IN (SELECT id FROM file_nodes WHERE job_id = @id);
             DELETE FROM ai_directory_results WHERE directory_node_id IN (SELECT id FROM directory_nodes WHERE job_id = @id);
             DELETE FROM file_nodes          WHERE job_id = @id;

@@ -115,6 +115,26 @@ https://github.com/crack666/smart_file_organizer/issues/5: `dotnet test`
   with `--json` against a temp database). (Until 12.11.2026 this line said
   the read commands were not there yet.)
 
+### Comparison with the library
+
+_Checked 12.11.2026 on the branch for
+https://github.com/crack666/smart_file_organizer/issues/24, rebased on #31,
+#32, #41 (comparison migration now step 5) and #44: `dotnet test` 392 passed; `sfo scan`, `scan --role library`,
+`compare --json` (twice, the second run computing no checksum; `match_hash`
+equal to `sha256sum` of the file) and `analyze` of a `library` job run by hand
+against two temp folders and a temp database._
+
+- `sfo scan <path> --role library` marks the organised archive (the library);
+  `sfo compare <source-job> --against <library-job>` sets `backed_up`, `new`,
+  `differs` or `error` per source file, finds duplicates within the
+  source and counts per directory; see [cli.md](cli.md) and
+  [architecture.md](architecture.md#comparison-flow-source-against-library).
+- Directories a scan cannot read are now recorded as errors (before, they
+  looked empty).
+- `sfo analyze` does not yet skip files that are `backed_up`; the
+  per-directory counts say which ones need no analysis
+  (https://github.com/crack666/smart_file_organizer/issues/42).
+
 ### Known limits
 
 - PDFs: only the first page is seen; text extraction is preview-sized; no

@@ -86,8 +86,18 @@ public class ScanEngine : IScanEngine
             }
 
             // Listed at most once: for the content check (only when a decision depends on it) and for the rows.
+            // The listing throws on access or I/O errors, so an unreadable directory is recorded as an error
+            // rather than looking empty; the comparison with a library must not mistake missing files for absent ones.
             List<string>? files = null;
-            List<string> Files() => files ??= _fs.EnumerateFiles(dirPath).ToList();
+            Exception? listError = null;
+            List<string> Files()
+            {
+                if (files != null)
+                    return files;
+                try { files = [.. _fs.ListFiles(dirPath)]; }
+                catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { listError = ex; files = []; }
+                return files;
+            }
 
             var evaluation = depth == 0
                 ? new DirectoryEvaluation(ScanDecision.Descend, "Descend: scan root")   // always descend root
@@ -136,6 +146,33 @@ public class ScanEngine : IScanEngine
                 job.ProcessedDirectories++;
             }
 
+            IReadOnlyList<string> subDirs = [];
+            if (listError == null && decision != ScanDecision.Skip)
+            {
+                if (listFiles)
+                    Files();
+                if (listError == null && decision == ScanDecision.Descend)
+                {
+                    try { subDirs = _fs.ListDirectories(dirPath); }
+                    catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { listError = ex; }
+                }
+            }
+
+            if (listError != null)
+            {
+                dirNode.DirStatus = DirectoryStatus.Error;
+                dirNode.DirReason = $"Read error: {listError.Message}";
+                job.ErrorCount++;
+                job.LastError = $"{dirPath}: {listError.Message}";
+                if (existing != null)
+                    await _dirRepo.UpdateAsync(dirNode, ct);
+                else
+                    dirBatch.Add(dirNode);
+                await FlushDirBatchIfNeeded(dirBatch, ct);
+                _logger.LogWarning("Could not read directory {Path}: {Message}", dirPath, listError.Message);
+                continue;
+            }
+
             if (decision == ScanDecision.Skip)
             {
                 dirBatch.Add(dirNode);
@@ -144,7 +181,6 @@ public class ScanEngine : IScanEngine
                 continue;
             }
 
-            // Enumerate files in this directory
             int fileCount = 0;
             long dirSize = 0;
             foreach (var filePath in listFiles ? Files() : [])
@@ -199,7 +235,7 @@ public class ScanEngine : IScanEngine
             if (decision == ScanDecision.Descend)
             {
                 int subdirCount = 0;
-                foreach (var subDir in _fs.EnumerateDirectories(dirPath))
+                foreach (var subDir in subDirs)
                 {
                     pendingDirs.Enqueue((subDir, depth + 1));
                     subdirCount++;

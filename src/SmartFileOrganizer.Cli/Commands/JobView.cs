@@ -10,6 +10,7 @@ namespace SmartFileOrganizer.Cli.Commands;
 public sealed record JobView(
     long Id,
     string RootPath,
+    ScanRole Role,
     JobStatus Status,
     DateTime CreatedAt,
     DateTime? StartedAt,
@@ -23,13 +24,13 @@ public sealed record JobView(
     RulesCommand.RulesView? Rules)
 {
     public static JobView From(ScanJob job) => new(
-        job.Id, job.RootPath, job.Status, job.CreatedAt, job.StartedAt, job.CompletedAt,
+        job.Id, job.RootPath, job.Role, job.Status, job.CreatedAt, job.StartedAt, job.CompletedAt,
         job.TotalFiles, job.ProcessedFiles, job.TotalDirectories, job.ProcessedDirectories,
         job.ErrorCount, job.LastError,
         job.Rules is { } rules ? RulesCommand.RulesView.From(rules) : null);
 
     public string ToLine() =>
-        $"#{Id}  {Status.ToString().ToLowerInvariant(),-9}  {FilesProcessed} files, {DirectoriesProcessed} dirs, {ErrorCount} errors  {RootPath}" +
+        $"#{Id}  {Role.ToValue(),-7}  {Status.ToString().ToLowerInvariant(),-9}  {FilesProcessed} files, {DirectoriesProcessed} dirs, {ErrorCount} errors  {RootPath}" +
         (Rules is { } r ? $"  [rules: {r.Name}]" : string.Empty);
 }
 

@@ -40,7 +40,18 @@ public class FileRepository : IFileRepository
         await conn.OpenAsync(ct);
         await using var tx = await conn.BeginTransactionAsync(ct);
 
+        // Replaced rows get new ids, so stored comparisons of this job would point at rows that
+        // no longer exist. They are dropped as a whole; running the comparison again is cheap
+        // because checksums are cached by path.
         const string deleteSql = """
+            DELETE FROM comparison_files
+            WHERE comparison_id IN (
+                SELECT id FROM comparisons WHERE source_job_id = @jobId OR against_job_id = @jobId
+            );
+
+            DELETE FROM comparisons
+            WHERE source_job_id = @jobId OR against_job_id = @jobId;
+
             DELETE FROM user_overrides
             WHERE file_node_id IN (
                 SELECT id FROM file_nodes WHERE job_id = @jobId AND parent_path = @parentPath

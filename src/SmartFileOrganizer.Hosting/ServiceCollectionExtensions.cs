@@ -62,11 +62,13 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IJobStatisticsRepository, JobStatisticsRepository>();
         services.AddSingleton<IDirectoryVerdictRepository, DirectoryVerdictRepository>();
         services.AddSingleton<IJobReadRepository, JobReadRepository>();
+        services.AddSingleton<IContentComparisonRepository, ContentComparisonRepository>();
 
         // Infrastructure
         services.AddSingleton<IFileSystemAccessor, FileSystemAccessor>();
         services.AddSingleton<FileContentExtractor>();
         services.AddSingleton<IClassificationInputPreparer, AiClassificationInputPreparer>();
+        services.AddSingleton<IContentHasher, ContentHasher>();
 
         // Ollama
         services.AddSingleton(sp =>
@@ -128,6 +130,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ReviewService>();
         services.AddSingleton<ScanExportService>();
         services.AddSingleton<FocusedRescanService>();
+        services.AddSingleton<ContentComparisonService>();
 
         return services;
     }

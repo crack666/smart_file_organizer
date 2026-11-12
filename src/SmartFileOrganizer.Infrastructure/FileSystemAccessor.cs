@@ -24,6 +24,10 @@ public class FileSystemAccessor : IFileSystemAccessor
         catch (IOException) { return []; }
     }
 
+    public IReadOnlyList<string> ListFiles(string path) => Directory.EnumerateFiles(path).ToList();
+
+    public IReadOnlyList<string> ListDirectories(string path) => Directory.EnumerateDirectories(path).ToList();
+
     public long GetFileSize(string path)
     {
         try { return new FileInfo(path).Length; }
