@@ -82,7 +82,8 @@ public class AiClassificationInputPreparer : IClassificationInputPreparer
         }
         catch (Exception ex)
         {
-            ev.Lacks($"file content: reading failed ({ex.GetType().Name}: {Shorten(ex.Message)})");
+            // Type only: exception messages may carry paths or content, and the notes are stored.
+            ev.Lacks($"file content: reading failed ({ex.GetType().Name})");
         }
 
         return ev.ToInput(file);
@@ -444,8 +445,6 @@ public class AiClassificationInputPreparer : IClassificationInputPreparer
             IsAiResult = false
         };
     }
-
-    private static string Shorten(string message) => message.Length <= 160 ? message : message[..160] + "…";
 
     private static string FormatSize(long bytes)
     {
