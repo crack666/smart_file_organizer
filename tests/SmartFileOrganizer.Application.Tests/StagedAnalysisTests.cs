@@ -555,6 +555,31 @@ public class StagedAnalysisTests : IDisposable
         Assert.True(DirectorySampler.Evaluate(members, results, new DirectoryAnalysisOptions()).Confirmed);
     }
 
+    /// <summary>
+    /// The target a model suggests for a marked file is model text about that file's content. Unmarked files
+    /// inherit the target of the sample, so a marked member must not take part in choosing it.
+    /// </summary>
+    [Fact]
+    public void Evaluate_InheritedTarget_IsNotTakenFromAMarkedMember()
+    {
+        var (members, results) = Sample(
+            M(FileCategory.Invoice, SampleRole.Sensitive, SensitiveMarker.Finanzen),
+            M(FileCategory.Invoice, SampleRole.Sensitive, SensitiveMarker.Finanzen),
+            M(FileCategory.Invoice));
+        results[1]!.SuggestedTarget = "Finance/Account-DE00-FAKE";
+        results[2]!.SuggestedTarget = "Finance/Account-DE00-FAKE";
+        results[3]!.SuggestedTarget = "Documents/Invoices";
+
+        var e = DirectorySampler.Evaluate(members, results, new DirectoryAnalysisOptions());
+
+        Assert.True(e.Confirmed);
+        Assert.Equal("Documents/Invoices", e.InheritedTarget);
+
+        // Only marked members: no target to inherit.
+        results[3]!.SuggestedTarget = null;
+        Assert.Null(DirectorySampler.Evaluate(members, results, new DirectoryAnalysisOptions()).InheritedTarget);
+    }
+
     [Fact]
     public void Evaluate_InheritedConfidenceIsCapped()
     {
