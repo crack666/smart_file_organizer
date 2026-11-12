@@ -85,11 +85,19 @@ public static class LibraryCommand
 
     public static Command Create(CliHost host, GlobalOptions globals)
     {
-        var command = new Command("library", "Judge a folder tree by its structure only and suggest improvements or a target structure. Changes nothing.");
+        var command = new Command("library", "Judge a folder tree by its structure, describe a library as a map, and find places in it for what a source holds. Changes nothing.");
         command.Subcommands.Add(CreateReview(host, globals));
         command.Subcommands.Add(CreatePropose(host, globals));
+        command.Subcommands.Add(LibraryTargetCommands.CreateShow(host, globals));
+        command.Subcommands.Add(LibraryTargetCommands.CreateMatch(host, globals));
         return command;
     }
+
+    internal static Option<bool> NoModelOption() => NoModel();
+    internal static Option<string?> ModelOption() => Model();
+    internal static Option<bool> RefreshOption() => Refresh();
+    internal static Option<string?> WordsOption() => Words();
+    internal static LibraryWords LoadWordsFile(string? path) => LoadWords(path);
 
     private static Option<bool> NoModel() => new("--no-model")
     {
@@ -303,9 +311,14 @@ public static class LibraryCommand
         }
     }
 
-    private static CliFailureException ToFailure(LibraryServiceException ex) => ex.Failure switch
+    internal static CliFailureException ToFailure(LibraryServiceException ex) => ex.Failure switch
     {
         LibraryFailure.JobNotFound => new CliFailureException(ExitCodes.Failure, ErrorCodes.JobNotFound, ex.Message),
+        LibraryFailure.WrongRole => new CliFailureException(ExitCodes.Failure, ErrorCodes.WrongRole, ex.Message),
+        LibraryFailure.PathNotFound => new CliFailureException(ExitCodes.Failure, ErrorCodes.PathNotFound, ex.Message),
+        LibraryFailure.BundleNotFound => new CliFailureException(ExitCodes.Failure, ErrorCodes.BundleNotFound, ex.Message),
+        LibraryFailure.PatternsInvalid => new CliFailureException(ExitCodes.Failure, ErrorCodes.LibraryPatternsInvalid, ex.Message),
+        LibraryFailure.OptionsInvalid => new CliFailureException(ExitCodes.Failure, ErrorCodes.SettingsInvalid, ex.Message),
         _ => new CliFailureException(ExitCodes.Failure, ErrorCodes.ScanNotCompleted, ex.Message)
     };
 

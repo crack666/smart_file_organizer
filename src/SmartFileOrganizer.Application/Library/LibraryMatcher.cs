@@ -109,6 +109,9 @@ public static partial class LibraryMatcher
         LibraryFindingKind.SimilarNames, LibraryFindingKind.SameNameElsewhere
     ];
 
+    /// <summary>Taken off the score of a parent for a new folder when its subfolders are named in several ways.</summary>
+    private const double NamingPenalty = 0.10;
+
     public static MatchResult Match(LibraryMap map, MatchUnit unit, LibraryMatchOptions o, int limit, LibraryWords words)
     {
         var scored = new List<MatchCandidate>();
@@ -229,7 +232,9 @@ public static partial class LibraryMatcher
             .Where(e => e.Dump is null && (e.Depth == 0 || e.Children.Count > 0 && e.Role != FolderRole.CatchAll))
             .Select(e => (Entry: e, Signals: SubfolderSignals(e, unit, o)))
             .Where(x => !x.Signals.Single(s => s.Signal == MatchSignal.FileType).Contradicts)
-            .Select(x => (x.Entry, x.Signals, Score: Score(x.Signals)))
+            // Where the neighbours are named in several ways, the habit for a new name is unclear: a weaker home.
+            .Select(x => (x.Entry, x.Signals,
+                Score: Score(x.Signals) - (x.Entry.Findings.Any(f => NamingKinds.Contains(f.Kind)) ? NamingPenalty : 0)))
             .OrderByDescending(x => x.Score)
             .ThenBy(x => x.Entry.Depth)
             .ThenBy(x => x.Entry.RelativePath, StringComparer.Ordinal)
@@ -388,7 +393,10 @@ public static partial class LibraryMatcher
     {
         if (unit.Words.Count == 0)
             return new SignalResult(MatchSignal.Name, 0, weight, false, false, false, "no words in the names to compare");
+        // A year folder is named by its parent: Invoices/2016 is about invoices.
         var folderWords = LibraryMap.Words(e.Name, words);
+        if (folderWords.Count == 0 && e.Parent is { Depth: > 0 } parent)
+            folderWords = LibraryMap.Words(parent.Name, words);
         var matched = unit.Words.Where(w => folderWords.Any(f => LibraryMap.SameWord(w, f))).ToList();
         var share = (double)matched.Count / unit.Words.Count;
         var agrees = matched.Count > 0 && share >= o.MinNameShare;

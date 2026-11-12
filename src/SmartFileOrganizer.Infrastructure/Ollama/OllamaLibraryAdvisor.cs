@@ -9,8 +9,8 @@ using SmartFileOrganizer.Domain.Models;
 namespace SmartFileOrganizer.Infrastructure.Ollama;
 
 /// <summary>
-/// Asks the configured local Ollama model about a library (<c>sfo library review</c> and <c>propose</c>).
-/// Prompts and answer schemas for both questions live here, next to the other prompts. The facts hold
+/// Asks the configured local Ollama model about a library (<c>sfo library review</c>, <c>propose</c>, <c>show</c>
+/// and <c>match</c>). Prompts and answer schemas for all questions live here, next to the other prompts. The facts hold
 /// folder names, which can be private; they go to this server and nowhere else.
 /// </summary>
 public sealed class OllamaLibraryAdvisor : ILibraryAdvisor
@@ -30,16 +30,26 @@ public sealed class OllamaLibraryAdvisor : ILibraryAdvisor
     {
         var model = string.IsNullOrWhiteSpace(request.Model) ? _options.Model : request.Model;
         var language = request.Language ?? _options.SummaryLanguage;
-        var prompt = request.Task == LibraryAdviceTask.Review
-            ? BuildReviewPrompt(request.Facts, language)
-            : BuildProposePrompt(request.Facts, language);
+        var prompt = request.Task switch
+        {
+            LibraryAdviceTask.Review => BuildReviewPrompt(request.Facts, language),
+            LibraryAdviceTask.Map => BuildMapPrompt(request.Facts, language),
+            LibraryAdviceTask.Name => BuildNamePrompt(request.Facts, language),
+            _ => BuildProposePrompt(request.Facts, language)
+        };
         var body = new
         {
             model,
             stream = false,
             think = false,
             keep_alive = _options.KeepAlive,
-            format = request.Task == LibraryAdviceTask.Review ? ReviewSchema() : ProposeSchema(),
+            format = request.Task switch
+            {
+                LibraryAdviceTask.Review => ReviewSchema(),
+                LibraryAdviceTask.Map => MapSchema(),
+                LibraryAdviceTask.Name => NameSchema(),
+                _ => ProposeSchema()
+            },
             messages = new object[] { new { role = "user", content = prompt } }
         };
 
@@ -123,6 +133,70 @@ public sealed class OllamaLibraryAdvisor : ILibraryAdvisor
         sb.Append(facts);
         return sb.ToString();
     }
+
+    /// <summary><c>sfo library show</c>: one sentence per folder on what it is for, from names, counts and patterns.</summary>
+    public static string BuildMapPrompt(string facts, string language)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("You describe the folders of a person's own ordered archive, so that new things can be filed where they belong.");
+        sb.AppendLine("You see only folder names, a role found by rules, counts, file types, periods and how subfolders are named.");
+        sb.AppendLine("You never see file names or contents.");
+        sb.AppendLine();
+        sb.AppendLine("For each folder, say in one short sentence what it is for, the way the person would put it");
+        sb.AppendLine("(\"Photos of trips and parties, one folder per occasion with its year\", \"Invoices by year\").");
+        sb.AppendLine("Do not judge the order and do not propose changes. Do not invent content the facts do not show.");
+        sb.AppendLine($"Write the purposes in {language}. Keep folder names exactly as listed.");
+        sb.AppendLine();
+        sb.AppendLine("Answer with JSON only: purposes, each with path (exactly as listed) and purpose.");
+        sb.AppendLine();
+        sb.AppendLine("Facts:");
+        sb.Append(facts);
+        return sb.ToString();
+    }
+
+    /// <summary><c>sfo library match</c>: the name of one new folder in the style of its siblings.</summary>
+    public static string BuildNamePrompt(string facts, string language)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("Name one new folder in a person's own archive, in the style of the folders next to it.");
+        sb.AppendLine("You see the naming pattern there, the sibling names, what goes in (counts and types), when it was taken,");
+        sb.AppendLine("and the names of the folders it came from. You never see file names or contents.");
+        sb.AppendLine();
+        sb.AppendLine("Rules:");
+        sb.AppendLine("- Follow the pattern and the language of the sibling names; fill every placeholder.");
+        sb.AppendLine("- Use the year or date of the files where the pattern has one.");
+        sb.AppendLine("- Take the occasion from the names of the folders it came from when they say something; otherwise use a plain, neutral word");
+        sb.AppendLine("  for the season or month (\"Sommer\", \"Juli\"), never invent an event, a place or a person.");
+        sb.AppendLine("- One folder name only: no slashes, no placeholders, not the name of an existing sibling.");
+        sb.AppendLine($"Write the reason in {language}.");
+        sb.AppendLine();
+        sb.AppendLine("Answer with JSON only: name, reason.");
+        sb.AppendLine();
+        sb.AppendLine("Facts:");
+        sb.Append(facts);
+        return sb.ToString();
+    }
+
+    private static object MapSchema() => new
+    {
+        type = "object",
+        properties = new
+        {
+            purposes = new
+            {
+                type = "array",
+                items = new { type = "object", properties = new { path = Str(), purpose = Str() }, required = new[] { "path", "purpose" } }
+            }
+        },
+        required = new[] { "purposes" }
+    };
+
+    private static object NameSchema() => new
+    {
+        type = "object",
+        properties = new { name = Str(), reason = Str() },
+        required = new[] { "name", "reason" }
+    };
 
     private static object Str() => new { type = "string" };
 
