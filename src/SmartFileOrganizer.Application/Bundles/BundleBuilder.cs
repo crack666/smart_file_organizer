@@ -405,6 +405,17 @@ public sealed class BundleBuilder
             bundle.TimeSource = sources.Count == 1 ? sources[0] : TimeSource.Mixed;
         }
 
+        // The period of a split dump is that of its worth-keeping parts: app data and caches carry the time of
+        // the last copy, which would stretch "phone 2013" to "phone 2013-2026".
+        var kept = bundle.Children.Where(c => c.Kind == BundleKind.DumpKeep && c.FirstTime is not null).ToList();
+        if (bundle.Kind == BundleKind.Dump && kept.Count > 0)
+        {
+            bundle.FirstTime = kept.Min(c => c.FirstTime);
+            bundle.LastTime = kept.Max(c => c.LastTime);
+            var keptSources = kept.Select(c => c.TimeSource).Distinct().ToList();
+            bundle.TimeSource = keptSources.Count == 1 ? keptSources[0] : TimeSource.Mixed;
+        }
+
         var devices = fileTimes.Select(t => t.Device).Distinct().ToList();
         if (devices.Count == 1 && devices[0] is { } device)
             bundle.Facts.Device = device;

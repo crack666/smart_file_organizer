@@ -102,7 +102,7 @@ public class BundleBuilderTests
         tree.File($"{at}/Android/data/com.example.app/cache/blob.bin");
         tree.Dir($"{at}/LOST.DIR");
         tree.Dir($"{at}/Alarms");
-        tree.File($"{at}/Download/manual.pdf");
+        tree.File($"{at}/Download/manual.pdf", day);
         return (tree, camera);
     }
 
@@ -150,7 +150,8 @@ public class BundleBuilderTests
         var dump = Assert.Single(Build(tree).Roots, b => b.Kind == BundleKind.Dump);
 
         Assert.Equal(Path.Combine(Root, "Handy 2014"), dump.RootPath);
-        Assert.StartsWith("Handy 2014 (phone 2014", dump.SuggestedName);
+        // App data carries the time of the copy (2020 here); the period comes from the kept parts.
+        Assert.Equal("Handy 2014 (phone 2014)", dump.SuggestedName);
     }
 
     [Fact]
