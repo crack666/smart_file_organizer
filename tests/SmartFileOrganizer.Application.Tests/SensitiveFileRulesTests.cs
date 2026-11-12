@@ -11,12 +11,12 @@ namespace SmartFileOrganizer.Application.Tests;
 /// </summary>
 public class SensitiveFileRulesTests
 {
-    private const SensitiveMarker Z = SensitiveMarker.Zugangsdaten;
-    private const SensitiveMarker S = SensitiveMarker.Schluessel;
-    private const SensitiveMarker N = SensitiveMarker.PrivateNachricht;
-    private const SensitiveMarker A = SensitiveMarker.Ausweis;
-    private const SensitiveMarker F = SensitiveMarker.Finanzen;
-    private const SensitiveMarker G = SensitiveMarker.Gesundheit;
+    private const SensitiveMarker Z = SensitiveMarker.Credentials;
+    private const SensitiveMarker S = SensitiveMarker.Keys;
+    private const SensitiveMarker N = SensitiveMarker.PrivateMessage;
+    private const SensitiveMarker A = SensitiveMarker.Identity;
+    private const SensitiveMarker F = SensitiveMarker.Finance;
+    private const SensitiveMarker G = SensitiveMarker.Health;
 
     // ------------------------------------------------------------------ marker tokens
 
@@ -24,7 +24,7 @@ public class SensitiveFileRulesTests
     public void Tokens_AreTheFixedGermanStrings()
     {
         Assert.Equal(
-            ["zugangsdaten", "schluessel", "private_nachricht", "ausweis", "finanzen", "gesundheit"],
+            ["credentials", "keys", "private_message", "identity", "finance", "health"],
             SensitiveMarkerNames.AllTokens);
     }
 
@@ -32,7 +32,7 @@ public class SensitiveFileRulesTests
     public void Format_And_Parse_RoundTrip()
     {
         var all = Z | S | N | A | F | G;
-        Assert.Equal("zugangsdaten,schluessel,private_nachricht,ausweis,finanzen,gesundheit",
+        Assert.Equal("credentials,keys,private_message,identity,finance,health",
             SensitiveMarkerNames.Format(all));
         Assert.Equal(all, SensitiveMarkerNames.Parse(SensitiveMarkerNames.Format(all)));
         Assert.Null(SensitiveMarkerNames.Format(SensitiveMarker.None));
@@ -41,7 +41,7 @@ public class SensitiveFileRulesTests
 
     [Fact]
     public void Parse_IgnoresUnknownTokens_AndCase()
-        => Assert.Equal(S | F, SensitiveMarkerNames.Parse(" Schluessel; geheim ,FINANZEN "));
+        => Assert.Equal(S | F, SensitiveMarkerNames.Parse(" Keys; geheim ,FINANCE "));
 
     // ------------------------------------------------------------------ exact names
 

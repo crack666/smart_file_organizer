@@ -239,14 +239,14 @@ public class LibraryRulesTests
     public async Task SensitiveFiles_AreReportedWithPathAndMarkerOnly()
     {
         var t = new LibraryTreeFixture();
-        t.Files("Dokumente", ["tresor.kdbx"], markers: SensitiveMarker.Zugangsdaten);
+        t.Files("Dokumente", ["tresor.kdbx"], markers: SensitiveMarker.Credentials);
         t.Files("Dokumente", ["2fa recovery codes.txt", "einkauf.txt"]);
 
         var f = (await RunAsync(t)).Findings;
 
         var s = Assert.Single(f, x => x.Kind == LibraryFindingKind.SensitiveLocation);
         Assert.Equal(["Dokumente/2fa recovery codes.txt", "Dokumente/tresor.kdbx"], s.Items.Order());
-        Assert.Equal(["zugangsdaten"], (IEnumerable<string>)s.Details["markers"]!);
+        Assert.Equal(["credentials"], (IEnumerable<string>)s.Details["markers"]!);
     }
 
     [Fact]

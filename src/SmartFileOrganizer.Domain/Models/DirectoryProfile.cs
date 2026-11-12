@@ -44,7 +44,7 @@ public sealed class DirectoryProfile
     /// <summary>Markers of a whole that must not be split, for example <c>dir:.git</c> or <c>file:package.json</c>.</summary>
     public List<string> UnitMarkers { get; set; } = [];
 
-    /// <summary>Verdict the facts point to, if any (<c>einheitlich</c> or <c>gemischt</c>). A hint, not a decision.</summary>
+    /// <summary>Verdict the facts point to, if any (<c>uniform</c> or <c>mixed</c>). A hint, not a decision.</summary>
     public DirectoryVerdictKind? Suggests { get; set; }
 
     /// <summary>Why <see cref="Suggests"/> was set, in one sentence.</summary>

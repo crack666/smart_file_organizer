@@ -14,7 +14,7 @@ public static class VerdictCodes
 {
     private static readonly ConcurrentDictionary<Type, (Dictionary<object, string> ToCode, Dictionary<string, object> FromCode)> Maps = new();
 
-    /// <summary>The stored code of an enum value, for example <c>einheit</c>.</summary>
+    /// <summary>The stored code of an enum value, for example <c>unit</c>.</summary>
     public static string ToCode<TEnum>(this TEnum value) where TEnum : struct, Enum =>
         GetMap(typeof(TEnum)).ToCode[value];
 

@@ -95,7 +95,7 @@ public class SecondCheckTests : IDisposable
         var node = (await _dirRepo.GetByPathAsync(jobId, _dir))!;
         await _verdictRepo.UpsertAsync(new DirectoryVerdict
         {
-            DirectoryNodeId = node.Id, Verdict = DirectoryVerdictKind.Gemischt, Source = VerdictSource.Modell,
+            DirectoryNodeId = node.Id, Verdict = DirectoryVerdictKind.Mixed, Source = VerdictSource.Model,
             Purpose = "downloads of a year", Retention = retention, Reason = "scripted", JudgedAt = DateTime.UtcNow
         });
     }
@@ -180,7 +180,7 @@ public class SecondCheckTests : IDisposable
     public async Task SecondCall_GetsMoreEvidenceAndTheDirectory_ButNeverTheFirstAnswer()
     {
         var jobId = await InsertAsync(("unsure.jpg", FileType.Image), ("neighbour.jpg", FileType.Image));
-        await SetVerdictAsync(jobId, RetentionValue.Pruefen);
+        await SetVerdictAsync(jobId, RetentionValue.Review);
         _ollama.Classify = input => input.File.Name == "unsure.jpg" && input.Depth == EvidenceDepth.Standard
             ? Answer(FileCategory.Screenshot, 0.3)
             : Answer(FileCategory.Photo);
@@ -191,9 +191,9 @@ public class SecondCheckTests : IDisposable
         Assert.Equal("unsure.jpg", second.File.Name);
         Assert.Null(_ollama.FirstLooks.Single(i => i.File.Name == "unsure.jpg").Context);
         var context = second.Context!;
-        Assert.Equal("gemischt", context.Verdict);
+        Assert.Equal("mixed", context.Verdict);
         Assert.Equal("downloads of a year", context.Purpose);
-        Assert.Equal("pruefen", context.Retention);
+        Assert.Equal("review", context.Retention);
         Assert.Equal(2, context.FilesInDirectory);
         Assert.DoesNotContain(context.Neighbours, n => n.Name == "unsure.jpg");
 
@@ -343,7 +343,7 @@ public class SecondCheckTests : IDisposable
     public async Task ValuableFileInDisposableDirectory_IsCheckedAgain_AndConfirmedAsCertain()
     {
         var jobId = await InsertAsync(("contract.pdf", FileType.Document), ("setup-notes.txt", FileType.Code));
-        await SetVerdictAsync(jobId, RetentionValue.Entbehrlich);
+        await SetVerdictAsync(jobId, RetentionValue.Disposable);
         _ollama.Classify = input => input.File.Name == "contract.pdf"
             ? Answer(FileCategory.PersonalDocument, 0.9, Importance.Critical)
             : Answer(FileCategory.Document, 0.9, Importance.Low);
@@ -380,7 +380,7 @@ public class SecondCheckTests : IDisposable
             JobId = job.Id, FullPath = Path.Combine(_dir, "passwoerter.txt"), Name = "passwoerter.txt", ParentPath = _dir,
             RootPath = _dir, RelativePath = "passwoerter.txt", Extension = ".txt", FileType = FileType.Document, Size = 10,
             LastWriteTime = DateTime.UtcNow, ScannedAt = DateTime.UtcNow,
-            SensitiveMarkers = SensitiveMarker.Zugangsdaten, SensitiveRule = "test"
+            SensitiveMarkers = SensitiveMarker.Credentials, SensitiveRule = "test"
         }]);
         _ollama.Classify = _ => new FileClassification
         {
@@ -401,7 +401,7 @@ public class SecondCheckTests : IDisposable
     public async Task Show_ListsBothAnswers_WithoutModelTextForAProtectedFile()
     {
         var job = await new ScanJobRepository(_db).CreateAsync(new ScanJob { RootPath = _dir, Status = JobStatus.Completed, CreatedAt = DateTime.UtcNow });
-        await _fileRepo.InsertBatchAsync(new[] { ("open.jpg", SensitiveMarker.None), ("pass.jpg", SensitiveMarker.Ausweis) }.Select(f => new FileNode
+        await _fileRepo.InsertBatchAsync(new[] { ("open.jpg", SensitiveMarker.None), ("pass.jpg", SensitiveMarker.Identity) }.Select(f => new FileNode
         {
             JobId = job.Id, FullPath = Path.Combine(_dir, f.Item1), Name = f.Item1, ParentPath = _dir, RootPath = _dir,
             RelativePath = f.Item1, Extension = ".jpg", FileType = FileType.Image, Size = 10,
@@ -551,11 +551,11 @@ public class SecondCheckTests : IDisposable
     }
 
     [Fact]
-    public void Verdict_Pruefen_NeverContradicts_Keep_RejectsTrash()
+    public void Verdict_Review_NeverContradicts_Keep_RejectsTrash()
     {
         var trash = new FileClassification { Category = FileCategory.TrashCandidate };
-        Assert.Null(ResultCheckRules.VerdictContradiction(trash, new DirectoryVerdict { Retention = RetentionValue.Pruefen }));
-        Assert.NotNull(ResultCheckRules.VerdictContradiction(trash, new DirectoryVerdict { Retention = RetentionValue.Behalten }));
-        Assert.Null(ResultCheckRules.VerdictContradiction(trash, new DirectoryVerdict { Retention = RetentionValue.Behalten, Error = "x" }));
+        Assert.Null(ResultCheckRules.VerdictContradiction(trash, new DirectoryVerdict { Retention = RetentionValue.Review }));
+        Assert.NotNull(ResultCheckRules.VerdictContradiction(trash, new DirectoryVerdict { Retention = RetentionValue.Keep }));
+        Assert.Null(ResultCheckRules.VerdictContradiction(trash, new DirectoryVerdict { Retention = RetentionValue.Keep, Error = "x" }));
     }
 }

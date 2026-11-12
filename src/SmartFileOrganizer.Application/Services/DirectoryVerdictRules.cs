@@ -5,7 +5,7 @@ namespace SmartFileOrganizer.Application.Services;
 
 /// <summary>
 /// Clear cases that are decided without calling the model. Every verdict from here carries
-/// <see cref="VerdictSource.Regel"/>, the rule id in <see cref="DirectoryVerdict.Rule"/> and a readable reason.
+/// <see cref="VerdictSource.Rule"/>, the rule id in <see cref="DirectoryVerdict.Rule"/> and a readable reason.
 /// </summary>
 public static class DirectoryVerdictRules
 {
@@ -38,7 +38,7 @@ public static class DirectoryVerdictRules
     {
         if (unitAncestor is not null)
         {
-            return Decide(dir, profile, DirectoryVerdictKind.Einheit, InsideUnit,
+            return Decide(dir, profile, DirectoryVerdictKind.Unit, InsideUnit,
                 $"Part of the unit '{unitAncestorPath}'; a unit is handled only as a whole.",
                 unitAncestor.Retention,
                 unitAncestor.UnitDirectoryNodeId ?? unitAncestor.DirectoryNodeId);
@@ -48,29 +48,29 @@ public static class DirectoryVerdictRules
         {
             return Decide(dir, profile, DirectoryVerdictKind.System, ScanSkip,
                 $"Excluded by the scan rules ({dir.DirReason ?? "Skip"}); its content was not listed.",
-                RetentionValue.Behalten, null);
+                RetentionValue.Keep, null);
         }
 
         if (dir.Name.StartsWith('.'))
         {
             return Decide(dir, profile, DirectoryVerdictKind.System, Hidden,
                 "Hidden directory (name starts with a dot): tool or application data, not user content.",
-                RetentionValue.Behalten, null);
+                RetentionValue.Keep, null);
         }
 
         if (profile.UnitMarkers.Count > 0)
         {
-            return Decide(dir, profile, DirectoryVerdictKind.Einheit, Marker,
+            return Decide(dir, profile, DirectoryVerdictKind.Unit, Marker,
                 $"Markers of a project, program, game or backup: {string.Join(", ", profile.UnitMarkers)}.",
-                RetentionValue.Pruefen, dir.Id);
+                RetentionValue.Review, dir.Id);
         }
 
         if (profile.FileCount == 0 && dir.DirStatus == DirectoryStatus.Scanned)
         {
             if (profile.SubdirectoryCount == 0)
             {
-                return Decide(dir, profile, DirectoryVerdictKind.Leer, Empty,
-                    "No files and no subdirectories.", RetentionValue.Entbehrlich, null);
+                return Decide(dir, profile, DirectoryVerdictKind.Empty, Empty,
+                    "No files and no subdirectories.", RetentionValue.Disposable, null);
             }
 
             return (Next.FromSubdirectories, null);
@@ -92,7 +92,7 @@ public static class DirectoryVerdictRules
             return new DirectoryVerdict
             {
                 DirectoryNodeId = dir.Id,
-                Source = VerdictSource.Regel,
+                Source = VerdictSource.Rule,
                 Rule = Container,
                 Profile = profile,
                 JudgedAt = DateTime.UtcNow,
@@ -101,11 +101,11 @@ public static class DirectoryVerdictRules
         }
 
         var judged = children.Select(c => c!).ToList();
-        var content = judged.Where(c => c.Verdict != DirectoryVerdictKind.Leer).ToList();
+        var content = judged.Where(c => c.Verdict != DirectoryVerdictKind.Empty).ToList();
         if (content.Count == 0)
         {
-            return Decide(dir, profile, DirectoryVerdictKind.Leer, Container,
-                $"No direct files and all {judged.Count} subdirectories are empty.", RetentionValue.Entbehrlich, null).Verdict!;
+            return Decide(dir, profile, DirectoryVerdictKind.Empty, Container,
+                $"No direct files and all {judged.Count} subdirectories are empty.", RetentionValue.Disposable, null).Verdict!;
         }
 
         var nonSystem = content.Where(c => c.Verdict != DirectoryVerdictKind.System).ToList();
@@ -113,35 +113,35 @@ public static class DirectoryVerdictRules
         {
             return Decide(dir, profile, DirectoryVerdictKind.System, Container,
                 $"No direct files and all {content.Count} non-empty subdirectories are system directories.",
-                RetentionValue.Behalten, null).Verdict!;
+                RetentionValue.Keep, null).Verdict!;
         }
 
         var keys = nonSystem.Select(DominantType).Distinct(StringComparer.Ordinal).ToList();
-        var allAlike = nonSystem.All(c => c.Verdict is DirectoryVerdictKind.Einheit or DirectoryVerdictKind.Einheitlich)
+        var allAlike = nonSystem.All(c => c.Verdict is DirectoryVerdictKind.Unit or DirectoryVerdictKind.Uniform)
                        && keys.Count == 1 && keys[0] is not null;
 
         if (allAlike)
         {
             profile.SubdirectoryDominantType = keys[0];
             var what = keys[0] == UnitDominantType ? "units (projects, programs, games or backups)" : $"collections of {keys[0]}";
-            return Decide(dir, profile, DirectoryVerdictKind.Einheitlich, Container,
+            return Decide(dir, profile, DirectoryVerdictKind.Uniform, Container,
                 $"No direct files; all {nonSystem.Count} subdirectories with content are {what}.",
-                RetentionValue.Pruefen, null).Verdict!;
+                RetentionValue.Review, null).Verdict!;
         }
 
         var summary = string.Join(", ", nonSystem
             .GroupBy(c => c.Verdict!.Value.ToCode())
             .OrderBy(g => g.Key, StringComparer.Ordinal)
             .Select(g => $"{g.Count()} {g.Key}"));
-        return Decide(dir, profile, DirectoryVerdictKind.Gemischt, Container,
+        return Decide(dir, profile, DirectoryVerdictKind.Mixed, Container,
             $"No direct files; subdirectories differ ({summary}), so each is handled on its own.",
-            RetentionValue.Pruefen, null).Verdict!;
+            RetentionValue.Review, null).Verdict!;
     }
 
     /// <summary>What a judged directory mainly holds, for comparing siblings: <c>unit</c>, a file type name, or null.</summary>
     public static string? DominantType(DirectoryVerdict v)
     {
-        if (v.Verdict == DirectoryVerdictKind.Einheit) return UnitDominantType;
+        if (v.Verdict == DirectoryVerdictKind.Unit) return UnitDominantType;
         if (v.Profile.FileCount > 0 && v.Profile.FileTypes.Count > 0) return v.Profile.FileTypes[0].Key;
         return v.Profile.SubdirectoryDominantType;
     }
@@ -153,11 +153,11 @@ public static class DirectoryVerdictRules
         {
             DirectoryNodeId = dir.Id,
             Verdict = kind,
-            Source = VerdictSource.Regel,
+            Source = VerdictSource.Rule,
             Rule = rule,
             Retention = retention,
             Reason = reason,
-            UnitDirectoryNodeId = kind == DirectoryVerdictKind.Einheit ? unitId : null,
+            UnitDirectoryNodeId = kind == DirectoryVerdictKind.Unit ? unitId : null,
             Profile = profile,
             JudgedAt = DateTime.UtcNow
         });

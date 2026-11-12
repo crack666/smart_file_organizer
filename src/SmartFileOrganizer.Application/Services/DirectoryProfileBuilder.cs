@@ -10,10 +10,10 @@ namespace SmartFileOrganizer.Application.Services;
 /// </summary>
 public static partial class DirectoryProfileBuilder
 {
-    /// <summary>Share of files of one type (or one naming scheme) from which a directory looks <c>einheitlich</c>.</summary>
+    /// <summary>Share of files of one type (or one naming scheme) from which a directory looks <c>uniform</c>.</summary>
     public const double UniformShare = 0.8;
 
-    /// <summary>Below this share for the largest type, with at least <see cref="MixedMinTypes"/> types, a directory looks <c>gemischt</c>.</summary>
+    /// <summary>Below this share for the largest type, with at least <see cref="MixedMinTypes"/> types, a directory looks <c>mixed</c>.</summary>
     public const double MixedMaxShare = 0.5;
 
     public const int MixedMinTypes = 3;
@@ -127,7 +127,7 @@ public static partial class DirectoryProfileBuilder
 
         if (profile.FileCount >= 2 && topShare >= UniformShare)
         {
-            profile.Suggests = DirectoryVerdictKind.Einheitlich;
+            profile.Suggests = DirectoryVerdictKind.Uniform;
             profile.SuggestionReason = $"{top.Count} of {profile.FileCount} files are {top.Key} ({topShare:P0}).";
             if (series is not null && (double)series.Count / profile.FileCount >= UniformShare)
                 profile.SuggestionReason += $" {series.Count} follow the {series.Pattern} naming pattern.";
@@ -136,14 +136,14 @@ public static partial class DirectoryProfileBuilder
 
         if (profile.FileCount >= 2 && series is not null && (double)series.Count / profile.FileCount >= UniformShare)
         {
-            profile.Suggests = DirectoryVerdictKind.Einheitlich;
+            profile.Suggests = DirectoryVerdictKind.Uniform;
             profile.SuggestionReason = $"{series.Count} of {profile.FileCount} files follow the {series.Pattern} naming pattern.";
             return;
         }
 
         if (profile.FileCount >= MixedMinTypes && profile.FileTypes.Count >= MixedMinTypes && topShare < MixedMaxShare)
         {
-            profile.Suggests = DirectoryVerdictKind.Gemischt;
+            profile.Suggests = DirectoryVerdictKind.Mixed;
             profile.SuggestionReason =
                 $"{profile.FileTypes.Count} file types, the largest ({top.Key}) only {topShare:P0} of {profile.FileCount} files.";
         }

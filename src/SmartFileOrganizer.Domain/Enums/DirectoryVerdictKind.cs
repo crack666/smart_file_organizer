@@ -5,21 +5,22 @@ namespace SmartFileOrganizer.Domain.Enums;
 /// <summary>
 /// What a directory is, and therefore whether it can be handled as a whole.
 /// The code in <see cref="JsonStringEnumMemberNameAttribute"/> is the fixed value stored in the
-/// database and written to JSON; see <see cref="VerdictCodes"/>.
+/// database and written to JSON; see <see cref="VerdictCodes"/>. Words for people come from
+/// <see cref="CodeLabels"/>; meanings are listed in <c>docs/glossary.md</c>.
 /// </summary>
 public enum DirectoryVerdictKind
 {
     /// <summary>Project, program, game or backup that only makes sense as a whole; never split up file by file.</summary>
-    [JsonStringEnumMemberName("einheit")] Einheit,
+    [JsonStringEnumMemberName("unit")] Unit,
 
     /// <summary>Collection of similar content (photos of one trip, invoices of one year).</summary>
-    [JsonStringEnumMemberName("einheitlich")] Einheitlich,
+    [JsonStringEnumMemberName("uniform")] Uniform,
 
     /// <summary>Storage without a common purpose (desktop, downloads, misc).</summary>
-    [JsonStringEnumMemberName("gemischt")] Gemischt,
+    [JsonStringEnumMemberName("mixed")] Mixed,
 
     /// <summary>Contains no files, neither directly nor in subdirectories.</summary>
-    [JsonStringEnumMemberName("leer")] Leer,
+    [JsonStringEnumMemberName("empty")] Empty,
 
     /// <summary>Operating system, tool or cache directory that is not user content.</summary>
     [JsonStringEnumMemberName("system")] System
@@ -28,17 +29,22 @@ public enum DirectoryVerdictKind
 /// <summary>How worth keeping the content of a directory is.</summary>
 public enum RetentionValue
 {
-    [JsonStringEnumMemberName("behalten")] Behalten,
-    [JsonStringEnumMemberName("pruefen")] Pruefen,
-    [JsonStringEnumMemberName("entbehrlich")] Entbehrlich
+    /// <summary>Personal or hard to replace.</summary>
+    [JsonStringEnumMemberName("keep")] Keep,
+
+    /// <summary>Unclear; a human should look.</summary>
+    [JsonStringEnumMemberName("review")] Review,
+
+    /// <summary>Can be recreated or downloaded again (installers, caches, temporary files).</summary>
+    [JsonStringEnumMemberName("disposable")] Disposable
 }
 
 /// <summary>Who decided a directory verdict.</summary>
 public enum VerdictSource
 {
     /// <summary>A deterministic rule decided without calling the model.</summary>
-    [JsonStringEnumMemberName("regel")] Regel,
+    [JsonStringEnumMemberName("rule")] Rule,
 
     /// <summary>The model decided (or was asked and failed).</summary>
-    [JsonStringEnumMemberName("modell")] Modell
+    [JsonStringEnumMemberName("model")] Model
 }

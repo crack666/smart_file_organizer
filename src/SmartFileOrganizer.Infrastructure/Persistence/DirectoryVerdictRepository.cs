@@ -122,7 +122,7 @@ public class DirectoryVerdictRepository : IDirectoryVerdictRepository
         Id = r.Id,
         DirectoryNodeId = r.DirectoryNodeId,
         Verdict = VerdictCodes.ParseNullable<DirectoryVerdictKind>(r.Verdict),
-        Source = VerdictCodes.ParseNullable<VerdictSource>(r.Source) ?? VerdictSource.Modell,
+        Source = VerdictCodes.ParseNullable<VerdictSource>(r.Source) ?? VerdictSource.Model,
         Rule = r.Rule,
         Purpose = r.Purpose,
         Retention = VerdictCodes.ParseNullable<RetentionValue>(r.Retention),

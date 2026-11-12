@@ -191,7 +191,7 @@ public class ClassificationRepository : IClassificationRepository
     /// <summary>
     /// Reads <c>ai_results</c>. The coded columns are renamed so Dapper does not map them onto the nullable
     /// enums itself: it ignores type handlers for nullable enums and would try <c>Enum.Parse</c> on the code.
-    /// The same holds for the marker list: <c>Enum.Parse</c> threw for <c>private_nachricht</c>
+    /// The same holds for the marker list: <c>Enum.Parse</c> threw for <c>private_message</c>
     /// (found by the evaluation corpus of https://github.com/crack666/smart_file_organizer/issues/36).
     /// </summary>
     internal const string SelectSql = """

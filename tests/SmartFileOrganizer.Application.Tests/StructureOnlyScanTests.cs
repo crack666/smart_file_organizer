@@ -70,7 +70,7 @@ public class StructureOnlyScanTests : IDisposable
 
         // Name rules still apply without opening the file.
         var files = await new FileRepository(_db).GetByDirectoryAsync(job.Id, Path.Combine(_root, "Documents"));
-        Assert.Contains(files, f => f.Name == "passwords.txt" && f.SensitiveMarkers.HasFlag(SensitiveMarker.Zugangsdaten));
+        Assert.Contains(files, f => f.Name == "passwords.txt" && f.SensitiveMarkers.HasFlag(SensitiveMarker.Credentials));
     }
 
     [Fact]

@@ -18,7 +18,7 @@ namespace SmartFileOrganizer.Application.Services;
 /// which gets the profile with the file list and returns verdict, purpose, retention and reason together
 /// with the sampling recommendation.</para>
 /// <para>Directories are processed level by level from the root, so a directory the model judges as
-/// <c>einheit</c> spares all calls below it. Directories without direct files are decided last, bottom-up,
+/// <c>unit</c> spares all calls below it. Directories without direct files are decided last, bottom-up,
 /// from their subdirectories.</para>
 /// <para>Every directory ends with a row in <c>directory_verdicts</c>: a verdict or a stored error.
 /// Rows with an error are retried on the next run.</para>
@@ -220,7 +220,7 @@ public class DirectoryPreAssessmentService
         await _verdictRepo.UpsertAsync(verdict, ct);
         tree.Set(verdict);
 
-        var handledAsWhole = verdict.Verdict is DirectoryVerdictKind.Einheit or DirectoryVerdictKind.System;
+        var handledAsWhole = verdict.Verdict is DirectoryVerdictKind.Unit or DirectoryVerdictKind.System;
 
         if (verdict.Rule == DirectoryVerdictRules.InsideUnit || !IsAiCandidate(dir))
         {
@@ -283,7 +283,7 @@ public class DirectoryPreAssessmentService
             var error = $"Pre-assessment failed: {ex.Message}";
             outcome = new DirectoryPreAssessmentOutcome(
                 new DirectoryClassificationResult { Phase = PreAssessmentPhase, AnalyzedAt = DateTime.UtcNow, Error = error },
-                new DirectoryVerdict { Source = VerdictSource.Modell, JudgedAt = DateTime.UtcNow, Error = error });
+                new DirectoryVerdict { Source = VerdictSource.Model, JudgedAt = DateTime.UtcNow, Error = error });
         }
 
         var assessment = outcome.Assessment;
@@ -292,14 +292,14 @@ public class DirectoryPreAssessmentService
 
         var verdict = outcome.Verdict;
         verdict.DirectoryNodeId = dir.Id;
-        verdict.Source = VerdictSource.Modell;
+        verdict.Source = VerdictSource.Model;
         verdict.Rule = null;
         verdict.Profile = p.Profile;
         if (verdict.Verdict is null && verdict.Error is null)
             verdict.Error = "The model answer contained no valid verdict.";
         if (verdict.Error is not null)
             verdict.Verdict = null;
-        verdict.UnitDirectoryNodeId = verdict.Verdict == DirectoryVerdictKind.Einheit ? dir.Id : null;
+        verdict.UnitDirectoryNodeId = verdict.Verdict == DirectoryVerdictKind.Unit ? dir.Id : null;
 
         if (IsAiCandidate(dir))
         {
@@ -352,13 +352,13 @@ public class DirectoryPreAssessmentService
 
         switch (verdict.Verdict)
         {
-            case DirectoryVerdictKind.Einheit or DirectoryVerdictKind.System:
+            case DirectoryVerdictKind.Unit or DirectoryVerdictKind.System:
                 assessment.SamplingStrategy = "skip";
                 assessment.SampleSize = 0;
                 await _fileRepo.MarkAsSkippedAsync(fileInfos.Select(f => f.Id).ToList(), ct);
                 _logger.LogDebug("Skipped all {Count} files in {Path} ({Verdict})", fileInfos.Count, dir.FullPath, verdict.Verdict);
                 break;
-            case DirectoryVerdictKind.Einheitlich:
+            case DirectoryVerdictKind.Uniform:
                 var eligible = fileInfos.Count(f => DirectorySamplingService.IsEligible((FileType)f.FileType));
                 var sampled = eligible > _options.EffectiveSampleSize;
                 assessment.SamplingStrategy = sampled ? StratifiedSample : "analyze_all";
@@ -443,14 +443,14 @@ public class DirectoryPreAssessmentService
         public IReadOnlyList<DirectoryNode> ChildrenOf(DirectoryNode dir) =>
             _children.TryGetValue(dir.FullPath, out var list) ? list : [];
 
-        /// <summary>Nearest ancestor judged <c>einheit</c>, with its path relative to the scan root.</summary>
+        /// <summary>Nearest ancestor judged <c>unit</c>, with its path relative to the scan root.</summary>
         public (DirectoryVerdict? Verdict, string? RelativePath) FindUnitAncestor(DirectoryNode dir)
         {
             var parentPath = dir.ParentPath;
             var guard = 0;
             while (!string.IsNullOrEmpty(parentPath) && _byPath.TryGetValue(parentPath, out var parent) && guard++ < 512)
             {
-                if (_verdicts.TryGetValue(parent.Id, out var v) && v.Verdict == DirectoryVerdictKind.Einheit)
+                if (_verdicts.TryGetValue(parent.Id, out var v) && v.Verdict == DirectoryVerdictKind.Unit)
                     return (v, parent.RelativePath);
                 parentPath = parent.ParentPath;
             }

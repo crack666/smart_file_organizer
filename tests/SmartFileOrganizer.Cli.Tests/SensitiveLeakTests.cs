@@ -214,7 +214,7 @@ public class SensitiveLeakTests : IDisposable
         var marked = (await SfoAsync("files", job.ToString(), "--sensitive", "yes", "--json")).Result();
         var notes = marked.GetProperty("items").EnumerateArray()
             .Single(i => i.GetProperty("name").GetString() == "notes-2009.txt");
-        Assert.Equal(["schluessel"], notes.GetProperty("sensitive").EnumerateArray().Select(t => t.GetString()));
+        Assert.Equal(["keys"], notes.GetProperty("sensitive").EnumerateArray().Select(t => t.GetString()));
         Assert.DoesNotContain(Secret, await AllOutputsAsync(job));
         Assert.DoesNotContain(Secret, await File.ReadAllTextAsync(DebugLogPath));
     }
@@ -238,7 +238,7 @@ public class SensitiveLeakTests : IDisposable
             .ToDictionary(i => Path.GetFileName(i.GetProperty("path").GetString()!), i => i);
         var ssh = items[".ssh"];
         Assert.Equal("skip", ssh.GetProperty("status").GetString());
-        Assert.Equal(["schluessel"], ssh.GetProperty("sensitive").EnumerateArray().Select(t => t.GetString()));
+        Assert.Equal(["keys"], ssh.GetProperty("sensitive").EnumerateArray().Select(t => t.GetString()));
         Assert.Equal("dir:ssh", ssh.GetProperty("sensitive_rule").GetString());
         Assert.Equal(0, ssh.GetProperty("files").GetInt64());
         Assert.Equal("dir:appdata", items["AppData"].GetProperty("sensitive_rule").GetString());
@@ -315,7 +315,7 @@ internal sealed class EchoingOllamaHandler : HttpMessageHandler
         {
             answer = new
             {
-                verdict = "gemischt", purpose = prompt, retention = "pruefen", reason = prompt,
+                verdict = "mixed", purpose = prompt, retention = "review", reason = prompt,
                 homogeneity = "low", dominant_type = "document", theme = prompt,
                 anomalous_files = Array.Empty<object>(), sampling_strategy = "analyze_all", suggested_sample_size = 2
             };

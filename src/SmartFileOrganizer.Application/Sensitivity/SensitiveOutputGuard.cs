@@ -37,7 +37,7 @@ public sealed record FileOutputRecord
     [JsonPropertyName("last_write_time")] public DateTime? LastWriteTime { get; init; }
     [JsonPropertyName("status")] public string Status { get; init; } = string.Empty;
 
-    /// <summary>Fixed marker tokens (<c>zugangsdaten</c>, <c>schluessel</c>, ...); empty when not sensitive.</summary>
+    /// <summary>Fixed marker tokens (<c>credentials</c>, <c>keys</c>, ...); empty when not sensitive.</summary>
     [JsonPropertyName("sensitive")] public IReadOnlyList<string> Sensitive { get; init; } = [];
 
     /// <summary>Ids of the rules that marked the file (<c>name:id_rsa</c>, <c>model</c>). No content.</summary>
@@ -236,12 +236,12 @@ public static class SensitiveOutputGuard
     public static string NeutralSummary(SensitiveMarker markers, FileType fileType)
     {
         var kinds = new List<string>();
-        if (markers.HasFlag(SensitiveMarker.Zugangsdaten)) kinds.Add("credentials");
-        if (markers.HasFlag(SensitiveMarker.Schluessel)) kinds.Add("private key material");
-        if (markers.HasFlag(SensitiveMarker.PrivateNachricht)) kinds.Add("private messages");
-        if (markers.HasFlag(SensitiveMarker.Ausweis)) kinds.Add("identity document");
-        if (markers.HasFlag(SensitiveMarker.Finanzen)) kinds.Add("financial records");
-        if (markers.HasFlag(SensitiveMarker.Gesundheit)) kinds.Add("health records");
+        if (markers.HasFlag(SensitiveMarker.Credentials)) kinds.Add("credentials");
+        if (markers.HasFlag(SensitiveMarker.Keys)) kinds.Add("private key material");
+        if (markers.HasFlag(SensitiveMarker.PrivateMessage)) kinds.Add("private messages");
+        if (markers.HasFlag(SensitiveMarker.Identity)) kinds.Add("identity document");
+        if (markers.HasFlag(SensitiveMarker.Finance)) kinds.Add("financial records");
+        if (markers.HasFlag(SensitiveMarker.Health)) kinds.Add("health records");
 
         var what = kinds.Count == 0 ? "sensitive content" : string.Join(", ", kinds);
         return $"Sensitive {fileType} file ({what}). Content withheld; review locally.";

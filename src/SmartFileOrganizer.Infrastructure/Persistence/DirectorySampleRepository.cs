@@ -140,8 +140,8 @@ public class DirectorySampleRepository : IDirectorySampleRepository
             """,
             new
             {
-                mixed = DirectoryVerdictKind.Gemischt.ToCode(),
-                uniform = DirectoryVerdictKind.Einheitlich.ToCode(),
+                mixed = DirectoryVerdictKind.Mixed.ToCode(),
+                uniform = DirectoryVerdictKind.Uniform.ToCode(),
                 escalationReason,
                 dirId = sample.DirectoryNodeId
             }, tx);

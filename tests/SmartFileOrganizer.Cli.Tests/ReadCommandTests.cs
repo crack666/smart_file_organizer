@@ -118,7 +118,7 @@ public class ReadCommandTests : IDisposable
             {
                 DirectoryNodeId = node.Id,
                 Verdict = kind,
-                Source = VerdictSource.Modell,
+                Source = VerdictSource.Model,
                 Purpose = purpose,
                 Reason = purpose is null ? null : "Judged from names.",
                 Retention = retention,
@@ -131,8 +131,8 @@ public class ReadCommandTests : IDisposable
         }
 
         // The purpose names a marked file, so it must not leave the process.
-        await Verdict(P("docs"), DirectoryVerdictKind.Gemischt, RetentionValue.Pruefen, "Letters and the .env of a project.");
-        await Verdict(P("photos"), DirectoryVerdictKind.Einheitlich, RetentionValue.Behalten, "Holiday photos.");
+        await Verdict(P("docs"), DirectoryVerdictKind.Mixed, RetentionValue.Review, "Letters and the .env of a project.");
+        await Verdict(P("photos"), DirectoryVerdictKind.Uniform, RetentionValue.Keep, "Holiday photos.");
         await Verdict(P("keys"), null, null, null, error: "Ollama request timed out.");
 
         async Task Classify(string dir, string name, FileCategory category, double confidence, string summary)
@@ -188,12 +188,15 @@ public class ReadCommandTests : IDisposable
     {
         var job = (await PrepareAsync()).ToString();
 
-        Assert.Equal(["docs"], Names((await OkAsync("dirs", job, "--verdict", DirectoryVerdictKind.Gemischt.ToCode())).Result()));
+        Assert.Equal(["docs"], Names((await OkAsync("dirs", job, "--verdict", DirectoryVerdictKind.Mixed.ToCode())).Result()));
         Assert.Equal(["keys"], Names((await OkAsync("dirs", job, "--verdict", "error")).Result()));
         Assert.Equal(["data"], Names((await OkAsync("dirs", job, "--verdict", "none")).Result()));
-        Assert.Equal(["photos"], Names((await OkAsync("dirs", job, "--retention", RetentionValue.Behalten.ToCode())).Result()));
+        Assert.Equal(["photos"], Names((await OkAsync("dirs", job, "--retention", RetentionValue.Keep.ToCode())).Result()));
         Assert.Equal(["data", "docs", "keys"], Names((await OkAsync("dirs", job, "--sensitive", "yes")).Result()));
         Assert.Equal(["photos"], Names((await OkAsync("dirs", job, "--sensitive", "no")).Result()));
+        // The codes as a user types them (docs/glossary.md).
+        Assert.Equal(["docs"], Names((await OkAsync("dirs", job, "--verdict", "mixed")).Result()));
+        Assert.Equal(["photos"], Names((await OkAsync("dirs", job, "--retention", "keep")).Result()));
         Assert.Equal(["data", "photos"], Names((await OkAsync("dirs", job, "--min-size", "4K")).Result()));
         Assert.Equal(["photos"], Names((await OkAsync("dirs", job, "--under", "photos")).Result()));
         Assert.Equal(["data"], Names((await OkAsync("dirs", job, "--depth", "0")).Result()));
@@ -241,7 +244,7 @@ public class ReadCommandTests : IDisposable
         Assert.Equal(6, (await OkAsync("files", job, "--dir", ".", "--recursive")).Result().GetProperty("total").GetInt64());
         Assert.Equal(3, (await OkAsync("files", job, "--status", "ai_analyzed")).Result().GetProperty("total").GetInt64());
         Assert.Equal(3, (await OkAsync("files", job, "--status", "pending")).Result().GetProperty("total").GetInt64());
-        Assert.Equal(["big.png", "pic.png"], Names((await OkAsync("files", job, "--verdict", DirectoryVerdictKind.Einheitlich.ToCode())).Result()));
+        Assert.Equal(["big.png", "pic.png"], Names((await OkAsync("files", job, "--verdict", DirectoryVerdictKind.Uniform.ToCode())).Result()));
         Assert.Equal(["id_rsa"], Names((await OkAsync("files", job, "--verdict", "error")).Result()));
 
         var marked = (await OkAsync("files", job, "--sensitive", "yes")).Result();
@@ -282,7 +285,7 @@ public class ReadCommandTests : IDisposable
         var file = result.GetProperty("file");
         Assert.True(file.GetProperty("protected").GetBoolean());
         Assert.Equal(JsonValueKind.Null, file.GetProperty("raw_response").ValueKind);
-        Assert.Equal(DirectoryVerdictKind.Gemischt.ToCode(), file.GetProperty("dir_verdict").GetString());
+        Assert.Equal(DirectoryVerdictKind.Mixed.ToCode(), file.GetProperty("dir_verdict").GetString());
         Assert.DoesNotContain(EnvSecret, result.GetRawText());
 
         var letter = (await OkAsync("show", job, P("docs", "letter.txt"))).Result().GetProperty("file");
@@ -297,8 +300,8 @@ public class ReadCommandTests : IDisposable
 
         var dir = (await OkAsync("show", job, "docs")).Result().GetProperty("directory");
 
-        Assert.Equal(DirectoryVerdictKind.Gemischt.ToCode(), dir.GetProperty("verdict").GetString());
-        Assert.Equal(VerdictSource.Modell.ToCode(), dir.GetProperty("verdict_source").GetString());
+        Assert.Equal(DirectoryVerdictKind.Mixed.ToCode(), dir.GetProperty("verdict").GetString());
+        Assert.Equal(VerdictSource.Model.ToCode(), dir.GetProperty("verdict_source").GetString());
         Assert.Equal(DirectoryTextGuard.NeutralHint, dir.GetProperty("purpose").GetString());
         Assert.Equal("Judged from names.", dir.GetProperty("reason").GetString());
         Assert.Equal(DirectoryTextGuard.NeutralHint, dir.GetProperty("verdict_raw_response").GetString());
@@ -341,7 +344,7 @@ public class ReadCommandTests : IDisposable
         Assert.Equal(1, result.GetProperty("directories_by_verdict").GetProperty("none").GetInt64());
         var largest = result.GetProperty("largest_directories");
         Assert.Equal("photos", largest[0].GetProperty("relative_path").GetString());
-        Assert.Equal(DirectoryVerdictKind.Einheitlich.ToCode(), largest[0].GetProperty("verdict").GetString());
+        Assert.Equal(DirectoryVerdictKind.Uniform.ToCode(), largest[0].GetProperty("verdict").GetString());
         Assert.False(largest[0].TryGetProperty("purpose", out _));
         Assert.DoesNotContain(EnvSecret, result.GetRawText());
     }
@@ -395,6 +398,8 @@ public class ReadCommandTests : IDisposable
     [InlineData("dirs", "1", "--limit", "1001")]
     [InlineData("dirs", "1", "--offset", "-1")]
     [InlineData("dirs", "1", "--verdict", "bogus")]
+    [InlineData("dirs", "1", "--verdict", "gemischt")]
+    [InlineData("dirs", "1", "--retention", "behalten")]
     [InlineData("dirs", "1", "--sensitive", "maybe")]
     [InlineData("dirs", "1", "--min-size", "lots")]
     [InlineData("dirs", "1", "--sort", "colour")]

@@ -18,10 +18,10 @@ public sealed class DirectoryReadRow
     public DirectoryStatus DirStatus { get; set; }
     public int SubdirCount { get; set; }
 
-    /// <summary>Stored verdict code (<c>einheit</c>, ...); null when there is no verdict or only an error.</summary>
+    /// <summary>Stored verdict code (<c>unit</c>, ...); null when there is no verdict or only an error.</summary>
     public string? Verdict { get; set; }
 
-    /// <summary><c>regel</c> or <c>modell</c>; null when Phase 1 has not reached the directory.</summary>
+    /// <summary><c>rule</c> or <c>model</c>; null when Phase 1 has not reached the directory.</summary>
     public string? VerdictSource { get; set; }
 
     public string? VerdictRule { get; set; }

@@ -137,34 +137,28 @@ public class EvaluationTests : IDisposable
     public void Codes_EnglishCodesOfIssue35_MapToTheEnums()
     {
         Assert.True(EvalCodes.TryParseVerdict("unit", out var unit));
-        Assert.Equal(DirectoryVerdictKind.Einheit, unit);
+        Assert.Equal(DirectoryVerdictKind.Unit, unit);
         Assert.True(EvalCodes.TryParseVerdict("uniform", out var uniform));
-        Assert.Equal(DirectoryVerdictKind.Einheitlich, uniform);
+        Assert.Equal(DirectoryVerdictKind.Uniform, uniform);
         Assert.True(EvalCodes.TryParseVerdict("mixed", out var mixed));
-        Assert.Equal(DirectoryVerdictKind.Gemischt, mixed);
+        Assert.Equal(DirectoryVerdictKind.Mixed, mixed);
         Assert.True(EvalCodes.TryParseVerdict("empty", out var empty));
-        Assert.Equal(DirectoryVerdictKind.Leer, empty);
+        Assert.Equal(DirectoryVerdictKind.Empty, empty);
         Assert.True(EvalCodes.TryParseVerdict("system", out var system));
         Assert.Equal(DirectoryVerdictKind.System, system);
 
         Assert.True(EvalCodes.TryParseMarker("credentials", out var c));
-        Assert.Equal(SensitiveMarker.Zugangsdaten, c);
+        Assert.Equal(SensitiveMarker.Credentials, c);
         Assert.True(EvalCodes.TryParseMarker("private_message", out var p));
-        Assert.Equal(SensitiveMarker.PrivateNachricht, p);
+        Assert.Equal(SensitiveMarker.PrivateMessage, p);
         Assert.True(EvalCodes.TryParseMarker("health", out var h));
-        Assert.Equal(SensitiveMarker.Gesundheit, h);
+        Assert.Equal(SensitiveMarker.Health, h);
 
-        // The central code is accepted as well, and it is what the output shows.
-        Assert.True(EvalCodes.TryParseVerdict(EvalCodes.Verdict(DirectoryVerdictKind.Gemischt), out var central));
-        Assert.Equal(DirectoryVerdictKind.Gemischt, central);
+        // The truth codes are the central codes, so the output shows exactly what the truth file says.
+        Assert.Equal("mixed", EvalCodes.Verdict(DirectoryVerdictKind.Mixed));
+        Assert.Equal("credentials,keys", EvalCodes.MarkerList(SensitiveMarker.Credentials | SensitiveMarker.Keys));
         Assert.False(EvalCodes.TryParseVerdict("chaos", out _));
-    }
-
-    [Fact]
-    public void Codes_BridgeHasOneCodePerEnumMember()
-    {
-        foreach (var (type, codes, members) in EvalCodes.BridgeShape())
-            Assert.True(codes == members, $"{type.Name}: {codes} codes for {members} members");
+        Assert.False(EvalCodes.TryParseVerdict("gemischt", out _));
     }
 
     [Fact]
@@ -265,13 +259,13 @@ public class EvaluationTests : IDisposable
     {
         var preparer = new FixedPreparer();
         var s = await CreateStoreAsync(preparer);
-        var id = await AddClassifiedFileAsync(s, "auszug.pdf", FileCategory.Document, SensitiveMarker.Finanzen);
+        var id = await AddClassifiedFileAsync(s, "auszug.pdf", FileCategory.Document, SensitiveMarker.Finance);
 
         await s.Review.ApplyOverrideAsync(id, FileCategory.Invoice, null, null);
 
         var stored = Assert.Single(await s.Cases.GetAllAsync());
         Assert.True(stored.IsSensitive);
-        Assert.Equal(SensitiveMarker.Finanzen, stored.SensitiveMarkers);
+        Assert.Equal(SensitiveMarker.Finance, stored.SensitiveMarkers);
         Assert.Null(stored.EvidenceJson);
         Assert.Equal(0, preparer.Calls);
 
@@ -307,7 +301,7 @@ public class EvaluationTests : IDisposable
     public async Task RunCases_SensitiveCaseWithoutFile_IsMissing_NotGuessed()
     {
         var s = await CreateStoreAsync(new FixedPreparer());
-        var id = await AddClassifiedFileAsync(s, "auszug.pdf", FileCategory.Document, SensitiveMarker.Finanzen);
+        var id = await AddClassifiedFileAsync(s, "auszug.pdf", FileCategory.Document, SensitiveMarker.Finance);
         await s.Review.ApplyOverrideAsync(id, FileCategory.Invoice, null, null);
 
         var answers = EvalTruth.FromDocument(new EvalTruthDocument(1, new EvalCorpusInfo("answers", 1, 0), "tree",

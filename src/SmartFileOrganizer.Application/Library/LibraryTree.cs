@@ -185,7 +185,7 @@ public sealed class LibraryTree
             dir.Files.Add(info);
             dir.DirectBytes += f.Size;
 
-            var markers = (f.SensitiveMarkers & (SensitiveMarker.Zugangsdaten | SensitiveMarker.Schluessel | SensitiveMarker.Ausweis))
+            var markers = (f.SensitiveMarkers & (SensitiveMarker.Credentials | SensitiveMarker.Keys | SensitiveMarker.Identity))
                           | ExtraSensitive(f.Name, words);
             if (markers != SensitiveMarker.None)
                 tree.SensitiveFiles.Add((dir, info, markers));
@@ -264,7 +264,7 @@ public sealed class LibraryTree
         {
             // Short words only as a whole word ("puk", "2fa"); longer ones anywhere ("backupcodes").
             if (word.Length <= 4 ? tokens.Contains(word) : name.Contains(word, StringComparison.Ordinal))
-                return SensitiveMarker.Zugangsdaten;
+                return SensitiveMarker.Credentials;
         }
         return SensitiveMarker.None;
     }

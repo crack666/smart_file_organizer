@@ -5,7 +5,7 @@ using SmartFileOrganizer.Domain.Enums;
 namespace SmartFileOrganizer.Infrastructure.Persistence;
 
 /// <summary>
-/// Reads <see cref="SensitiveMarker"/> from its stored token list (<c>zugangsdaten,schluessel</c>).
+/// Reads <see cref="SensitiveMarker"/> from its stored token list (<c>credentials,keys</c>).
 /// Registered once in <see cref="DatabaseContext"/>.
 /// </summary>
 /// <remarks>

@@ -65,7 +65,7 @@ public class SensitiveOutputGuardTests
     public void Json_OfMarkedFile_ContainsNeitherExcerptNorRawResponse()
     {
         var file = MakeFile("notes.txt");
-        file.SensitiveMarkers = SensitiveMarker.Schluessel;
+        file.SensitiveMarkers = SensitiveMarker.Keys;
         file.SensitiveRule = "header:private-key";
 
         var json = SensitiveOutputGuard.ToJson(SensitiveOutputGuard.Project(file, textExcerpt: Excerpt));
@@ -76,7 +76,7 @@ public class SensitiveOutputGuardTests
         var root = doc.RootElement;
         Assert.Equal("/Scan/Docs/notes.txt", root.GetProperty("full_path").GetString());
         Assert.Equal("Document", root.GetProperty("file_type").GetString());
-        Assert.Equal("schluessel", root.GetProperty("sensitive")[0].GetString());
+        Assert.Equal("keys", root.GetProperty("sensitive")[0].GetString());
         Assert.True(root.GetProperty("protected").GetBoolean());
         Assert.Equal(JsonValueKind.Null, root.GetProperty("text_excerpt").ValueKind);
         Assert.Equal(JsonValueKind.Null, root.GetProperty("raw_response").ValueKind);
@@ -87,7 +87,7 @@ public class SensitiveOutputGuardTests
     public void Json_WithIncludeSensitive_ShowsEverything()
     {
         var file = MakeFile("notes.txt");
-        file.SensitiveMarkers = SensitiveMarker.Schluessel;
+        file.SensitiveMarkers = SensitiveMarker.Keys;
 
         var record = SensitiveOutputGuard.Project(
             file, new SensitiveOutputOptions { IncludeSensitive = true }, Excerpt);
@@ -98,7 +98,7 @@ public class SensitiveOutputGuardTests
         Assert.Contains("RAW-RESPONSE", json);
         Assert.Contains(ModelSummary, json);
         // Still marked, and still never proposed as disposable.
-        Assert.Equal(["schluessel"], record.Sensitive);
+        Assert.Equal(["keys"], record.Sensitive);
         Assert.Equal(nameof(FileCategory.ReviewNeeded), record.Category);
         Assert.Equal("sensitive", record.CategorySource);
     }
@@ -125,12 +125,12 @@ public class SensitiveOutputGuardTests
     public void ModelMarker_Alone_Protects()
     {
         var file = MakeFile("scan_0042.pdf");
-        file.Classification!.SensitiveMarkers = SensitiveMarker.Ausweis;
+        file.Classification!.SensitiveMarkers = SensitiveMarker.Identity;
 
         var record = SensitiveOutputGuard.Project(file, textExcerpt: Excerpt);
 
         Assert.True(record.Protected);
-        Assert.Equal(["ausweis"], record.Sensitive);
+        Assert.Equal(["identity"], record.Sensitive);
         Assert.Equal(SensitiveOutputGuard.ModelRule, record.SensitiveRule);
         AssertNoContent(SensitiveOutputGuard.ToJson(record));
     }
@@ -144,7 +144,7 @@ public class SensitiveOutputGuardTests
         var record = SensitiveOutputGuard.Project(file, textExcerpt: Excerpt);
 
         Assert.True(record.Protected);
-        Assert.Contains("schluessel", record.Sensitive);
+        Assert.Contains("keys", record.Sensitive);
         AssertNoContent(SensitiveOutputGuard.ToJson(record));
     }
 
@@ -181,23 +181,23 @@ public class SensitiveOutputGuardTests
     public void ReviewRule_ReplacesTrashCandidateOnlyForMarkedFiles()
     {
         Assert.Equal(FileCategory.ReviewNeeded,
-            SensitiveOutputGuard.ApplyReviewRule(FileCategory.TrashCandidate, SensitiveMarker.Finanzen));
+            SensitiveOutputGuard.ApplyReviewRule(FileCategory.TrashCandidate, SensitiveMarker.Finance));
         Assert.Equal(FileCategory.TrashCandidate,
             SensitiveOutputGuard.ApplyReviewRule(FileCategory.TrashCandidate, SensitiveMarker.None));
         Assert.Equal(FileCategory.Photo,
-            SensitiveOutputGuard.ApplyReviewRule(FileCategory.Photo, SensitiveMarker.Finanzen));
+            SensitiveOutputGuard.ApplyReviewRule(FileCategory.Photo, SensitiveMarker.Finance));
     }
 
     [Fact]
     public void ClassificationService_NeverStoresTrashCandidateForMarkedFile()
     {
-        var byModel = new FileClassification { Category = FileCategory.TrashCandidate, SensitiveMarkers = SensitiveMarker.Zugangsdaten };
+        var byModel = new FileClassification { Category = FileCategory.TrashCandidate, SensitiveMarkers = SensitiveMarker.Credentials };
         ClassificationService.ApplySensitiveReviewRule(MakeFile("tmp.txt"), byModel);
         Assert.Equal(FileCategory.ReviewNeeded, byModel.Category);
 
         var byRule = new FileClassification { Category = FileCategory.TrashCandidate };
         var keyFile = MakeFile("tmp.txt");
-        keyFile.SensitiveMarkers = SensitiveMarker.Schluessel;
+        keyFile.SensitiveMarkers = SensitiveMarker.Keys;
         ClassificationService.ApplySensitiveReviewRule(keyFile, byRule);
         Assert.Equal(FileCategory.ReviewNeeded, byRule.Category);
 
@@ -218,7 +218,7 @@ public class SensitiveOutputGuardTests
         var row = sw.ToString();
 
         AssertNoContent(row);
-        Assert.Contains("gesundheit", row);
+        Assert.Contains("health", row);
         Assert.Contains(nameof(FileCategory.ReviewNeeded), row);
         Assert.DoesNotContain(nameof(FileCategory.TrashCandidate), row);
     }
@@ -246,8 +246,8 @@ public class SensitiveOutputGuardTests
     public void NeutralSummary_NamesEveryMarker()
     {
         var text = SensitiveOutputGuard.NeutralSummary(
-            SensitiveMarker.Zugangsdaten | SensitiveMarker.Schluessel | SensitiveMarker.PrivateNachricht |
-            SensitiveMarker.Ausweis | SensitiveMarker.Finanzen | SensitiveMarker.Gesundheit, FileType.Other);
+            SensitiveMarker.Credentials | SensitiveMarker.Keys | SensitiveMarker.PrivateMessage |
+            SensitiveMarker.Identity | SensitiveMarker.Finance | SensitiveMarker.Health, FileType.Other);
 
         foreach (var kind in new[] { "credentials", "private key", "private messages", "identity", "financial", "health" })
             Assert.Contains(kind, text);

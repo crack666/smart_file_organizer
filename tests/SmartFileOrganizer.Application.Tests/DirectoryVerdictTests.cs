@@ -101,7 +101,7 @@ public class DirectoryVerdictTests : IDisposable
     // ------------------------------------------------------------------ Fertig, wenn
 
     [Fact]
-    public async Task GitRepository_IsEinheit_WithoutModelCall()
+    public async Task GitRepository_IsUnit_WithoutModelCall()
     {
         var repo = MakeTree("repo");
         WriteFile(Path.Combine(repo, ".git", "HEAD"));
@@ -116,8 +116,8 @@ public class DirectoryVerdictTests : IDisposable
         Assert.Equal(0, result.ErrorCount);
 
         var root = await VerdictAsync(jobId, repo);
-        Assert.Equal(DirectoryVerdictKind.Einheit, root.Verdict);
-        Assert.Equal(VerdictSource.Regel, root.Source);
+        Assert.Equal(DirectoryVerdictKind.Unit, root.Verdict);
+        Assert.Equal(VerdictSource.Rule, root.Source);
         Assert.Equal(DirectoryVerdictRules.Marker, root.Rule);
         Assert.Contains("dir:.git", root.Profile.UnitMarkers);
         Assert.Contains(".git", root.Reason);
@@ -126,7 +126,7 @@ public class DirectoryVerdictTests : IDisposable
         foreach (var inner in new[] { Path.Combine(repo, "src"), Path.Combine(repo, "src", "Core"), Path.Combine(repo, ".git") })
         {
             var v = await VerdictAsync(jobId, inner);
-            Assert.Equal(DirectoryVerdictKind.Einheit, v.Verdict);
+            Assert.Equal(DirectoryVerdictKind.Unit, v.Verdict);
             Assert.Equal(DirectoryVerdictRules.InsideUnit, v.Rule);
             Assert.Equal(root.DirectoryNodeId, v.UnitDirectoryNodeId);
         }
@@ -139,13 +139,13 @@ public class DirectoryVerdictTests : IDisposable
         await using var conn = _db.CreateConnection();
         var row = await conn.QuerySingleAsync<(string Verdict, string Source)>(
             "SELECT verdict, source FROM directory_verdicts WHERE directory_node_id = @id", new { id = root.DirectoryNodeId });
-        Assert.Equal(("einheit", "regel"), row);
+        Assert.Equal(("unit", "rule"), row);
 
         await AssertEveryDirectoryHasVerdictOrErrorAsync(jobId);
     }
 
     [Fact]
-    public async Task TwoHundredCameraJpgs_ProfileSuggestsEinheitlich()
+    public async Task TwoHundredCameraJpgs_ProfileSuggestsUniform()
     {
         var trip = MakeTree("Urlaub");
         var start = new DateTime(2024, 5, 17, 9, 0, 0, DateTimeKind.Utc);
@@ -158,7 +158,7 @@ public class DirectoryVerdictTests : IDisposable
         var input = Assert.Single(_ollama.PreAssessInputs);
         var profile = input.Profile;
         Assert.Equal(200, profile.FileCount);
-        Assert.Equal(DirectoryVerdictKind.Einheitlich, profile.Suggests);
+        Assert.Equal(DirectoryVerdictKind.Uniform, profile.Suggests);
         Assert.Equal(new[] { ".jpg" }, profile.Extensions.Select(e => e.Key));
         Assert.Equal(200, Assert.Single(profile.FileTypes, t => t.Key == nameof(FileType.Image)).Count);
         Assert.Equal(200, Assert.Single(profile.NamePatterns, p => p.Pattern == "camera").Count);
@@ -168,18 +168,18 @@ public class DirectoryVerdictTests : IDisposable
         // The model sees the profile and its hint.
         var prompt = OllamaService.BuildPreAssessmentPrompt(input);
         Assert.Contains("camera 200", prompt);
-        Assert.Contains("points to 'einheitlich'", prompt);
+        Assert.Contains("points to 'uniform'", prompt);
 
         var stored = await VerdictAsync(jobId, trip);
-        Assert.Equal(VerdictSource.Modell, stored.Source);
-        Assert.Equal(DirectoryVerdictKind.Einheitlich, stored.Verdict);
-        Assert.Equal(RetentionValue.Behalten, stored.Retention);
-        Assert.Equal(DirectoryVerdictKind.Einheitlich, stored.Profile.Suggests); // profile JSON round-trips
+        Assert.Equal(VerdictSource.Model, stored.Source);
+        Assert.Equal(DirectoryVerdictKind.Uniform, stored.Verdict);
+        Assert.Equal(RetentionValue.Keep, stored.Retention);
+        Assert.Equal(DirectoryVerdictKind.Uniform, stored.Profile.Suggests); // profile JSON round-trips
         Assert.Null(stored.Rule);
     }
 
     [Fact]
-    public async Task PdfExeJpgZip_ProfileSuggestsGemischt()
+    public async Task PdfExeJpgZip_ProfileSuggestsMixed()
     {
         var downloads = MakeTree("Downloads");
         foreach (var name in new[] { "rechnung.pdf", "setup.exe", "foto.jpg", "archiv.zip" })
@@ -189,10 +189,10 @@ public class DirectoryVerdictTests : IDisposable
         await NewService().RunAsync(jobId);
 
         var profile = Assert.Single(_ollama.PreAssessInputs).Profile;
-        Assert.Equal(DirectoryVerdictKind.Gemischt, profile.Suggests);
+        Assert.Equal(DirectoryVerdictKind.Mixed, profile.Suggests);
         Assert.Equal(4, profile.FileTypes.Count);
         Assert.Empty(profile.UnitMarkers); // an exe without dlls is an installer, not a program
-        Assert.Equal(DirectoryVerdictKind.Gemischt, (await VerdictAsync(jobId, downloads)).Verdict);
+        Assert.Equal(DirectoryVerdictKind.Mixed, (await VerdictAsync(jobId, downloads)).Verdict);
     }
 
     [Fact]
@@ -224,20 +224,20 @@ public class DirectoryVerdictTests : IDisposable
             var v = await VerdictAsync(jobId, relative.Length == 0 ? root : Path.Combine(root, relative));
             Assert.True(kind == v.Verdict, $"{relative}: expected {kind}, got {v.Verdict} ({v.Rule}: {v.Reason})");
             Assert.Equal(rule, v.Rule);
-            Assert.Equal(rule is null ? VerdictSource.Modell : VerdictSource.Regel, v.Source);
+            Assert.Equal(rule is null ? VerdictSource.Model : VerdictSource.Rule, v.Source);
             Assert.False(string.IsNullOrWhiteSpace(v.Reason));
         }
 
-        await Expect("leer", DirectoryVerdictKind.Leer, DirectoryVerdictRules.Empty);
-        await Expect(Path.Combine("Alt", "nichts"), DirectoryVerdictKind.Leer, DirectoryVerdictRules.Empty);
-        await Expect("Alt", DirectoryVerdictKind.Leer, DirectoryVerdictRules.Container);
-        await Expect(Path.Combine("Fotos", "2019"), DirectoryVerdictKind.Einheitlich, null);
-        await Expect("Fotos", DirectoryVerdictKind.Einheitlich, DirectoryVerdictRules.Container);
+        await Expect("leer", DirectoryVerdictKind.Empty, DirectoryVerdictRules.Empty);
+        await Expect(Path.Combine("Alt", "nichts"), DirectoryVerdictKind.Empty, DirectoryVerdictRules.Empty);
+        await Expect("Alt", DirectoryVerdictKind.Empty, DirectoryVerdictRules.Container);
+        await Expect(Path.Combine("Fotos", "2019"), DirectoryVerdictKind.Uniform, null);
+        await Expect("Fotos", DirectoryVerdictKind.Uniform, DirectoryVerdictRules.Container);
         await Expect(".cache", DirectoryVerdictKind.System, DirectoryVerdictRules.ScanSkip); // the scan skips dot directories
         await Expect("$Recycle.Bin", DirectoryVerdictKind.System, DirectoryVerdictRules.ScanSkip);
-        await Expect("Programm", DirectoryVerdictKind.Einheit, DirectoryVerdictRules.Marker);
-        await Expect("Ablage", DirectoryVerdictKind.Gemischt, null);
-        await Expect("", DirectoryVerdictKind.Gemischt, DirectoryVerdictRules.Container);
+        await Expect("Programm", DirectoryVerdictKind.Unit, DirectoryVerdictRules.Marker);
+        await Expect("Ablage", DirectoryVerdictKind.Mixed, null);
+        await Expect("", DirectoryVerdictKind.Mixed, DirectoryVerdictRules.Container);
 
         Assert.Equal(nameof(FileType.Image), (await VerdictAsync(jobId, Path.Combine(root, "Fotos"))).Profile.SubdirectoryDominantType);
         await AssertEveryDirectoryHasVerdictOrErrorAsync(jobId);
@@ -246,7 +246,7 @@ public class DirectoryVerdictTests : IDisposable
         var query = new DirectoryQueryService(_dirRepo, _verdictRepo);
         var all = await query.GetVerdictsAsync(jobId);
         Assert.Equal((await _dirRepo.GetAllForJobOrderedByDepthAsync(jobId)).Count, all.Count);
-        Assert.Equal(DirectoryVerdictKind.Gemischt, (await query.GetVerdictAsync(jobId, root))!.Verdict);
+        Assert.Equal(DirectoryVerdictKind.Mixed, (await query.GetVerdictAsync(jobId, root))!.Verdict);
     }
 
     [Fact]
@@ -257,25 +257,25 @@ public class DirectoryVerdictTests : IDisposable
         WriteFile(Path.Combine(root, "b", "y.pdf"));
 
         var jobId = await ScanAsync(root);
-        _ollama.Answer = input => input.Directory.Name == "b" ? null : DirectoryVerdictKind.Einheitlich;
+        _ollama.Answer = input => input.Directory.Name == "b" ? null : DirectoryVerdictKind.Uniform;
         var first = await NewService().RunAsync(jobId);
 
         var failed = await VerdictAsync(jobId, Path.Combine(root, "b"));
         Assert.Null(failed.Verdict);
         Assert.Equal("scripted failure", failed.Error);
-        Assert.Equal(VerdictSource.Modell, failed.Source);
+        Assert.Equal(VerdictSource.Model, failed.Source);
         Assert.NotNull((await VerdictAsync(jobId, root)).Error); // waits for its subdirectory
         Assert.Equal(2, first.ErrorCount);
         await AssertEveryDirectoryHasVerdictOrErrorAsync(jobId);
 
         _ollama.PreAssessInputs.Clear();
-        _ollama.Answer = _ => DirectoryVerdictKind.Einheitlich;
+        _ollama.Answer = _ => DirectoryVerdictKind.Uniform;
         var second = await NewService().RunAsync(jobId);
 
         Assert.Equal(0, second.ErrorCount);
         Assert.Equal(new[] { "b" }, _ollama.CalledDirectoryNames);
-        Assert.Equal(DirectoryVerdictKind.Einheitlich, (await VerdictAsync(jobId, Path.Combine(root, "b"))).Verdict);
-        Assert.Equal(DirectoryVerdictKind.Einheitlich, (await VerdictAsync(jobId, root)).Verdict);
+        Assert.Equal(DirectoryVerdictKind.Uniform, (await VerdictAsync(jobId, Path.Combine(root, "b"))).Verdict);
+        Assert.Equal(DirectoryVerdictKind.Uniform, (await VerdictAsync(jobId, root)).Verdict);
     }
 
     [Fact]
@@ -288,7 +288,7 @@ public class DirectoryVerdictTests : IDisposable
         WriteFile(Path.Combine(root, "Spiel", "levels", "deep", "level2.dat"));
 
         var jobId = await ScanAsync(root);
-        _ollama.Answer = input => input.Directory.Name == "Spiel" ? DirectoryVerdictKind.Einheit : DirectoryVerdictKind.Gemischt;
+        _ollama.Answer = input => input.Directory.Name == "Spiel" ? DirectoryVerdictKind.Unit : DirectoryVerdictKind.Mixed;
         await NewService().RunAsync(jobId);
 
         Assert.Equal(new[] { "Spiel" }, _ollama.CalledDirectoryNames);
@@ -297,7 +297,7 @@ public class DirectoryVerdictTests : IDisposable
         var level = await VerdictAsync(jobId, Path.Combine(root, "Spiel", "levels", "deep"));
         Assert.Equal(DirectoryVerdictRules.InsideUnit, level.Rule);
         Assert.Equal(game.DirectoryNodeId, level.UnitDirectoryNodeId);
-        Assert.Equal(DirectoryVerdictKind.Einheitlich, (await VerdictAsync(jobId, root)).Verdict); // a collection of units
+        Assert.Equal(DirectoryVerdictKind.Uniform, (await VerdictAsync(jobId, root)).Verdict); // a collection of units
     }
 
     [Fact]
@@ -335,16 +335,16 @@ public class DirectoryVerdictTests : IDisposable
     [Fact]
     public void Codes_AreTheGermanValuesOfTheIssue()
     {
-        Assert.Equal(new[] { "einheit", "einheitlich", "gemischt", "leer", "system" }, VerdictCodes.All<DirectoryVerdictKind>());
-        Assert.Equal(new[] { "behalten", "pruefen", "entbehrlich" }, VerdictCodes.All<RetentionValue>());
-        Assert.Equal(new[] { "regel", "modell" }, VerdictCodes.All<VerdictSource>());
+        Assert.Equal(new[] { "unit", "uniform", "mixed", "empty", "system" }, VerdictCodes.All<DirectoryVerdictKind>());
+        Assert.Equal(new[] { "keep", "review", "disposable" }, VerdictCodes.All<RetentionValue>());
+        Assert.Equal(new[] { "rule", "model" }, VerdictCodes.All<VerdictSource>());
 
-        Assert.True(VerdictCodes.TryParse<DirectoryVerdictKind>("Einheitlich", out var k));
-        Assert.Equal(DirectoryVerdictKind.Einheitlich, k);
+        Assert.True(VerdictCodes.TryParse<DirectoryVerdictKind>("Uniform", out var k));
+        Assert.Equal(DirectoryVerdictKind.Uniform, k);
         Assert.False(VerdictCodes.TryParse<DirectoryVerdictKind>("2", out _));
 
-        var json = System.Text.Json.JsonSerializer.Serialize(new DirectoryProfile { Suggests = DirectoryVerdictKind.Gemischt },
+        var json = System.Text.Json.JsonSerializer.Serialize(new DirectoryProfile { Suggests = DirectoryVerdictKind.Mixed },
             DirectoryVerdictRepository.ProfileJsonOptions);
-        Assert.Contains("\"suggests\":\"gemischt\"", json);
+        Assert.Contains("\"suggests\":\"mixed\"", json);
     }
 }

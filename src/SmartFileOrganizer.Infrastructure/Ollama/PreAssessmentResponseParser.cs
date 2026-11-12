@@ -11,24 +11,20 @@ namespace SmartFileOrganizer.Infrastructure.Ollama;
 /// </summary>
 public static class PreAssessmentResponseParser
 {
-    /// <summary>English words small models tend to answer with instead of the German codes.</summary>
+    /// <summary>
+    /// Other English words small models tend to answer with instead of the codes. The German words
+    /// (the codes before https://github.com/crack666/smart_file_organizer/issues/35) are read through
+    /// <see cref="CodeLabels.TryParseWord{TEnum}"/>. Either way only the code is stored.
+    /// </summary>
     private static readonly Dictionary<string, DirectoryVerdictKind> VerdictAliases = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["unit"] = DirectoryVerdictKind.Einheit,
-        ["uniform"] = DirectoryVerdictKind.Einheitlich,
-        ["homogeneous"] = DirectoryVerdictKind.Einheitlich,
-        ["mixed"] = DirectoryVerdictKind.Gemischt,
-        ["empty"] = DirectoryVerdictKind.Leer,
+        ["homogeneous"] = DirectoryVerdictKind.Uniform,
     };
 
     private static readonly Dictionary<string, RetentionValue> RetentionAliases = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["prüfen"] = RetentionValue.Pruefen,
-        ["keep"] = RetentionValue.Behalten,
-        ["review"] = RetentionValue.Pruefen,
-        ["check"] = RetentionValue.Pruefen,
-        ["expendable"] = RetentionValue.Entbehrlich,
-        ["disposable"] = RetentionValue.Entbehrlich,
+        ["check"] = RetentionValue.Review,
+        ["expendable"] = RetentionValue.Disposable,
     };
 
     public static DirectoryPreAssessmentOutcome Parse(string ollamaJson, string? modelUsed)
@@ -41,7 +37,7 @@ public static class PreAssessmentResponseParser
         };
         var verdict = new DirectoryVerdict
         {
-            Source = VerdictSource.Modell,
+            Source = VerdictSource.Model,
             ModelUsed = modelUsed,
             RawResponse = ollamaJson,
             JudgedAt = assessment.AnalyzedAt
@@ -96,7 +92,8 @@ public static class PreAssessmentResponseParser
         kind = default;
         if (string.IsNullOrWhiteSpace(text)) return false;
         var t = text.Trim();
-        return VerdictCodes.TryParse(t, out kind) || VerdictAliases.TryGetValue(t, out kind);
+        return VerdictCodes.TryParse(t, out kind) || VerdictAliases.TryGetValue(t, out kind)
+               || CodeLabels.TryParseWord(t, out kind);
     }
 
     public static bool TryParseRetention(string? text, out RetentionValue value)
@@ -104,7 +101,8 @@ public static class PreAssessmentResponseParser
         value = default;
         if (string.IsNullOrWhiteSpace(text)) return false;
         var t = text.Trim();
-        return VerdictCodes.TryParse(t, out value) || RetentionAliases.TryGetValue(t, out value);
+        return VerdictCodes.TryParse(t, out value) || RetentionAliases.TryGetValue(t, out value)
+               || CodeLabels.TryParseWord(t, out value);
     }
 
     /// <summary>Unwraps the Ollama envelope and the JSON object inside the answer text.</summary>

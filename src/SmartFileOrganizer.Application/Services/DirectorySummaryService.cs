@@ -209,12 +209,12 @@ public class DirectorySummaryService
         DirectoryNode dir, DirectoryVerdict? verdict, DirectorySample? sample, DirectoryClassificationResult preAssessment)
     {
         if (verdict?.Verdict is not { } kind || verdict.Error is not null) return null;
-        if (kind == DirectoryVerdictKind.Gemischt) return null;
+        if (kind == DirectoryVerdictKind.Mixed) return null;
 
         var text = verdict.Purpose ?? verdict.Reason;
         if (string.IsNullOrWhiteSpace(text)) return null;
 
-        if (kind == DirectoryVerdictKind.Einheitlich && sample is { State: SampleState.Confirmed })
+        if (kind == DirectoryVerdictKind.Uniform && sample is { State: SampleState.Confirmed })
         {
             text += $" Sample of {sample.Members.Count} confirmed {sample.MajorityCategory}; " +
                     $"{sample.InheritedCount} file(s) inherited that result.";

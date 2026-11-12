@@ -125,11 +125,11 @@ public class EvalCliTests : IDisposable
         };
         Assert.Equal(baseline.Keys.Concat(expectedNew).Order(StringComparer.Ordinal), failures.Keys.Order(StringComparer.Ordinal));
 
-        AssertFailure(failures[expectedNew[0]], "wrong", EvalCodes.Verdict(DirectoryVerdictKind.Einheitlich), EvalCodes.Verdict(DirectoryVerdictKind.Gemischt));
+        AssertFailure(failures[expectedNew[0]], "wrong", EvalCodes.Verdict(DirectoryVerdictKind.Uniform), EvalCodes.Verdict(DirectoryVerdictKind.Mixed));
         Assert.Equal("model stub:wrong.json", failures[expectedNew[0]].GetProperty("decided_by").GetString());
         AssertFailure(failures[expectedNew[1]], "wrong", EvalCodes.Category(FileCategory.Photo), EvalCodes.Category(FileCategory.Screenshot));
-        AssertFailure(failures[expectedNew[2]], "wrong", EvalCodes.MarkerList(SensitiveMarker.Zugangsdaten), EvalCodes.MarkerList(SensitiveMarker.None));
-        AssertFailure(failures[expectedNew[3]], "wrong", EvalCodes.MarkerList(SensitiveMarker.None), EvalCodes.MarkerList(SensitiveMarker.Finanzen));
+        AssertFailure(failures[expectedNew[2]], "wrong", EvalCodes.MarkerList(SensitiveMarker.Credentials), EvalCodes.MarkerList(SensitiveMarker.None));
+        AssertFailure(failures[expectedNew[3]], "wrong", EvalCodes.MarkerList(SensitiveMarker.None), EvalCodes.MarkerList(SensitiveMarker.Finance));
         Assert.Contains("extra", failures[expectedNew[3]].GetProperty("detail").GetString());
 
         // --compare without ids: newest run against the one before it.

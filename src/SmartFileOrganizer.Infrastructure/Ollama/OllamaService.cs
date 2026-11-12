@@ -287,12 +287,12 @@ public class OllamaService : IOllamaService
         sb.AppendLine("Use ReviewNeeded if you are uncertain — do not guess TrashCandidate.");
         sb.AppendLine();
         sb.AppendLine("Sensitive content: list every marker that applies in the sensitive field (empty list if none):");
-        sb.AppendLine("- zugangsdaten: passwords, password lists, login data, API keys or tokens");
-        sb.AppendLine("- schluessel: private keys, certificates with private key, crypto wallets or seed phrases");
-        sb.AppendLine("- private_nachricht: private messages, chats, e-mails, personal letters");
-        sb.AppendLine("- ausweis: identity card, passport, driving licence or a scan of one");
-        sb.AppendLine("- finanzen: bank statements, tax documents, payslips, credit card data");
-        sb.AppendLine("- gesundheit: medical findings, doctor letters, health insurance documents");
+        sb.AppendLine($"- {SensitiveMarkerNames.Credentials}: passwords, password lists, login data, API keys or tokens");
+        sb.AppendLine($"- {SensitiveMarkerNames.Keys}: private keys, certificates with private key, crypto wallets or seed phrases");
+        sb.AppendLine($"- {SensitiveMarkerNames.PrivateMessage}: private messages, chats, e-mails, personal letters");
+        sb.AppendLine($"- {SensitiveMarkerNames.Identity}: identity card, passport, driving licence or a scan of one");
+        sb.AppendLine($"- {SensitiveMarkerNames.Finance}: bank statements, tax documents, payslips, credit card data");
+        sb.AppendLine($"- {SensitiveMarkerNames.Health}: medical findings, doctor letters, health insurance documents");
         sb.AppendLine("If any marker applies: never use TrashCandidate, and keep the summary neutral (what kind of document it is),");
         sb.AppendLine("without quoting passwords, keys, numbers, names or message text.");
         sb.AppendLine();
@@ -481,11 +481,11 @@ public class OllamaService : IOllamaService
                 foreach (var item in prop.EnumerateArray())
                 {
                     if (item.ValueKind == JsonValueKind.String)
-                        markers |= SensitiveMarkerNames.Parse(item.GetString());
+                        markers |= SensitiveMarkerNames.ParseAnswer(item.GetString());
                 }
                 break;
             case JsonValueKind.String:
-                markers = SensitiveMarkerNames.Parse(prop.GetString());
+                markers = SensitiveMarkerNames.ParseAnswer(prop.GetString());
                 break;
         }
         return markers;
@@ -545,7 +545,7 @@ public class OllamaService : IOllamaService
             return new DirectoryPreAssessmentOutcome(result, new DirectoryVerdict
             {
                 DirectoryNodeId = input.Directory.Id,
-                Source = VerdictSource.Modell,
+                Source = VerdictSource.Model,
                 ModelUsed = _options.Model,
                 RawResponse = raw,
                 JudgedAt = result.AnalyzedAt,
@@ -653,14 +653,14 @@ public class OllamaService : IOllamaService
         sb.AppendLine();
         sb.AppendLine("Tasks:");
         sb.AppendLine("1. Judge the directory as a whole (field verdict), using the profile above:");
-        sb.AppendLine("   einheit = project, program, game or backup that only makes sense as a whole; never split into single files");
-        sb.AppendLine("   einheitlich = collection of similar content with one purpose (photos of one trip, invoices of one year)");
-        sb.AppendLine("   gemischt = storage without a common purpose (desktop, downloads, misc); files are handled one by one");
-        sb.AppendLine("   leer = nothing worth looking at");
-        sb.AppendLine("   system = operating system, application or cache data, not user content");
+        sb.AppendLine($"   {DirectoryVerdictKind.Unit.ToCode()} = project, program, game or backup that only makes sense as a whole; never split into single files");
+        sb.AppendLine($"   {DirectoryVerdictKind.Uniform.ToCode()} = collection of similar content with one purpose (photos of one trip, invoices of one year)");
+        sb.AppendLine($"   {DirectoryVerdictKind.Mixed.ToCode()} = storage without a common purpose (desktop, downloads, misc); files are handled one by one");
+        sb.AppendLine($"   {DirectoryVerdictKind.Empty.ToCode()} = nothing worth looking at");
+        sb.AppendLine($"   {DirectoryVerdictKind.System.ToCode()} = operating system, application or cache data, not user content");
         sb.AppendLine("2. purpose: what the directory is for, in one sentence.");
-        sb.AppendLine("3. retention: behalten = personal or hard to replace; pruefen = unclear, a human should look;");
-        sb.AppendLine("   entbehrlich = can be recreated or downloaded again (installers, caches, temporary files).");
+        sb.AppendLine($"3. retention: {RetentionValue.Keep.ToCode()} = personal or hard to replace; {RetentionValue.Review.ToCode()} = unclear, a human should look;");
+        sb.AppendLine($"   {RetentionValue.Disposable.ToCode()} = can be recreated or downloaded again (installers, caches, temporary files).");
         sb.AppendLine("4. reason: one or two sentences why, naming the facts from the profile you relied on.");
         sb.AppendLine("5. Assess homogeneity: high=all same type/theme, medium=mostly similar, low=very mixed.");
         sb.AppendLine("6. Identify anomalous files: different type from the majority, or dramatically larger/smaller than peers.");
