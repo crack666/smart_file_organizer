@@ -115,22 +115,23 @@ https://github.com/crack666/smart_file_organizer/issues/5: `dotnet test`
   with `--json` against a temp database). (Until 12.11.2026 this line said
   the read commands were not there yet.)
 
-### Comparison with the archive
+### Comparison with the library
 
 _Checked 12.11.2026 on the branch for
-https://github.com/crack666/smart_file_organizer/issues/24: `dotnet test`
-150 passed; `sfo scan`, `scan --role bestand`, `compare --json` (twice, the
-second run computing no checksum) and `analyze` of a `bestand` job run by hand
+https://github.com/crack666/smart_file_organizer/issues/24, rebased on #31
+and #32: `dotnet test` 313 passed; `sfo scan`, `scan --role library`,
+`compare --json` (twice, the second run computing no checksum; `match_hash`
+equal to `sha256sum` of the file) and `analyze` of a `library` job run by hand
 against two temp folders and a temp database._
 
-- `sfo scan <path> --role bestand` marks the organised archive;
-  `sfo compare <quelle-job> --against <bestand-job>` sets `gesichert`, `neu`,
-  `abweichend` or `fehler` per source file, finds duplicates within the
+- `sfo scan <path> --role library` marks the organised archive (the library);
+  `sfo compare <source-job> --against <library-job>` sets `backed_up`, `new`,
+  `differs` or `error` per source file, finds duplicates within the
   source and counts per directory; see [cli.md](cli.md) and
-  [architecture.md](architecture.md#comparison-flow-source-against-archive).
+  [architecture.md](architecture.md#comparison-flow-source-against-library).
 - Directories a scan cannot read are now recorded as errors (before, they
   looked empty).
-- `sfo analyze` does not yet skip files that are `gesichert`; the
+- `sfo analyze` does not yet skip files that are `backed_up`; the
   per-directory counts say which ones need no analysis.
 
 ### Known limits

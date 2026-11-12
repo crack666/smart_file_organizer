@@ -10,7 +10,7 @@ The repository is intentionally split into focused layers.
   - orchestration services and use-case oriented business logic
 - `src/SmartFileOrganizer.Infrastructure`
   - persistence and schema migrations, filesystem access, Ollama HTTP integration
-  - `Content/`: UI-free file evidence extraction (`FileContentExtractor`), the model input builder (`AiClassificationInputPreparer`) and the checksums for the archive comparison (`ContentHasher`)
+  - `Content/`: UI-free file evidence extraction (`FileContentExtractor`), the model input builder (`AiClassificationInputPreparer`) and the checksums for the library comparison (`ContentHasher`)
 - `src/SmartFileOrganizer.Scanning`
   - scan engine, heuristics, file type detection
   - `Rules/`: scan rule files (`ScanRulesFile`, `ScanRuleSet`) and the shipped `default-rules.json` (embedded); format in [scan-rules.md](scan-rules.md)
@@ -93,18 +93,18 @@ Other options: `AppSettingsDirectory` (where the shipped `appsettings.json` defa
 - `.docx`, `.xlsx`, `.odt`, `.ods`: text extracted from the package XML
 - text-like files: truncated text excerpt (12,000 characters)
 
-## Comparison flow (source against archive)
+## Comparison flow (source against library)
 
 Issue: https://github.com/crack666/smart_file_organizer/issues/24
 
-A scan job has a role (`ScanJob.Role`, column `scan_jobs.role`): `quelle`, a medium to clean up, or `bestand`, the user's organised archive. The role is set by `ScanJobService.CreateJobAsync(root, role)` and never changes. A `bestand` is only scanned and read for checksums; it is never changed and never analysed by a model.
+A scan job has a role (`ScanJob.Role`, column `scan_jobs.role`): `source`, a medium to clean up, or `library`, the user's organised archive (a NAS, a folder on disk). The role is set by `ScanJobService.CreateJobAsync(root, role)` and never changes. A `library` is only scanned and read for checksums; it is never changed and never analysed by a model.
 
 `ContentComparisonService.CompareAsync(sourceJobId, againstJobId?, progress, ct)` (Application):
 
 1. Checks both jobs (exist, roles, `completed`, root reachable); otherwise `ComparisonException`.
-2. Loads the source files and only those archive files that share a size or a name with a source file (`IContentComparisonRepository`, indexes on `file_nodes(job_id, size)` and `(job_id, name)`).
-3. Stats every source file again; one that is gone or changed size since its scan is `fehler`.
-4. Per size, reads the head-and-tail checksum of the archive candidates once; per source file compares head-and-tail, then the full checksum (`IContentHasher`, implemented by `Infrastructure/Content/ContentHasher`: SHA-256, files opened read-only and shared). Equal full checksums: `gesichert`. An unreadable candidate that could still hold the content: `fehler`. Otherwise same name in a folder of the same name: `abweichend`; else `neu`.
+2. Loads the source files and only those library files that share a size or a name with a source file (`IContentComparisonRepository`, indexes on `file_nodes(job_id, size)` and `(job_id, name)`).
+3. Stats every source file again; one that is gone or changed size since its scan is `error`.
+4. Per size, reads the head-and-tail checksum of the library candidates once; per source file compares head-and-tail, then the full checksum (`IContentHasher`, implemented by `Infrastructure/Content/ContentHasher`: SHA-256, files opened read-only and shared). Equal full checksums of both files: `backed_up`, stored with the shared checksum (`match_hash`) and when it was computed from the files (`match_verified_at`, the older of the two). A later deletion step must re-read both files and compare with `match_hash` before it deletes anything. An unreadable candidate that could still hold the content: `error`. Otherwise same name in a folder of the same name: `differs`; else `new`.
 5. Groups source files with equal full checksums into duplicate groups.
 6. Stores checksums in `content_fingerprints` (by path, reused while size and modification time match, flushed every 256 entries and on cancel) and the result in `comparisons`/`comparison_files`, replacing an earlier result for the same pair.
 
@@ -251,7 +251,7 @@ SQLite is the local source of truth. It stores both operational state and review
 
 Important tables:
 
-- `scan_jobs` — job lifecycle, counters, status, and the scan rules of the job (step 4: `rules_name`, `rules_source`, `rules_hash`, `rules_json`), role (`quelle`/`bestand`)
+- `scan_jobs` — job lifecycle, counters, status, and the scan rules of the job (step 4: `rules_name`, `rules_source`, `rules_hash`, `rules_json`), role (`source`/`library`)
 - `directory_nodes` — scanned directories with heuristic metadata and stats; `dir_status = Error` for directories the scan could not read
 - `file_nodes` — scanned files with metadata, type, AI status, rule-based sensitive markers (`sensitive_markers`, `sensitive_rule`)
 - `ai_results` — Phase 2 per-file classification results, including model sensitive markers (`sensitive_markers`)
@@ -260,9 +260,9 @@ Important tables:
   `purpose`, `retention`, `reason`, `unit_directory_node_id` (the directory that is the whole, for `einheit`),
   `profile_json` (snake_case), `model_used`, `raw_response`, `judged_at`, `error`; either `verdict` or `error` is set
 - `user_overrides` — manual category/target corrections
-- `content_fingerprints` — head-and-tail and full SHA-256 per path, with the size and modification time (`last_write_ticks`) they belong to; shared by all jobs
-- `comparisons` — one row per compared pair of source job and archive job (`against_job_id` null: duplicates only), with `complete` and `error_count`
-- `comparison_files` — per source file: `state` (`gesichert`, `neu`, `abweichend`, `fehler`; null without archive), `match_file_node_id`, `match_count`, `duplicate_group`, `error`
+- `content_fingerprints` — head-and-tail and full SHA-256 per path, with the size and modification time (`last_write_ticks`) they belong to and the time the full checksum was computed (`full_hash_at`); shared by all jobs
+- `comparisons` — one row per compared pair of source job and library job (`against_job_id` null: duplicates only), with `complete` and `error_count`
+- `comparison_files` — per source file: `state` (`backed_up`, `new`, `differs`, `error`; null without library), `match_file_node_id`, `match_count`, `match_hash`, `match_verified_at`, `duplicate_group`, `error`
 - `db_version` — one row per applied schema step (`version`, `applied_at`)
 
 ## Schema migrations
