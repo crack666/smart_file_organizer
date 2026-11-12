@@ -14,6 +14,6 @@ public enum FileNodeStatus
     /// <summary>Waits for the sample of its uniform directory; then inherits (<see cref="Inherited"/>) or is judged on its own.</summary>
     Deferred,
 
-    /// <summary>Carries a result inherited from the confirmed sample of its directory (<c>ai_results.derivation = geerbt</c>).</summary>
+    /// <summary>Carries a result inherited from the confirmed sample of its directory (<c>ai_results.origin = inherited</c>).</summary>
     Inherited
 }

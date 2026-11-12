@@ -74,8 +74,34 @@ public class ClassificationRepository : IClassificationRepository
     {
         await using var conn = _db.CreateConnection();
         await conn.OpenAsync(ct);
-        return await conn.QuerySingleOrDefaultAsync<FileClassification>(
-            "SELECT * FROM ai_results WHERE file_node_id = @fileNodeId",
+        var row = await conn.QuerySingleOrDefaultAsync<Row>(
+            SelectSql + " WHERE file_node_id = @fileNodeId",
             new { fileNodeId });
+        return row?.Finish();
+    }
+
+    /// <summary>
+    /// Reads <c>ai_results</c>. The coded columns are renamed so Dapper does not map them onto the nullable
+    /// enums itself: it ignores type handlers for nullable enums and would try <c>Enum.Parse</c> on the code.
+    /// </summary>
+    internal const string SelectSql = """
+        SELECT id, file_node_id, category, importance, confidence, summary, suggested_target, model_used,
+               analyzed_at, raw_response, error, is_ai_result, sensitive_markers,
+               origin AS origin_code, inherited_from_directory_node_id, keep_hint AS keep_hint_code, keep_reason
+        FROM ai_results
+        """;
+
+    /// <summary>Database shape of a classification: the codes as strings, turned into enums by <see cref="Finish"/>.</summary>
+    internal sealed class Row : FileClassification
+    {
+        public string? OriginCode { get; set; }
+        public string? KeepHintCode { get; set; }
+
+        public FileClassification Finish()
+        {
+            Origin = VerdictCodes.ParseNullable<ResultOrigin>(OriginCode);
+            KeepHint = VerdictCodes.ParseNullable<KeepHint>(KeepHintCode);
+            return this;
+        }
     }
 }

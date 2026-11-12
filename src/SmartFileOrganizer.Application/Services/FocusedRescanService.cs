@@ -17,6 +17,8 @@ public class FocusedRescanService
     private readonly DirectoryPreAssessmentService _preAssessmentService;
     private readonly ClassificationService _classificationService;
     private readonly DirectorySummaryService _summaryService;
+    private readonly DirectorySamplingService _sampling;
+    private readonly IDirectoryVerdictRepository _verdictRepo;
     private readonly ILogger<FocusedRescanService> _logger;
 
     public FocusedRescanService(
@@ -27,8 +29,12 @@ public class FocusedRescanService
         DirectoryPreAssessmentService preAssessmentService,
         ClassificationService classificationService,
         DirectorySummaryService summaryService,
+        DirectorySamplingService sampling,
+        IDirectoryVerdictRepository verdictRepo,
         ILogger<FocusedRescanService> logger)
     {
+        _sampling = sampling;
+        _verdictRepo = verdictRepo;
         _refreshService = refreshService;
         _fileRepo = fileRepo;
         _dirRepo = dirRepo;
@@ -49,10 +55,17 @@ public class FocusedRescanService
         var dir = await _refreshService.RefreshDirectoryAsync(jobId, directoryPath, ct);
         progress?.Report(new FocusedRescanProgress("Rescan: pre-assessing directory…", 1, 2, directoryPath));
 
+        // Judged again: the old sample no longer applies. A uniform directory gets a new one, so the rescan
+        // spends the same calls as a run would; only Discovered files (sample members, mixed files) are judged.
+        await _sampling.ForgetAsync(dir.Id, ct);
         await _preAssessmentService.PreAssessSingleAsync(jobId, dir, ct);
+        await _sampling.PlanDirectoryAsync(jobId, dir.Id, ct);
+        var verdict = await _verdictRepo.GetByNodeIdAsync(dir.Id, ct);
+        var askKeepHint = verdict?.Verdict is DirectoryVerdictKind.Gemischt or DirectoryVerdictKind.Einheitlich;
 
         var directFiles = await _fileRepo.GetByDirectoryAsync(jobId, directoryPath, ct);
-        var filesToAnalyze = directFiles.Where(f => f.Status != FileNodeStatus.Skipped).ToList();
+        // As before the rescan judges every file not skipped, eligible or not, except those waiting for the sample.
+        var filesToAnalyze = directFiles.Where(f => f.Status == FileNodeStatus.Discovered).ToList();
         var totalSteps = 3 + filesToAnalyze.Count;
 
         progress?.Report(new FocusedRescanProgress(
@@ -65,7 +78,7 @@ public class FocusedRescanService
         foreach (var file in filesToAnalyze)
         {
             await _overrideRepo.DeleteByFileNodeIdAsync(file.Id, ct);
-            await _classificationService.ClassifySingleAsync(file, ct);
+            await _classificationService.ClassifySingleAsync(file, ct, askKeepHint);
 
             processedSteps++;
             progress?.Report(new FocusedRescanProgress(
@@ -73,6 +86,19 @@ public class FocusedRescanService
                 processedSteps,
                 totalSteps,
                 file.FullPath));
+        }
+
+        // Inherit, or raise to mixed and judge the released files one by one.
+        if (await _sampling.ResolveDirectoryAsync(jobId, dir.Id, ct) == SampleState.Escalated)
+        {
+            var released = (await _fileRepo.GetByDirectoryAsync(jobId, directoryPath, ct))
+                .Where(f => f.Status == FileNodeStatus.Discovered && DirectorySamplingService.IsEligible(f.FileType))
+                .ToList();
+            foreach (var file in released)
+            {
+                await _overrideRepo.DeleteByFileNodeIdAsync(file.Id, ct);
+                await _classificationService.ClassifySingleAsync(file, ct, askKeepHint: true);
+            }
         }
 
         progress?.Report(new FocusedRescanProgress("Rescan: summarizing directory…", totalSteps - 1, totalSteps, directoryPath));

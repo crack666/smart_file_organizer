@@ -95,8 +95,8 @@ public class FileRepository : IFileRepository
             "SELECT * FROM file_nodes WHERE id = @id", new { id });
         if (node == null) return null;
 
-        node.Classification = await conn.QuerySingleOrDefaultAsync<FileClassification>(
-            "SELECT * FROM ai_results WHERE file_node_id = @id", new { id });
+        node.Classification = (await conn.QuerySingleOrDefaultAsync<ClassificationRepository.Row>(
+            ClassificationRepository.SelectSql + " WHERE file_node_id = @id", new { id }))?.Finish();
         node.Override = await conn.QuerySingleOrDefaultAsync<UserOverride>(
             "SELECT * FROM user_overrides WHERE file_node_id = @id", new { id });
         return node;
@@ -119,9 +119,9 @@ public class FileRepository : IFileRepository
 
         // Step 2: load classifications for these files in one query
         var ids = nodes.Select(n => n.Id).ToList();
-        var classifications = (await conn.QueryAsync<FileClassification>(
-            "SELECT * FROM ai_results WHERE file_node_id IN @ids",
-            new { ids })).ToDictionary(c => c.FileNodeId);
+        var classifications = (await conn.QueryAsync<ClassificationRepository.Row>(
+            ClassificationRepository.SelectSql + " WHERE file_node_id IN @ids",
+            new { ids })).Select(r => r.Finish()).ToDictionary(c => c.FileNodeId);
 
         // Step 3: load user overrides
         var overrides = (await conn.QueryAsync<UserOverride>(

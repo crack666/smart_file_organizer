@@ -75,7 +75,9 @@ public static class StatusCommand
             new ScanPhaseView(j.Status, j.TotalFiles, j.ProcessedFiles, j.TotalDirectories, j.ProcessedDirectories, j.ErrorCount),
             new AiPhaseView(s.DirectoriesAiRelevant, preDone, s.PreAssessmentErrors,
                 Math.Max(0, s.DirectoriesAiRelevant - s.DirectoriesPreAssessed), 0),
-            new AiPhaseView(s.FilesAiEligible, s.FilesAiAnalyzed, s.FilesAiErrors, s.FilesAiPending, s.FilesAiSkipped),
+            // Inherited files count as done, files waiting for their sample as pending.
+            new AiPhaseView(s.FilesAiEligible, s.FilesAiAnalyzed + s.FilesAiInherited, s.FilesAiErrors,
+                s.FilesAiPending + s.FilesAiDeferred, s.FilesAiSkipped),
             new AiPhaseView(s.DirectoriesAiRelevant, sumDone, s.SummaryErrors,
                 Math.Max(0, s.DirectoriesAiRelevant - s.DirectoriesSummarized), 0));
 
