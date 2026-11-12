@@ -6,8 +6,8 @@ using SmartFileOrganizer.Domain.Models;
 namespace SmartFileOrganizer.Infrastructure.Content;
 
 /// <summary>
-/// SHA-256 checksums for the archive comparison. Files are opened read-only and shared, so
-/// neither the source medium nor the archive is changed.
+/// SHA-256 checksums for the library comparison. Files are opened read-only and shared, so
+/// neither the source medium nor the library is changed.
 /// </summary>
 public sealed class ContentHasher : IContentHasher
 {

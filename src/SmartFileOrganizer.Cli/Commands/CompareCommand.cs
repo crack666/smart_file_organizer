@@ -8,20 +8,28 @@ using SmartFileOrganizer.Domain.Enums;
 namespace SmartFileOrganizer.Cli.Commands;
 
 /// <summary>
-/// <c>sfo compare &lt;quelle-job&gt; --against &lt;bestand-job&gt;</c>: which files of a source are already
-/// in the archive, by content. https://github.com/crack666/smart_file_organizer/issues/24
+/// <c>sfo compare &lt;source-job&gt; --against &lt;library-job&gt;</c>: which files of a source are already
+/// in the library, by content. https://github.com/crack666/smart_file_organizer/issues/24
 /// </summary>
 public static class CompareCommand
 {
-    public sealed record CountsView(int Files, int Gesichert, int Neu, int Abweichend, int Fehler);
+    public sealed record CountsView(int Files, int BackedUp, int New, int Differs, int Errors);
 
     public sealed record DuplicatesView(int GroupsTotal, int Files, IReadOnlyList<DuplicateGroup> Groups);
 
-    public sealed record DirectoryView(string Path, int Files, int Gesichert, int Neu, int Abweichend, int Fehler, double BackedUpShare);
+    public sealed record DirectoryView(string Path, int Files, int BackedUp, int New, int Differs, int Errors, double BackedUpShare);
 
     public sealed record ErrorView(ScanRole Role, ComparisonIssueKind Kind, string Path, string Message);
 
-    public sealed record FileView(string Path, ContentState? State, string? MatchPath, int MatchCount, int? DuplicateGroup, string? Error);
+    public sealed record FileView(
+        string Path,
+        ContentState? State,
+        string? MatchPath,
+        int MatchCount,
+        string? MatchHash,
+        DateTime? MatchVerifiedAt,
+        int? DuplicateGroup,
+        string? Error);
 
     public sealed record CompareResult(
         long ComparisonId,
@@ -43,15 +51,15 @@ public static class CompareCommand
 
     public static Command Create(CliHost host, GlobalOptions globals)
     {
-        var job = JobArguments.Create("Job id of a completed scan with role quelle.");
+        var job = JobArguments.Create("Job id of a completed scan with role source.");
         var against = new Option<long?>("--against")
         {
-            Description = "Job id of a completed scan with role bestand. Without it, only duplicates within the source are found.",
+            Description = "Job id of a completed scan with role library. Without it, only duplicates within the source are found.",
             HelpName = "job"
         };
         var files = new Option<string[]>("--files")
         {
-            Description = "List the files with this state: gesichert, neu, abweichend, fehler or all. Repeatable. Default: no file list.",
+            Description = "List the files with this state: backed_up, new, differs, error or all. Repeatable. Default: no file list.",
             HelpName = "state",
             AllowMultipleArgumentsPerToken = true
         };
@@ -69,7 +77,7 @@ public static class CompareCommand
         });
 
         var command = new Command("compare",
-            "Compare a source scan with an archive scan by content: gesichert, neu, abweichend, plus duplicates within the source.")
+            "Compare a source scan with a library scan by content: backed_up, new, differs, plus duplicates within the source.")
         {
             job, against, files, limit
         };
@@ -110,7 +118,7 @@ public static class CompareCommand
             if (!result.Complete)
             {
                 return CommandOutcome.Fail(ExitCodes.Failure, ErrorCodes.CompareIncomplete,
-                    $"{result.ErrorsTotal} error(s): some content could not be read, so the affected files are marked fehler. The result is stored.",
+                    $"{result.ErrorsTotal} error(s): some content could not be read, so the affected files are marked error. The result is stored.",
                     result, () => Render(result));
             }
             return CommandOutcome.Success(result, () => Render(result));
@@ -140,15 +148,15 @@ public static class CompareCommand
             report.Header.ComparedAt,
             report.Header.Complete,
             new CountsView(report.Files.Count,
-                report.Count(ContentState.Gesichert), report.Count(ContentState.Neu),
-                report.Count(ContentState.Abweichend), report.Count(ContentState.Fehler)),
+                report.Count(ContentState.BackedUp), report.Count(ContentState.New),
+                report.Count(ContentState.Differs), report.Count(ContentState.Error)),
             new DuplicatesView(report.DuplicateGroups.Count, report.DuplicateGroups.Sum(g => g.Paths.Count), Take(report.DuplicateGroups)),
             report.Directories.Count,
-            Take(report.Directories.Select(d => new DirectoryView(d.Path, d.Files, d.Gesichert, d.Neu, d.Abweichend, d.Fehler, d.BackedUpShare))),
+            Take(report.Directories.Select(d => new DirectoryView(d.Path, d.Files, d.BackedUp, d.New, d.Differs, d.Errors, d.BackedUpShare))),
             report.Errors.Count,
             Take(report.Errors.Select(e => new ErrorView(e.Role, e.Kind, e.Path, e.Message))),
             listed.Count,
-            Take(listed.Select(f => new FileView(f.FullPath, f.State, f.MatchPath, f.MatchCount, f.DuplicateGroup, f.Error))),
+            Take(listed.Select(f => new FileView(f.FullPath, f.State, f.MatchPath, f.MatchCount, f.MatchHash, f.MatchVerifiedAt, f.DuplicateGroup, f.Error))),
             report.Hashing);
     }
 
@@ -156,11 +164,11 @@ public static class CompareCommand
     {
         var sb = new StringBuilder();
         sb.AppendLine(r.Against == null
-            ? $"Job {r.Source.Id} ({r.Source.RootPath}) without bestand: duplicates only"
-            : $"Job {r.Source.Id} ({r.Source.RootPath}) against bestand job {r.Against.Id} ({r.Against.RootPath})");
+            ? $"Job {r.Source.Id} ({r.Source.RootPath}) without library: duplicates only"
+            : $"Job {r.Source.Id} ({r.Source.RootPath}) against library job {r.Against.Id} ({r.Against.RootPath})");
         var c = r.Counts;
         if (r.Against != null)
-            sb.AppendLine($"  {c.Files} files: {c.Gesichert} gesichert, {c.Neu} neu, {c.Abweichend} abweichend, {c.Fehler} fehler");
+            sb.AppendLine($"  {c.Files} files: {c.BackedUp} backed_up, {c.New} new, {c.Differs} differs, {c.Errors} error");
         sb.AppendLine($"  {r.Duplicates.GroupsTotal} duplicate groups ({r.Duplicates.Files} files)");
         sb.AppendLine($"  checksums: {r.Hashing.HeadTailComputed} head-tail and {r.Hashing.FullComputed} full computed, {r.Hashing.Reused} files from cache");
         foreach (var f in r.Files)

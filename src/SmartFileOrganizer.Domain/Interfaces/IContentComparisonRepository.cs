@@ -22,10 +22,10 @@ public interface IContentComparisonRepository
 
     Task UpsertFingerprintsAsync(IReadOnlyCollection<ContentFingerprint> fingerprints, CancellationToken ct = default);
 
-    /// <summary>Replaces the stored comparison of the same source and archive job. Returns the new comparison id.</summary>
+    /// <summary>Replaces the stored comparison of the same source and library job. Returns the new comparison id.</summary>
     Task<long> SaveComparisonAsync(ComparisonHeader header, IReadOnlyList<FileComparison> files, CancellationToken ct = default);
 
-    /// <summary>The stored comparison of a source job against an archive job (or without one), or null.</summary>
+    /// <summary>The stored comparison of a source job against a library job (or without one), or null.</summary>
     Task<ComparisonHeader?> GetComparisonAsync(long sourceJobId, long? againstJobId, CancellationToken ct = default);
 
     /// <summary>Per-file results of a stored comparison, ordered by path.</summary>

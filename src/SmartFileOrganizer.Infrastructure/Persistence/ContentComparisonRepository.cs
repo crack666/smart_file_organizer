@@ -78,12 +78,15 @@ public class ContentComparisonRepository : IContentComparisonRepository
         {
             var rows = await conn.QueryAsync<FingerprintRow>(new CommandDefinition(
                 """
-                SELECT full_path, size, last_write_ticks, head_tail_hash, full_hash, computed_at
+                SELECT full_path, size, last_write_ticks, head_tail_hash, full_hash, computed_at, full_hash_at
                 FROM content_fingerprints WHERE full_path IN @paths
                 """,
                 new { paths = chunk }, cancellationToken: ct));
             foreach (var row in rows)
-                result[row.FullPath] = new ContentFingerprint(row.FullPath, row.Size, row.LastWriteTicks, row.HeadTailHash, row.FullHash, row.ComputedAt);
+            {
+                result[row.FullPath] = new ContentFingerprint(
+                    row.FullPath, row.Size, row.LastWriteTicks, row.HeadTailHash, row.FullHash, row.ComputedAt, row.FullHashAt);
+            }
         }
 
         return result;
@@ -99,14 +102,15 @@ public class ContentComparisonRepository : IContentComparisonRepository
         await using var tx = await conn.BeginTransactionAsync(ct);
         await conn.ExecuteAsync(new CommandDefinition(
             """
-            INSERT INTO content_fingerprints (full_path, size, last_write_ticks, head_tail_hash, full_hash, computed_at)
-            VALUES (@FullPath, @Size, @LastWriteTicks, @HeadTailHash, @FullHash, @ComputedAt)
+            INSERT INTO content_fingerprints (full_path, size, last_write_ticks, head_tail_hash, full_hash, computed_at, full_hash_at)
+            VALUES (@FullPath, @Size, @LastWriteTicks, @HeadTailHash, @FullHash, @ComputedAt, @FullHashAt)
             ON CONFLICT(full_path) DO UPDATE SET
                 size = excluded.size,
                 last_write_ticks = excluded.last_write_ticks,
                 head_tail_hash = excluded.head_tail_hash,
                 full_hash = excluded.full_hash,
-                computed_at = excluded.computed_at
+                computed_at = excluded.computed_at,
+                full_hash_at = excluded.full_hash_at
             """,
             fingerprints, transaction: tx, cancellationToken: ct));
         await tx.CommitAsync(ct);
@@ -138,9 +142,11 @@ public class ContentComparisonRepository : IContentComparisonRepository
         await conn.ExecuteAsync(new CommandDefinition(
             """
             INSERT INTO comparison_files
-                (comparison_id, file_node_id, state, match_file_node_id, match_count, duplicate_group, error)
+                (comparison_id, file_node_id, state, match_file_node_id, match_count, duplicate_group, error,
+                 match_hash, match_verified_at)
             VALUES
-                (@ComparisonId, @FileNodeId, @State, @MatchFileNodeId, @MatchCount, @DuplicateGroup, @Error)
+                (@ComparisonId, @FileNodeId, @State, @MatchFileNodeId, @MatchCount, @DuplicateGroup, @Error,
+                 @MatchHash, @MatchVerifiedAt)
             """,
             files.Select(f => new
             {
@@ -150,7 +156,9 @@ public class ContentComparisonRepository : IContentComparisonRepository
                 f.MatchFileNodeId,
                 f.MatchCount,
                 f.DuplicateGroup,
-                f.Error
+                f.Error,
+                f.MatchHash,
+                f.MatchVerifiedAt
             }),
             transaction: tx, cancellationToken: ct));
 
@@ -180,7 +188,8 @@ public class ContentComparisonRepository : IContentComparisonRepository
         var rows = await conn.QueryAsync<FileComparisonRow>(new CommandDefinition(
             """
             SELECT cf.file_node_id, f.full_path, f.size, cf.state, cf.match_file_node_id,
-                   m.full_path AS match_path, cf.match_count, cf.duplicate_group, cf.error
+                   m.full_path AS match_path, cf.match_count, cf.duplicate_group, cf.error,
+                   cf.match_hash, cf.match_verified_at
             FROM comparison_files cf
             JOIN file_nodes f ON f.id = cf.file_node_id
             LEFT JOIN file_nodes m ON m.id = cf.match_file_node_id
@@ -193,7 +202,7 @@ public class ContentComparisonRepository : IContentComparisonRepository
             r.State == null ? null : ContentStateValues.Parse(r.State),
             r.MatchFileNodeId, r.MatchPath, (int)r.MatchCount,
             r.DuplicateGroup == null ? null : (int)r.DuplicateGroup.Value,
-            r.Error)).ToList();
+            r.Error, r.MatchHash, r.MatchVerifiedAt)).ToList();
     }
 
     // Dapper row types: plain settable properties, so mapping does not depend on constructor matching.
@@ -217,6 +226,7 @@ public class ContentComparisonRepository : IContentComparisonRepository
         public string? HeadTailHash { get; set; }
         public string? FullHash { get; set; }
         public DateTime ComputedAt { get; set; }
+        public DateTime? FullHashAt { get; set; }
     }
 
     private sealed class HeaderRow
@@ -240,5 +250,7 @@ public class ContentComparisonRepository : IContentComparisonRepository
         public long MatchCount { get; set; }
         public long? DuplicateGroup { get; set; }
         public string? Error { get; set; }
+        public string? MatchHash { get; set; }
+        public DateTime? MatchVerifiedAt { get; set; }
     }
 }

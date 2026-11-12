@@ -39,12 +39,12 @@ public sealed record DuplicateGroup(int Group, long Size, IReadOnlyList<string> 
 /// <summary>
 /// Counts for one source directory including all subdirectories. A directory with
 /// <see cref="NotBackedUp"/> = 0 needs no model analysis; otherwise only the files that are not
-/// <c>gesichert</c> do.
+/// <c>backed_up</c> do.
 /// </summary>
-public sealed record DirectoryComparison(string Path, int Files, int Gesichert, int Neu, int Abweichend, int Fehler)
+public sealed record DirectoryComparison(string Path, int Files, int BackedUp, int New, int Differs, int Errors)
 {
-    public int NotBackedUp => Files - Gesichert;
-    public double BackedUpShare => Files == 0 ? 1.0 : Math.Round((double)Gesichert / Files, 4);
+    public int NotBackedUp => Files - BackedUp;
+    public double BackedUpShare => Files == 0 ? 1.0 : Math.Round((double)BackedUp / Files, 4);
 }
 
 /// <summary>How many checksums a run computed and how many it took from the cache.</summary>

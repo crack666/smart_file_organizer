@@ -12,7 +12,7 @@ using SmartFileOrganizer.Scanning.Engine;
 namespace SmartFileOrganizer.Application.Tests;
 
 /// <summary>
-/// Comparison of a generated source folder with a generated archive folder, both in a temp
+/// Comparison of a generated source folder with a generated library folder, both in a temp
 /// directory, scanned with the real scan engine into a temp database.
 /// https://github.com/crack666/smart_file_organizer/issues/24
 /// </summary>
@@ -22,7 +22,7 @@ public class ContentComparisonTests : IDisposable
 
     private readonly string _dir;
     private readonly string _source;
-    private readonly string _archive;
+    private readonly string _library;
     private readonly DatabaseContext _db;
     private readonly ScanJobRepository _jobRepo;
     private readonly CountingHasher _hasher = new(new ContentHasher());
@@ -33,9 +33,9 @@ public class ContentComparisonTests : IDisposable
         DefaultTypeMap.MatchNamesWithUnderscores = true;
         _dir = Path.Combine(Path.GetTempPath(), $"sfo_cmp_{Guid.NewGuid():N}");
         _source = Path.Combine(_dir, "stick");
-        _archive = Path.Combine(_dir, "ablage");
+        _library = Path.Combine(_dir, "ablage");
         Directory.CreateDirectory(_source);
-        Directory.CreateDirectory(_archive);
+        Directory.CreateDirectory(_library);
 
         _db = new DatabaseContext(Path.Combine(_dir, "data.db"), NullLogger<DatabaseContext>.Instance);
         _db.InitializeAsync().GetAwaiter().GetResult();
@@ -69,39 +69,39 @@ public class ContentComparisonTests : IDisposable
         Write(root, relative, System.Text.Encoding.UTF8.GetBytes(text));
 
     /// <summary>
-    /// Source and archive covering every state. Returns the paths by short name.
+    /// Source and library covering every state. Returns the paths by short name.
     /// </summary>
     private Dictionary<string, string> CreateStandardFixture()
     {
         var photo = Bytes(1, Big);
         var almost = Bytes(2, Big);
-        var almostArchive = (byte[])almost.Clone();
-        almostArchive[Big / 2] ^= 0xFF; // same size, same head and tail, different middle
+        var almostLibrary = (byte[])almost.Clone();
+        almostLibrary[Big / 2] ^= 0xFF; // same size, same head and tail, different middle
         var copy = Bytes(3, 4000);
 
         var p = new Dictionary<string, string>
         {
-            // gesichert, renamed and in another folder in the archive
+            // backed_up, renamed and in another folder in the library
             ["photo"] = Write(_source, "DCIM/IMG_0001.jpg", photo),
             ["photoCopy"] = Write(_source, "Backup/IMG_0001 (1).jpg", photo),
             ["small"] = Write(_source, "notes/einkauf.txt", "Milch, Brot, Butter"),
-            // neu although head and tail agree with an archive file
+            // new although head and tail agree with a library file
             ["almost"] = Write(_source, "DCIM/IMG_0002.jpg", almost),
-            // abweichend: same name in a folder of the same name, other content (other size / same size)
+            // differs: same name in a folder of the same name, other content (other size / same size)
             ["letter"] = Write(_source, "Briefe/vermieter.txt", "Version zwei, laenger"),
             ["sameSize"] = Write(_source, "Briefe/kuendigung.txt", "AAAA-1111"),
-            // neu, and a duplicate group within the source
+            // new, and a duplicate group within the source
             ["dupA"] = Write(_source, "Kopien/a.dat", copy),
             ["dupB"] = Write(_source, "Kopien/tief/b.dat", copy),
             ["unique"] = Write(_source, "unique.bin", Bytes(4, 5000))
         };
 
-        Write(_archive, "Fotos/2015 Skifahrt/skifahrt-01.jpg", photo);
-        Write(_archive, "Fotos/2015 Skifahrt/skifahrt-01-kopie.jpg", photo);
-        Write(_archive, "Dokumente/einkaufsliste.txt", "Milch, Brot, Butter");
-        Write(_archive, "Fotos/anderes.jpg", almostArchive);
-        Write(_archive, "Archiv/Briefe/vermieter.txt", "Version eins");
-        Write(_archive, "Archiv/Briefe/kuendigung.txt", "BBBB-2222");
+        Write(_library, "Fotos/2015 Skifahrt/skifahrt-01.jpg", photo);
+        Write(_library, "Fotos/2015 Skifahrt/skifahrt-01-kopie.jpg", photo);
+        Write(_library, "Dokumente/einkaufsliste.txt", "Milch, Brot, Butter");
+        Write(_library, "Fotos/anderes.jpg", almostLibrary);
+        Write(_library, "Archiv/Briefe/vermieter.txt", "Version eins");
+        Write(_library, "Archiv/Briefe/kuendigung.txt", "BBBB-2222");
         return p;
     }
 
@@ -118,8 +118,8 @@ public class ContentComparisonTests : IDisposable
         return await service.RunAsync(job.Id);
     }
 
-    private async Task<(ScanJob Source, ScanJob Archive)> ScanBothAsync() =>
-        (await ScanAsync(_source, ScanRole.Quelle), await ScanAsync(_archive, ScanRole.Bestand));
+    private async Task<(ScanJob Source, ScanJob Library)> ScanBothAsync() =>
+        (await ScanAsync(_source, ScanRole.Source), await ScanAsync(_library, ScanRole.Library));
 
     private static FileComparison Result(ComparisonReport report, string path) =>
         report.Files.Single(f => f.FullPath == path);
@@ -130,29 +130,34 @@ public class ContentComparisonTests : IDisposable
     public async Task Compare_SetsAllStates_AndFindsDuplicateGroup_EvenForRenamedFiles()
     {
         var p = CreateStandardFixture();
-        var (source, archive) = await ScanBothAsync();
+        var (source, library) = await ScanBothAsync();
 
-        var report = await CreateService().CompareAsync(source.Id, archive.Id);
+        var report = await CreateService().CompareAsync(source.Id, library.Id);
 
         Assert.True(report.Header.Complete, string.Join("; ", report.Errors.Select(e => e.Message)));
         Assert.Empty(report.Errors);
 
         var photo = Result(report, p["photo"]);
-        Assert.Equal(ContentState.Gesichert, photo.State);
+        Assert.Equal(ContentState.BackedUp, photo.State);
         Assert.Equal(2, photo.MatchCount);
-        Assert.Equal(Path.Combine(_archive, "Fotos", "2015 Skifahrt", "skifahrt-01-kopie.jpg"), photo.MatchPath);
-        Assert.Equal(ContentState.Gesichert, Result(report, p["photoCopy"]).State);
-        Assert.Equal(ContentState.Gesichert, Result(report, p["small"]).State);
-        Assert.Equal(Path.Combine(_archive, "Dokumente", "einkaufsliste.txt"), Result(report, p["small"]).MatchPath);
+        // Evidence for a later deletion step: the shared full checksum and when it was established.
+        Assert.Equal(Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(p["photo"]))), photo.MatchHash);
+        Assert.NotNull(photo.MatchVerifiedAt);
+        Assert.True(photo.MatchVerifiedAt <= DateTime.UtcNow);
+        Assert.Null(Result(report, p["letter"]).MatchHash); // differs carries no checksum evidence
+        Assert.Equal(Path.Combine(_library, "Fotos", "2015 Skifahrt", "skifahrt-01-kopie.jpg"), photo.MatchPath);
+        Assert.Equal(ContentState.BackedUp, Result(report, p["photoCopy"]).State);
+        Assert.Equal(ContentState.BackedUp, Result(report, p["small"]).State);
+        Assert.Equal(Path.Combine(_library, "Dokumente", "einkaufsliste.txt"), Result(report, p["small"]).MatchPath);
 
-        Assert.Equal(ContentState.Neu, Result(report, p["almost"]).State);
-        Assert.Equal(ContentState.Neu, Result(report, p["dupA"]).State);
-        Assert.Equal(ContentState.Neu, Result(report, p["unique"]).State);
+        Assert.Equal(ContentState.New, Result(report, p["almost"]).State);
+        Assert.Equal(ContentState.New, Result(report, p["dupA"]).State);
+        Assert.Equal(ContentState.New, Result(report, p["unique"]).State);
 
         var letter = Result(report, p["letter"]);
-        Assert.Equal(ContentState.Abweichend, letter.State);
-        Assert.Equal(Path.Combine(_archive, "Archiv", "Briefe", "vermieter.txt"), letter.MatchPath);
-        Assert.Equal(ContentState.Abweichend, Result(report, p["sameSize"]).State);
+        Assert.Equal(ContentState.Differs, letter.State);
+        Assert.Equal(Path.Combine(_library, "Archiv", "Briefe", "vermieter.txt"), letter.MatchPath);
+        Assert.Equal(ContentState.Differs, Result(report, p["sameSize"]).State);
 
         Assert.Equal(2, report.DuplicateGroups.Count);
         var dup = Assert.Single(report.DuplicateGroups, g => g.Paths.Contains(p["dupA"]));
@@ -162,23 +167,25 @@ public class ContentComparisonTests : IDisposable
         Assert.Null(Result(report, p["unique"]).DuplicateGroup);
 
         // Stored and readable again.
-        var stored = await CreateService().GetStoredAsync(source.Id, archive.Id);
+        var stored = await CreateService().GetStoredAsync(source.Id, library.Id);
         Assert.NotNull(stored);
         Assert.Equal(report.Files.Select(f => (f.FullPath, f.State, f.MatchPath, f.DuplicateGroup)),
             stored!.Files.Select(f => (f.FullPath, f.State, f.MatchPath, f.DuplicateGroup)));
+        Assert.Equal(photo.MatchHash, Result(stored, p["photo"]).MatchHash);
+        Assert.NotNull(Result(stored, p["photo"]).MatchVerifiedAt);
     }
 
     [Fact]
     public async Task Compare_SummarisesDirectories_IncludingSubdirectories()
     {
         var p = CreateStandardFixture();
-        var (source, archive) = await ScanBothAsync();
+        var (source, library) = await ScanBothAsync();
 
-        var report = await CreateService().CompareAsync(source.Id, archive.Id);
+        var report = await CreateService().CompareAsync(source.Id, library.Id);
 
         var root = Assert.Single(report.Directories, d => d.Path == _source);
         Assert.Equal(9, root.Files);
-        Assert.Equal(3, root.Gesichert);
+        Assert.Equal(3, root.BackedUp);
         Assert.Equal(6, root.NotBackedUp);
 
         var backup = Assert.Single(report.Directories, d => d.Path == Path.GetDirectoryName(p["photoCopy"]));
@@ -187,22 +194,22 @@ public class ContentComparisonTests : IDisposable
 
         var copies = Assert.Single(report.Directories, d => d.Path == Path.GetDirectoryName(p["dupA"]));
         Assert.Equal(2, copies.Files); // includes the subdirectory
-        Assert.Equal(2, copies.Neu);
+        Assert.Equal(2, copies.New);
     }
 
     [Fact]
     public async Task SecondRun_WithoutChanges_ComputesNoChecksum_AndChangedFileIsRecomputed()
     {
         var p = CreateStandardFixture();
-        var (source, archive) = await ScanBothAsync();
+        var (source, library) = await ScanBothAsync();
         var service = CreateService();
 
-        var first = await service.CompareAsync(source.Id, archive.Id);
+        var first = await service.CompareAsync(source.Id, library.Id);
         Assert.True(first.Hashing.HeadTailComputed > 0);
         Assert.True(first.Hashing.FullComputed > 0);
         var callsAfterFirst = _hasher.Calls;
 
-        var second = await service.CompareAsync(source.Id, archive.Id);
+        var second = await service.CompareAsync(source.Id, library.Id);
 
         Assert.Equal(0, second.Hashing.HeadTailComputed);
         Assert.Equal(0, second.Hashing.FullComputed);
@@ -211,50 +218,50 @@ public class ContentComparisonTests : IDisposable
         Assert.Equal(first.Files.Select(f => (f.FullPath, f.State)), second.Files.Select(f => (f.FullPath, f.State)));
 
         // Same size, new content and a new modification time: only this file is read again.
-        var archived = Path.Combine(_archive, "Archiv", "Briefe", "kuendigung.txt");
-        File.WriteAllText(archived, "AAAA-1111");
-        File.SetLastWriteTimeUtc(archived, DateTime.UtcNow.AddMinutes(5));
+        var inLibrary = Path.Combine(_library, "Archiv", "Briefe", "kuendigung.txt");
+        File.WriteAllText(inLibrary, "AAAA-1111");
+        File.SetLastWriteTimeUtc(inLibrary, DateTime.UtcNow.AddMinutes(5));
 
-        var third = await service.CompareAsync(source.Id, archive.Id);
+        var third = await service.CompareAsync(source.Id, library.Id);
 
         Assert.Equal(1, third.Hashing.HeadTailComputed);
-        Assert.Equal(ContentState.Gesichert, Result(third, p["sameSize"]).State);
+        Assert.Equal(ContentState.BackedUp, Result(third, p["sameSize"]).State);
     }
 
     [Fact]
-    public async Task ArchiveCandidateUnreadable_IsFehler_NotNeu_AndRunIsIncomplete()
+    public async Task LibraryCandidateUnreadable_IsError_NotNew_AndRunIsIncomplete()
     {
         var p = CreateStandardFixture();
-        var (source, archive) = await ScanBothAsync();
+        var (source, library) = await ScanBothAsync();
         // Same size as the source letter, but gone (as if the network path dropped) after the scan.
-        var vanished = Path.Combine(_archive, "Archiv", "Briefe", "kuendigung.txt");
+        var vanished = Path.Combine(_library, "Archiv", "Briefe", "kuendigung.txt");
         File.Delete(vanished);
 
-        var report = await CreateService().CompareAsync(source.Id, archive.Id);
+        var report = await CreateService().CompareAsync(source.Id, library.Id);
 
         var file = Result(report, p["sameSize"]);
-        Assert.Equal(ContentState.Fehler, file.State);
+        Assert.Equal(ContentState.Error, file.State);
         Assert.Contains(vanished, file.Error);
         Assert.False(report.Header.Complete);
-        Assert.Contains(report.Errors, e => e.Role == ScanRole.Bestand && e.Path == vanished);
-        Assert.Contains(report.Errors, e => e.Role == ScanRole.Quelle && e.Path == p["sameSize"]);
+        Assert.Contains(report.Errors, e => e.Role == ScanRole.Library && e.Path == vanished);
+        Assert.Contains(report.Errors, e => e.Role == ScanRole.Source && e.Path == p["sameSize"]);
         // Files of other sizes are not affected.
-        Assert.Equal(ContentState.Neu, Result(report, p["unique"]).State);
+        Assert.Equal(ContentState.New, Result(report, p["unique"]).State);
     }
 
     [Fact]
-    public async Task SourceFileGoneOrChanged_IsFehler()
+    public async Task SourceFileGoneOrChanged_IsError()
     {
         var p = CreateStandardFixture();
-        var (source, archive) = await ScanBothAsync();
+        var (source, library) = await ScanBothAsync();
         File.Delete(p["unique"]);
         File.AppendAllText(p["small"], " und Eier");
 
-        var report = await CreateService().CompareAsync(source.Id, archive.Id);
+        var report = await CreateService().CompareAsync(source.Id, library.Id);
 
-        Assert.Equal(ContentState.Fehler, Result(report, p["unique"]).State);
+        Assert.Equal(ContentState.Error, Result(report, p["unique"]).State);
         var changed = Result(report, p["small"]);
-        Assert.Equal(ContentState.Fehler, changed.State);
+        Assert.Equal(ContentState.Error, changed.State);
         Assert.Contains("scan the source again", changed.Error);
         Assert.False(report.Header.Complete);
     }
@@ -263,26 +270,26 @@ public class ContentComparisonTests : IDisposable
     public async Task UnreadableDirectory_IsRecordedByTheScan_AndReportedByTheComparison()
     {
         CreateStandardFixture();
-        var locked = Path.Combine(_archive, "Fotos");
+        var locked = Path.Combine(_library, "Fotos");
         _fs = new FailingFileSystemAccessor(locked);
-        var (source, archive) = await ScanBothAsync();
+        var (source, library) = await ScanBothAsync();
 
-        Assert.Equal(JobStatus.Completed, archive.Status);
-        Assert.Equal(1, archive.ErrorCount);
+        Assert.Equal(JobStatus.Completed, library.Status);
+        Assert.Equal(1, library.ErrorCount);
 
-        var report = await CreateService().CompareAsync(source.Id, archive.Id);
+        var report = await CreateService().CompareAsync(source.Id, library.Id);
 
         var error = Assert.Single(report.Errors, e => e.Kind == ComparisonIssueKind.Scan);
-        Assert.Equal(ScanRole.Bestand, error.Role);
+        Assert.Equal(ScanRole.Library, error.Role);
         Assert.Equal(locked, error.Path);
         Assert.False(report.Header.Complete);
     }
 
     [Fact]
-    public async Task WithoutArchive_OnlyDuplicatesAreDetermined()
+    public async Task WithoutLibrary_OnlyDuplicatesAreDetermined()
     {
         var p = CreateStandardFixture();
-        var source = await ScanAsync(_source, ScanRole.Quelle);
+        var source = await ScanAsync(_source, ScanRole.Source);
 
         var report = await CreateService().CompareAsync(source.Id, null);
 
@@ -290,49 +297,49 @@ public class ContentComparisonTests : IDisposable
         Assert.All(report.Files, f => Assert.Null(f.State));
         Assert.Equal(2, report.DuplicateGroups.Count);
         Assert.Empty(report.Directories);
-        Assert.DoesNotContain(_hasher.Paths, path => path.StartsWith(_archive, StringComparison.Ordinal));
+        Assert.DoesNotContain(_hasher.Paths, path => path.StartsWith(_library, StringComparison.Ordinal));
         Assert.DoesNotContain(p["unique"], _hasher.Paths); // a unique size is never read
     }
 
     [Fact]
-    public async Task EmptyArchive_MakesEverythingNeu_WithoutReadingAnything()
+    public async Task EmptyLibrary_MakesEverythingNew_WithoutReadingAnything()
     {
         Write(_source, "a.txt", "eins");
         Write(_source, "b.txt", "zweiundzwanzig");
-        var (source, archive) = await ScanBothAsync();
+        var (source, library) = await ScanBothAsync();
 
-        var report = await CreateService().CompareAsync(source.Id, archive.Id);
+        var report = await CreateService().CompareAsync(source.Id, library.Id);
 
         Assert.True(report.Header.Complete);
-        Assert.All(report.Files, f => Assert.Equal(ContentState.Neu, f.State));
+        Assert.All(report.Files, f => Assert.Equal(ContentState.New, f.State));
         Assert.Equal(0, _hasher.Calls);
     }
 
     [Fact]
-    public async Task SourceInsideArchive_FileDoesNotBackUpItself()
+    public async Task SourceInsideLibrary_FileDoesNotBackUpItself()
     {
-        var inner = Path.Combine(_archive, "Eingang");
+        var inner = Path.Combine(_library, "Eingang");
         var path = Write(inner, "scan.pdf", Bytes(9, 2000));
-        var source = await ScanAsync(inner, ScanRole.Quelle);
-        var archive = await ScanAsync(_archive, ScanRole.Bestand);
+        var source = await ScanAsync(inner, ScanRole.Source);
+        var library = await ScanAsync(_library, ScanRole.Library);
 
-        var report = await CreateService().CompareAsync(source.Id, archive.Id);
+        var report = await CreateService().CompareAsync(source.Id, library.Id);
 
-        Assert.Equal(ContentState.Neu, Result(report, path).State);
+        Assert.Equal(ContentState.New, Result(report, path).State);
     }
 
     [Fact]
     public async Task WrongRoleOrUnfinishedScan_IsRefused()
     {
         CreateStandardFixture();
-        var (source, archive) = await ScanBothAsync();
+        var (source, library) = await ScanBothAsync();
         var service = CreateService();
 
-        var swapped = await Assert.ThrowsAsync<ComparisonException>(() => service.CompareAsync(archive.Id, source.Id));
+        var swapped = await Assert.ThrowsAsync<ComparisonException>(() => service.CompareAsync(library.Id, source.Id));
         Assert.Equal(ComparisonFailure.WrongRole, swapped.Failure);
 
         var unfinished = await new ScanJobService(_jobRepo, null!, NullLogger<ScanJobService>.Instance)
-            .CreateJobAsync(_archive, ScanRole.Bestand);
+            .CreateJobAsync(_library, ScanRole.Library);
         var notDone = await Assert.ThrowsAsync<ComparisonException>(() => service.CompareAsync(source.Id, unfinished.Id));
         Assert.Equal(ComparisonFailure.ScanNotCompleted, notDone.Failure);
 
@@ -344,23 +351,23 @@ public class ContentComparisonTests : IDisposable
     public async Task Role_IsStoredAsFixedString_AndReadBack()
     {
         var job = await new ScanJobService(_jobRepo, null!, NullLogger<ScanJobService>.Instance)
-            .CreateJobAsync(_archive, ScanRole.Bestand);
+            .CreateJobAsync(_library, ScanRole.Library);
 
         await using var conn = _db.CreateConnection();
-        Assert.Equal("bestand", await conn.ExecuteScalarAsync<string>("SELECT role FROM scan_jobs WHERE id = @id", new { id = job.Id }));
-        Assert.Equal(ScanRole.Bestand, (await _jobRepo.GetByIdAsync(job.Id))!.Role);
+        Assert.Equal("library", await conn.ExecuteScalarAsync<string>("SELECT role FROM scan_jobs WHERE id = @id", new { id = job.Id }));
+        Assert.Equal(ScanRole.Library, (await _jobRepo.GetByIdAsync(job.Id))!.Role);
     }
 
     [Fact]
     public async Task DeletingAJob_RemovesItsComparisons()
     {
         CreateStandardFixture();
-        var (source, archive) = await ScanBothAsync();
-        await CreateService().CompareAsync(source.Id, archive.Id);
+        var (source, library) = await ScanBothAsync();
+        await CreateService().CompareAsync(source.Id, library.Id);
 
-        await _jobRepo.DeleteAsync(archive.Id);
+        await _jobRepo.DeleteAsync(library.Id);
 
-        Assert.Null(await CreateService().GetStoredAsync(source.Id, archive.Id));
+        Assert.Null(await CreateService().GetStoredAsync(source.Id, library.Id));
         await using var conn = _db.CreateConnection();
         Assert.Equal(0, await conn.ExecuteScalarAsync<long>("SELECT COUNT(*) FROM comparison_files"));
     }

@@ -32,7 +32,7 @@ public static class ScanCommand
             "With --resume: switch the job to these rules; stored skip and shallow decisions are re-evaluated.");
         var role = new Option<string?>("--role")
         {
-            Description = "quelle (default): a medium to clean up. bestand: the organised archive; only read, never analysed.",
+            Description = "source (default): a medium to clean up. library: the organised archive; only read, never analysed.",
             HelpName = "role"
         };
         role.AcceptOnlyFromAmong([.. ScanRoleValues.All]);
@@ -78,7 +78,7 @@ public static class ScanCommand
                 var root = Path.GetFullPath(ctx.ParseResult.GetValue(path)!);
                 if (!Directory.Exists(root))
                     throw new CliFailureException(ExitCodes.Failure, ErrorCodes.PathNotFound, $"Folder not found: {root}");
-                var scanRole = ctx.ParseResult.GetValue(role) is { } r ? ScanRoleValues.Parse(r) : ScanRole.Quelle;
+                var scanRole = ctx.ParseResult.GetValue(role) is { } r ? ScanRoleValues.Parse(r) : ScanRole.Source;
                 jobId = (await jobs.CreateJobAsync(root, profile, scanRole, ct)).Id;
                 ctx.Note($"Created {scanRole.ToValue()} job {jobId} for {root} with rules '{profile.Name}'");
             }
