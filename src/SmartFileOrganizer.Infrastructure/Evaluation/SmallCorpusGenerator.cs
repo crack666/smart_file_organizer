@@ -1,0 +1,486 @@
+using System.Text;
+using System.Text.Json;
+using SmartFileOrganizer.Application.Evaluation;
+
+namespace SmartFileOrganizer.Infrastructure.Evaluation;
+
+/// <summary>What <see cref="SmallCorpusGenerator.Generate"/> wrote.</summary>
+/// <param name="RootPath">The folder to scan (<c>tree</c> below <paramref name="Directory"/>).</param>
+public sealed record GeneratedCorpus(string Directory, string TruthPath, string RootPath, EvalCorpusInfo Corpus, int Directories, int Files);
+
+/// <summary>
+/// Generates the small evaluation corpus of https://github.com/crack666/smart_file_organizer/issues/36:
+/// about forty folders of the kinds a private drive really has (mixed downloads and desktop,
+/// photo folders per occasion, documents by topic, software projects, programs and a game, a
+/// phone dump, music, videos, a hidden key folder) plus dummies of sensitive files. The truth
+/// for every folder and file is written to <c>truth.json</c> next to the scanned folder.
+/// </summary>
+/// <remarks>
+/// <para>Everything is invented: names, texts, pictures. Images are small painted PNGs (also the
+/// ones named <c>.jpg</c>, because scan rules and profiles work on names and image decoders sniff
+/// the content); PDFs are minimal text or scan pages; media, programs and archives are headers
+/// with filler. Sensitive dummies have a real header line and random filler, assembled at run time,
+/// so no valid key or secret exists in the repository or the corpus.</para>
+/// <para>The output depends only on the seed: same seed, same bytes, same timestamps.</para>
+/// <para>The truth is meant to be unambiguous. Where the categories of the product allow two
+/// answers (a bank statement is <c>invoice</c> or <c>document</c> by the prompt), the category is
+/// <c>null</c> and only the markers are measured. Files inside a unit (project, program, game,
+/// dump) have no category, because units are not classified file by file. Verdict codes follow
+/// the rules of docs/architecture.md: a folder of uniform collections of one file type is
+/// <c>uniform</c>, a folder of units is <c>uniform</c>, everything inside a unit is <c>unit</c>.</para>
+/// </remarks>
+public static class SmallCorpusGenerator
+{
+    public const string Name = "small";
+
+    /// <summary>Raise when the content or the truth changes, so stored runs of different corpora are not compared as equal.</summary>
+    public const int GeneratorVersion = 1;
+
+    public const int DefaultSeed = 36;
+    public const string RootFolder = "tree";
+
+    public static GeneratedCorpus Generate(string outputDirectory, int seed = DefaultSeed)
+    {
+        var dir = Path.GetFullPath(outputDirectory);
+        if (Directory.Exists(dir) && Directory.EnumerateFileSystemEntries(dir).Any())
+            throw new IOException($"Output folder is not empty: {dir}");
+
+        var root = Path.Combine(dir, RootFolder);
+        var b = new Builder(root, new Random(seed));
+        Populate(b);
+
+        var corpus = new EvalCorpusInfo(Name, GeneratorVersion, seed,
+            "Small invented corpus: mixed downloads and desktop, photo folders per occasion, documents by topic, " +
+            "projects, programs, a phone dump, media and sensitive dummies.");
+        var doc = new EvalTruthDocument(EvalTruth.SchemaVersion, corpus, RootFolder, b.Directories, b.Files);
+        var truthPath = Path.Combine(dir, EvalTruth.FileName);
+        File.WriteAllText(truthPath, JsonSerializer.Serialize(doc, EvalJson.Options) + "\n", new UTF8Encoding(false));
+
+        b.ApplyDirectoryTimes();
+        return new GeneratedCorpus(dir, truthPath, root, corpus, b.Directories.Count, b.Files.Count);
+    }
+
+    // Codes of issue 35 (English). Compared through EvalCodes, never as strings.
+    private const string Unit = "unit", Uniform = "uniform", Mixed = "mixed", Empty = "empty", SystemDir = "system";
+    private const string Photo = "photo", Screenshot = "screenshot", Video = "video", Invoice = "invoice", Document = "document",
+        DocumentScan = "document_scan", PersonalDocument = "personal_document", Letter = "letter";
+    private const string Credentials = "credentials", Keys = "keys", PrivateMessage = "private_message", Identity = "identity",
+        Finance = "finance", Health = "health";
+
+    private static readonly string[] None = [];
+
+    private static void Populate(Builder b)
+    {
+        b.Dir(".", Mixed, "Drive root: folders with different purposes.");
+
+        // ── Downloads: mixed, from #29 "lose Dateien", installers next to documents ──
+        b.Dir("Downloads", Mixed, "Download folder without a common purpose.");
+        b.File("Downloads/setup_fotoeditor_3.2.exe", Exe(b), D(2024, 1, 14), null, None, "Installer; not classified (executable).");
+        b.File("Downloads/Rechnung_2024-03_Stromanbieter.pdf", MiniPdf.Text("Rechnung Nr. 2024-0317", [
+            "Stadtwerke Beispielstadt GmbH, Musterweg 1, 12345 Beispielstadt",
+            "Kundennummer 4711-0815",
+            "Stromlieferung Maerz 2024: 212 kWh",
+            "Arbeitspreis 0,32 EUR/kWh: 67,84 EUR",
+            "Grundpreis: 12,50 EUR",
+            "Rechnungsbetrag: 80,34 EUR, faellig am 15.04.2024"]), D(2024, 4, 2), Invoice, None,
+            "An invoice is not a finance marker: the marker list names bank statements, tax papers, payslips, card data.");
+        b.File("Downloads/Screenshot_2024-05-02_101500.png", Screen(b, 0), D(2024, 5, 2), Screenshot, None);
+        b.File("Downloads/IMG_20230812_143012.jpg", PhotoOf(b, Scene.Lake), D(2023, 8, 12), Photo, None);
+        b.File("Downloads/Bedienungsanleitung_Router.pdf", MiniPdf.Text("Bedienungsanleitung WLAN-Router X200", [
+            "1. Router mit dem Stromnetz verbinden.",
+            "2. LAN-Kabel in die gelbe Buchse stecken.",
+            "3. Im Browser die Adresse des Routers oeffnen.",
+            "4. Den Einrichtungsassistenten durchlaufen.",
+            "Technische Daten: 4 LAN-Anschluesse, WLAN 2,4 und 5 GHz."]), D(2022, 11, 3), Document, None);
+        b.File("Downloads/fotos_export.zip", EmptyZip(), D(2023, 9, 1), null, None, "Archive; not classified.");
+        b.File("Downloads/Kontoauszug_2024_03.pdf", MiniPdf.Text("Kontoauszug Maerz 2024", [
+            "Beispielbank eG, Konto 1234 5678 90",
+            "01.03. Gehalt Musterfirma        +2.310,00",
+            "03.03. Miete                       -780,00",
+            "12.03. Supermarkt                   -64,13",
+            "Neuer Saldo: 3.118,52 EUR"]), D(2024, 4, 1), null, [Finance],
+            "Category is invoice or document by the prompt; only the finance marker is measured.");
+        b.File("Downloads/install.log", Text("2024-01-14 10:02:11 Installation started\n2024-01-14 10:02:40 Installation finished\n"),
+            D(2024, 1, 14), null, None, "Log file; not classified (no document type).");
+
+        // ── Desktop: mixed, with credentials lying around ──
+        b.Dir("Desktop", Mixed, "Desktop: notes, screenshots and things put down for later.");
+        b.File("Desktop/Passwoerter.txt", Text(Filler(b, "Zugang ", 6)), D(2023, 3, 9), null, [Credentials],
+            "Password list; category ambiguous (document or review_needed).");
+        b.File("Desktop/wiederherstellungscodes.txt", Text("Wiederherstellungscodes\n" + Codes(b, 8)), D(2023, 6, 21), null, [Credentials],
+            "Recovery codes; no name rule matches, only the model can find it.");
+        b.File("Desktop/Einkaufsliste.txt", Text("Milch\nBrot\nAepfel\nKaffee\nSpuelmittel\n"), D(2024, 6, 1), null, None,
+            "Category ambiguous (document, review_needed, trash_candidate).");
+        b.File("Desktop/Screenshot_2024-06-11_084512.png", Screen(b, 1), D(2024, 6, 11), Screenshot, None);
+        b.File("Desktop/Kuendigung_Fitnessstudio.txt", Text(
+            "Max Beispiel\nMusterweg 2\n12345 Beispielstadt\n\nFitnessstudio Aktiv\n\nKuendigung meiner Mitgliedschaft\n\n" +
+            "Sehr geehrte Damen und Herren,\nhiermit kuendige ich meine Mitgliedschaft (Nr. 20931) zum naechstmoeglichen Termin.\n" +
+            "Bitte bestaetigen Sie mir die Kuendigung schriftlich.\n\nMit freundlichen Gruessen\nMax Beispiel\n"),
+            D(2024, 2, 27), Letter, None, "Formal letter to a company; not a private message.");
+        b.File("Desktop/Tresor.kdbx", Kdbx(b), D(2024, 5, 30), null, [Credentials], "Password store dummy (header and filler).");
+        b.File("Desktop/vpn-zugang.pfx", Pfx(b), D(2022, 10, 4), null, [Keys], "Certificate with key, dummy.");
+        b.File("Desktop/Steuer-Programm.lnk", Binary(b, [0x4C, 0x00, 0x00, 0x00], 420), D(2023, 2, 2), null, None, "Shortcut.");
+
+        // ── Photos: one folder per occasion, inconsistent names as in #29 ──
+        b.Dir("Fotos", Uniform, "Only photo collections below (empty folders are ignored).");
+        b.Dir("Fotos/2019 Skifahrt", Uniform, "Photos of one trip.");
+        for (var i = 0; i < 6; i++)
+            b.File($"Fotos/2019 Skifahrt/IMG_20190212_{101530 + i * 217}.jpg", PhotoOf(b, Scene.Snow), D(2019, 2, 12, 10, 15 + i * 3), Photo, None);
+        b.Dir("Fotos/Sommerfest 2022", Uniform, "Photos and a phone clip of one occasion; a clip there is no mix.");
+        for (var i = 0; i < 5; i++)
+            b.File($"Fotos/Sommerfest 2022/IMG_20220716_{180112 + i * 305}.jpg", PhotoOf(b, Scene.Garden), D(2022, 7, 16, 18, 1 + i * 5), Photo, None);
+        b.File("Fotos/Sommerfest 2022/VID_20220716_183001.mp4", Mp4(b, 48_000), D(2022, 7, 16, 18, 30), Video, None);
+        b.Dir("Fotos/hochzeit anna und ben", Uniform, "Photos of one occasion; lower-case name without a date.");
+        for (var i = 0; i < 5; i++)
+            b.File($"Fotos/hochzeit anna und ben/DSC_{412 + i:0000}.jpg", PhotoOf(b, Scene.Wedding), D(2021, 9, 4, 14, 10 + i * 7), Photo, None);
+        b.Dir("Fotos/100MEDIA", Uniform, "Camera folder name; photos of one card.");
+        for (var i = 0; i < 4; i++)
+            b.File($"Fotos/100MEDIA/IMG_{i + 1:0000}.JPG", PhotoOf(b, Scene.Lake), D(2020, 5, 23, 9, 2 + i * 11), Photo, None);
+        b.Dir("Fotos/Urlaub Italien", Uniform, "Photos of one trip plus a thumbnail cache file.");
+        for (var i = 0; i < 4; i++)
+            b.File($"Fotos/Urlaub Italien/P{1010231 + i * 4}.jpg", PhotoOf(b, Scene.Coast), D(2018, 6, 3 + i, 11, 0), Photo, None);
+        b.File("Fotos/Urlaub Italien/Thumbs.db", Binary(b, [0xD0, 0xCF, 0x11, 0xE0], 2048), D(2018, 6, 10), null, None, "Thumbnail cache.");
+        b.Dir("Fotos/Neuer Ordner", Empty, "Placeholder name, nothing inside.");
+
+        // ── Documents by topic ──
+        b.Dir("Dokumente", Uniform, "Only document collections below.");
+        b.Dir("Dokumente/Rechnungen 2023", Uniform, "Invoices of one year.");
+        string[][] invoices =
+        [
+            ["2023-01_Internet.pdf", "Rechnung Internetanschluss Januar 2023", "Tarif Surf 100: 39,99 EUR"],
+            ["2023-04_Handwerker.pdf", "Rechnung Malerbetrieb Pinsel", "Wohnzimmer streichen, 14 m2: 412,00 EUR"],
+            ["2023-07_Moebelhaus.pdf", "Rechnung Moebelhaus Holzweg", "Regal Eiche, Lieferung: 289,00 EUR"],
+            ["2023-11_Autowerkstatt.pdf", "Rechnung Autowerkstatt Schraube", "Inspektion und Oelwechsel: 247,30 EUR"]
+        ];
+        for (var i = 0; i < invoices.Length; i++)
+            b.File($"Dokumente/Rechnungen 2023/{invoices[i][0]}", MiniPdf.Text(invoices[i][1],
+                [$"Rechnungsnummer R-2023-{100 + i * 37}", invoices[i][2], "Zahlbar innerhalb von 14 Tagen ohne Abzug."]),
+                D(2023, 1 + i * 3, 20), Invoice, None);
+        b.Dir("Dokumente/Steuer 2022", Uniform, "Tax papers of one year.");
+        b.File("Dokumente/Steuer 2022/Steuererklaerung_2022.pdf", MiniPdf.Text("Einkommensteuererklaerung 2022", [
+            "Steuernummer 12/345/67890", "Einkuenfte aus nichtselbstaendiger Arbeit", "Werbungskosten: Fahrten zur Arbeit"]),
+            D(2023, 5, 14), null, [Finance], "Tax return; category ambiguous (personal_document or document).");
+        b.File("Dokumente/Steuer 2022/Lohnsteuerbescheinigung_2022.pdf", MiniPdf.Text("Ausdruck der elektronischen Lohnsteuerbescheinigung 2022", [
+            "Arbeitgeber: Musterfirma GmbH", "Bruttoarbeitslohn: 33.720,00 EUR", "Einbehaltene Lohnsteuer: 4.912,00 EUR"]),
+            D(2023, 2, 10), null, [Finance], "Payslip-like tax paper; category ambiguous.");
+        b.Dir("Dokumente/Gesundheit", Uniform, "Medical papers.");
+        b.File("Dokumente/Gesundheit/Arztbrief_Orthopaedie_2023.pdf", MiniPdf.Text("Arztbrief", [
+            "Praxis fuer Orthopaedie Dr. Knie", "Diagnose: Reizung der Patellasehne rechts", "Empfehlung: Physiotherapie, 6 Termine"]),
+            D(2023, 10, 5), null, [Health], "Doctor letter; category ambiguous (letter or personal_document).");
+        b.File("Dokumente/Gesundheit/Befund_Blutbild.pdf", MiniPdf.Text("Laborbefund", [
+            "Labor Beispielstadt", "Haemoglobin 14,2 g/dl (Referenz 13,5-17,5)", "Leukozyten 6,1 /nl (Referenz 4,0-10,0)"]),
+            D(2023, 10, 2), null, [Health], "Lab finding; category ambiguous.");
+        b.Dir("Dokumente/Persoenliches", Uniform, "Personal papers.");
+        b.File("Dokumente/Persoenliches/Lebenslauf_2023.pdf", MiniPdf.Text("Lebenslauf", [
+            "Max Beispiel, geboren 1990 in Beispielstadt", "2016-2023 Sachbearbeiter, Musterfirma GmbH",
+            "2010-2016 Studium der Betriebswirtschaft", "Sprachen: Deutsch, Englisch"]),
+            D(2023, 8, 30), PersonalDocument, None);
+        b.File("Dokumente/Persoenliches/Mietvertrag_Wohnung.pdf", MiniPdf.Text("Mietvertrag ueber Wohnraum", [
+            "Zwischen Vermieterin Erika Muster und Mieter Max Beispiel", "Wohnung Musterweg 2, 2. OG links",
+            "Kaltmiete 650,00 EUR, Nebenkosten 130,00 EUR", "Mietbeginn 01.04.2019"]),
+            D(2019, 3, 12), PersonalDocument, None, "A contract is a personal document, not a letter.");
+        b.File("Dokumente/Persoenliches/Personalausweis_Scan.pdf", MiniPdf.Scan(IdCardScan(b)), D(2021, 1, 18), null, [Identity],
+            "Scan of an identity card; category ambiguous (document_scan or personal_document).");
+        b.Dir("Dokumente/Briefe", Uniform, "Letters.");
+        b.File("Dokumente/Briefe/Kuendigung_Handyvertrag.txt", Text(
+            "Max Beispiel\nMusterweg 2\n12345 Beispielstadt\n\nMobilfunk Beispiel AG\n\nKuendigung Vertrag 0170-000000\n\n" +
+            "Sehr geehrte Damen und Herren,\nich kuendige den genannten Vertrag fristgerecht zum Ende der Laufzeit.\n\nMit freundlichen Gruessen\nMax Beispiel\n"),
+            D(2022, 9, 1), Letter, None);
+        b.File("Dokumente/Briefe/Widerspruch_Bescheid.txt", Text(
+            "Max Beispiel\nMusterweg 2\n12345 Beispielstadt\n\nStadtverwaltung Beispielstadt\n\nWiderspruch gegen den Bescheid vom 03.05.2022\n\n" +
+            "Sehr geehrte Damen und Herren,\nhiermit lege ich Widerspruch gegen den oben genannten Bescheid ein. Begruendung folgt.\n\nMit freundlichen Gruessen\nMax Beispiel\n"),
+            D(2022, 5, 20), Letter, None);
+        b.File("Dokumente/Briefe/Brief_an_Oma.txt", Text(
+            "Liebe Oma,\n\nwir denken oft an dich. Der Kleine kann jetzt schon laufen und lacht den ganzen Tag.\n" +
+            "Im Sommer kommen wir dich besuchen, versprochen. Pass auf dich auf!\n\nDein Max\n"),
+            D(2021, 12, 18), Letter, [PrivateMessage], "Private letter; only the model can mark it.");
+
+        // ── Projects: software, recognised by markers ──
+        b.Dir("Projekte", Uniform, "Only units below: a collection of projects.");
+        b.Dir("Projekte/haushaltsbuch-app", Unit, "Software project (package.json).");
+        b.File("Projekte/haushaltsbuch-app/package.json", Text("{\n  \"name\": \"haushaltsbuch-app\",\n  \"version\": \"0.3.0\",\n  \"main\": \"src/index.js\"\n}\n"),
+            D(2024, 3, 3), null, None);
+        b.File("Projekte/haushaltsbuch-app/README.md", Text("# Haushaltsbuch\n\nKleine App fuer Einnahmen und Ausgaben.\n"), D(2024, 3, 3), null, None,
+            "Inside a unit: no category.");
+        b.File("Projekte/haushaltsbuch-app/.env", Text("API_" + "TOKEN=" + "dummy-" + Hex(b, 24) + "\nPORT=8080\n"), D(2024, 3, 5), null, [Credentials],
+            "Environment file with a dummy token.");
+        b.Dir("Projekte/haushaltsbuch-app/src", Unit, "Inside a unit.");
+        b.File("Projekte/haushaltsbuch-app/src/index.js", Text("import { summe } from './budget.js';\nconsole.log(summe([12, 30]));\n"), D(2024, 3, 4), null, None);
+        b.File("Projekte/haushaltsbuch-app/src/budget.js", Text("export const summe = (werte) => werte.reduce((a, b) => a + b, 0);\n"), D(2024, 3, 4), null, None);
+        b.Dir("Projekte/haushaltsbuch-app/node_modules", Unit, "Dependencies inside a unit; skipped by the scan.");
+        b.File("Projekte/haushaltsbuch-app/node_modules/.package-lock.json", Text("{\n  \"lockfileVersion\": 3\n}\n"), D(2024, 3, 3), null, None);
+        b.Dir("Projekte/haushaltsbuch-app/.git", Unit, "Version control inside a unit; skipped by the scan.");
+        b.File("Projekte/haushaltsbuch-app/.git/HEAD", Text("ref: refs/heads/main\n"), D(2024, 3, 5), null, None);
+        b.Dir("Projekte/vereinswebsite", Unit, "Website project under version control (.git).");
+        b.File("Projekte/vereinswebsite/index.html", Text("<!doctype html>\n<title>Kleingartenverein Sonnenblick</title>\n<h1>Willkommen</h1>\n"), D(2023, 4, 9), null, None);
+        b.File("Projekte/vereinswebsite/style.css", Text("body { font-family: sans-serif; }\n"), D(2023, 4, 9), null, None);
+        b.Dir("Projekte/vereinswebsite/bilder", Unit, "Inside a unit.");
+        b.File("Projekte/vereinswebsite/bilder/logo.png", Logo(b), D(2023, 4, 8), null, None, "Inside a unit: no category.");
+        b.Dir("Projekte/vereinswebsite/.git", Unit, "Version control inside a unit; skipped by the scan.");
+        b.File("Projekte/vereinswebsite/.git/HEAD", Text("ref: refs/heads/main\n"), D(2023, 4, 9), null, None);
+
+        // ── A phone dump: a unit as a whole (#29: "Geraeteabzuege ... als Einheit melden") ──
+        b.Dir("Handy-Backup 2021", Unit, "Copy of a phone; belongs together and is handled as one backup.");
+        b.Dir("Handy-Backup 2021/DCIM", Unit, "Inside the phone dump.");
+        b.Dir("Handy-Backup 2021/DCIM/Camera", Unit, "Inside the phone dump.");
+        for (var i = 0; i < 5; i++)
+            b.File($"Handy-Backup 2021/DCIM/Camera/IMG_20210{3 + i}14_{120000 + i * 1111}.jpg", PhotoOf(b, Scene.Garden),
+                D(2021, 3 + i, 14, 12, i), null, None, "Inside a unit: no category.");
+        b.Dir("Handy-Backup 2021/LOST.DIR", Unit, "Empty system folder of the phone, still part of the dump.");
+        b.Dir("Handy-Backup 2021/Android", Unit, "Inside the phone dump.");
+        b.Dir("Handy-Backup 2021/Android/data", Unit, "Inside the phone dump.");
+        b.Dir("Handy-Backup 2021/Android/data/com.example.notes", Unit, "App data folder named after an app package.");
+        b.Dir("Handy-Backup 2021/Android/data/com.example.notes/files", Unit, "Inside the phone dump.");
+        b.File("Handy-Backup 2021/Android/data/com.example.notes/files/notes.db", Binary(b, Encoding.ASCII.GetBytes("SQLite format 3\0"), 4096),
+            D(2021, 7, 30), null, None);
+        b.File("Handy-Backup 2021/Android/data/com.example.notes/files/settings.xml", Text("<settings><theme>dark</theme></settings>\n"),
+            D(2021, 7, 30), null, None);
+
+        // ── Programs and a game ──
+        b.Dir("Programme", Uniform, "Only units below: a collection of programs.");
+        b.Dir("Programme/PortableTool", Unit, "Portable program (exe next to dll).");
+        b.File("Programme/PortableTool/tool.exe", Exe(b), D(2020, 2, 2), null, None);
+        b.File("Programme/PortableTool/tool.dll", Exe(b), D(2020, 2, 2), null, None);
+        b.File("Programme/PortableTool/liesmich.txt", Text("PortableTool 1.4\nStarten mit tool.exe.\n"), D(2020, 2, 2), null, None);
+        b.Dir("Programme/MiniGolf", Unit, "Game (exe next to its _Data folder).");
+        b.File("Programme/MiniGolf/MiniGolf.exe", Exe(b), D(2021, 12, 24), null, None);
+        b.File("Programme/MiniGolf/UnityPlayer.dll", Exe(b), D(2021, 12, 24), null, None);
+        b.Dir("Programme/MiniGolf/MiniGolf_Data", Unit, "Inside the game.");
+        b.File("Programme/MiniGolf/MiniGolf_Data/level0", Binary(b, [0x00, 0x00, 0x00, 0x16], 3000), D(2021, 12, 24), null, None);
+        b.File("Programme/MiniGolf/MiniGolf_Data/globalgamemanagers", Binary(b, [0x00, 0x00, 0x00, 0x16], 2000), D(2021, 12, 24), null, None);
+
+        // ── Media ──
+        b.Dir("Musik", Uniform, "Music files; audio is not classified.");
+        string[] songs = ["01 - Sommerregen.mp3", "02 - Am Hafen.mp3", "03 - Leise Nacht.mp3", "04 - Rueckweg.mp3"];
+        foreach (var song in songs)
+            b.File($"Musik/{song}", Mp3(b), D(2017, 8, 1), null, None);
+        b.Dir("Videos", Uniform, "Family videos.");
+        b.File("Videos/Geburtstag_Opa_2018.mp4", Mp4(b, 64_000), D(2018, 10, 7), Video, None);
+        b.File("Videos/Schulauffuehrung_2019.mp4", Mp4(b, 64_000), D(2019, 6, 28), Video, None);
+        b.File("Videos/VID_20200101_000512.mp4", Mp4(b, 64_000), D(2020, 1, 1), Video, None);
+        b.Dir("Screenshots", Uniform, "Screenshots only.");
+        for (var i = 0; i < 4; i++)
+            b.File($"Screenshots/Screenshot_2023-0{i + 2}-1{i}_09{10 + i}00.png", Screen(b, 2 + i), D(2023, 2 + i, 10 + i), Screenshot, None);
+
+        // ── Leftovers under a placeholder name ──
+        b.Dir("alt", Mixed, "Placeholder name; unrelated leftovers.");
+        b.File("alt/scan001.pdf", MiniPdf.Scan(LetterScan(b)), D(2016, 11, 2), DocumentScan, None, "Scanned page of a letter.");
+        b.File("alt/bewerbungsfoto.jpg", PhotoOf(b, Scene.Portrait), D(2016, 3, 1), Photo, None);
+        b.File("alt/Tabelle1.csv", Text("Monat;Betrag\nJanuar;120\nFebruar;95\nMaerz;143\n"), D(2016, 4, 4), null, None, "Category ambiguous.");
+
+        // ── Hidden key folder ──
+        b.Dir(".ssh", SystemDir, "Hidden tool folder.");
+        b.File(".ssh/id_ed25519", PrivateKey(b), D(2022, 1, 9), null, [Keys], "Private key dummy (header and random filler).");
+        b.File(".ssh/id_ed25519.pub", Text("ssh-ed25519 " + Convert.ToBase64String(Bytes(b, 32)) + " max@laptop\n"), D(2022, 1, 9), null, None,
+            "A public key is not secret.");
+    }
+
+    // ── File contents ────────────────────────────────────────────────────
+
+    private static byte[] Text(string s) => new UTF8Encoding(false).GetBytes(s.Replace("\r\n", "\n"));
+
+    private static byte[] Bytes(Builder b, int n)
+    {
+        var bytes = new byte[n];
+        b.Random.NextBytes(bytes);
+        return bytes;
+    }
+
+    private static string Hex(Builder b, int n) => Convert.ToHexString(Bytes(b, n / 2)).ToLowerInvariant();
+
+    private static byte[] Binary(Builder b, byte[] header, int size)
+    {
+        var bytes = Bytes(b, size);
+        header.CopyTo(bytes, 0);
+        return bytes;
+    }
+
+    private static byte[] Exe(Builder b) => Binary(b, [(byte)'M', (byte)'Z', 0x90, 0x00], 1536);
+
+    private static byte[] Mp3(Builder b) => Binary(b, Encoding.ASCII.GetBytes("ID3\u0004\0\0\0\0\0\0"), 8000);
+
+    private static byte[] Mp4(Builder b, int size) => Binary(b, [0, 0, 0, 0x18, (byte)'f', (byte)'t', (byte)'y', (byte)'p', (byte)'m', (byte)'p', (byte)'4', (byte)'2'], size);
+
+    /// <summary>An empty but valid ZIP archive (end-of-central-directory record only).</summary>
+    private static byte[] EmptyZip() => [0x50, 0x4B, 0x05, 0x06, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+
+    /// <summary>KeePass signature with random filler; not a readable database.</summary>
+    private static byte[] Kdbx(Builder b) => Binary(b, [0x03, 0xD9, 0xA2, 0x9A, 0x67, 0xFB, 0x4B, 0xB5], 1024);
+
+    /// <summary>A DER sequence start with random filler; not a readable certificate.</summary>
+    private static byte[] Pfx(Builder b) => Binary(b, [0x30, 0x82, 0x09, 0xF1, 0x02, 0x01, 0x03], 900);
+
+    /// <summary>Key header and footer around random base64; assembled here so no key line is in the source.</summary>
+    private static byte[] PrivateKey(Builder b)
+    {
+        var label = string.Join(' ', "OPENSSH", "PRIVATE", "KEY");
+        var body = Convert.ToBase64String(Bytes(b, 300), Base64FormattingOptions.InsertLineBreaks).Replace("\r\n", "\n");
+        return Text($"-----BEGIN {label}-----\n{body}\n-----END {label}-----\n");
+    }
+
+    private static string Filler(Builder b, string prefix, int lines)
+    {
+        var sb = new StringBuilder();
+        for (var i = 0; i < lines; i++)
+            sb.Append(prefix).Append(i + 1).Append(": nutzer").Append(b.Random.Next(10, 99)).Append(" / ").Append(Hex(b, 12)).Append('\n');
+        return sb.ToString();
+    }
+
+    private static string Codes(Builder b, int count)
+    {
+        var sb = new StringBuilder();
+        for (var i = 0; i < count; i++)
+            sb.Append(b.Random.Next(1000, 9999)).Append('-').Append(b.Random.Next(1000, 9999)).Append('\n');
+        return sb.ToString();
+    }
+
+    // ── Pictures ─────────────────────────────────────────────────────────
+
+    private enum Scene { Snow, Garden, Wedding, Lake, Coast, Portrait }
+
+    private static byte[] PhotoOf(Builder b, Scene scene)
+    {
+        var r = b.Random;
+        var c = new Canvas(320, 240);
+        var horizon = 120 + r.Next(-20, 21);
+        switch (scene)
+        {
+            case Scene.Snow:
+                c.VerticalGradient(0, horizon, (90, 140, 220), (190, 215, 245));
+                for (var i = 0; i < 3; i++) c.Peak(r.Next(30, 290), horizon - r.Next(50, 100), horizon, r.Next(50, 90), (225, 230, 240));
+                c.Fill(0, horizon, 320, 240, (245, 247, 250));
+                for (var i = 0; i < 3; i++) { var x = r.Next(40, 280); var y = r.Next(horizon + 30, 215); c.Fill(x, y - 18, x + 6, y, (200, 40, 40)); c.Circle(x + 3, y - 22, 4, (230, 190, 160)); }
+                break;
+            case Scene.Garden:
+                c.VerticalGradient(0, horizon, (110, 170, 230), (200, 225, 245));
+                c.Circle(r.Next(40, 280), r.Next(20, 50), 16, (255, 230, 120));
+                c.Fill(0, horizon, 320, 240, (70, 150, 60));
+                for (var i = 0; i < 25; i++) c.Circle(r.Next(0, 320), r.Next(horizon, 240), 3, (r.Next(180, 255), r.Next(40, 200), r.Next(40, 120)));
+                for (var i = 0; i < 4; i++) { var x = r.Next(30, 290); c.Fill(x, horizon - 30, x + 10, horizon + 20, (r.Next(40, 200), r.Next(40, 200), r.Next(40, 200))); c.Circle(x + 5, horizon - 36, 6, (225, 185, 150)); }
+                break;
+            case Scene.Wedding:
+                c.VerticalGradient(0, 240, (250, 235, 215), (215, 190, 160));
+                c.Fill(110, 70, 150, 220, (40, 40, 50));
+                c.Circle(130, 58, 14, (230, 190, 160));
+                c.Fill(170, 80, 215, 220, (250, 250, 248));
+                c.Circle(192, 66, 13, (235, 195, 165));
+                for (var i = 0; i < 12; i++) c.Circle(r.Next(0, 320), r.Next(0, 60), 3, (255, 255, 255));
+                break;
+            case Scene.Lake:
+                c.VerticalGradient(0, horizon, (120, 175, 235), (215, 230, 245));
+                c.Peak(r.Next(80, 240), horizon - 70, horizon, 120, (90, 110, 90));
+                c.VerticalGradient(horizon, 240, (60, 110, 160), (30, 70, 120));
+                break;
+            case Scene.Coast:
+                c.VerticalGradient(0, horizon, (60, 140, 230), (170, 210, 245));
+                c.Circle(r.Next(200, 290), r.Next(25, 50), 18, (255, 240, 170));
+                c.VerticalGradient(horizon, horizon + 50, (30, 110, 170), (60, 150, 190));
+                c.Fill(0, horizon + 50, 320, 240, (230, 205, 150));
+                for (var i = 0; i < 5; i++) { var x = r.Next(10, 300); c.Fill(x, horizon - 40, x + 18, horizon, (235, 200, 160)); c.Fill(x + 4, horizon - 50, x + 14, horizon - 40, (180, 70, 50)); }
+                break;
+            case Scene.Portrait:
+                c.VerticalGradient(0, 240, (200, 205, 215), (160, 165, 180));
+                c.Circle(160, 95, 48, (230, 190, 160));
+                c.Fill(95, 150, 225, 240, (50, 60, 90));
+                c.Fill(125, 40, 195, 62, (80, 55, 40));
+                break;
+        }
+        c.Noise(r, 6);
+        return c.ToPng();
+    }
+
+    private static byte[] Screen(Builder b, int variant)
+    {
+        var r = b.Random;
+        var c = new Canvas(400, 260);
+        c.Fill(0, 0, 400, 260, (236, 238, 242));
+        c.Fill(0, 0, 400, 22, (45, 50, 60));
+        c.Fill(368, 5, 380, 17, (220, 80, 70));
+        c.Fill(0, 22, 90, 260, (220, 224, 232));
+        for (var i = 0; i < 6; i++) c.Fill(10, 36 + i * 22, 75, 44 + i * 22, (120, 125, 135));
+        for (var i = 0; i < 9 + variant % 3; i++)
+            c.Fill(105, 40 + i * 20, 105 + r.Next(120, 280), 48 + i * 20, (70, 72, 80));
+        c.Fill(300, 225, 385, 248, (40, 110, 210));
+        return c.ToPng();
+    }
+
+    private static byte[] Logo(Builder b)
+    {
+        var c = new Canvas(96, 96);
+        c.Fill(0, 0, 96, 96, (255, 255, 255));
+        c.Circle(48, 48, 34, (250, 200, 40));
+        c.Circle(48, 48, 14, (120, 80, 30));
+        return c.ToPng();
+    }
+
+    private static Canvas Paper(Builder b, int width, int height)
+    {
+        var c = new Canvas(width, height);
+        c.Fill(0, 0, width, height, (246, 244, 238));
+        return c;
+    }
+
+    private static Canvas LetterScan(Builder b)
+    {
+        var r = b.Random;
+        var c = Paper(b, 420, 594);
+        c.Fill(40, 40, 170, 50, (60, 60, 60));
+        c.Fill(40, 56, 150, 63, (90, 90, 90));
+        c.Fill(260, 120, 380, 128, (80, 80, 80));
+        for (var i = 0; i < 16; i++)
+            c.Fill(40, 190 + i * 16, 40 + r.Next(250, 340), 197 + i * 16, (70, 70, 70));
+        c.Fill(40, 480, 140, 488, (60, 60, 60));
+        c.Noise(r, 10);
+        return c;
+    }
+
+    private static Canvas IdCardScan(Builder b)
+    {
+        var r = b.Random;
+        var c = Paper(b, 420, 594);
+        c.Fill(60, 60, 360, 250, (205, 215, 225));
+        c.Fill(80, 90, 160, 200, (150, 150, 160));
+        c.Circle(120, 125, 22, (200, 175, 150));
+        for (var i = 0; i < 6; i++) c.Fill(180, 95 + i * 18, 180 + r.Next(90, 160), 102 + i * 18, (50, 60, 80));
+        c.Fill(80, 215, 340, 222, (60, 60, 60));
+        c.Fill(80, 228, 340, 235, (60, 60, 60));
+        c.Noise(r, 8);
+        return c;
+    }
+
+    private static DateTime D(int y, int m, int d, int h = 12, int min = 0) => new(y, m, d, h, min, 0, DateTimeKind.Utc);
+
+    /// <summary>Collects folders and files with their truth while writing them.</summary>
+    private sealed class Builder(string root, Random random)
+    {
+        private readonly List<(string Path, DateTime Time)> _dirTimes = [];
+
+        public Random Random { get; } = random;
+        public List<TruthDirectoryEntry> Directories { get; } = [];
+        public List<TruthFileEntry> Files { get; } = [];
+
+        public void Dir(string path, string? verdict, string? note = null)
+        {
+            Directory.CreateDirectory(Full(path));
+            Directories.Add(new TruthDirectoryEntry(path, verdict, note));
+        }
+
+        public void File(string path, byte[] content, DateTime modified, string? category, string[] sensitive, string? note = null)
+        {
+            var full = Full(path);
+            System.IO.File.WriteAllBytes(full, content);
+            System.IO.File.SetLastWriteTimeUtc(full, modified);
+            Files.Add(new TruthFileEntry(path, category, sensitive, note));
+            _dirTimes.Add((EvalTruth.ParentOf(path), modified));
+        }
+
+        /// <summary>Folder times follow their newest file, as on a real drive; set last, after all writes.</summary>
+        public void ApplyDirectoryTimes()
+        {
+            foreach (var group in _dirTimes.GroupBy(t => t.Path))
+                Directory.SetLastWriteTimeUtc(Full(group.Key), group.Max(t => t.Time));
+        }
+
+        private string Full(string path) => path == "." ? root : Path.Combine(root, path.Replace('/', Path.DirectorySeparatorChar));
+    }
+}
