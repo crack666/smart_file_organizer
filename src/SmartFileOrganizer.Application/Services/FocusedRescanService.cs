@@ -61,7 +61,7 @@ public class FocusedRescanService
         await _preAssessmentService.PreAssessSingleAsync(jobId, dir, ct);
         await _sampling.PlanDirectoryAsync(jobId, dir.Id, ct);
         var verdict = await _verdictRepo.GetByNodeIdAsync(dir.Id, ct);
-        var askKeepHint = verdict?.Verdict is DirectoryVerdictKind.Gemischt or DirectoryVerdictKind.Einheitlich;
+        var askKeepHint = verdict?.Verdict is DirectoryVerdictKind.Mixed or DirectoryVerdictKind.Uniform;
 
         var directFiles = await _fileRepo.GetByDirectoryAsync(jobId, directoryPath, ct);
         // As before the rescan judges every file not skipped, eligible or not, except those waiting for the sample.

@@ -3,7 +3,7 @@ using SmartFileOrganizer.Domain.Enums;
 namespace SmartFileOrganizer.Domain.Models;
 
 /// <summary>
-/// The sample of a directory judged uniform (<see cref="DirectoryVerdictKind.Einheitlich"/>): which files were drawn and why, and what came of it.
+/// The sample of a directory judged uniform (<see cref="DirectoryVerdictKind.Uniform"/>): which files were drawn and why, and what came of it.
 /// One row per directory in <c>directory_samples</c>.
 /// </summary>
 /// <remarks>

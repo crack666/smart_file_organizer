@@ -167,7 +167,7 @@ public sealed class CorpusEvaluator
     }
 
     private static string DecidedBy(DirectoryVerdict verdict) =>
-        verdict.Source == VerdictSource.Regel
+        verdict.Source == VerdictSource.Rule
             ? $"rule {verdict.Rule}"
             : $"model {verdict.ModelUsed}";
 

@@ -136,19 +136,22 @@ The post-scan AI pipeline runs as three sequential phases coordinated by `AiClas
 ### Phase 1 — Directory verdict and pre-assessment (`DirectoryPreAssessmentService`)
 
 Every directory of the job gets a verdict: what lies here, and can it be handled as a whole
-([#7](https://github.com/crack666/smart_file_organizer/issues/7)). Values are fixed German codes,
-defined once on the Domain enums and shared by database and JSON (`VerdictCodes`):
+([#7](https://github.com/crack666/smart_file_organizer/issues/7)). Values are fixed English codes,
+defined once on the Domain enums and shared by database, JSON and prompts (`VerdictCodes`; all codes in
+[glossary.md](glossary.md)). Until schema step 13 (12.11.2026) they were German (`einheit`, `gemischt`, ...);
+the parser still reads those words in a model answer and stores the code. People see words from
+`CodeLabels` (English or German, by the summary language), never the code itself:
 
 | Verdict | Meaning |
 |---|---|
-| `einheit` | project, program, game or backup that only makes sense as a whole; never split up |
-| `einheitlich` | collection of similar content (photos of one trip, invoices of one year) |
-| `gemischt` | storage without a common purpose (desktop, downloads); handled file by file |
-| `leer` | no files, neither directly nor below |
+| `unit` | project, program, game or backup that only makes sense as a whole; never split up |
+| `uniform` | collection of similar content (photos of one trip, invoices of one year) |
+| `mixed` | storage without a common purpose (desktop, downloads); handled file by file |
+| `empty` | no files, neither directly nor below |
 | `system` | operating system, tool or cache data, or excluded by the scan |
 
-Retention is `behalten`, `pruefen` or `entbehrlich`; the source is `regel` (a rule decided, no model
-call) or `modell`.
+Retention is `keep`, `review` or `disposable`; the source is `rule` (a rule decided, no model
+call) or `model`.
 
 1. All `directory_nodes` of the job are loaded, including directories the scan skipped. Directories with
    a verdict in `directory_verdicts` are done (resume); rows with an error are retried.
@@ -156,20 +159,20 @@ call) or `modell`.
    distribution by extension and file type (count and bytes), oldest and newest modification and the
    span in days, naming patterns (`camera`, `date-prefix`, `screenshot`, `copy-suffix`), unit markers
    (`dir:.git`, `dir:node_modules`, `file:package.json`, `ext:.sln`, `program:exe+dll`,
-   `game:exe+_Data`, backup images, …) and a hint (`einheitlich` from 80 % of one file type or naming
-   series, `gemischt` from three or more types with none above 50 %).
+   `game:exe+_Data`, backup images, …) and a hint (`uniform` from 80 % of one file type or naming
+   series, `mixed` from three or more types with none above 50 %).
 3. `DirectoryVerdictRules` decide the clear cases without the model, in this order: below a directory
-   judged `einheit` (`inside-unit`), skipped by the scan (`scan-skip`), name starting with a dot
+   judged `unit` (`inside-unit`), skipped by the scan (`scan-skip`), name starting with a dot
    (`hidden`), unit markers (`marker`), no files and no subdirectories (`empty`).
 4. Directories are processed level by level from the root. What no rule decides goes to Ollama in
    parallel (`PreAssessDirectoryAsync`): file list, subdirectory names and the profile. The model returns
    verdict, purpose, retention and reason, together with the sampling fields used so far
    (`homogeneity`, `anomalous_files`, `sampling_strategy`, `suggested_sample_size`).
    `PreAssessmentResponseParser` reads the answer; a missing or unknown verdict is stored as an error.
-   A directory the model judges `einheit` spares all calls below it.
+   A directory the model judges `unit` spares all calls below it.
 5. Directories without direct files but with subdirectories are decided last, bottom-up, from their
-   subdirectories (`container`): all empty → `leer`; only system → `system`; all units, or all
-   `einheitlich` with the same dominant file type → `einheitlich`; otherwise `gemischt`.
+   subdirectories (`container`): all empty → `empty`; only system → `system`; all units, or all
+   `uniform` with the same dominant file type → `uniform`; otherwise `mixed`.
 6. The verdict is stored in `directory_verdicts`; the pre-assessment in `ai_directory_results`
    (phase=`pre_assessment`) for directories Phase 2 and 3 work on. Directories inside a unit get no
    pre-assessment row and no summary of their own.
@@ -189,7 +192,7 @@ Staged since [#8](https://github.com/crack666/smart_file_organizer/issues/8): sa
 judgement only where the sample disagrees or the directory is mixed. Quality comes before throughput:
 whenever something is unclear the directory is raised to mixed and every file is judged.
 
-**Plan.** For every directory judged `einheitlich` without a sample, `DirectorySampler.Draw` picks the
+**Plan.** For every directory judged `uniform` without a sample, `DirectorySampler.Draw` picks the
 members from its eligible files (image, video, document):
 
 - sensitive files (rule markers, `SensitiveOutputGuard.IsSensitive`): always, on top of the sample size;
@@ -259,7 +262,7 @@ signals. `ResultCheckRules.Find` lists what speaks against a first answer (codes
 | `unclear_category` | `ReviewNeeded` or `Unknown` |
 | `kind_mismatch` | `Photo`/`Screenshot` for a file that is no image, `Video` for no video, `Audio` for no audio; header bytes (`detected_format`) decide, the extension where the header is ambiguous (`mp4` is also HEIC and MOV, `mp3` a weak test) |
 | `rule_disagrees` | an unambiguous metadata rule: `image_origin = screenshot` against `Photo`, `image_origin = camera` with a device against `Screenshot`. The rule sets the category, no second call. A scan is not forced: a scanned print may be a photo |
-| `verdict_disagrees` | retention of the directory verdict `entbehrlich` and importance High or Critical, or `behalten` and `TrashCandidate` or keep hint `temporary` |
+| `verdict_disagrees` | retention of the directory verdict `disposable` and importance High or Critical, or `keep` and `TrashCandidate` or keep hint `temporary` |
 
 Any reason except `rule_disagrees` leads to a second call, made right after the first in the same worker: the
 preparer runs again with `EvidenceDepth.Extended` (PDF text up to 24,000 characters plus the middle and last page
@@ -315,7 +318,7 @@ Confirmed (`ConfirmAsync`, one transaction): every file still `Deferred` gets an
 `origin = inherited`, `is_ai_result = 0`, `inherited_from_directory_node_id`, the majority category, the
 most frequent importance and target of the agreeing members, `model_used` empty, and the lowest confidence
 of the agreeing members capped at `InheritedConfidenceCap`; status `Inherited`.
-Contradicted (`EscalateAsync`, one transaction): the verdict becomes `gemischt` with the old one in
+Contradicted (`EscalateAsync`, one transaction): the verdict becomes `mixed` with the old one in
 `escalated_from` and the reason in `escalation_reason`, the `Deferred` files return to `Discovered`, a
 summary written while it was uniform is dropped. Another pass then judges them; the loop ends when a
 resolve escalates nothing.
@@ -358,7 +361,7 @@ judges the members and resolves, so it spends the same calls as a run.
 
 Spec: [#9](https://github.com/crack666/smart_file_organizer/issues/9); the decision and its limits are in [engineering-decisions.md](engineering-decisions.md#8-sensitive-files-local-and-external-readers).
 
-- `SensitiveMarker` (Domain, flags) with fixed tokens in `SensitiveMarkerNames`: `zugangsdaten`, `schluessel`, `private_nachricht`, `ausweis`, `finanzen`, `gesundheit`. Database and JSON use the tokens, comma-separated, `NULL` for none. Dapper cannot read an enum through a type handler (it calls `Enum.Parse`), so `SensitiveMarkerColumnMap` maps the column `sensitive_markers` of `file_nodes` to a private string property that parses the tokens, and `ClassificationRepository` reads it from `ai_results` under another name and parses it in `Row.Finish`; until 12.11.2026 every read of a folder with a `private_nachricht` marker failed.
+- `SensitiveMarker` (Domain, flags) with fixed tokens in `SensitiveMarkerNames`: `credentials`, `keys`, `private_message`, `identity`, `finance`, `health`. Database and JSON use the tokens, comma-separated, `NULL` for none. Dapper cannot read an enum through a type handler (it calls `Enum.Parse`), so `SensitiveMarkerColumnMap` maps the column `sensitive_markers` of `file_nodes` to a private string property that parses the tokens, and `ClassificationRepository` reads it from `ai_results` under another name and parses it in `Row.Finish`; until 12.11.2026 every read of a folder with a private-message marker failed (then stored as `private_nachricht`). Until step 13 (12.11.2026) the codes were German (`zugangsdaten`, ...); see [glossary.md](glossary.md).
 - `SensitiveFileRules` (Application/Sensitivity) runs in `ScanEngine` and `ScopedRefreshService` for every file: exact names, extensions, folders, keywords, and for files up to 256 KB that are not image, video, audio, archive, executable, font or database a header probe of the first 8 KB through `IFileSystemAccessor.ReadPrefix`. Result: `FileNode.SensitiveMarkers` and `SensitiveRule` (rule ids such as `name:id_rsa`, `header:private-key`).
 - The local model reports markers in the Phase 2 call (`FileClassification.SensitiveMarkers`).
 - `SensitiveOutputGuard` (Application/Sensitivity) is the single exit for file data:
@@ -444,10 +447,10 @@ Important tables:
   (`metadata`, `rule`, `model`), `recorded_at`; one row per file and fact. Codes are defined on the Domain enums
   `FileFactKey` and `FactSource` (`FileFactCodes.cs`)
 - `ai_directory_results` — Phase 1 pre-assessment + Phase 3 directory summaries (distinguished by `phase` column); `marked_inputs` (step 12) lists the marked files a model summary saw as their neutral line
-- `directory_verdicts` — one verdict per directory (step 3): `verdict`, `source` (`regel`/`modell`), `rule`,
-  `purpose`, `retention`, `reason`, `unit_directory_node_id` (the directory that is the whole, for `einheit`),
+- `directory_verdicts` — one verdict per directory (step 3): `verdict`, `source` (`rule`/`model`), `rule`,
+  `purpose`, `retention`, `reason`, `unit_directory_node_id` (the directory that is the whole, for `unit`),
   `profile_json` (snake_case), `model_used`, `raw_response`, `judged_at`, `error`; either `verdict` or `error` is set;
-  `escalated_from` and `escalation_reason` when a sample raised the directory to `gemischt` (step 6)
+  `escalated_from` and `escalation_reason` when a sample raised the directory to `mixed` (step 6)
 - `directory_samples` — one sample per uniform directory (step 6): `seed`, `state` (`open`, `confirmed`,
   `escalated`), `eligible_count`, `members_json` (file id, name, `role` = `stratum`/`size`/`date`/`anomaly`/`sensitive`,
   category, `deviates`, error), `max_deviation_share`, `majority_category`, `deviating_count`, `failed_count`,
@@ -497,7 +500,7 @@ The schema is built from numbered steps in `src/SmartFileOrganizer.Infrastructur
 1. Add one file `Migrations/M000N_ShortName.cs` with a class implementing `ISchemaMigration`, or deriving from `SqlSchemaMigration` when plain SQL is enough. `Version` is `N`.
 2. Take the next free number on `master`. Steps are discovered by reflection, so no shared list is edited.
 3. Versions must be exactly `1..N`. If two branches picked the same number, startup and `SchemaMigrationTests` fail with a "Duplicate schema migration versions" message; the branch merged second renumbers its step (file name and `Version`).
-4. Never change a step that has been merged; add a new one. Step 1 (`M0001_InitialSchema`) is the schema as it existed before migrations. Step 2 (`M0002_SensitiveMarkers`) adds the sensitive-marker columns. Step 3 (`M0003_DirectoryVerdicts`) adds `directory_verdicts`. Step 4 (`M0004_ScanJobRules`) adds the scan rules of a job. Step 5 (`M0005_ContentComparison`) adds the comparison with the library. Step 6 (`M0006_DirectorySamples`) adds `directory_samples`, the escalation columns and the origin and keep-hint columns of `ai_results`; its new codes are English. Step 7 (`M0007_FileFacts`) adds `file_facts` and `ai_results.evidence`. Step 8 (`M0008_LibraryReview`) adds `scan_jobs.structure_only` and `library_advice`. Step 9 (`M0009_Evaluation`) adds `eval_cases` and `eval_runs`. Step 10 (`M0010_ResultChecks`) adds certainty, attempts and previous error to `ai_results` and the table `result_checks`. Step 11 (`M0011_Bundles`) adds `bundles`, `bundle_files` and `bundle_builds`. Step 12 (`M0012_SensitiveGaps`) adds the markers of skipped folders, the rule version per file and the marked inputs of directory summaries.
+4. Never change a step that has been merged; add a new one. Step 1 (`M0001_InitialSchema`) is the schema as it existed before migrations. Step 2 (`M0002_SensitiveMarkers`) adds the sensitive-marker columns. Step 3 (`M0003_DirectoryVerdicts`) adds `directory_verdicts`. Step 4 (`M0004_ScanJobRules`) adds the scan rules of a job. Step 5 (`M0005_ContentComparison`) adds the comparison with the library. Step 6 (`M0006_DirectorySamples`) adds `directory_samples`, the escalation columns and the origin and keep-hint columns of `ai_results`; its new codes are English. Step 7 (`M0007_FileFacts`) adds `file_facts` and `ai_results.evidence`. Step 8 (`M0008_LibraryReview`) adds `scan_jobs.structure_only` and `library_advice`. Step 9 (`M0009_Evaluation`) adds `eval_cases` and `eval_runs`. Step 10 (`M0010_ResultChecks`) adds certainty, attempts and previous error to `ai_results` and the table `result_checks`. Step 11 (`M0011_Bundles`) adds `bundles`, `bundle_files` and `bundle_builds`. Step 12 (`M0012_SensitiveGaps`) adds the markers of skipped folders, the rule version per file and the marked inputs of directory summaries. Step 13 (`M0013_EnglishCodes`) switches the German codes of steps 2 and 3 to the English codes of [glossary.md](glossary.md): it rebuilds `directory_verdicts` (its CHECK constraints named the old codes), rewrites marker lists token by token, and the texts the program wrote from codes (keep reason, container reason, profile hint, `dominant_type` of the pre-assessment, stored check answers, stored evaluation reports); raw model answers stay as received. The old codes are spelled out in that step, and in step 3, and nowhere else in code.
 5. Do not put `PRAGMA journal_mode` or other transaction-incompatible statements in a step.
 
 ## Architectural rules

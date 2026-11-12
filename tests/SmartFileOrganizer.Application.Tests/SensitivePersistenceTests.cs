@@ -72,9 +72,9 @@ public class SensitivePersistenceTests : IDisposable
         var job = await ScanAsync(fs);
         var files = (await _fileRepo.GetByDirectoryAsync(job.Id, "/Scan")).ToDictionary(f => f.Name);
 
-        Assert.Equal(SensitiveMarker.Schluessel, files["id_rsa"].SensitiveMarkers);
+        Assert.Equal(SensitiveMarker.Keys, files["id_rsa"].SensitiveMarkers);
         Assert.Equal("name:id_rsa", files["id_rsa"].SensitiveRule);
-        Assert.Equal(SensitiveMarker.Schluessel, files["notizen"].SensitiveMarkers);
+        Assert.Equal(SensitiveMarker.Keys, files["notizen"].SensitiveMarkers);
         Assert.Equal("header:private-key", files["notizen"].SensitiveRule);
         Assert.Equal(SensitiveMarker.None, files["readme.txt"].SensitiveMarkers);
         Assert.Null(files["readme.txt"].SensitiveRule);
@@ -84,11 +84,11 @@ public class SensitivePersistenceTests : IDisposable
         await using var conn = _db.CreateConnection();
         var raw = await conn.ExecuteScalarAsync<string>(
             "SELECT sensitive_markers FROM file_nodes WHERE name = 'id_rsa'");
-        Assert.Equal("schluessel", raw);
+        Assert.Equal("keys", raw);
     }
 
     /// <summary>
-    /// Dapper ignores type handlers for enums when it reads, and <c>private_nachricht</c> is no enum name:
+    /// Dapper ignores type handlers for enums when it reads, and <c>private_message</c> is no enum name:
     /// reading a mail archive used to throw, which stopped sampling and Phase 3 for its directory.
     /// </summary>
     [Fact]
@@ -101,9 +101,9 @@ public class SensitivePersistenceTests : IDisposable
         var job = await ScanAsync(fs);
         var files = (await _fileRepo.GetByDirectoryAsync(job.Id, "/Scan")).ToDictionary(f => f.Name);
 
-        Assert.Equal(SensitiveMarker.PrivateNachricht, files["archiv.pst"].SensitiveMarkers);
-        Assert.Equal(SensitiveMarker.PrivateNachricht | SensitiveMarker.Zugangsdaten, files["passwort-mails.eml"].SensitiveMarkers);
-        Assert.Equal(SensitiveMarker.PrivateNachricht, (await _fileRepo.GetByIdAsync(files["archiv.pst"].Id))!.SensitiveMarkers);
+        Assert.Equal(SensitiveMarker.PrivateMessage, files["archiv.pst"].SensitiveMarkers);
+        Assert.Equal(SensitiveMarker.PrivateMessage | SensitiveMarker.Credentials, files["passwort-mails.eml"].SensitiveMarkers);
+        Assert.Equal(SensitiveMarker.PrivateMessage, (await _fileRepo.GetByIdAsync(files["archiv.pst"].Id))!.SensitiveMarkers);
     }
 
     [Fact]
@@ -123,10 +123,10 @@ public class SensitivePersistenceTests : IDisposable
 
         var ssh = (await _dirRepo.GetByPathAsync(job.Id, "/Scan/.ssh"))!;
         Assert.Equal(DirectoryStatus.Skip, ssh.DirStatus);
-        Assert.Equal(SensitiveMarker.Schluessel, ssh.SensitiveMarkers);
+        Assert.Equal(SensitiveMarker.Keys, ssh.SensitiveMarkers);
         Assert.Equal("dir:ssh", ssh.SensitiveRule);
         var appData = (await _dirRepo.GetByPathAsync(job.Id, "/Scan/AppData"))!;
-        Assert.Equal(SensitiveMarker.Zugangsdaten | SensitiveMarker.PrivateNachricht, appData.SensitiveMarkers);
+        Assert.Equal(SensitiveMarker.Credentials | SensitiveMarker.PrivateMessage, appData.SensitiveMarkers);
         Assert.Equal(SensitiveMarker.None, (await _dirRepo.GetByPathAsync(job.Id, "/Scan/.cache"))!.SensitiveMarkers);
         Assert.DoesNotContain("/Scan/.ssh/id_ed25519", fs.PrefixReads);
         Assert.Empty(await _fileRepo.GetByDirectoryAsync(job.Id, "/Scan/.ssh"));
@@ -156,7 +156,7 @@ public class SensitivePersistenceTests : IDisposable
         var csv = sw.ToString();
 
         Assert.DoesNotContain("QUOTING-THE-FILE", csv);
-        Assert.Contains("schluessel", csv);
+        Assert.Contains("keys", csv);
     }
 
     [Fact]
@@ -176,14 +176,14 @@ public class SensitivePersistenceTests : IDisposable
         {
             FileNodeId = file.Id,
             AnalyzedAt = DateTime.UtcNow,
-            SensitiveMarkers = SensitiveMarker.Finanzen | SensitiveMarker.Ausweis
+            SensitiveMarkers = SensitiveMarker.Finance | SensitiveMarker.Identity
         });
 
         var loaded = await repo.GetByFileNodeIdAsync(file.Id);
-        Assert.Equal(SensitiveMarker.Finanzen | SensitiveMarker.Ausweis, loaded!.SensitiveMarkers);
+        Assert.Equal(SensitiveMarker.Finance | SensitiveMarker.Identity, loaded!.SensitiveMarkers);
 
         await using var conn = _db.CreateConnection();
-        Assert.Equal("ausweis,finanzen", await conn.ExecuteScalarAsync<string>(
+        Assert.Equal("identity,finance", await conn.ExecuteScalarAsync<string>(
             "SELECT sensitive_markers FROM ai_results WHERE file_node_id = @id", new { id = file.Id }));
 
         // Unmarked is NULL, not an empty string or 0.
@@ -198,14 +198,14 @@ public class SensitivePersistenceTests : IDisposable
     public async Task EveryMarker_ReadsBack_FromFileNodesAndAiResults(SensitiveMarker marker)
     {
         // Dapper parses string columns into enums with Enum.Parse and skips type handlers; until the
-        // column map, a token that is not a member name (private_nachricht) failed every read.
+        // column map, a token that is not a member name (private_message) failed every read.
         var job = await _jobRepo.CreateAsync(new ScanJob { RootPath = "/Scan", Status = JobStatus.Created, CreatedAt = DateTime.UtcNow });
         await _fileRepo.InsertBatchAsync([new FileNode
         {
             JobId = job.Id, FullPath = "/Scan/a.eml", Name = "a.eml", ParentPath = "/Scan", RootPath = "/Scan",
             RelativePath = "a.eml", RelativeDir = ".", Extension = ".eml", FileType = FileType.Document,
             LastWriteTime = DateTime.UtcNow, ScannedAt = DateTime.UtcNow,
-            SensitiveMarkers = marker | SensitiveMarker.Zugangsdaten, SensitiveRule = "test"
+            SensitiveMarkers = marker | SensitiveMarker.Credentials, SensitiveRule = "test"
         }]);
         var id = (await _fileRepo.GetByDirectoryAsync(job.Id, "/Scan")).Single().Id;
         await new ClassificationRepository(_db).UpsertAsync(new FileClassification
@@ -216,9 +216,9 @@ public class SensitivePersistenceTests : IDisposable
         var byDirectory = (await _fileRepo.GetByDirectoryAsync(job.Id, "/Scan")).Single();
         var byId = await _fileRepo.GetByIdAsync(id);
 
-        Assert.Equal(marker | SensitiveMarker.Zugangsdaten, byDirectory.SensitiveMarkers);
+        Assert.Equal(marker | SensitiveMarker.Credentials, byDirectory.SensitiveMarkers);
         Assert.Equal(marker, byDirectory.Classification!.SensitiveMarkers);
-        Assert.Equal(marker | SensitiveMarker.Zugangsdaten, byId!.SensitiveMarkers);
+        Assert.Equal(marker | SensitiveMarker.Credentials, byId!.SensitiveMarkers);
         Assert.Equal(marker, byId.Classification!.SensitiveMarkers);
     }
 
@@ -259,19 +259,19 @@ public class SensitivePersistenceTests : IDisposable
     public async Task ModelAnswer_SensitiveArray_IsParsed()
     {
         var (result, _) = await ClassifyWithAnswerAsync(
-            """{"category":"PersonalDocument","importance":"High","confidence":0.9,"summary":"Identity card scan","suggested_target":"Documents","sensitive":["ausweis","made_up"]}""");
+            """{"category":"PersonalDocument","importance":"High","confidence":0.9,"summary":"Identity card scan","suggested_target":"Documents","sensitive":["identity","made_up"]}""");
 
         Assert.Null(result.Error);
         Assert.Equal(FileCategory.PersonalDocument, result.Category);
-        Assert.Equal(SensitiveMarker.Ausweis, result.SensitiveMarkers);
+        Assert.Equal(SensitiveMarker.Identity, result.SensitiveMarkers);
     }
 
     [Fact]
     public async Task ModelAnswer_SensitiveAsString_IsParsed()
     {
         var (result, _) = await ClassifyWithAnswerAsync(
-            """{"category":"Document","importance":"High","confidence":0.8,"summary":"x","suggested_target":"","sensitive":"zugangsdaten, finanzen"}""");
-        Assert.Equal(SensitiveMarker.Zugangsdaten | SensitiveMarker.Finanzen, result.SensitiveMarkers);
+            """{"category":"Document","importance":"High","confidence":0.8,"summary":"x","suggested_target":"","sensitive":"credentials, finance"}""");
+        Assert.Equal(SensitiveMarker.Credentials | SensitiveMarker.Finance, result.SensitiveMarkers);
     }
 
     [Theory]

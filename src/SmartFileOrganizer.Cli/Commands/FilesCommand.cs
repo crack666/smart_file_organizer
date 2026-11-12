@@ -98,7 +98,8 @@ public static class FilesCommand
             }
 
             var result = PageView<FileListView>.From(query.JobId, page, FileListView.From);
-            return Contract.CommandOutcome.Success(result, () => Render(result, page));
+            var language = ReadFormat.Language(services);
+            return Contract.CommandOutcome.Success(result, () => Render(result, page, language));
         });
 
         return command;
@@ -109,11 +110,11 @@ public static class FilesCommand
             ? value
             : null;
 
-    private static string Render(PageView<FileListView> result, ReadPage<FileItem> page)
+    private static string Render(PageView<FileListView> result, ReadPage<FileItem> page, DisplayLanguage language)
     {
         var sb = new StringBuilder();
         foreach (var f in result.Items)
-            sb.AppendLine(f.ToLine());
+            sb.AppendLine(f.ToLine(language));
         sb.Append(ReadFormat.PageFooter(page));
         return sb.ToString();
     }

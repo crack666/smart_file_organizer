@@ -7,7 +7,7 @@ namespace SmartFileOrganizer.Application.Tests;
 
 /// <summary>
 /// Stand-in for Ollama in Phase 1 tests. Records every pre-assessment input and answers with
-/// <see cref="Answer"/> (default: the verdict the profile suggests, else <c>gemischt</c>). Never touches the network.
+/// <see cref="Answer"/> (default: the verdict the profile suggests, else <c>mixed</c>). Never touches the network.
 /// </summary>
 internal sealed class ScriptedOllamaService : IOllamaService
 {
@@ -15,7 +15,7 @@ internal sealed class ScriptedOllamaService : IOllamaService
 
     /// <summary>Verdict to answer for a directory name; return null to answer with an error.</summary>
     public Func<DirectoryPreAssessmentInput, DirectoryVerdictKind?> Answer { get; set; } =
-        input => input.Profile.Suggests ?? DirectoryVerdictKind.Gemischt;
+        input => input.Profile.Suggests ?? DirectoryVerdictKind.Mixed;
 
     public IReadOnlyList<string> CalledDirectoryNames => PreAssessInputs.Select(i => i.Directory.Name).OrderBy(n => n).ToList();
 
@@ -36,9 +36,9 @@ internal sealed class ScriptedOllamaService : IOllamaService
         var verdict = new DirectoryVerdict
         {
             Verdict = kind,
-            Source = VerdictSource.Modell,
+            Source = VerdictSource.Model,
             Purpose = kind is null ? null : $"purpose of {input.Directory.Name}",
-            Retention = kind is null ? null : RetentionValue.Behalten,
+            Retention = kind is null ? null : RetentionValue.Keep,
             Reason = kind is null ? null : "scripted",
             ModelUsed = "scripted",
             JudgedAt = DateTime.UtcNow,

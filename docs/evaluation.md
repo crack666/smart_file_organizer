@@ -80,11 +80,11 @@ runs of different corpora are never compared as equal.
   file on disk is listed exactly once; the reader refuses duplicates, unknown codes, a missing
   `sensitive` list and entries whose folder is not listed. Paths the scan finds but the truth
   does not list are reported as `untracked`.
-- `verdict` and `sensitive` use the English codes of
-  https://github.com/crack666/smart_file_organizer/issues/35; `category` is the category name in
-  `snake_case` as in all CLI JSON (`document_scan`). They are compared through the enums
-  (`EvalCodes`), never as strings. Until issue 35 switches the stored codes, reports show the
-  current central codes (`gemischt`) for expected and actual alike.
+- `verdict` and `sensitive` use the codes of [glossary.md](glossary.md), the same the database and
+  the CLI JSON carry; `category` is the category name in `snake_case` as in all CLI JSON
+  (`document_scan`). They are compared through the enums (`EvalCodes`), never as strings. (Until
+  12.11.2026 the stored codes were German and `EvalCodes` bridged between the two; schema step 13
+  also rewrote the expected and actual values of stored reports.)
 - The truth must be unambiguous. `category: null` means no single category is right (a bank
   statement is `invoice` or `document` by the prompt) and only the markers are measured; files
   inside a unit have no category, because units are not classified file by file. `sensitive: []`
@@ -109,10 +109,10 @@ every expected marker, how many lack one, and false alarms on unmarked files.
 A failure names the item, the expectation, the result, who decided and why:
 
 ```text
-directory_verdict wrong   Handy-Backup 2021/LOST.DIR: expected einheit, got leer  [rule empty]  No files and no subdirectories.
-directory_verdict wrong   Fotos/Sommerfest 2022: expected einheitlich, got gemischt  [sample]  raised from einheitlich (model gemma4:26b): 5 of 6 sample files are Photo, 1 deviate, ...
+directory_verdict wrong   Handy-Backup 2021/LOST.DIR: expected unit, got empty  [rule empty]  No files and no subdirectories.
+directory_verdict wrong   Fotos/Sommerfest 2022: expected uniform, got mixed  [sample]  raised from uniform (model gemma4:26b): 5 of 6 sample files are Photo, 1 deviate, ...
 file_category     wrong   Downloads/IMG_20230812_143012.jpg: expected photo, got screenshot  [model gemma4:26b]
-sensitive         wrong   Desktop/wiederherstellungscodes.txt: expected zugangsdaten, got none  missed zugangsdaten
+sensitive         wrong   Desktop/wiederherstellungscodes.txt: expected credentials, got none  missed credentials
 ```
 
 `[sample]` means the staged analysis overruled the pre-assessment: the sample of a uniform
@@ -166,7 +166,9 @@ items fixed and the new failures.
 _12.11.2026, scripted answers (`--stub truth.json`), corpus small v1 seed 36, on the branch of
 issue 36 rebased on the staged analysis:_ `directory_verdict` 32/41, `file_category` 49/49,
 `sensitive` 96/97. (Before the rebase on the staged analysis the same run gave 35/41 verdicts;
-the three folders below under "sample check" were hits then.) With perfect model answers every
+the three folders below under "sample check" were hits then. The switch to English codes in
+https://github.com/crack666/smart_file_organizer/issues/35 changed nothing: same scores, `--compare`
+against the run on master before it found no new and no fixed failure, measured 12.11.2026.) With perfect model answers every
 remaining failure comes from rules, the sample check or the scan, not from the model:
 
 - Sample check (3 failures). `Dokumente/Briefe` becomes mixed because the model marks

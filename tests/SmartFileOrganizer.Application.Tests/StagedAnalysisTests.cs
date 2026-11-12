@@ -147,7 +147,7 @@ public class StagedAnalysisTests : IDisposable
     {
         var trip = WritePhotos(MakeTree("Urlaub"), 500);
 
-        var jobId = await RunAllAsync(trip, _ => DirectoryVerdictKind.Einheitlich);
+        var jobId = await RunAllAsync(trip, _ => DirectoryVerdictKind.Uniform);
 
         Assert.True(_ollama.ClassifyInputs.Count <= _options.MaxSamplesPerDirectory,
             $"{_ollama.ClassifyInputs.Count} model calls for a uniform directory");
@@ -215,12 +215,12 @@ public class StagedAnalysisTests : IDisposable
             ? new FileClassification { Category = FileCategory.Screenshot, Importance = Importance.Low, Confidence = 0.9 }
             : Photo();
 
-        var jobId = await RunAllAsync(trip, _ => DirectoryVerdictKind.Einheitlich);
+        var jobId = await RunAllAsync(trip, _ => DirectoryVerdictKind.Uniform);
         var dirId = await DirIdAsync(jobId, trip);
 
         var verdict = (await _verdictRepo.GetByNodeIdAsync(dirId))!;
-        Assert.Equal(DirectoryVerdictKind.Gemischt, verdict.Verdict);
-        Assert.Equal(DirectoryVerdictKind.Einheitlich, verdict.EscalatedFrom);
+        Assert.Equal(DirectoryVerdictKind.Mixed, verdict.Verdict);
+        Assert.Equal(DirectoryVerdictKind.Uniform, verdict.EscalatedFrom);
         Assert.Contains("Off:", verdict.EscalationReason);
 
         var sample = (await _sampleRepo.GetByNodeIdAsync(dirId))!;
@@ -248,7 +248,7 @@ public class StagedAnalysisTests : IDisposable
     public async Task TwoRunsOverTheSameDirectory_DrawTheSameSample()
     {
         var trip = WritePhotos(MakeTree("Wiederholt"), 200);
-        _ollama.Answer = _ => DirectoryVerdictKind.Einheitlich;
+        _ollama.Answer = _ => DirectoryVerdictKind.Uniform;
         var jobId = await ScanAsync(trip);
         await Phase1Async(jobId);
         var dirId = await DirIdAsync(jobId, trip);
@@ -279,7 +279,7 @@ public class StagedAnalysisTests : IDisposable
     public async Task OneOutlierInFifteen_IsTolerated_AndKeepsItsOwnResult()
     {
         var trip = WritePhotos(MakeTree("Ausreisser"), 100);
-        _ollama.Answer = _ => DirectoryVerdictKind.Einheitlich;
+        _ollama.Answer = _ => DirectoryVerdictKind.Uniform;
         var jobId = await ScanAsync(trip);
         await Phase1Async(jobId);
         await Sampling().PlanAsync(jobId);
@@ -297,7 +297,7 @@ public class StagedAnalysisTests : IDisposable
         Assert.Equal(85, sample.InheritedCount);
         var files = await _fileRepo.GetByDirectoryAsync(jobId, trip);
         Assert.Equal(FileCategory.Screenshot, files.Single(f => f.Name == odd).Classification!.Category);
-        Assert.Equal(DirectoryVerdictKind.Einheitlich, (await _verdictRepo.GetByNodeIdAsync(dirId))!.Verdict);
+        Assert.Equal(DirectoryVerdictKind.Uniform, (await _verdictRepo.GetByNodeIdAsync(dirId))!.Verdict);
     }
 
     [Fact]
@@ -306,7 +306,7 @@ public class StagedAnalysisTests : IDisposable
         var trip = WritePhotos(MakeTree("Scans"), 60);
         WriteFile(Path.Combine(trip, "reisepass_scan.jpg"), 70);
 
-        var jobId = await RunAllAsync(trip, _ => DirectoryVerdictKind.Einheitlich);
+        var jobId = await RunAllAsync(trip, _ => DirectoryVerdictKind.Uniform);
         var dirId = await DirIdAsync(jobId, trip);
 
         var sample = (await _sampleRepo.GetByNodeIdAsync(dirId))!;
@@ -332,7 +332,7 @@ public class StagedAnalysisTests : IDisposable
             KeepHint = KeepHint.Temporary, KeepReason = "looks like a download remainder"
         };
 
-        var jobId = await RunAllAsync(downloads, _ => DirectoryVerdictKind.Gemischt);
+        var jobId = await RunAllAsync(downloads, _ => DirectoryVerdictKind.Mixed);
 
         Assert.Equal(5, _ollama.FirstLooks.Count);
         Assert.All(_ollama.ClassifyInputs, i => Assert.True(i.AskKeepHint));
@@ -364,7 +364,7 @@ public class StagedAnalysisTests : IDisposable
         WriteFile(Path.Combine(root, "Cache", "a.jpg"));
         WriteFile(Path.Combine(root, "Cache", "b.jpg"));
 
-        var jobId = await RunAllAsync(root, input => input.Directory.Name == "Cache" ? DirectoryVerdictKind.System : DirectoryVerdictKind.Gemischt);
+        var jobId = await RunAllAsync(root, input => input.Directory.Name == "Cache" ? DirectoryVerdictKind.System : DirectoryVerdictKind.Mixed);
 
         Assert.Empty(_ollama.ClassifyInputs);
         foreach (var sub in new[] { "Programm", "Cache" })
@@ -380,7 +380,7 @@ public class StagedAnalysisTests : IDisposable
         WriteFile(Path.Combine(odd, "a.pdf"));
         WriteFile(Path.Combine(odd, "b.jpg"));
 
-        var jobId = await RunAllAsync(odd, _ => DirectoryVerdictKind.Leer);
+        var jobId = await RunAllAsync(odd, _ => DirectoryVerdictKind.Empty);
 
         Assert.Equal(2, _ollama.FirstLooks.Count);
         Assert.All(await _fileRepo.GetByDirectoryAsync(jobId, odd), f => Assert.NotNull(f.Classification));
@@ -400,11 +400,11 @@ public class StagedAnalysisTests : IDisposable
             Confidence = 0.9
         };
 
-        var jobId = await RunAllAsync(small, _ => DirectoryVerdictKind.Einheitlich);
+        var jobId = await RunAllAsync(small, _ => DirectoryVerdictKind.Uniform);
         var dirId = await DirIdAsync(jobId, small);
 
         Assert.Equal(8, _ollama.ClassifyInputs.Count);
-        Assert.Equal(DirectoryVerdictKind.Gemischt, (await _verdictRepo.GetByNodeIdAsync(dirId))!.Verdict);
+        Assert.Equal(DirectoryVerdictKind.Mixed, (await _verdictRepo.GetByNodeIdAsync(dirId))!.Verdict);
         Assert.Equal(SampleState.Escalated, (await _sampleRepo.GetByNodeIdAsync(dirId))!.State);
         Assert.Equal(8, _ollama.ClassifyInputs.Count); // nothing judged twice after the escalation
     }
@@ -413,7 +413,7 @@ public class StagedAnalysisTests : IDisposable
     public async Task CancelledRun_LeavesNoDirectoryHalfInherited_AndResumes()
     {
         var trip = WritePhotos(MakeTree("Abbruch"), 300);
-        _ollama.Answer = _ => DirectoryVerdictKind.Einheitlich;
+        _ollama.Answer = _ => DirectoryVerdictKind.Uniform;
         var jobId = await ScanAsync(trip);
         await Phase1Async(jobId);
         var dirId = await DirIdAsync(jobId, trip);
@@ -445,7 +445,7 @@ public class StagedAnalysisTests : IDisposable
     public async Task FocusedRescanOfAUniformDirectory_DrawsAFreshSample_AndInherits()
     {
         var trip = WritePhotos(MakeTree("Nachgescannt"), 80);
-        var jobId = await RunAllAsync(trip, _ => DirectoryVerdictKind.Einheitlich);
+        var jobId = await RunAllAsync(trip, _ => DirectoryVerdictKind.Uniform);
         _ollama.ClassifyInputs.Clear();
 
         var rescan = new FocusedRescanService(
@@ -544,7 +544,7 @@ public class StagedAnalysisTests : IDisposable
     public void Evaluate_ModelFindsSensitiveContentInARandomMember_Escalates()
     {
         var items = Enumerable.Repeat(M(FileCategory.Photo), 14)
-            .Append(M(FileCategory.Photo, SampleRole.Stratum, SensitiveMarker.Ausweis)).ToArray();
+            .Append(M(FileCategory.Photo, SampleRole.Stratum, SensitiveMarker.Identity)).ToArray();
         var (members, results) = Sample(items);
         var e = DirectorySampler.Evaluate(members, results, new DirectoryAnalysisOptions());
         Assert.False(e.Confirmed);
@@ -563,8 +563,8 @@ public class StagedAnalysisTests : IDisposable
     public void Evaluate_InheritedTarget_IsNotTakenFromAMarkedMember()
     {
         var (members, results) = Sample(
-            M(FileCategory.Invoice, SampleRole.Sensitive, SensitiveMarker.Finanzen),
-            M(FileCategory.Invoice, SampleRole.Sensitive, SensitiveMarker.Finanzen),
+            M(FileCategory.Invoice, SampleRole.Sensitive, SensitiveMarker.Finance),
+            M(FileCategory.Invoice, SampleRole.Sensitive, SensitiveMarker.Finance),
             M(FileCategory.Invoice));
         results[1]!.SuggestedTarget = "Finance/Account-DE00-FAKE";
         results[2]!.SuggestedTarget = "Finance/Account-DE00-FAKE";

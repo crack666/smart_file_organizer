@@ -218,7 +218,7 @@ public sealed record DirectoryDetail
 {
     public DirectoryItem Directory { get; init; } = new();
 
-    /// <summary>For <c>einheit</c>: full path of the directory that is the whole.</summary>
+    /// <summary>For <c>unit</c>: full path of the directory that is the whole.</summary>
     public string? UnitDirectory { get; init; }
 
     public DirectoryProfile? Profile { get; init; }

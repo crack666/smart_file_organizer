@@ -10,8 +10,8 @@ namespace SmartFileOrganizer.Infrastructure.Persistence;
 /// </summary>
 /// <remarks>
 /// Dapper never calls a type handler for an enum member: it parses a string column with
-/// <c>Enum.Parse(ignoreCase)</c>. That accepted <c>zugangsdaten,schluessel</c> by accident (member
-/// names) and threw for <c>private_nachricht</c>, so every read of a folder with a private message
+/// <c>Enum.Parse(ignoreCase)</c>. That accepted codes that happened to equal member names by accident
+/// and threw for a code with an underscore (the private-message marker), so every read of a folder with a private message
 /// failed (found by the evaluation corpus of
 /// https://github.com/crack666/smart_file_organizer/issues/36). Mapping the column to a string
 /// member keeps the token format the only one that matters, also when the codes change.

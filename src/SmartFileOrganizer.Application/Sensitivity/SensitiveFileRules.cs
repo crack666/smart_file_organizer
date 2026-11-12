@@ -51,12 +51,12 @@ public static class SensitiveFileRules
     /// <summary>Larger files are not probed: key files are a few KB, and the scan must stay fast.</summary>
     public const long MaxHeaderProbeFileSize = 256 * 1024;
 
-    private const SensitiveMarker Z = SensitiveMarker.Zugangsdaten;
-    private const SensitiveMarker S = SensitiveMarker.Schluessel;
-    private const SensitiveMarker N = SensitiveMarker.PrivateNachricht;
-    private const SensitiveMarker A = SensitiveMarker.Ausweis;
-    private const SensitiveMarker F = SensitiveMarker.Finanzen;
-    private const SensitiveMarker G = SensitiveMarker.Gesundheit;
+    private const SensitiveMarker Z = SensitiveMarker.Credentials;
+    private const SensitiveMarker S = SensitiveMarker.Keys;
+    private const SensitiveMarker N = SensitiveMarker.PrivateMessage;
+    private const SensitiveMarker A = SensitiveMarker.Identity;
+    private const SensitiveMarker F = SensitiveMarker.Finance;
+    private const SensitiveMarker G = SensitiveMarker.Health;
 
     /// <summary>Exact file names (case-insensitive).</summary>
     public static IReadOnlyDictionary<string, SensitiveMarker> ExactNames { get; } =

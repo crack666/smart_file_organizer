@@ -50,9 +50,9 @@ public sealed class ScriptedAnswerOllamaService : IOllamaService
         {
             DirectoryNodeId = input.Directory.Id,
             Verdict = verdict,
-            Source = VerdictSource.Modell,
+            Source = VerdictSource.Model,
             Purpose = verdict is null ? null : "scripted answer",
-            Retention = verdict is null ? null : RetentionValue.Pruefen,
+            Retention = verdict is null ? null : RetentionValue.Review,
             Reason = verdict is null ? null : $"scripted answer from {ModelName}",
             ModelUsed = ModelName,
             JudgedAt = now,

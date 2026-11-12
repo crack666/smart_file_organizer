@@ -146,7 +146,7 @@ public class Phase2EvidenceTests : IDisposable
     public async Task SensitiveFile_KeepsOnlyFactsWithoutFreeText()
     {
         GeneratedFiles.Docx(Path.Combine(_dir, "steuer.docx"), "Tax return 2015", "Some Person", new DateTime(2016, 3, 1), "Income");
-        var jobId = await InsertAsync(("steuer.docx", FileType.Document, SensitiveMarker.Finanzen));
+        var jobId = await InsertAsync(("steuer.docx", FileType.Document, SensitiveMarker.Finance));
 
         await Service().RunAsync(jobId);
 

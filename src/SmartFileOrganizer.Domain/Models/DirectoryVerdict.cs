@@ -28,7 +28,7 @@ public sealed class DirectoryVerdict
     public string? Reason { get; set; }
 
     /// <summary>
-    /// For <c>einheit</c>: the directory that is the whole (itself, or the ancestor it belongs to).
+    /// For <c>unit</c>: the directory that is the whole (itself, or the ancestor it belongs to).
     /// Null for all other verdicts.
     /// </summary>
     public long? UnitDirectoryNodeId { get; set; }
@@ -42,7 +42,7 @@ public sealed class DirectoryVerdict
 
     /// <summary>
     /// Set when the sample contradicted the verdict and the directory was raised to
-    /// <see cref="DirectoryVerdictKind.Gemischt"/>: the verdict it had before (<see cref="DirectoryVerdictKind.Einheitlich"/>). The sample itself is in <c>directory_samples</c>.
+    /// <see cref="DirectoryVerdictKind.Mixed"/>: the verdict it had before (<see cref="DirectoryVerdictKind.Uniform"/>). The sample itself is in <c>directory_samples</c>.
     /// </summary>
     public DirectoryVerdictKind? EscalatedFrom { get; set; }
 

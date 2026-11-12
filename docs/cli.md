@@ -494,10 +494,16 @@ down with `dirs` and `files`, look at single entries with `show`.
 as listed, or a path relative to the job root (`photos/2024`, `.` for the root).
 
 **Verdict codes.** `--verdict` and `--retention` accept the codes the core defines in
-`VerdictCodes` (see [architecture.md](architecture.md), Phase 1), plus `error` (only an error
-is stored for the directory) and `none` (not judged yet, or no retention). Output carries the
-same codes. When the codes change in the core, the accepted values change with them; `sfo dirs
---help` always lists the current ones.
+`VerdictCodes` (`--verdict mixed`, `--retention keep`; all codes and their meaning in
+[glossary.md](glossary.md)), plus `error` (only an error is stored for the directory) and `none`
+(not judged yet, or no retention). JSON output carries the same codes; the German words used
+before 12.11.2026 (`gemischt`, `behalten`) are no longer accepted. `sfo dirs --help` always lists
+the current codes.
+
+**Words in the text output.** Without `--json`, verdict, retention, verdict source, result origin
+and sensitive markers are shown as words for people, in German when the summary language in the
+settings is German (`"SummaryLanguage": "Deutsch"`), in English otherwise (`mixed` / `gemischt`,
+`credentials` / `Zugangsdaten`). Programs read the JSON, which never changes with the language.
 
 ### Lists and paging
 
@@ -671,14 +677,14 @@ sfo files 7 --dir photos --max-confidence 0.5 --json
   "items": [
     { "path": "/media/usb-stick/photos/scan_004.jpg", "name": "scan_004.jpg",
       "file_type": "image", "size_bytes": 482113, "last_write_time": "2019-07-02T10:14:00.000Z",
-      "status": "ai_analyzed", "category": "document_scan", "category_source": "ai",
+      "status": "ai_analyzed", "category": "document_scan", "category_source": "model",
       "confidence": 0.42, "summary": "Scanned page of a rental contract.",
       "sensitive": [], "protected": false, "dir_verdict": "...", "certainty": "likely" }
   ]
 }
 ```
 
-`category_source` is `ai`, `user` (an override), `sensitive` (forced to review by a marker) or
+`category_source` is an origin code (see [glossary.md](glossary.md)): `model`, `human` (an override), `rule` (forced to review by a marker; until 12.11.2026 `ai`, `user` and `sensitive`) or
 `null`. `dir_verdict` is the verdict of the directory holding the file. `certainty` says how far the
 result can be relied on: `certain` (two independent signals agree), `likely` (one answer nothing
 contradicts, or inherited), `uncertain` (a due second check did not happen), `review` (a person should

@@ -59,10 +59,10 @@ internal sealed class FakeOllamaService : IOllamaService
         };
         var verdict = new DirectoryVerdict
         {
-            Verdict = input.Profile.Suggests ?? DirectoryVerdictKind.Gemischt,
-            Source = VerdictSource.Modell,
+            Verdict = input.Profile.Suggests ?? DirectoryVerdictKind.Mixed,
+            Source = VerdictSource.Model,
             Purpose = $"fake purpose of {input.Directory.Name}",
-            Retention = RetentionValue.Pruefen,
+            Retention = RetentionValue.Review,
             Reason = "fake reason",
             ModelUsed = "fake-model",
             JudgedAt = DateTime.UtcNow

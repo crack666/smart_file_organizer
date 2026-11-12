@@ -73,7 +73,7 @@ before that) and in CI on Windows and Linux._
 
 1. **Directory verdict and pre-assessment** (`DirectoryPreAssessmentService`,
    since 12.11.2026 by [#7](https://github.com/crack666/smart_file_organizer/issues/7)):
-   every directory gets a verdict (`einheit`, `einheitlich`, `gemischt`, `leer`,
+   every directory gets a verdict (`unit`, `uniform`, `mixed`, `empty`,
    `system`) with purpose, retention, reason and the profile it rests on, stored
    in `directory_verdicts`. Clear cases are decided by rule without Ollama; the
    rest in one Ollama call. Files of units and system directories are marked

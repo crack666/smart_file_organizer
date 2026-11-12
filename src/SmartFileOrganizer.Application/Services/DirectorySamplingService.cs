@@ -68,7 +68,7 @@ public class DirectorySamplingService
         var sampled = (await _sampleRepo.GetForJobAsync(jobId, ct)).Select(s => s.DirectoryNodeId).ToHashSet();
 
         var drawn = 0;
-        foreach (var v in verdicts.Where(v => v.Error is null && v.Verdict == DirectoryVerdictKind.Einheitlich
+        foreach (var v in verdicts.Where(v => v.Error is null && v.Verdict == DirectoryVerdictKind.Uniform
                                               && !sampled.Contains(v.DirectoryNodeId)))
         {
             if (waitIfPausedAsync != null) await waitIfPausedAsync(ct);
@@ -85,7 +85,7 @@ public class DirectorySamplingService
     public async Task<bool> PlanDirectoryAsync(long jobId, long directoryNodeId, CancellationToken ct = default)
     {
         var verdict = await _verdictRepo.GetByNodeIdAsync(directoryNodeId, ct);
-        if (verdict is null || verdict.Error is not null || verdict.Verdict != DirectoryVerdictKind.Einheitlich) return false;
+        if (verdict is null || verdict.Error is not null || verdict.Verdict != DirectoryVerdictKind.Uniform) return false;
         if (await _sampleRepo.GetByNodeIdAsync(directoryNodeId, ct) is not null) return false;
         return await PlanDirectoryAsync(jobId, verdict, ct);
     }
@@ -163,7 +163,7 @@ public class DirectorySamplingService
     {
         var verdicts = await _verdictRepo.GetForJobAsync(jobId, ct);
         var keepDirs = verdicts
-            .Where(v => v.Verdict is DirectoryVerdictKind.Gemischt or DirectoryVerdictKind.Einheitlich && v.DirectoryFullPath != null)
+            .Where(v => v.Verdict is DirectoryVerdictKind.Mixed or DirectoryVerdictKind.Uniform && v.DirectoryFullPath != null)
             .Select(v => v.DirectoryFullPath!)
             .ToHashSet(StringComparer.Ordinal);
         var byPath = new Dictionary<string, DirectoryVerdict>(StringComparer.Ordinal);

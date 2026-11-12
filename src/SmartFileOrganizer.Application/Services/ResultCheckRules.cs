@@ -173,11 +173,11 @@ public static class ResultCheckRules
 
         return verdict.Retention switch
         {
-            RetentionValue.Entbehrlich when answer.Importance is Importance.High or Importance.Critical =>
+            RetentionValue.Disposable when answer.Importance is Importance.High or Importance.Critical =>
                 $"Importance {answer.Importance}, but the directory was judged {verdict.Retention.ToCode()}.",
-            RetentionValue.Behalten when answer.Category == FileCategory.TrashCandidate =>
+            RetentionValue.Keep when answer.Category == FileCategory.TrashCandidate =>
                 $"Category TrashCandidate, but the directory was judged {verdict.Retention.ToCode()}.",
-            RetentionValue.Behalten when answer.KeepHint == KeepHint.Temporary =>
+            RetentionValue.Keep when answer.KeepHint == KeepHint.Temporary =>
                 $"Keep hint temporary, but the directory was judged {verdict.Retention.ToCode()}.",
             _ => null
         };

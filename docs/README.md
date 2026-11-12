@@ -36,7 +36,7 @@ Smart File Organizer runs a **3-phase AI pipeline** after scanning your director
 ```
 Phase 1 — Directory Verdict
    ↳ For every folder: profile of types, sizes, dates, naming patterns, project/program markers
-   ↳ Verdict einheit / einheitlich / gemischt / leer / system, with purpose, retention, reason
+   ↳ Verdict unit / uniform / mixed / empty / system, with purpose, retention, reason (codes: glossary.md)
    ↳ Clear cases (Git repo, program, empty, skipped) by rule without a model call
    ↳ Units and system folders: no file analysis, the folder carries the result
    ↳ Verdict stored in directory_verdicts, pre-assessment in ai_directory_results (phase = 'pre_assessment')
@@ -232,6 +232,7 @@ https://github.com/crack666/smart_file_organizer/milestones
 | [library-review.md](library-review.md) | Judging a library by its structure: dumps, finding kinds and thresholds, word file, model questions, target file |
 | [library-match.md](library-match.md) | Placing into a library: target map, match signals and certainty, weak places, new folder names, patterns file, settings |
 | [evaluation.md](evaluation.md) | Measuring verdicts, categories and markers: test corpus, truth file, test cases from corrections, comparing runs |
+| [glossary.md](glossary.md) | Every fixed code in database, JSON, CLI and prompts, with its meaning |
 | [engineering-decisions.md](engineering-decisions.md) | Library choices, trade-offs, lessons learned |
 | [code-guidelines.md](code-guidelines.md) | Repo-specific conventions and rules |
 | [product-overview.md](product-overview.md) | Vision, use cases, non-goals |
