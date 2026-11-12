@@ -4,7 +4,11 @@ namespace SmartFileOrganizer.Scanning.Engine;
 
 public class HeuristicsOptions
 {
-    /// <summary>Directories whose names match any of these patterns are fully skipped.</summary>
+    /// <summary>
+    /// Directories are fully skipped when their path below the scan root contains one of these
+    /// patterns as whole segments (case-insensitive). A pattern with separators ("AppData/Local/Temp",
+    /// either separator) must match as a run of consecutive segments. "bin" skips "App/bin", not "Robin".
+    /// </summary>
     public List<string> SkipPatterns { get; set; } =
     [
         "node_modules", ".git", ".svn", ".hg",
@@ -44,16 +48,19 @@ public class HeuristicsEngine : IHeuristicsEngine
 
     public DirectoryEvaluation EvaluateDirectory(string rootPath, string fullPath, int depth)
     {
-        var name = Path.GetFileName(fullPath);
+        var segments = Segments(fullPath);
+        var name = segments.Length > 0 ? segments[^1] : string.Empty;
 
         // Hidden directories (dotfiles) that aren't known user data
         if (name.StartsWith('.') && !IsLikelyUserData(fullPath))
             return new(ScanDecision.Skip, "Skip: hidden directory");
 
-        // Matched skip patterns
+        // Matched skip patterns: whole segments below the scan root only. What lies above the root
+        // was chosen by the user and must not hide the scan (e.g. a root inside AppData).
+        var relative = BelowRoot(Segments(rootPath), segments);
         foreach (var pattern in _opts.SkipPatterns)
         {
-            if (fullPath.Contains(pattern, StringComparison.OrdinalIgnoreCase))
+            if (ContainsSegmentRun(relative, Segments(pattern)))
                 return new(ScanDecision.Skip, $"Skip: matches skip pattern '{pattern}'");
         }
 
@@ -68,11 +75,52 @@ public class HeuristicsEngine : IHeuristicsEngine
         return new(ScanDecision.Descend, "Descend");
     }
 
+    /// <remarks>
+    /// Evaluates the whole path, including folders above the scan root: a root chosen inside
+    /// "Documents" makes everything below it user data. This only ever keeps folders in the scan.
+    /// </remarks>
     public bool IsLikelyUserData(string fullPath)
     {
+        var segments = Segments(fullPath);
         foreach (var pattern in _opts.UserDataPatterns)
         {
-            if (fullPath.Contains(pattern, StringComparison.OrdinalIgnoreCase))
+            if (ContainsSegmentRun(segments, Segments(pattern)))
+                return true;
+        }
+        return false;
+    }
+
+    private static readonly char[] Separators = ['\\', '/'];
+
+    /// <summary>Splits a path on both separators, independent of the OS the scan runs on.</summary>
+    private static string[] Segments(string path) =>
+        path.Split(Separators, StringSplitOptions.RemoveEmptyEntries);
+
+    /// <summary>The segments of <paramref name="path"/> below <paramref name="root"/>; the whole
+    /// path if it does not lie under the root (stricter, so nothing is wrongly kept).</summary>
+    private static ReadOnlySpan<string> BelowRoot(string[] root, string[] path)
+    {
+        if (root.Length > path.Length)
+            return path;
+        for (var i = 0; i < root.Length; i++)
+        {
+            if (!string.Equals(root[i], path[i], StringComparison.OrdinalIgnoreCase))
+                return path;
+        }
+        return path.AsSpan(root.Length);
+    }
+
+    /// <summary>True if <paramref name="run"/> occurs as consecutive whole segments.</summary>
+    private static bool ContainsSegmentRun(ReadOnlySpan<string> segments, string[] run)
+    {
+        if (run.Length == 0)
+            return false;
+        for (var start = 0; start + run.Length <= segments.Length; start++)
+        {
+            var match = true;
+            for (var j = 0; j < run.Length && match; j++)
+                match = string.Equals(segments[start + j], run[j], StringComparison.OrdinalIgnoreCase);
+            if (match)
                 return true;
         }
         return false;
