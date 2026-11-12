@@ -55,7 +55,8 @@ public class DirectorySamplingService
         public DirectoryVerdict? VerdictOf(FileNode file) => Verdicts.GetValueOrDefault(file.ParentPath);
     }
 
-    public sealed record ResolveResult(int Confirmed, int Escalated, int Inherited, int StillOpen);
+    /// <param name="Released">Deferred files of confirmed samples that do not inherit and wait to be judged one by one.</param>
+    public sealed record ResolveResult(int Confirmed, int Escalated, int Inherited, int StillOpen, int Released = 0);
 
     public static bool IsEligible(FileType t) => t is FileType.Image or FileType.Video or FileType.Document;
 
@@ -177,13 +178,14 @@ public class DirectorySamplingService
     /// <summary>Evaluates every open sample whose members are all judged.</summary>
     public async Task<ResolveResult> ResolveAsync(long jobId, Func<CancellationToken, Task>? waitIfPausedAsync = null, CancellationToken ct = default)
     {
-        int confirmed = 0, escalated = 0, inherited = 0, open = 0;
+        int confirmed = 0, escalated = 0, inherited = 0, open = 0, released = 0;
         foreach (var sample in (await _sampleRepo.GetForJobAsync(jobId, ct)).Where(s => s.State == SampleState.Open))
         {
             if (waitIfPausedAsync != null) await waitIfPausedAsync(ct);
             ct.ThrowIfCancellationRequested();
 
-            var outcome = await ResolveSampleAsync(jobId, sample, ct);
+            var (outcome, freed) = await ResolveSampleAsync(jobId, sample, ct);
+            released += freed;
             switch (outcome)
             {
                 case SampleState.Confirmed: confirmed++; inherited += sample.InheritedCount; break;
@@ -195,10 +197,11 @@ public class DirectorySamplingService
         if (confirmed + escalated > 0)
         {
             _logger.LogInformation(
-                "Samples of job {JobId}: {Confirmed} confirmed ({Inherited} files inherited), {Escalated} raised to mixed, {Open} still open.",
-                jobId, confirmed, inherited, escalated, open);
+                "Samples of job {JobId}: {Confirmed} confirmed ({Inherited} files inherited, {Released} released to be judged), " +
+                "{Escalated} raised to mixed, {Open} still open.",
+                jobId, confirmed, inherited, released, escalated, open);
         }
-        return new ResolveResult(confirmed, escalated, inherited, open);
+        return new ResolveResult(confirmed, escalated, inherited, open, released);
     }
 
     /// <summary>Evaluates the sample of one directory if it is open and complete; returns the resulting state.</summary>
@@ -206,22 +209,23 @@ public class DirectorySamplingService
     {
         var sample = await _sampleRepo.GetByNodeIdAsync(directoryNodeId, ct);
         if (sample is null) return null;
-        return sample.State == SampleState.Open ? await ResolveSampleAsync(jobId, sample, ct) : sample.State;
+        return sample.State == SampleState.Open ? (await ResolveSampleAsync(jobId, sample, ct)).State : sample.State;
     }
 
-    private async Task<SampleState> ResolveSampleAsync(long jobId, DirectorySample sample, CancellationToken ct)
+    /// <returns>The new state, and how many Deferred files were released to be judged one by one.</returns>
+    private async Task<(SampleState State, int Released)> ResolveSampleAsync(long jobId, DirectorySample sample, CancellationToken ct)
     {
         var files = await _fileRepo.GetByDirectoryAsync(jobId, sample.DirectoryFullPath ?? string.Empty, ct);
         var byId = files.ToDictionary(f => f.Id);
 
         if (sample.Members.Any(m => byId.TryGetValue(m.FileNodeId, out var f)
                                     && f.Status is FileNodeStatus.Discovered or FileNodeStatus.Processing))
-            return SampleState.Open;
+            return (SampleState.Open, 0);
 
         var results = sample.Members.ToDictionary(
             m => m.FileNodeId,
             m => byId.TryGetValue(m.FileNodeId, out var f) ? f.Classification : null);
-        var eval = DirectorySampler.Evaluate(sample.Members, results, _options);
+        var eval = DirectorySampler.Evaluate(sample.Members, results, _options, sample.EligibleCount);
 
         sample.MajorityCategory = eval.Majority;
         sample.DeviatingCount = eval.Deviating;
@@ -237,10 +241,24 @@ public class DirectorySamplingService
             await _sampleRepo.EscalateAsync(sample, eval.Reason, ct);
             _logger.LogInformation("Sample of {Path} contradicts the uniform verdict, raised to mixed: {Reason}",
                 sample.DirectoryRelativePath, eval.Reason);
-            return SampleState.Escalated;
+            return (SampleState.Escalated, 0);
         }
 
         sample.State = SampleState.Confirmed;
+        if (!eval.Inherit || eval.Majority is null)
+        {
+            // The verdict stands, but the other files are judged one by one: ConfirmAsync releases what does not inherit.
+            sample.InheritedConfidence = null;
+            var released = files.Count(f => f.Status == FileNodeStatus.Deferred);
+            await _sampleRepo.ConfirmAsync(sample, [], ct);
+            if (released > 0)
+            {
+                _logger.LogInformation("Sample of {Path} confirmed, but {Count} file(s) are judged one by one: {Reason}",
+                    sample.DirectoryRelativePath, released, eval.Reason);
+            }
+            return (SampleState.Confirmed, released);
+        }
+
         sample.InheritedConfidence = eval.InheritedConfidence;
         var dirName = Path.GetFileName((sample.DirectoryFullPath ?? string.Empty).TrimEnd('/', '\\'));
         var now = DateTime.UtcNow;
@@ -255,7 +273,7 @@ public class DirectorySamplingService
                     Importance = eval.InheritedImportance,
                     Confidence = eval.InheritedConfidence,
                     Summary = $"Not looked at: inherited from the sample of '{dirName}' " +
-                              $"({eval.Agreeing} of {sample.Members.Count} are {eval.Majority}).",
+                              $"({sample.Members.Count(m => m.Category == eval.Majority)} of {sample.Members.Count} are {eval.Majority}).",
                     SuggestedTarget = eval.InheritedTarget,
                     ModelUsed = null,
                     AnalyzedAt = now,
@@ -272,6 +290,6 @@ public class DirectorySamplingService
             .ToList();
 
         await _sampleRepo.ConfirmAsync(sample, inherited, ct);
-        return SampleState.Confirmed;
+        return (SampleState.Confirmed, 0);
     }
 }

@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Threading;
 using Microsoft.Extensions.Logging;
+using SmartFileOrganizer.Application.Bundles;
 using SmartFileOrganizer.Domain.Enums;
 using SmartFileOrganizer.Domain.Interfaces;
 using SmartFileOrganizer.Domain.Models;
@@ -14,7 +15,8 @@ namespace SmartFileOrganizer.Application.Services;
 /// <remarks>
 /// <para>For every directory of the job a <see cref="DirectoryProfile"/> is computed from scan data, then
 /// <see cref="DirectoryVerdictRules"/> decide the clear cases without a model call (part of a unit,
-/// unit markers, skipped or hidden, empty, judged from subdirectories). Only the rest goes to Ollama,
+/// unit markers, skipped or hidden, a dump recognised by <see cref="BundlePatterns.Recognise"/>, empty,
+/// judged from subdirectories). Only the rest goes to Ollama,
 /// which gets the profile with the file list and returns verdict, purpose, retention and reason together
 /// with the sampling recommendation.</para>
 /// <para>Directories are processed level by level from the root, so a directory the model judges as
@@ -42,8 +44,10 @@ public class DirectoryPreAssessmentService
     private readonly IOllamaService _ollama;
     private readonly Func<int> _getMaxParallelRequests;
     private readonly DirectoryAnalysisOptions _options;
+    private readonly BundlePatterns _patterns;
     private readonly ILogger<DirectoryPreAssessmentService> _logger;
 
+    /// <param name="patterns">Dump recognition (<c>bundle-patterns.json</c>); null for the shipped patterns.</param>
     public DirectoryPreAssessmentService(
         IDirectoryRepository dirRepo,
         IFileRepository fileRepo,
@@ -52,7 +56,8 @@ public class DirectoryPreAssessmentService
         IOllamaService ollama,
         Func<int> getMaxParallelRequests,
         DirectoryAnalysisOptions options,
-        ILogger<DirectoryPreAssessmentService> logger)
+        ILogger<DirectoryPreAssessmentService> logger,
+        BundlePatterns? patterns = null)
     {
         _dirRepo = dirRepo;
         _fileRepo = fileRepo;
@@ -61,6 +66,7 @@ public class DirectoryPreAssessmentService
         _ollama = ollama;
         _getMaxParallelRequests = getMaxParallelRequests;
         _options = options;
+        _patterns = patterns ?? BundlePatterns.Default;
         _logger = logger;
     }
 
@@ -121,7 +127,7 @@ public class DirectoryPreAssessmentService
 
                 var prepared = await PrepareAsync(jobId, dir, tree, ct);
                 var (next, verdict) = DirectoryVerdictRules.Evaluate(
-                    dir, prepared.Profile, prepared.UnitAncestor, prepared.UnitAncestorPath);
+                    dir, prepared.Profile, prepared.UnitAncestor, prepared.UnitAncestorPath, prepared.Dump);
 
                 switch (next)
                 {
@@ -186,7 +192,7 @@ public class DirectoryPreAssessmentService
         var tree = await JobTree.LoadAsync(jobId, allDirs, _verdictRepo, ct);
         var prepared = await PrepareAsync(jobId, dir, tree, ct);
         var (next, verdict) = DirectoryVerdictRules.Evaluate(
-            dir, prepared.Profile, prepared.UnitAncestor, prepared.UnitAncestorPath);
+            dir, prepared.Profile, prepared.UnitAncestor, prepared.UnitAncestorPath, prepared.Dump);
 
         switch (next)
         {
@@ -211,7 +217,53 @@ public class DirectoryPreAssessmentService
         var children = tree.ChildrenOf(dir);
         var profile = DirectoryProfileBuilder.Build(files, children.Select(c => c.Name).ToList());
         var (unitAncestor, unitPath) = tree.FindUnitAncestor(dir);
-        return new PreparedDirectory(dir, files, children, profile, unitAncestor, unitPath);
+        var dump = unitAncestor is null ? await RecogniseDumpAsync(jobId, dir, files, children, tree, ct) : null;
+        return new PreparedDirectory(dir, files, children, profile, unitAncestor, unitPath, dump);
+    }
+
+    /// <summary>
+    /// Whether the directory is a dump by the shared recognition of the bundles. Never the scan root: a
+    /// scanned phone or user profile as one unit would leave no file to judge, and the bundles split it into
+    /// its parts anyway. The media share of the subtree is read only when a signature limits it.
+    /// </summary>
+    private async Task<DumpRecognition?> RecogniseDumpAsync(
+        long jobId, DirectoryNode dir, IReadOnlyList<DirectoryFileInfo> files, IReadOnlyList<DirectoryNode> children,
+        JobTree tree, CancellationToken ct)
+    {
+        if (dir.Depth == 0) return null;
+        var subdirectories = children.Select(c => c.Name).ToList();
+        var names = files.Select(f => f.Name).ToList();
+
+        var shareAsked = false;
+        var first = _patterns.Recognise(subdirectories, names, isRoot: false, () => { shareAsked = true; return 0; });
+        if (!shareAsked) return first;
+
+        var share = await SubtreeMediaShareAsync(jobId, dir, files, tree, ct);
+        return _patterns.Recognise(subdirectories, names, isRoot: false, () => share);
+    }
+
+    private async Task<double> SubtreeMediaShareAsync(
+        long jobId, DirectoryNode dir, IReadOnlyList<DirectoryFileInfo> directFiles, JobTree tree, CancellationToken ct)
+    {
+        long total = 0, media = 0;
+        void Count(IEnumerable<DirectoryFileInfo> list)
+        {
+            foreach (var f in list)
+            {
+                total++;
+                if ((FileType)f.FileType is FileType.Image or FileType.Video) media++;
+            }
+        }
+
+        Count(directFiles);
+        var queue = new Queue<DirectoryNode>(tree.ChildrenOf(dir));
+        while (queue.Count > 0)
+        {
+            var d = queue.Dequeue();
+            Count(await _fileRepo.GetFileInfoForDirectoryAsync(jobId, d.FullPath, ct));
+            foreach (var c in tree.ChildrenOf(d)) queue.Enqueue(c);
+        }
+        return total == 0 ? 0 : (double)media / total;
     }
 
     private async Task StoreRuleVerdictAsync(PreparedDirectory p, DirectoryVerdict verdict, JobTree tree, CancellationToken ct)
@@ -408,7 +460,8 @@ public class DirectoryPreAssessmentService
         IReadOnlyList<DirectoryNode> Children,
         DirectoryProfile Profile,
         DirectoryVerdict? UnitAncestor,
-        string? UnitAncestorPath);
+        string? UnitAncestorPath,
+        DumpRecognition? Dump);
 
     /// <summary>All directories of a job with their verdicts so far; safe for the parallel model calls.</summary>
     private sealed class JobTree

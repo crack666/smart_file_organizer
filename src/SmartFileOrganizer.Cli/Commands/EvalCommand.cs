@@ -190,6 +190,8 @@ public static class EvalCommand
             throw new CliFailureException(ExitCodes.Failure, ErrorCodes.ScanFailed, $"Scan of job {job.Id} ended as {scanned.Status}: {scanned.LastError}");
 
         var analyzeClock = System.Diagnostics.Stopwatch.StartNew();
+        // Without Phase 3 on purpose: no summary is measured, and each would cost a model call. The job's status
+        // shows the summaries as pending; `sfo analyze <job>` writes them.
         var run = await services.GetRequiredService<AiClassificationCoordinator>().RunAsync(
             job.Id, AiPhases.PreAssessment | AiPhases.Classification,
             new SynchronousProgress<AiPhaseProgress>(pr => ctx.Progress.Report(AnalyzeCommand.PhaseName(pr.Phase),
@@ -202,7 +204,7 @@ public static class EvalCommand
                 $"Ollama is not reachable at {ollama.BaseUrl}. Check with: sfo doctor, or use --stub for a run without a model.");
 
         var report = await services.GetRequiredService<CorpusEvaluator>().EvaluateAsync(truth, job.Id, ct);
-        var context = Context(ollama, stub, rules);
+        var context = Context(ollama, services.GetRequiredService<DirectoryAnalysisOptions>(), stub, rules);
         var stored = await services.GetRequiredService<EvalRunService>().RecordAsync(
             EvalRunMode.Corpus, truth.Subject, job.Id, context, report, started, ct);
 
@@ -231,7 +233,7 @@ public static class EvalCommand
             ct);
         clock.Stop();
 
-        var context = Context(ollama, stub, rules: null);
+        var context = Context(ollama, sampling: null, stub, rules: null);
         var stored = await services.GetRequiredService<EvalRunService>().RecordAsync(
             EvalRunMode.Cases, "cases", null, context, report, started, ct);
         var result = ToResult(stored, context, report, null, clock.Elapsed.TotalSeconds);
@@ -276,7 +278,8 @@ public static class EvalCommand
     }
 
     /// <summary>Everything that can change a result besides the code: model, prompts, thresholds, scan rules.</summary>
-    private static EvalRunContext Context(OllamaOptions o, ScriptedAnswerOllamaService? stub, ScanRulesProfile? rules)
+    private static EvalRunContext Context(
+        OllamaOptions o, DirectoryAnalysisOptions? sampling, ScriptedAnswerOllamaService? stub, ScanRulesProfile? rules)
     {
         var inv = CultureInfo.InvariantCulture;
         var settings = new Dictionary<string, string>
@@ -288,6 +291,13 @@ public static class EvalCommand
             ["ollama.timeout_seconds"] = o.TimeoutSeconds.ToString(inv),
             ["ollama.summary_language"] = o.SummaryLanguage
         };
+        if (sampling != null)
+        {
+            // The thresholds the sample check decided with (issue 50 changed how they are applied).
+            settings["sampling.sample_size"] = sampling.EffectiveSampleSize.ToString(inv);
+            settings["sampling.max_deviation_share"] = sampling.MaxDeviationShare.ToString(inv);
+            settings["sampling.small_directory_max_files"] = sampling.SmallDirectoryMaxFiles.ToString(inv);
+        }
         if (rules != null)
             settings["scan.rules"] = $"{rules.Name} {rules.Hash}";
 

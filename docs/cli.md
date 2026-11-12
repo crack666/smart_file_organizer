@@ -375,7 +375,9 @@ the shipped rules. Without `--json` the output is a valid rule file, so
 Scans `<corpus>/<root>` (from `<corpus>/truth.json`) into a new job, runs the pre-assessment and
 the classification, and scores directory verdicts, categories and sensitive markers against the
 truth. The run is stored for `--compare`. Corpus, truth format and what counts:
-[evaluation.md](evaluation.md).
+[evaluation.md](evaluation.md). Phase 3 (directory summaries) is left out on purpose: nothing it
+writes is measured, and it would cost a model call per mixed folder. `sfo status <job>` therefore
+shows the summary phase as pending; `sfo analyze <job>` writes the summaries if you want them.
 
 | Option | Meaning |
 |---|---|

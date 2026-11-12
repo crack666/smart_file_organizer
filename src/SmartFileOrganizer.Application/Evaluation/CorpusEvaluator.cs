@@ -16,7 +16,8 @@ namespace SmartFileOrganizer.Application.Evaluation;
 /// <item><c>file_category</c>: every truth file with a category; the category the model gave in
 /// <c>ai_results</c>. A human override is ignored, because the model is measured.</item>
 /// <item><c>sensitive</c>: every truth file; the markers of the rules and of the model together,
-/// because together they decide whether a file is protected. A hit needs exactly the expected set.</item>
+/// because together they decide whether a file is protected. A hit needs exactly the expected set. A file
+/// inside a folder the scan skipped and marked (<c>.ssh</c>) carries the markers of that folder.</item>
 /// </list>
 /// An item without a result (not scanned, not analysed, model error) is <see cref="EvalOutcome.Missing"/>.
 /// </remarks>
@@ -67,7 +68,8 @@ public sealed class CorpusEvaluator
             fileByPath.TryGetValue(expected.Path, out var node);
             if (expected.Category is { } category)
                 ScoreCategory(report, expected.Path, category, node);
-            ScoreSensitive(report, expected.Path, expected.Sensitive, node);
+            ScoreSensitive(report, expected.Path, expected.Sensitive, node,
+                node is null ? SkippedMarkedFolder(expected.Path, dirByPath) : null);
         }
 
         return report.Build(Kinds);
@@ -134,12 +136,39 @@ public sealed class CorpusEvaluator
             inherited ? "inherited from the confirmed sample of its directory" : byRule ? cls.Summary : null));
     }
 
-    private static void ScoreSensitive(EvalReportBuilder report, string path, SensitiveMarker expected, FileNode? node)
+    /// <summary>
+    /// The nearest folder above a file the scan did not list that the scan skipped and marked sensitive
+    /// (<c>.ssh</c>): what the product reports for the files inside it, since it never lists them.
+    /// </summary>
+    private static (string Path, DirectoryNode Node)? SkippedMarkedFolder(string filePath, IReadOnlyDictionary<string, DirectoryNode> dirByPath)
+    {
+        for (var dir = ParentOf(filePath); dir is not null; dir = ParentOf(dir))
+        {
+            if (dirByPath.TryGetValue(dir, out var node) && node.DirStatus == DirectoryStatus.Skip
+                && node.SensitiveMarkers != SensitiveMarker.None)
+                return (dir, node);
+        }
+        return null;
+
+        static string? ParentOf(string path)
+        {
+            if (path == ".") return null;
+            var cut = path.LastIndexOf('/');
+            return cut < 0 ? "." : path[..cut];
+        }
+    }
+
+    /// <param name="skippedFolder">For a file the scan did not list: the skipped folder above it that carries
+    /// markers. Its markers count for the file on both sides, found and false alarm, because the folder marker
+    /// withholds every file inside (https://github.com/crack666/smart_file_organizer/issues/50).</param>
+    private static void ScoreSensitive(EvalReportBuilder report, string path, SensitiveMarker expected, FileNode? node,
+        (string Path, DirectoryNode Node)? skippedFolder = null)
     {
         var key = Key(EvalKind.Sensitive, path);
         var byRule = node?.SensitiveMarkers ?? SensitiveMarker.None;
         var byModel = node?.Classification is { IsAiResult: true, Error: null } cls ? cls.SensitiveMarkers : SensitiveMarker.None;
-        var actual = byRule | byModel;
+        var byFolder = skippedFolder?.Node.SensitiveMarkers ?? SensitiveMarker.None;
+        var actual = byRule | byModel | byFolder;
         report.Sensitive(expected, actual);
 
         if (actual == expected)
@@ -153,14 +182,15 @@ public sealed class CorpusEvaluator
         var parts = new List<string>();
         if (missed != SensitiveMarker.None) parts.Add("missed " + EvalCodes.MarkerList(missed));
         if (extra != SensitiveMarker.None) parts.Add("extra " + EvalCodes.MarkerList(extra));
-        if (node is null) parts.Add("file not in the scan");
+        if (node is null) parts.Add(skippedFolder is { } f ? $"file not in the scan; marker of the skipped folder {f.Path}" : "file not in the scan");
 
         var decidedBy = new List<string>();
         if (byRule != SensitiveMarker.None) decidedBy.Add($"rule {node!.SensitiveRule}");
         if (byModel != SensitiveMarker.None) decidedBy.Add($"model {node!.Classification!.ModelUsed}");
+        if (byFolder != SensitiveMarker.None) decidedBy.Add($"rule {skippedFolder!.Value.Node.SensitiveRule}");
 
         report.Fail(new(EvalKind.Sensitive, key, path,
-            node is null && expected != SensitiveMarker.None ? EvalOutcome.Missing : EvalOutcome.Wrong,
+            node is null && byFolder == SensitiveMarker.None && expected != SensitiveMarker.None ? EvalOutcome.Missing : EvalOutcome.Wrong,
             EvalCodes.MarkerList(expected), EvalCodes.MarkerList(actual),
             decidedBy.Count == 0 ? null : string.Join(" + ", decidedBy),
             string.Join("; ", parts)));

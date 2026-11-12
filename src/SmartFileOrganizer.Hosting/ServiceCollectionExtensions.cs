@@ -150,7 +150,11 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<IOllamaService>(),
             () => sp.GetRequiredService<OllamaOptions>().MaxParallelRequests,
             sp.GetRequiredService<DirectoryAnalysisOptions>(),
-            sp.GetRequiredService<ILogger<DirectoryPreAssessmentService>>()));
+            sp.GetRequiredService<ILogger<DirectoryPreAssessmentService>>(),
+            // The same dump patterns as the bundles (Bundles:PatternsFile), so both recognise the same dumps.
+            sp.GetRequiredService<BundleOptions>().PatternsFile is { } patternsFile
+                ? BundlePatterns.Load(patternsFile)
+                : BundlePatterns.Default));
         services.AddSingleton<DirectorySummaryService>(sp => new DirectorySummaryService(
             sp.GetRequiredService<IDirectoryRepository>(),
             sp.GetRequiredService<IFileRepository>(),

@@ -110,6 +110,9 @@ public class DirectorySampleRepository : IDirectorySampleRepository
             count++;
         }
 
+        // A file that got no inherited result is judged on its own: never left waiting behind a decided sample.
+        await conn.ExecuteAsync(ReleaseDeferredSql, ReleaseParameters(sample.DirectoryNodeId), tx);
+
         // A member that agrees with the confirmed majority fits the verdict of its directory: two signals agree.
         var agreeing = sample.Members.Where(m => m.Deviates == false).Select(m => m.FileNodeId).ToList();
         if (agreeing.Count > 0)

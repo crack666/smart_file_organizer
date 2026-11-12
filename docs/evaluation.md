@@ -31,13 +31,14 @@ reference and JSON shapes: [cli.md](cli.md#sfo-eval-corpus).
 
 `sfo eval generate <dir> [--seed n]` writes `<dir>/tree/` (the folder that is scanned) and
 `<dir>/truth.json`. The generator is `SmallCorpusGenerator` (Infrastructure/Evaluation); the same
-seed gives the same bytes and timestamps. Version 1 has 41 folders and 97 files:
+seed gives the same bytes and timestamps. Version 2 has 42 folders and 100 files (version 1: 41
+and 97; the changes are listed under [Truth changes](#truth-changes)):
 
 | Kind | Example | Truth |
 |---|---|---|
 | Mixed storage | `Downloads`, `Desktop`, `alt` | `mixed` |
 | Photo folders per occasion, names as people write them | `2019 Skifahrt`, `Sommerfest 2022`, `hochzeit anna und ben`, `100MEDIA` | `uniform` |
-| Documents by topic | `Dokumente/Rechnungen 2023`, `Steuer 2022`, `Gesundheit`, `Briefe` | `uniform` |
+| Documents by topic | `Dokumente/Rechnungen 2023`, `Steuer 2022`, `Bank`, `Gesundheit`, `Briefe` | `uniform` |
 | Software projects | `package.json`, `.git` | `unit`, also everything inside |
 | Program and game | exe next to dll, exe next to `_Data` | `unit` |
 | Phone dump | `DCIM/Camera`, `Android/data/<package>`, empty `LOST.DIR` | `unit`, also everything inside |
@@ -45,6 +46,7 @@ seed gives the same bytes and timestamps. Version 1 has 41 folders and 97 files:
 | Placeholder | `Neuer Ordner` (empty) | `empty` |
 | Hidden tool folder | `.ssh` | `system` |
 | Sensitive dummies | password list, recovery codes, `.kdbx`, `.pfx`, `.env`, private key, bank statement, tax papers, doctor letter, ID scan, private letter | markers |
+| Counter-samples (version 2) | a bank statement and a payslip whose names no rule knows, a personal letter laid out like a formal one | `finance`, `private_message`; only the model can mark them |
 
 The structure follows what a manual check of a real private archive found
 (https://github.com/crack666/smart_file_organizer/issues/29). Everything is invented: names,
@@ -62,15 +64,17 @@ runs of different corpora are never compared as equal.
 ```json
 {
   "schema_version": 1,
-  "corpus": { "name": "small", "generator_version": 1, "seed": 36, "description": "..." },
+  "corpus": { "name": "small", "generator_version": 2, "seed": 36, "description": "..." },
   "root": "tree",
   "directories": [
     { "path": ".", "verdict": "mixed", "note": "Drive root: folders with different purposes." },
     { "path": "Fotos/2019 Skifahrt", "verdict": "uniform", "note": "Photos of one trip." }
   ],
   "files": [
-    { "path": "Downloads/Kontoauszug_2024_03.pdf", "category": null, "sensitive": ["finance"],
-      "note": "Category is invoice or document by the prompt; only the finance marker is measured." },
+    { "path": "Desktop/Einkaufsliste.txt", "category": null, "sensitive": [],
+      "note": "Category ambiguous (document, review_needed, trash_candidate)." },
+    { "path": "Downloads/Kontoauszug_2024_03.pdf", "category": "personal_document", "sensitive": ["finance"],
+      "note": "Bank statement: a record about the person, not correspondence (version 2; was null in version 1)." },
     { "path": "Fotos/2019 Skifahrt/IMG_20190212_101530.jpg", "category": "photo", "sensitive": [] }
   ]
 }
@@ -85,8 +89,8 @@ runs of different corpora are never compared as equal.
   (`document_scan`). They are compared through the enums (`EvalCodes`), never as strings. (Until
   12.11.2026 the stored codes were German and `EvalCodes` bridged between the two; schema step 13
   also rewrote the expected and actual values of stored reports.)
-- The truth must be unambiguous. `category: null` means no single category is right (a bank
-  statement is `invoice` or `document` by the prompt) and only the markers are measured; files
+- The truth must be unambiguous. `category: null` means no single category is right (a shopping
+  list is `document`, `review_needed` or `trash_candidate`) and only the markers are measured; files
   inside a unit have no category, because units are not classified file by file. `sensitive: []`
   means the file must not be marked. `note` says why, for people.
 
@@ -94,13 +98,56 @@ The same file shape serves as an answer sheet for `--stub`: the truth itself ans
 a copy with changed entries answers wrong on purpose. Where the truth leaves a category open, the
 stub answers `document`, because a model has to commit to one as well.
 
+## Truth changes
+
+Every change of the truth is listed here with its reason. The truth follows what is right for the
+user, never what the program happens to answer.
+
+### Version 2 (12.11.2026, https://github.com/crack666/smart_file_organizer/issues/50)
+
+The prompt now gives each kind of paper one category
+(`PersonalDocument`: "a record about the person that is not correspondence: CV, certificate,
+contract (rental, employment, loan), tax papers, bank and pay statements, medical findings and
+doctor letters"; `DocumentScan`: "a picture of a paper page …, whatever the paper says"). Files
+whose category was left open because the old prompt allowed two answers now have one:
+
+| File | Version 1 | Version 2 | Why |
+|---|---|---|---|
+| `Downloads/Kontoauszug_2024_03.pdf` | `null` | `personal_document` | A bank statement is a record about the person, not a bill (`invoice`) and not correspondence. |
+| `Dokumente/Steuer 2022/Steuererklaerung_2022.pdf` | `null` | `personal_document` | Tax papers are named under `PersonalDocument`. |
+| `Dokumente/Steuer 2022/Lohnsteuerbescheinigung_2022.pdf` | `null` | `personal_document` | A tax certificate of the employer is a tax paper. |
+| `Dokumente/Gesundheit/Arztbrief_Orthopaedie_2023.pdf` | `null` | `personal_document` | A doctor letter is a medical record about the person; it is not a letter the person wrote or received as correspondence. Before, `letter` was a fair answer too. |
+| `Dokumente/Gesundheit/Befund_Blutbild.pdf` | `null` | `personal_document` | A medical finding is named under `PersonalDocument`. |
+| `Dokumente/Persoenliches/Personalausweis_Scan.pdf` | `null` | `document_scan` | The file is a PDF of one page image without text; the format decides, not what the paper says. The `identity` marker carries what it is. |
+
+Still open (`null`), because no single category is right: the password list and the shopping list
+(`document`, `review_needed` or `trash_candidate`), `alt/Tabelle1.csv` (a bare table of amounts:
+`document` or `trash_candidate`), and files without a document type (installer, archive, log,
+shortcut, password store, certificate, thumbnail cache).
+
+New files, so that a too narrow boundary of a marker shows (the marker rules of the prompt were
+sharpened in the same issue and could now miss real cases):
+
+| File | Category | Markers | Why |
+|---|---|---|---|
+| `Dokumente/Bank/Umsaetze_Girokonto_2024_05.pdf` | `personal_document` | `finance` | A bank statement whose name no rule knows: must stay `finance`, not be taken for an invoice. |
+| `Dokumente/Bank/Verdienstnachweis_2023_05.pdf` | `personal_document` | `finance` | A payslip whose name no rule knows: must stay `finance`. |
+| `Desktop/Brief_an_Lisa.txt` | `letter` | `private_message` | A personal letter laid out like a formal one (addresses on top): must stay `private_message`. |
+
+A test checks that no name rule marks the three new files, so they measure the model
+(`Generator_CounterSamples_AreLeftToTheModel`). The new folder `Dokumente/Bank` is `uniform`.
+
+Unchanged on purpose: the invoices, the rental contract and the formal letters keep `sensitive: []`
+although every model in the run of 12.11.2026 marked them (see [Measured](#measured)); that was the
+prompt, which was wrong. `.ssh/id_ed25519.pub` keeps `sensitive: []`, see the next section.
+
 ## What is measured
 
 | Kind | Items | Result compared |
 |---|---|---|
 | `directory_verdict` | every truth folder with a verdict | stored verdict, whether a rule, the model or the sample check decided |
 | `file_category` | every truth file with a category | the model's category, or the one inherited from a confirmed sample (a human override is ignored) |
-| `sensitive` | every truth file | markers of the rules and of the model together; a hit needs exactly the expected set |
+| `sensitive` | every truth file | markers of the rules and of the model together; a hit needs exactly the expected set. A file inside a folder the scan skipped and marked (`.ssh`) carries the markers of that folder, see [below](#files-in-a-skipped-marked-folder) |
 
 Each item is a `hit`, `wrong` (a different result) or `missing` (not scanned, not analysed, or a
 model error). For `sensitive` the score also counts files the truth marks, how many of them carry
@@ -121,6 +168,24 @@ mixed. For a file it means the category was inherited from a confirmed sample.
 
 The `key` of a failure (`file_category:Fotos/...jpg`) is stable across runs and is what
 `--compare` matches on.
+
+### Files in a skipped, marked folder
+
+The scan does not enter dot folders, so the files in `.ssh` are never listed. Since
+https://github.com/crack666/smart_file_organizer/pull/52 the skipped folder itself carries the
+marker (`keys`, rule `dir:ssh`), and everything below it is withheld with the folder.
+
+Decided 12.11.2026 (https://github.com/crack666/smart_file_organizer/issues/50): the truth stays
+per file, and the evaluation reads the marker of the nearest skipped, marked folder as the result
+for a file the scan did not list. The alternative, marking the folder in the truth instead of its
+files, was rejected: the truth would then say what the program does, not what is right. Per file,
+the private key is `keys` and the public key is not secret. So:
+
+- `.ssh/id_ed25519` counts as found (before: missing).
+- `.ssh/id_ed25519.pub` counts as a false alarm `[rule dir:ssh]`. This failure stays on purpose: the
+  folder rule withholds a file that is not secret. It is cheap (the user loses nothing by
+  skipping a public key) and much safer than entering `.ssh`, so the rule is right, and the
+  failure shows the price.
 
 ## Test cases from corrections
 
@@ -150,7 +215,9 @@ Every `sfo eval` run is stored in `eval_runs`: mode (`corpus` or `cases`), subje
 (`small v1 seed 36` or `cases`), start and end, job, model or stub, prompt fingerprint, app
 version (with the commit when the build knows it), the settings and thresholds of the run
 (`ollama.max_parallel_requests`, `ollama.max_samples_per_directory`, upload limits, timeout,
-summary language, scan rules with hash) and the full report.
+summary language, scan rules with hash, and for corpus runs since 12.11.2026 the sample thresholds
+`sampling.sample_size`, `sampling.max_deviation_share`, `sampling.small_directory_max_files`) and the
+full report.
 
 The prompt fingerprint (`OllamaService.PromptFingerprint`) is a hash over the system prompt, the
 summary language, the prompt templates built for a fixed sample (classification with and without
@@ -162,6 +229,80 @@ what changed (model, prompts, version, each setting), the score per kind before 
 items fixed and the new failures.
 
 ## Measured
+
+### Scripted answers after issue 50 (12.11.2026)
+
+_Scripted answers (`--stub truth.json`), on the branch of
+https://github.com/crack666/smart_file_organizer/issues/50, prompt fingerprint `d2f30ce0d015d9d5`,
+sampling 15 / 10 % / small folders up to 3 files:_
+
+| Corpus | `directory_verdict` | `file_category` | `sensitive` |
+|---|---|---|---|
+| small v1 seed 36, before (master) | 32/41 | 49/49 | 96/97 |
+| small v1 seed 36, after | 41/41 | 49/49 | 96/97 |
+| small v2 seed 36, after | 42/42 | 58/58 | 99/100 (16 marked, 16 found, 1 false alarm) |
+
+`sfo eval --compare` of the v1 runs lists 10 fixed failures and no new one: the six folders of the
+phone dump (now one unit by the shared dump recognition), `Dokumente/Briefe`,
+`Dokumente/Persoenliches` and `Fotos/Sommerfest 2022` (sample check), and `.ssh/id_ed25519`;
+`.ssh/id_ed25519.pub` is new as the deliberate false alarm described above. On both versions the
+one remaining failure is that false alarm. How the issues were fixed:
+
+- The phone dump: a folder that `bundle-patterns.json` recognises as a copy of a device, a computer
+  or software is a `unit` by rule `dump`, with everything inside. Bundles, library review and the
+  verdict now share one recognition. The scan root is never a dump.
+- The sample check counts by purpose: a video next to photos, and invoice, letter, personal
+  document, document scan next to document, are no deviation. At least one deviation is
+  tolerated in every folder (5 photos and 1 video stay `uniform`). Folders of at most 3 files keep
+  the verdict of the pre-assessment and are judged file by file. A marker the model finds marks
+  that file only; the folder keeps its verdict and nothing in it inherits a result.
+- The `.ssh` key: [Files in a skipped, marked folder](#files-in-a-skipped-marked-folder).
+
+### Real models on version 1 (12.11.2026)
+
+_Measured 12.11.2026 21:11 to 21:32 local time by the owner, on master `84e9138`, corpus small v1
+seed 36, prompt fingerprint `66eb5ea2b5813d77`, directly against Ollama, one request at a time, one
+run each; times include the first load of the model
+(https://github.com/crack666/smart_file_organizer/issues/50)._
+
+| Model | Analysis | `directory_verdict` | `file_category` | `sensitive` false alarms | missed | Second checks |
+|---|---|---|---|---|---|---|
+| perfect stub | 3 s | 32/41 | 49/49 | 0 | 1 | - |
+| gemma4:26b | 146 s | 29/41 | 49/49 | 10 | 1 | 1 |
+| qwen3.8:27b, 8k context | 232 s | 30/41 | 49/49 | 10 | 1 | 3 or 4 |
+| qwen3.8:27b, 256k context | 300 s | 29/41 | 47/49 | 11 | 1 | 3 or 4 |
+
+- All three runs raise the same ten false alarms on the same files: the five invoices and
+  `alt/Tabelle1.csv` as `finance`, the rental contract as `finance`, the two cancellations and the
+  objection as `private_message`. (The comment on the issue says "seven invoices"; the corpus has
+  five, and only 5 + 1 + 1 + 3 gives the ten.) Since all models agree, the cause was the prompt.
+  The boundaries of `finance` and `private_message` are now drawn in the prompt and in the
+  [glossary](glossary.md#where-finance-and-private_message-end), with examples on both sides.
+- The one missed marker is the key in `.ssh`, which the scan never lists; it now counts as found.
+- Three new verdict failures against the stub: `Dokumente/Rechnungen 2023` was raised because the
+  model reported a marker in the sample; `Dokumente/Gesundheit` (two files, `document` and
+  `personal_document`) had no majority; `Handy-Backup 2021/DCIM/Camera` was `uniform` instead of
+  part of the dump. All three are covered by the changes above.
+- gemma4:26b was fastest at one request at a time (about 1.6 s per file against 2.5 s and 3.3 s).
+  Differences of one or two items lie within the noise of one run; the spread between runs of one
+  model is not measured. The two qwen runs also differ in temperature (0.2 in the 8k tag, the
+  default in the 256k tag), because `sfo` sets neither temperature nor context size
+  (https://github.com/crack666/smart_file_organizer/issues/53).
+
+A run with real models after issue 50 has not been made yet (the package had no GPU). To compare
+with the table above, run the new build on the existing version 1 folder (its `truth.json` still
+says v1, so `--compare` matches the runs of 12.11.2026), then on a fresh version 2 folder for the
+counter-samples:
+
+```bash
+sfo eval <v1-folder> --db <db-of-12.11> --model gemma4:26b && sfo eval --compare --db <db-of-12.11>
+sfo eval generate <v2-folder> && sfo eval <v2-folder> --db <db-of-12.11> --model gemma4:26b
+```
+
+What to look at: the ten false alarms should be gone, and the three counter-samples
+(`Dokumente/Bank/*`, `Desktop/Brief_an_Lisa.txt`) must still be found.
+
+### Scripted answers before issue 50 (12.11.2026)
 
 _12.11.2026, scripted answers (`--stub truth.json`), corpus small v1 seed 36, on the branch of
 issue 36 rebased on the staged analysis:_ `directory_verdict` 32/41, `file_category` 49/49,
@@ -180,5 +321,3 @@ remaining failure comes from rules, the sample check or the scan, not from the m
   package folder `uniform`, and the empty `LOST.DIR` is `empty` (6 failures).
 - `.ssh/id_ed25519` is not marked: the scan skips dot-folders (`skip_hidden`), so the key file is
   never listed and the `/.ssh/` marker rule never runs.
-
-A run with the real model has not been made yet.

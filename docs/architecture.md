@@ -163,7 +163,14 @@ call) or `model`.
    series, `mixed` from three or more types with none above 50 %).
 3. `DirectoryVerdictRules` decide the clear cases without the model, in this order: below a directory
    judged `unit` (`inside-unit`), skipped by the scan (`scan-skip`), name starting with a dot
-   (`hidden`), unit markers (`marker`), no files and no subdirectories (`empty`).
+   (`hidden`), unit markers (`marker`), a dump (`dump`), no files and no subdirectories (`empty`).
+   `dump` uses the one recognition the bundles and the library review use (`BundlePatterns.Recognise`,
+   `bundle-patterns.json`, or `Bundles:PatternsFile` when set): a copy of a phone, a user profile, a
+   system drive, a USB stick or unpacked software is a unit, so everything inside it is `inside-unit`
+   and none of its files is judged one by one. Never the scan root: a scanned phone as one unit would
+   leave nothing to judge; the bundles split it into its parts
+   ([#50](https://github.com/crack666/smart_file_organizer/issues/50), measured on the corpus of
+   [evaluation.md](evaluation.md)).
 4. Directories are processed level by level from the root. What no rule decides goes to Ollama in
    parallel (`PreAssessDirectoryAsync`): file list, subdirectory names and the profile. The model returns
    verdict, purpose, retention and reason, together with the sampling fields used so far
@@ -308,27 +315,48 @@ status `Error` (not those a person corrected) go back to `Discovered`. Every wri
 attempt.
 
 **Resolve.** `DirectorySamplingService.ResolveAsync` evaluates every `open` sample whose members are all
-done (`DirectorySampler.Evaluate`). Failed members count as deviating. The sample confirms only if
+done (`DirectorySampler.Evaluate`). Members are counted by purpose (`DirectorySampler.PurposeOf`): `Photo`
+and `Video` are one purpose (the photos and the phone clip of one occasion), and `Document`, `Invoice`,
+`Letter`, `PersonalDocument` and `DocumentScan` are one purpose (kinds of documents); every other category
+is a purpose of its own. Failed members count as deviating. The sample confirms only if
 
-- one category is the clear majority and it is a real category (not `Unknown` or `ReviewNeeded`),
-- the share of deviating and failed members is at most `MaxDeviationShare`, and
-- the model reported no sensitive marker for a member that the rules had not marked.
+- one purpose is the clear majority and its most frequent category is a real one (not `Unknown` or
+  `ReviewNeeded`), and
+- the deviating and failed members are at most `MaxDeviationShare` of the sample, rounded down, but at
+  least one (`ToleratedDeviations`): a single outlier never tips a small sample.
+
+Otherwise the directory is raised to mixed, with two exceptions
+([#50](https://github.com/crack666/smart_file_organizer/issues/50), from the first measurement with real
+models):
+
+- A directory with at most `SmallDirectoryMaxFiles` eligible files keeps the verdict of its
+  pre-assessment whatever its sample says (state `confirmed`, reason "Kept: …"). All its files are members
+  and judged on their own, nothing inherits, and two or three files make no majority worth the name; the
+  pre-assessment saw the whole file list.
+- A member the model marks sensitive although the rules had not does not raise the directory: the file
+  carries its marker and the verdict stands. Other files may hold more of the same, so none of them
+  inherits: `ConfirmAsync` gets no inherited results and returns the `Deferred` files to `Discovered`, and
+  another pass judges them one by one. (Until 12.11.2026 such a sample raised the directory to mixed, so a
+  folder of letters with one private letter was never uniform.)
 
 Confirmed (`ConfirmAsync`, one transaction): every file still `Deferred` gets an `ai_results` row with
-`origin = inherited`, `is_ai_result = 0`, `inherited_from_directory_node_id`, the majority category, the
-most frequent importance and target of the agreeing members, `model_used` empty, and the lowest confidence
-of the agreeing members capped at `InheritedConfidenceCap`; status `Inherited`.
+`origin = inherited`, `is_ai_result = 0`, `inherited_from_directory_node_id`, the most frequent category of
+the majority purpose (on a tie the general one, `Photo` or `Document`), the most frequent importance and
+target of the members in that category, `model_used` empty, and the lowest confidence of those members
+capped at `InheritedConfidenceCap`; status `Inherited`. A `Deferred` file that gets no inherited result
+returns to `Discovered`.
 Contradicted (`EscalateAsync`, one transaction): the verdict becomes `mixed` with the old one in
 `escalated_from` and the reason in `escalation_reason`, the `Deferred` files return to `Discovered`, a
 summary written while it was uniform is dropped. Another pass then judges them; the loop ends when a
-resolve escalates nothing.
+resolve escalates and releases nothing.
 
 A stopped run leaves samples `open` and their files `Deferred`; the next run skips planning for them,
 judges the remaining members and resolves. No directory is ever half inherited.
 
 Thresholds (`DirectoryAnalysisOptions`, configuration section `Sampling`; the sample size falls back to
 `Ollama:MaxSamplesPerDirectory`): `MaxSamplesPerDirectory` 15, `MaxDeviationShare` 0.1 (one outlier in
-15 is tolerated, two escalate), `InheritedConfidenceCap` 0.6. These are starting values; the measurement
+15 is tolerated, two escalate; one outlier in a sample of six is tolerated too), `SmallDirectoryMaxFiles` 3,
+`InheritedConfidenceCap` 0.6. These are starting values; the measurement
 of [#10](https://github.com/crack666/smart_file_organizer/issues/10) should set them.
 
 A focused rescan of a directory forgets its sample, judges it again, draws a new sample if it is uniform,

@@ -117,7 +117,7 @@ public class ClassificationService
 
             var resolved = await _sampling.ResolveAsync(jobId, waitIfPausedAsync, ct);
             inherited += resolved.Inherited;
-            if (resolved.Escalated == 0) break;
+            if (resolved.Escalated == 0 && resolved.Released == 0) break;
         }
 
         var pending = await _fileRepo.CountPendingAiAnalysisAsync(jobId, ct);

@@ -62,8 +62,10 @@ nothing below a dump is checked again. A dump nested in folders that hold nothin
 | `software` | `software` | `.git`, `.hg`, `node_modules`, `.venv`, `.idea`, `package.json`, `.sln`, `.exe` (with `.dll`) | no |
 
 This recognition (`BundlePatterns.Recognise`) is the only one in the program: the structure review of a
-library (`sfo library review`, [library-review.md](library-review.md)) asks it too, so a phone copy is the
-same dump in both places.
+library (`sfo library review`, [library-review.md](library-review.md)) and the directory verdict of the
+analysis (rule `dump`, [architecture.md](architecture.md#phase-1--directory-verdict-and-pre-assessment-directorypreassessmentservice))
+ask it too, so a phone copy is the same dump in all three places. The verdict never makes the scan root
+itself a unit.
 
 Guards against false dumps:
 

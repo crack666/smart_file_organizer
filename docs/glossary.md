@@ -58,12 +58,77 @@ A file can carry several markers; they are stored as a comma-separated list in t
 
 | Code | Meaning |
 |---|---|
-| `credentials` | Passwords, password stores, login data, API keys or tokens, `.env` files. |
+| `credentials` | Passwords, password stores, login data, recovery codes, API keys or tokens, `.env` files. |
 | `keys` | Private keys, certificates with a private key, crypto wallets or seed phrases. |
-| `private_message` | Private messages: mail archives, chat databases, personal letters. |
+| `private_message` | Personal messages between people who know each other: personal letters, chats and chat exports, private e-mails, mail archives and chat databases. Not a formal letter to or from a company, an authority or a landlord, a newsletter or an order confirmation. |
 | `identity` | Identity cards, passports, driving licences or scans of them. |
-| `finance` | Bank statements, tax documents, payslips, credit card data. |
+| `finance` | Papers that show the money, income or debts of the person: bank and credit card statements, tax returns and tax certificates, payslips, depot and loan papers, card numbers. Not an ordinary invoice or receipt, a rental or other contract, or a table of amounts without account, income or debt. |
 | `health` | Medical findings, doctor letters, health insurance documents. |
+
+#### Where `finance` and `private_message` end
+
+A marker withholds the content of a file from everything that leaves the machine and sends the file to
+review. Both mistakes cost something: a false alarm costs rework and makes a folder of ordinary papers
+look sensitive, a missed marker can let private content out. The line below was drawn on 12.11.2026
+after three runs with real models marked the same ordinary invoices and a rental contract as `finance`
+and the same formal letters as `private_message`
+(https://github.com/crack666/smart_file_organizer/issues/50). The prompt of the model says the same in
+the same words (`OllamaService.BuildClassificationPrompt`). If you disagree with a line, change it here
+and in the prompt, and the corpus of [evaluation.md](evaluation.md) shows what the change costs.
+
+`finance` asks: does the paper show what the person has, earns or owes?
+
+| `finance` | not `finance` |
+|---|---|
+| a bank or credit card statement | an invoice for electricity, internet, a craftsman or a shop |
+| a tax return, a wage tax certificate | a receipt or an order confirmation |
+| a payslip | a rental contract (it names a rent, not the person's money) |
+| a depot statement, a loan or credit contract | a price list, a household table of amounts without account or income |
+
+`private_message` asks: is it a message between people who know each other?
+
+| `private_message` | not `private_message` |
+|---|---|
+| a personal letter to a grandmother or a friend | a cancellation of a phone contract or a gym membership |
+| a chat export, a chat database (`msgstore.db`) | an objection to a decision of an authority |
+| a private e-mail, a mail archive (`.pst`, `.mbox`) | an application, a complaint, a letter to the landlord |
+| | a newsletter, an order confirmation |
+
+The name and path rules of the scan (`SensitiveFileRules`: `kontoauszug`, `lohnsteuer`, `.pst`, ...) mark
+independently of the model and are not changed by this line.
+
+### File category (`FileCategory`)
+
+What a file is. The category says what kind of thing it is, not how important or how private it is;
+that is the importance and the sensitive markers. The JSON of the CLI and the truth of the evaluation
+corpus write the enum name in `snake_case`; the model is asked with the enum name (`PersonalDocument`).
+Each kind of paper has one category (decided 12.11.2026,
+https://github.com/crack666/smart_file_organizer/issues/50; before, the prompt offered "PersonalDocument
+or Letter" and filed invoices next to bank statements).
+
+| Code | Meaning |
+|---|---|
+| `unknown` | Not determined: no result, or a binary nothing can read. |
+| `photo` | A photo taken with a camera or phone. |
+| `document_scan` | A picture of a paper page: a scan, or a PDF of page images without text, whatever the paper says. |
+| `screenshot` | A screen capture. |
+| `video` | A video. |
+| `audio` | Music or a sound recording. |
+| `document` | Any other text that is none of the kinds below: a manual, an article, notes, a list, a table, a form. |
+| `invoice` | A bill or receipt for goods or services: electricity, internet, a craftsman, a shop, a garage. |
+| `personal_document` | A record about the person that is not correspondence: CV, certificate, contract (rental, employment, loan), tax papers, bank and pay statements, medical findings and doctor letters. |
+| `letter` | Correspondence written to or from someone: a cancellation, an objection, an application, a complaint, a personal letter. |
+| `archive` | A ZIP, RAR, 7z or TAR archive, judged by its listing. |
+| `code` | Source code. |
+| `software_installer` | An installer, setup or update package, or a program. |
+| `system_file` | A library, font, driver or other file of the system or of a program. |
+| `trash_candidate` | A temporary file, log, crash dump or cache that can go. |
+| `review_needed` | Personal or made by the user, but unclear what it is: a person should look. |
+
+For the sample of a uniform folder, related categories count as one purpose: `photo` and `video` (the
+pictures and clips of one occasion), and `document`, `invoice`, `letter`, `personal_document` and
+`document_scan` (kinds of documents). A folder with photos and one clip of the same party, or with a CV,
+a contract and a scanned ID card, stays `uniform` ([architecture.md](architecture.md), Resolve).
 
 ### Keep hint for files in mixed directories (`KeepHint`)
 
@@ -105,7 +170,7 @@ These codes are fixed by the decision table but no code uses them yet.
 | Code | Meaning |
 |---|---|
 | `open` | The sample is drawn; the other files of the directory wait for its result. |
-| `confirmed` | The sample agreed; the other files inherited its result. |
+| `confirmed` | The verdict stands: the sample agreed, or the directory has so few files (three by default) that each was judged on its own. The other files inherited the result of the sample, unless the model found a sensitive marker the rules had missed; then each of them was judged on its own. |
 | `escalated` | The sample disagreed; the directory is now `mixed` and every file is judged on its own. |
 
 ### Why a file is in a sample (`SampleRole`)

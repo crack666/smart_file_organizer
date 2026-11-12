@@ -22,9 +22,9 @@ public sealed record GeneratedCorpus(string Directory, string TruthPath, string 
 /// with filler. Sensitive dummies have a real header line and random filler, assembled at run time,
 /// so no valid key or secret exists in the repository or the corpus.</para>
 /// <para>The output depends only on the seed: same seed, same bytes, same timestamps.</para>
-/// <para>The truth is meant to be unambiguous. Where the categories of the product allow two
-/// answers (a bank statement is <c>invoice</c> or <c>document</c> by the prompt), the category is
-/// <c>null</c> and only the markers are measured. Files inside a unit (project, program, game,
+/// <para>The truth is meant to be unambiguous. Where the categories of the prompt allow two
+/// answers (a password list or a shopping list is <c>document</c>, <c>review_needed</c> or
+/// <c>trash_candidate</c>), the category is <c>null</c> and only the markers are measured. Files inside a unit (project, program, game,
 /// dump) have no category, because units are not classified file by file. Verdict codes follow
 /// the rules of docs/architecture.md: a folder of uniform collections of one file type is
 /// <c>uniform</c>, a folder of units is <c>uniform</c>, everything inside a unit is <c>unit</c>.</para>
@@ -34,7 +34,9 @@ public static class SmallCorpusGenerator
     public const string Name = "small";
 
     /// <summary>Raise when the content or the truth changes, so stored runs of different corpora are not compared as equal.</summary>
-    public const int GeneratorVersion = 1;
+    /// <remarks>Version 2 (https://github.com/crack666/smart_file_organizer/issues/50): counter-samples for the
+    /// finance and private_message boundaries, categories of money, medical and scanned papers; see docs/evaluation.md.</remarks>
+    public const int GeneratorVersion = 2;
 
     public const int DefaultSeed = 36;
     public const string RootFolder = "tree";
@@ -98,8 +100,8 @@ public static class SmallCorpusGenerator
             "01.03. Gehalt Musterfirma        +2.310,00",
             "03.03. Miete                       -780,00",
             "12.03. Supermarkt                   -64,13",
-            "Neuer Saldo: 3.118,52 EUR"]), D(2024, 4, 1), null, [Finance],
-            "Category is invoice or document by the prompt; only the finance marker is measured.");
+            "Neuer Saldo: 3.118,52 EUR"]), D(2024, 4, 1), PersonalDocument, [Finance],
+            "Bank statement: a record about the person, not correspondence (version 2; was null in version 1).");
         b.File("Downloads/install.log", Text("2024-01-14 10:02:11 Installation started\n2024-01-14 10:02:40 Installation finished\n"),
             D(2024, 1, 14), null, None, "Log file; not classified (no document type).");
 
@@ -117,6 +119,13 @@ public static class SmallCorpusGenerator
             "Sehr geehrte Damen und Herren,\nhiermit kuendige ich meine Mitgliedschaft (Nr. 20931) zum naechstmoeglichen Termin.\n" +
             "Bitte bestaetigen Sie mir die Kuendigung schriftlich.\n\nMit freundlichen Gruessen\nMax Beispiel\n"),
             D(2024, 2, 27), Letter, None, "Formal letter to a company; not a private message.");
+        b.File("Desktop/Brief_an_Lisa.txt", Text(
+            "Max Beispiel\nMusterweg 2\n12345 Beispielstadt\n\nLisa Muster\nAm Bach 7\n54321 Nachbarort\n\n" +
+            "Liebe Lisa,\nseit du weggezogen bist, ist es hier ziemlich still. Mit der Trennung geht es mir inzwischen besser,\n" +
+            "auch wenn ich nachts oft wach liege. Danke, dass du am Telefon so lange zugehoert hast.\n" +
+            "Kommst du im Herbst vorbei? Ich wuerde mich sehr freuen.\n\nDein Max\n"),
+            D(2024, 3, 12), Letter, [PrivateMessage],
+            "Counter-sample of version 2: a personal letter laid out like a formal one (addresses on top); must stay private_message.");
         b.File("Desktop/Tresor.kdbx", Kdbx(b), D(2024, 5, 30), null, [Credentials], "Password store dummy (header and filler).");
         b.File("Desktop/vpn-zugang.pfx", Pfx(b), D(2022, 10, 4), null, [Keys], "Certificate with key, dummy.");
         b.File("Desktop/Steuer-Programm.lnk", Binary(b, [0x4C, 0x00, 0x00, 0x00], 420), D(2023, 2, 2), null, None, "Shortcut.");
@@ -159,17 +168,34 @@ public static class SmallCorpusGenerator
         b.Dir("Dokumente/Steuer 2022", Uniform, "Tax papers of one year.");
         b.File("Dokumente/Steuer 2022/Steuererklaerung_2022.pdf", MiniPdf.Text("Einkommensteuererklaerung 2022", [
             "Steuernummer 12/345/67890", "Einkuenfte aus nichtselbstaendiger Arbeit", "Werbungskosten: Fahrten zur Arbeit"]),
-            D(2023, 5, 14), null, [Finance], "Tax return; category ambiguous (personal_document or document).");
+            D(2023, 5, 14), PersonalDocument, [Finance], "Tax return: tax papers are a personal document (version 2; was null).");
         b.File("Dokumente/Steuer 2022/Lohnsteuerbescheinigung_2022.pdf", MiniPdf.Text("Ausdruck der elektronischen Lohnsteuerbescheinigung 2022", [
             "Arbeitgeber: Musterfirma GmbH", "Bruttoarbeitslohn: 33.720,00 EUR", "Einbehaltene Lohnsteuer: 4.912,00 EUR"]),
-            D(2023, 2, 10), null, [Finance], "Payslip-like tax paper; category ambiguous.");
+            D(2023, 2, 10), PersonalDocument, [Finance], "Tax certificate of the employer: tax papers are a personal document (version 2; was null).");
+        // Counter-samples of version 2 (https://github.com/crack666/smart_file_organizer/issues/50): money papers whose
+        // names no rule knows, so only the model can mark them; a too narrow finance boundary shows here.
+        b.Dir("Dokumente/Bank", Uniform, "Money papers of the person.");
+        b.File("Dokumente/Bank/Umsaetze_Girokonto_2024_05.pdf", MiniPdf.Text("Umsatzuebersicht Girokonto Mai 2024", [
+            "Beispielbank eG, IBAN DE00 0000 0000 0000 0000 00",
+            "02.05. Gutschrift Musterfirma Lohn    +2.310,00",
+            "04.05. Lastschrift Vermieterin          -780,00",
+            "17.05. Kartenzahlung Baumarkt            -38,90",
+            "Kontostand am 31.05.: 2.904,17 EUR"]), D(2024, 6, 1), PersonalDocument, [Finance],
+            "Bank statement whose name no rule knows; must stay finance, not be taken for an invoice.");
+        b.File("Dokumente/Bank/Verdienstnachweis_2023_05.pdf", MiniPdf.Text("Verdienstnachweis Mai 2023", [
+            "Musterfirma GmbH, Personalnummer 00417",
+            "Grundgehalt: 2.810,00 EUR",
+            "Lohnsteuer, Solidaritaetszuschlag, Sozialversicherung: -1.024,37 EUR",
+            "Auszahlungsbetrag: 1.785,63 EUR"]), D(2023, 5, 31), PersonalDocument, [Finance],
+            "Payslip whose name no rule knows; must stay finance.");
         b.Dir("Dokumente/Gesundheit", Uniform, "Medical papers.");
         b.File("Dokumente/Gesundheit/Arztbrief_Orthopaedie_2023.pdf", MiniPdf.Text("Arztbrief", [
             "Praxis fuer Orthopaedie Dr. Knie", "Diagnose: Reizung der Patellasehne rechts", "Empfehlung: Physiotherapie, 6 Termine"]),
-            D(2023, 10, 5), null, [Health], "Doctor letter; category ambiguous (letter or personal_document).");
+            D(2023, 10, 5), PersonalDocument, [Health],
+            "Doctor letter: a medical record about the person, not correspondence of the person (version 2; was null).");
         b.File("Dokumente/Gesundheit/Befund_Blutbild.pdf", MiniPdf.Text("Laborbefund", [
             "Labor Beispielstadt", "Haemoglobin 14,2 g/dl (Referenz 13,5-17,5)", "Leukozyten 6,1 /nl (Referenz 4,0-10,0)"]),
-            D(2023, 10, 2), null, [Health], "Lab finding; category ambiguous.");
+            D(2023, 10, 2), PersonalDocument, [Health], "Lab finding: a medical finding is a personal document (version 2; was null).");
         b.Dir("Dokumente/Persoenliches", Uniform, "Personal papers.");
         b.File("Dokumente/Persoenliches/Lebenslauf_2023.pdf", MiniPdf.Text("Lebenslauf", [
             "Max Beispiel, geboren 1990 in Beispielstadt", "2016-2023 Sachbearbeiter, Musterfirma GmbH",
@@ -179,8 +205,8 @@ public static class SmallCorpusGenerator
             "Zwischen Vermieterin Erika Muster und Mieter Max Beispiel", "Wohnung Musterweg 2, 2. OG links",
             "Kaltmiete 650,00 EUR, Nebenkosten 130,00 EUR", "Mietbeginn 01.04.2019"]),
             D(2019, 3, 12), PersonalDocument, None, "A contract is a personal document, not a letter.");
-        b.File("Dokumente/Persoenliches/Personalausweis_Scan.pdf", MiniPdf.Scan(IdCardScan(b)), D(2021, 1, 18), null, [Identity],
-            "Scan of an identity card; category ambiguous (document_scan or personal_document).");
+        b.File("Dokumente/Persoenliches/Personalausweis_Scan.pdf", MiniPdf.Scan(IdCardScan(b)), D(2021, 1, 18), DocumentScan, [Identity],
+            "Scan of an identity card: a PDF of a page image is a document scan, whatever the paper says (version 2; was null).");
         b.Dir("Dokumente/Briefe", Uniform, "Letters.");
         b.File("Dokumente/Briefe/Kuendigung_Handyvertrag.txt", Text(
             "Max Beispiel\nMusterweg 2\n12345 Beispielstadt\n\nMobilfunk Beispiel AG\n\nKuendigung Vertrag 0170-000000\n\n" +

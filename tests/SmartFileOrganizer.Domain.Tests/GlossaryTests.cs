@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using SmartFileOrganizer.Domain.Enums;
@@ -16,7 +17,7 @@ public class GlossaryTests
         File.ReadAllLines(Path.Combine(RepoRoot(), "docs", "glossary.md")));
 
     /// <summary>Enums whose codes come from their own value classes rather than the member attribute.</summary>
-    private static readonly Type[] OtherCodedEnums = [typeof(SensitiveMarker), typeof(ScanRole), typeof(ContentState)];
+    private static readonly Type[] OtherCodedEnums = [typeof(SensitiveMarker), typeof(ScanRole), typeof(ContentState), typeof(FileCategory)];
 
     public static TheoryData<string> CodedEnums()
     {
@@ -118,6 +119,9 @@ public class GlossaryTests
             return Enum.GetValues<ScanRole>().Select(r => r.ToValue()).ToHashSet();
         if (type == typeof(ContentState))
             return Enum.GetValues<ContentState>().Select(s => s.ToValue()).ToHashSet();
+        // Categories are written as their names in snake_case, in all CLI JSON and in the truth of the corpus.
+        if (type == typeof(FileCategory))
+            return Enum.GetNames<FileCategory>().Select(JsonNamingPolicy.SnakeCaseLower.ConvertName).ToHashSet();
 
         // VerdictCodes refuses an enum with a member that has no code attribute.
         var all = typeof(VerdictCodes).GetMethod(nameof(VerdictCodes.All))!.MakeGenericMethod(type);

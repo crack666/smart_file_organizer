@@ -88,8 +88,9 @@ public class FocusedRescanService
                 file.FullPath));
         }
 
-        // Inherit, or raise to mixed and judge the released files one by one.
-        if (await _sampling.ResolveDirectoryAsync(jobId, dir.Id, ct) == SampleState.Escalated)
+        // Inherit, or judge the released files one by one: raised to mixed, or confirmed without inheritance
+        // because the model found a marker the rules had missed.
+        if (await _sampling.ResolveDirectoryAsync(jobId, dir.Id, ct) is SampleState.Escalated or SampleState.Confirmed)
         {
             var released = (await _fileRepo.GetByDirectoryAsync(jobId, directoryPath, ct))
                 .Where(f => f.Status == FileNodeStatus.Discovered && DirectorySamplingService.IsEligible(f.FileType))

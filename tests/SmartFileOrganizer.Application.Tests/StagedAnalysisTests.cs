@@ -392,10 +392,13 @@ public class StagedAnalysisTests : IDisposable
     public async Task SmallUniformDirectory_IsJudgedCompletely_AndStillRaisedWhenItDisagrees()
     {
         var small = MakeTree("Klein");
-        for (var i = 1; i <= 8; i++) WriteFile(Path.Combine(small, $"doc{i}.pdf"));
+        for (var i = 1; i <= 4; i++) WriteFile(Path.Combine(small, $"doc{i}.pdf"));
+        for (var i = 5; i <= 8; i++) WriteFile(Path.Combine(small, $"img{i}.jpg"));
+        // Invoices against photos: no related kinds, half and half. (Invoices against letters are one purpose
+        // since issue 50: related document kinds do not deviate.)
         _ollama.Classify = input => new FileClassification
         {
-            Category = input.File.Name.CompareTo("doc5") < 0 ? FileCategory.Invoice : FileCategory.Letter,
+            Category = input.File.Name.EndsWith(".pdf") ? FileCategory.Invoice : FileCategory.Photo,
             Importance = Importance.Medium,
             Confidence = 0.9
         };
@@ -407,6 +410,129 @@ public class StagedAnalysisTests : IDisposable
         Assert.Equal(DirectoryVerdictKind.Mixed, (await _verdictRepo.GetByNodeIdAsync(dirId))!.Verdict);
         Assert.Equal(SampleState.Escalated, (await _sampleRepo.GetByNodeIdAsync(dirId))!.State);
         Assert.Equal(8, _ollama.ClassifyInputs.Count); // nothing judged twice after the escalation
+    }
+
+    // ------------------------------------------------------------------ issue 50: first measurement
+
+    /// <summary>
+    /// "Fertig, wenn" of issue 50: people file photos by occasion, and a phone clip of the same party is
+    /// part of it. Before, one video in six was 17 % off, above the 10 % limit, and the folder became mixed.
+    /// </summary>
+    [Fact]
+    public async Task FivePhotosAndOneVideoOfOneOccasion_StayUniform()
+    {
+        var party = MakeTree("Sommerfest 2022");
+        for (var i = 1; i <= 5; i++) WriteFile(Path.Combine(party, $"IMG_20220716_18{i:00}00.jpg"));
+        WriteFile(Path.Combine(party, "VID_20220716_183001.mp4"));
+        _ollama.Classify = input => input.File.Name.StartsWith("VID", StringComparison.Ordinal)
+            ? new FileClassification { Category = FileCategory.Video, Importance = Importance.High, Confidence = 0.9 }
+            : Photo();
+
+        var jobId = await RunAllAsync(party, _ => DirectoryVerdictKind.Uniform);
+        var dirId = await DirIdAsync(jobId, party);
+
+        var verdict = (await _verdictRepo.GetByNodeIdAsync(dirId))!;
+        Assert.Equal(DirectoryVerdictKind.Uniform, verdict.Verdict);
+        Assert.Null(verdict.EscalatedFrom);
+        var sample = (await _sampleRepo.GetByNodeIdAsync(dirId))!;
+        Assert.Equal(SampleState.Confirmed, sample.State);
+        Assert.Equal(FileCategory.Photo, sample.MajorityCategory);
+        Assert.Equal(0, sample.DeviatingCount);
+        // Every file keeps its own category; the video is not counted as a deviation, not turned into a photo.
+        var video = (await _fileRepo.GetByDirectoryAsync(jobId, party)).Single(f => f.Name.EndsWith(".mp4"));
+        Assert.Equal(FileCategory.Video, video.Classification!.Category);
+    }
+
+    /// <summary>
+    /// The real model gave a doctor letter "document" and a lab finding "personal_document": no majority, so the
+    /// folder became mixed. Related document kinds are one purpose, and a folder of two or three files keeps the
+    /// verdict of its pre-assessment anyway, because every file is judged on its own.
+    /// </summary>
+    [Fact]
+    public async Task TwoMedicalPapersOfDifferentDocumentKinds_StayUniform()
+    {
+        var health = MakeTree("Gesundheit");
+        WriteFile(Path.Combine(health, "Arztbrief.pdf"));
+        WriteFile(Path.Combine(health, "Laborwerte.pdf"));
+        _ollama.Classify = input => new FileClassification
+        {
+            Category = input.File.Name.StartsWith("Arzt", StringComparison.Ordinal) ? FileCategory.Document : FileCategory.PersonalDocument,
+            Importance = Importance.High,
+            Confidence = 0.9
+        };
+
+        var jobId = await RunAllAsync(health, _ => DirectoryVerdictKind.Uniform);
+
+        Assert.Equal(DirectoryVerdictKind.Uniform, (await _verdictRepo.GetByNodeIdAsync(await DirIdAsync(jobId, health)))!.Verdict);
+    }
+
+    /// <summary>
+    /// A folder of two or three files has no majority worth the name: every file is judged on its own anyway, so the
+    /// sample does not overrule the pre-assessment, which saw the whole file list ("Bewerbung": CV and photo).
+    /// </summary>
+    [Fact]
+    public async Task ThreeFilesOfDifferentKinds_KeepTheVerdictOfThePreAssessment()
+    {
+        var application = MakeTree("Bewerbung 2016");
+        WriteFile(Path.Combine(application, "Lebenslauf.pdf"));
+        WriteFile(Path.Combine(application, "Anschreiben.pdf"));
+        WriteFile(Path.Combine(application, "bewerbungsfoto.jpg"));
+        _ollama.Classify = input => input.File.Name.EndsWith(".jpg")
+            ? Photo()
+            : new FileClassification { Category = FileCategory.PersonalDocument, Importance = Importance.High, Confidence = 0.9 };
+
+        var jobId = await RunAllAsync(application, _ => DirectoryVerdictKind.Uniform);
+        var dirId = await DirIdAsync(jobId, application);
+
+        Assert.Equal(DirectoryVerdictKind.Uniform, (await _verdictRepo.GetByNodeIdAsync(dirId))!.Verdict);
+        var sample = (await _sampleRepo.GetByNodeIdAsync(dirId))!;
+        Assert.Equal(SampleState.Confirmed, sample.State);
+        Assert.Contains("keeps the verdict", sample.Reason);
+        Assert.Equal(3, _ollama.FirstLooks.Count);
+        Assert.All(await _fileRepo.GetByDirectoryAsync(jobId, application), f => Assert.Equal(ResultOrigin.Model, f.Classification!.Origin));
+    }
+
+    /// <summary>
+    /// The model marks a file the rules missed. Before, that raised the whole folder to mixed, so a folder of
+    /// letters with one private letter was never uniform. Now the file carries its marker and the folder stays what
+    /// it is; because other files may hold more of the same, none of them inherits: each is judged on its own.
+    /// </summary>
+    [Fact]
+    public async Task MarkerFoundByTheModel_MarksTheFile_KeepsTheVerdict_AndNothingInherits()
+    {
+        var trip = WritePhotos(MakeTree("Ausflug"), 60);
+        _ollama.Answer = _ => DirectoryVerdictKind.Uniform;
+        var jobId = await ScanAsync(trip);
+        await Phase1Async(jobId);
+        await Sampling().PlanAsync(jobId);
+        var dirId = await DirIdAsync(jobId, trip);
+        var marked = (await _sampleRepo.GetByNodeIdAsync(dirId))!.Members[2].Name;
+
+        _ollama.Classify = input =>
+        {
+            var c = Photo();
+            if (input.File.Name == marked) c.SensitiveMarkers = SensitiveMarker.Identity;
+            return c;
+        };
+        await Classification().RunAsync(jobId);
+
+        var verdict = (await _verdictRepo.GetByNodeIdAsync(dirId))!;
+        Assert.Equal(DirectoryVerdictKind.Uniform, verdict.Verdict);
+        Assert.Null(verdict.EscalatedFrom);
+
+        var sample = (await _sampleRepo.GetByNodeIdAsync(dirId))!;
+        Assert.Equal(SampleState.Confirmed, sample.State);
+        Assert.Equal(0, sample.InheritedCount);
+        Assert.Contains("judged one by one", sample.Reason);
+
+        var files = await _fileRepo.GetByDirectoryAsync(jobId, trip);
+        Assert.All(files, f =>
+        {
+            Assert.Equal(FileNodeStatus.AiAnalyzed, f.Status);
+            Assert.Equal(ResultOrigin.Model, f.Classification!.Origin);
+        });
+        Assert.Equal(60, _ollama.ClassifiedNames.Distinct().Count());
+        Assert.Equal(SensitiveMarker.Identity, files.Single(f => f.Name == marked).Classification!.SensitiveMarkers);
     }
 
     [Fact]
@@ -541,18 +667,82 @@ public class StagedAnalysisTests : IDisposable
     }
 
     [Fact]
-    public void Evaluate_ModelFindsSensitiveContentInARandomMember_Escalates()
+    public void Evaluate_ModelFindsSensitiveContentInARandomMember_ConfirmsWithoutInheritance()
     {
         var items = Enumerable.Repeat(M(FileCategory.Photo), 14)
             .Append(M(FileCategory.Photo, SampleRole.Stratum, SensitiveMarker.Identity)).ToArray();
         var (members, results) = Sample(items);
         var e = DirectorySampler.Evaluate(members, results, new DirectoryAnalysisOptions());
-        Assert.False(e.Confirmed);
+        Assert.True(e.Confirmed);
+        Assert.False(e.Inherit);
         Assert.Contains("sensitive", e.Reason);
 
-        // A member drawn because the rules marked it is expected to be sensitive.
+        // A member drawn because the rules marked it is expected to be sensitive: the others may inherit.
         members[^1].Role = SampleRole.Sensitive;
-        Assert.True(DirectorySampler.Evaluate(members, results, new DirectoryAnalysisOptions()).Confirmed);
+        var expected = DirectorySampler.Evaluate(members, results, new DirectoryAnalysisOptions());
+        Assert.True(expected.Confirmed);
+        Assert.True(expected.Inherit);
+    }
+
+    [Theory]
+    [InlineData(new[] { FileCategory.Photo, FileCategory.Photo, FileCategory.Photo, FileCategory.Photo, FileCategory.Video, FileCategory.Video })]
+    [InlineData(new[] { FileCategory.Invoice, FileCategory.Invoice, FileCategory.Letter, FileCategory.PersonalDocument, FileCategory.Document, FileCategory.DocumentScan })]
+    public void Evaluate_RelatedCategories_AreOnePurpose(FileCategory[] categories)
+    {
+        var (members, results) = Sample(categories.Select(c => M(c)).ToArray());
+        var e = DirectorySampler.Evaluate(members, results, new DirectoryAnalysisOptions());
+        Assert.True(e.Confirmed, e.Reason);
+        Assert.Equal(0, e.Deviating);
+        // The most frequent single category is what the other files inherit.
+        Assert.Equal(categories[0], e.Majority);
+    }
+
+    [Fact]
+    public void Evaluate_UnrelatedCategories_StillDeviate()
+    {
+        // A screenshot is no part of an occasion, a photo no part of a document folder.
+        var items = Enumerable.Repeat(M(FileCategory.Photo), 13).Append(M(FileCategory.Screenshot)).Append(M(FileCategory.Invoice)).ToArray();
+        var (members, results) = Sample(items);
+        var e = DirectorySampler.Evaluate(members, results, new DirectoryAnalysisOptions());
+        Assert.False(e.Confirmed); // 2 of 15
+        Assert.Equal(2, e.Deviating);
+    }
+
+    [Theory]
+    [InlineData(4, 1, true)]    // one deviation never tips a sample on its own
+    [InlineData(6, 1, true)]
+    [InlineData(6, 2, false)]
+    [InlineData(15, 1, true)]   // as before: one in fifteen
+    [InlineData(15, 2, false)]
+    [InlineData(20, 2, true)]   // 10 % of twenty
+    [InlineData(20, 3, false)]
+    public void Evaluate_ToleratesAtLeastOneDeviation(int size, int deviating, bool confirmed)
+    {
+        var items = Enumerable.Repeat(M(FileCategory.Photo), size - deviating)
+            .Concat(Enumerable.Repeat(M(FileCategory.Screenshot), deviating)).ToArray();
+        var (members, results) = Sample(items);
+        Assert.Equal(confirmed, DirectorySampler.Evaluate(members, results, new DirectoryAnalysisOptions()).Confirmed);
+    }
+
+    [Fact]
+    public void Evaluate_NoTolerance_WhenTheLimitIsZero()
+    {
+        var (members, results) = Sample(M(FileCategory.Photo), M(FileCategory.Photo), M(FileCategory.Photo), M(FileCategory.Screenshot));
+        Assert.False(DirectorySampler.Evaluate(members, results, new DirectoryAnalysisOptions { MaxDeviationShare = 0 }).Confirmed);
+    }
+
+    [Fact]
+    public void Evaluate_SmallDirectory_KeepsItsVerdict_EvenWithoutMajority()
+    {
+        var (members, results) = Sample(M(FileCategory.Photo), M(FileCategory.Invoice));
+        var options = new DirectoryAnalysisOptions();
+        Assert.False(DirectorySampler.Evaluate(members, results, options).Confirmed);   // size unknown: the usual rules
+
+        var small = DirectorySampler.Evaluate(members, results, options, eligibleCount: 2);
+        Assert.True(small.Confirmed);
+        Assert.Contains("keeps the verdict", small.Reason);
+
+        Assert.False(DirectorySampler.Evaluate(members, results, new DirectoryAnalysisOptions { SmallDirectoryMaxFiles = 1 }, eligibleCount: 2).Confirmed);
     }
 
     /// <summary>
