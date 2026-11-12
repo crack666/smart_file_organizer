@@ -440,6 +440,34 @@ public class ReadCommandTests : IDisposable
         Assert.Contains("1-2 of 6 (next: --offset 2)", run.Stdout);
     }
 
+    /// <summary>JSON carries the code; the text output shows the word in the language of the settings.</summary>
+    [Fact]
+    public async Task TextOutput_ShowsWordsInTheSettingsLanguage_JsonKeepsTheCodes()
+    {
+        var job = (await PrepareAsync()).ToString();
+
+        var english = (await SfoAsync("dirs", job)).Stdout;
+        Assert.Contains("mixed", english);
+        Assert.Contains("review", english);
+        Assert.Contains("[credentials]", (await SfoAsync("files", job, "--sensitive", "yes")).Stdout);
+
+        File.WriteAllText(Path.Combine(Path.GetDirectoryName(_dbPath)!, "settings.json"),
+            """{ "Ollama": { "SummaryLanguage": "Deutsch" } }""");
+
+        var german = (await SfoAsync("dirs", job)).Stdout;
+        Assert.Contains("gemischt", german);
+        Assert.Contains("prüfen", german);
+        Assert.Contains("behalten", german);
+        Assert.Contains("[Zugangsdaten]", (await SfoAsync("files", job, "--sensitive", "yes")).Stdout);
+        Assert.DoesNotContain(" mixed ", german);
+        Assert.Contains("verdict     gemischt (Modell)", (await SfoAsync("show", job, "docs")).Stdout);
+
+        var json = (await OkAsync("dirs", job, "--verdict", "mixed")).Result().GetProperty("items")[0];
+        Assert.Equal("mixed", json.GetProperty("verdict").GetString());
+        Assert.Equal("review", json.GetProperty("retention").GetString());
+        Assert.Equal("model", json.GetProperty("verdict_source").GetString());
+    }
+
     // ------------------------------------------------------------------ size
 
     /// <summary>Fertig-wenn of issue 6: the summary of a 10,000-file job stays under 20 kB of JSON.</summary>

@@ -2,6 +2,7 @@ using System.CommandLine;
 using System.Text;
 using Microsoft.Extensions.DependencyInjection;
 using SmartFileOrganizer.Application.Services;
+using SmartFileOrganizer.Domain.Enums;
 
 namespace SmartFileOrganizer.Cli.Commands;
 
@@ -83,17 +84,18 @@ public static class DirsCommand
             }
 
             var result = PageView<DirectoryView>.From(query.JobId, page, DirectoryView.From);
-            return Contract.CommandOutcome.Success(result, () => Render(result, page));
+            var language = ReadFormat.Language(services);
+            return Contract.CommandOutcome.Success(result, () => Render(result, page, language));
         });
 
         return command;
     }
 
-    private static string Render(PageView<DirectoryView> result, ReadPage<DirectoryItem> page)
+    private static string Render(PageView<DirectoryView> result, ReadPage<DirectoryItem> page, DisplayLanguage language)
     {
         var sb = new StringBuilder();
         foreach (var d in result.Items)
-            sb.AppendLine(d.ToLine());
+            sb.AppendLine(d.ToLine(language));
         sb.Append(ReadFormat.PageFooter(page));
         return sb.ToString();
     }

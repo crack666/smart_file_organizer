@@ -6,6 +6,8 @@ using SmartFileOrganizer.Application.Sensitivity;
 using SmartFileOrganizer.Application.Services;
 using SmartFileOrganizer.Cli.Contract;
 using SmartFileOrganizer.Domain.Enums;
+using SmartFileOrganizer.Infrastructure.Ollama;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace SmartFileOrganizer.Cli.Commands;
 
@@ -105,6 +107,17 @@ public sealed class ReadOptions
 /// <summary>Parsing and formatting helpers of the read commands.</summary>
 public static class ReadFormat
 {
+    /// <summary>
+    /// Language of the words in the text output: the summary language of the settings. JSON always
+    /// carries the codes; the words come from <see cref="CodeLabels"/>.
+    /// </summary>
+    public static DisplayLanguage Language(IServiceProvider services) =>
+        CodeLabels.LanguageFor(services.GetRequiredService<OllamaOptions>().SummaryLanguage);
+
+    /// <summary>Marker codes as words, comma-separated, for a text line.</summary>
+    public static string Markers(IReadOnlyList<string> codes, DisplayLanguage language) =>
+        string.Join(',', codes.Select(c => CodeLabels.LabelOfCode<SensitiveMarker>(c, language)));
+
     /// <summary>Enum value names as the contract writes them: <c>snake_case</c>.</summary>
     public static string? Snake(string? value) =>
         value is null ? null : JsonNamingPolicy.SnakeCaseLower.ConvertName(value);
@@ -227,10 +240,11 @@ public sealed record DirectoryView(
         d.Verdict ?? (d.VerdictError is not null ? ReadFilterCodes.Error : null), d.VerdictSource, d.Retention,
         d.SensitiveFiles, d.Sensitive, d.SensitiveRule, d.SensitiveDirs, d.Purpose, d.Summary, d.TextWithheld);
 
-    public string ToLine() =>
-        $"{ReadFormat.Size(SizeBytes),10}  {Files,7} files  {Verdict ?? "-",-11} {Retention ?? "-",-11}"
+    public string ToLine(DisplayLanguage language) =>
+        $"{ReadFormat.Size(SizeBytes),10}  {Files,7} files  {CodeLabels.LabelOfCode<DirectoryVerdictKind>(Verdict, language) ?? "-",-11} "
+        + $"{CodeLabels.LabelOfCode<RetentionValue>(Retention, language) ?? "-",-11}"
         + (SensitiveFiles > 0 ? $" [{SensitiveFiles} sensitive]" : string.Empty)
-        + (Sensitive.Count > 0 ? $" [{string.Join(',', Sensitive)}]" : string.Empty)
+        + (Sensitive.Count > 0 ? $" [{ReadFormat.Markers(Sensitive, language)}]" : string.Empty)
         + $"  {Path}";
 }
 
@@ -259,8 +273,8 @@ public sealed record FileListView(
             r.Sensitive, r.Protected, f.DirectoryVerdict, r.Certainty);
     }
 
-    public string ToLine() =>
+    public string ToLine(DisplayLanguage language) =>
         $"{Category ?? "-",-18} {(Confidence is { } c ? c.ToString("0.00", CultureInfo.InvariantCulture) : "-"),5}  {Certainty ?? "-",-9} {Status,-12}"
-        + (Sensitive.Count > 0 ? $" [{string.Join(',', Sensitive)}]" : string.Empty)
+        + (Sensitive.Count > 0 ? $" [{ReadFormat.Markers(Sensitive, language)}]" : string.Empty)
         + $"  {Path}";
 }

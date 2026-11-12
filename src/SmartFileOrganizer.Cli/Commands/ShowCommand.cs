@@ -148,21 +148,25 @@ public static class ShowCommand
             var result = detail.File is not null
                 ? new ShowResult(jobId, "file", null, FileDetailView.From(detail.File))
                 : new ShowResult(jobId, "directory", DirectoryDetailView.From(detail.Directory!), null);
-            return CommandOutcome.Success(result, () => Render(result));
+            var language = ReadFormat.Language(services);
+            return CommandOutcome.Success(result, () => Render(result, language));
         });
 
         return command;
     }
 
-    private static string Render(ShowResult result)
+    private static string Render(ShowResult result, DisplayLanguage language)
     {
+        string? Verdict(string? code) => CodeLabels.LabelOfCode<DirectoryVerdictKind>(code, language);
+        string? Retention(string? code) => CodeLabels.LabelOfCode<RetentionValue>(code, language);
+
         var sb = new StringBuilder();
         if (result.File is { } f)
         {
             sb.AppendLine(f.Path);
             Line(sb, "type", $"{f.FileType}, {ReadFormat.Size(f.SizeBytes)}");
             Line(sb, "status", f.Status);
-            Line(sb, "category", f.Category is null ? null : $"{f.Category} ({f.CategorySource})");
+            Line(sb, "category", f.Category is null ? null : $"{f.Category} ({CodeLabels.LabelOfCode<ResultOrigin>(f.CategorySource, language)})");
             Line(sb, "confidence", f.Confidence?.ToString("0.00", CultureInfo.InvariantCulture));
             Line(sb, "certainty", f.Certainty);
             Line(sb, "attempts", f.Attempts is > 1 ? f.Attempts.Value.ToString(CultureInfo.InvariantCulture) : null);
@@ -175,22 +179,23 @@ public static class ShowCommand
             Line(sb, "importance", f.Importance);
             Line(sb, "summary", f.Summary);
             Line(sb, "target", f.SuggestedTarget);
-            Line(sb, "sensitive", f.Sensitive.Count == 0 ? null : $"{string.Join(", ", f.Sensitive)} ({f.SensitiveRule})");
-            Line(sb, "directory", f.DirVerdict);
+            Line(sb, "sensitive", f.Sensitive.Count == 0 ? null : $"{CodeLabels.Markers(f.Sensitive, language)} ({f.SensitiveRule})");
+            Line(sb, "directory", Verdict(f.DirVerdict));
             Line(sb, "error", f.Error);
         }
         else if (result.Directory is { } d)
         {
             sb.AppendLine(d.Path);
             Line(sb, "size", $"{ReadFormat.Size(d.SizeBytes)}, {d.Files} files ({d.DirectFiles} direct), {d.Subdirs} subdirectories");
-            Line(sb, "verdict", d.Verdict is null ? null : $"{d.Verdict} ({d.VerdictSource}{(d.VerdictRule is null ? "" : ": " + d.VerdictRule)})");
-            Line(sb, "retention", d.Retention);
+            Line(sb, "verdict", d.Verdict is null ? null
+                : $"{Verdict(d.Verdict)} ({CodeLabels.LabelOfCode<VerdictSource>(d.VerdictSource, language)}{(d.VerdictRule is null ? "" : ": " + d.VerdictRule)})");
+            Line(sb, "retention", Retention(d.Retention));
             Line(sb, "purpose", d.Purpose);
             Line(sb, "reason", d.Reason);
             Line(sb, "unit", d.UnitDirectory);
             Line(sb, "summary", d.Summary);
             Line(sb, "sensitive", d.SensitiveFiles > 0 ? $"{d.SensitiveFiles} marked files" : null);
-            Line(sb, "marked", d.Sensitive.Count > 0 ? $"{string.Join(", ", d.Sensitive)} ({d.SensitiveRule})" : null);
+            Line(sb, "marked", d.Sensitive.Count > 0 ? $"{CodeLabels.Markers(d.Sensitive, language)} ({d.SensitiveRule})" : null);
             Line(sb, "error", d.VerdictError ?? d.SummaryError);
         }
         return sb.ToString().TrimEnd();

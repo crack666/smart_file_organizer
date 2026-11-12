@@ -3,6 +3,7 @@ using System.Text;
 using Microsoft.Extensions.DependencyInjection;
 using SmartFileOrganizer.Application.Services;
 using SmartFileOrganizer.Cli.Contract;
+using SmartFileOrganizer.Domain.Enums;
 using SmartFileOrganizer.Domain.Models;
 
 namespace SmartFileOrganizer.Cli.Commands;
@@ -102,13 +103,14 @@ public static class SummaryCommand
                 await services.GetRequiredService<BundleService>().GetOverviewAsync(summary.Job.Id, ct) is { } o
                     ? new BundleStatsView(o.BuiltAt, o.Stats.DumpCount, o.Stats.BundleCount, o.Stats.UnbundledFiles, o.Stats.Dumps, o.Stats.WithoutDumps)
                     : null);
-            return CommandOutcome.Success(result, () => Render(result));
+            var language = ReadFormat.Language(services);
+            return CommandOutcome.Success(result, () => Render(result, language));
         });
 
         return command;
     }
 
-    private static string Render(SummaryResult r)
+    private static string Render(SummaryResult r, DisplayLanguage language)
     {
         var sb = new StringBuilder();
         sb.AppendLine(r.Job.ToLine());
@@ -118,9 +120,9 @@ public static class SummaryCommand
         Counts(sb, "categories", r.ByCategory);
         Counts(sb, "types", r.ByFileType);
         Counts(sb, "status", r.ByStatus);
-        Counts(sb, "verdicts", r.DirectoriesByVerdict);
-        Counts(sb, "retention", r.DirectoriesByRetention);
-        Counts(sb, "sensitive", r.BySensitiveMarker);
+        Counts(sb, "verdicts", r.DirectoriesByVerdict, c => CodeLabels.LabelOfCode<DirectoryVerdictKind>(c, language)!);
+        Counts(sb, "retention", r.DirectoriesByRetention, c => CodeLabels.LabelOfCode<RetentionValue>(c, language)!);
+        Counts(sb, "sensitive", r.BySensitiveMarker, c => CodeLabels.LabelOfCode<SensitiveMarker>(c, language)!);
         if (r.Bundles is { } b)
         {
             sb.AppendLine($"  dumps       {b.DumpCount}: {BundlesCommand.Line(b.Dumps)}");
@@ -130,16 +132,16 @@ public static class SummaryCommand
         {
             sb.AppendLine("  largest directories:");
             foreach (var d in r.LargestDirectories)
-                sb.AppendLine($"  {ReadFormat.Size(d.SizeBytes),10}  {d.Files,7} files  {d.Verdict,-11} {d.Retention ?? "-",-11}"
+                sb.AppendLine($"  {ReadFormat.Size(d.SizeBytes),10}  {d.Files,7} files  {CodeLabels.LabelOfCode<DirectoryVerdictKind>(d.Verdict, language),-11} {CodeLabels.LabelOfCode<RetentionValue>(d.Retention, language) ?? "-",-11}"
                               + (d.SensitiveFiles > 0 ? $" [{d.SensitiveFiles} sensitive]" : string.Empty)
                               + $"  {d.RelativePath}");
         }
         return sb.ToString().TrimEnd();
     }
 
-    private static void Counts(StringBuilder sb, string label, IReadOnlyDictionary<string, long> counts)
+    private static void Counts(StringBuilder sb, string label, IReadOnlyDictionary<string, long> counts, Func<string, string>? word = null)
     {
         if (counts.Count > 0)
-            sb.AppendLine($"  {label,-11} {string.Join(", ", counts.Select(c => $"{ReadFormat.Snake(c.Key)} {c.Value}"))}");
+            sb.AppendLine($"  {label,-11} {string.Join(", ", counts.Select(c => $"{(word is null ? ReadFormat.Snake(c.Key) : word(c.Key))} {c.Value}"))}");
     }
 }
