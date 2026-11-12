@@ -159,9 +159,7 @@ These codes are fixed by the decision table but no code uses them yet.
 
 | Group | Codes |
 |---|---|
-| Kind of a plan action | `move`, `copy`, `quarantine`, `delete_source`, `leave` |
 | State of a plan action | `proposed`, `approved`, `rejected`, `executed`, `failed`, `undone` |
-| Findings | `not_backed_up`, `in_noise`, `misplaced`, `sensitive`, `duplicate` |
 
 ## Staged analysis
 
@@ -475,9 +473,63 @@ These codes are fixed by the decision table but no code uses them yet.
 | Code | Meaning |
 |---|---|
 | `file_category` | A person set another category for a file than the model. |
+| `finding` | A finding was reported wrong (`sfo findings wrong`); `observed` is its kind, `expected` is `none`. |
 
 ### Origin of a test case (`EvalCaseOrigin`)
 
 | Code | Meaning |
 |---|---|
 | `review_override` | A manual override in the review. |
+| `finding_reported_wrong` | A person or agent reported a finding wrong. |
+
+## Findings
+
+The short list of hints a job ends in (see [findings.md](findings.md)).
+
+### Kind of a finding (`FindingKind`)
+
+| Code | Meaning |
+|---|---|
+| `not_backed_up` | Files worth keeping whose content is not in the library. Needs a comparison with a library. |
+| `in_noise` | Files worth keeping in a place without value: app data of a device copy, a program folder, a folder judged mixed or disposable. |
+| `misplaced` | Files whose kind does not fit the purpose of their folder; uncertain at most until targets are checked by content. |
+| `sensitive` | Files or skipped folders marked sensitive. Path and marker only, never content; always decided one by one. |
+| `duplicate` | Files with identical content (same full SHA-256) at several places of the source. |
+
+### State of a finding (`FindingState`)
+
+| Code | Meaning |
+|---|---|
+| `open` | Not decided yet. Not stored: no row means open. |
+| `accepted` | Taken over; the plan turns it into an action. |
+| `rejected` | Not wanted; not listed again. |
+| `wrong` | The finding itself is wrong; not listed again and kept as a test case. |
+
+### Kind of a plan action (`PlanActionKind`)
+
+Recommended by every finding, executed by nothing yet.
+
+| Code | Meaning |
+|---|---|
+| `move` | Copy to the target, verify, then remove the original. |
+| `copy` | Copy to the target; the original stays. Never recommended for documents. |
+| `quarantine` | Move to a quarantine folder from which it can be restored. |
+| `delete_source` | Remove the original, because the same content is already in the library. |
+| `leave` | Leave it where it is. Always the recommendation for sensitive files. |
+
+### Content check of a target (`TargetContentCheck`)
+
+| Code | Meaning |
+|---|---|
+| `not_checked` | Not compared: the target rests on period, names and file types. Every target today. |
+| `fits` | The content of the unit fits what the target holds. |
+| `contradicts` | The content contradicts the target; the target is dropped. |
+| `unclear` | Compared, without a clear answer. |
+
+### Coverage of a kind of finding (`FindingCoverage`)
+
+| Code | Meaning |
+|---|---|
+| `complete` | Every step the kind needs has run. |
+| `partial` | Computed, but a step that sharpens it is missing; the note says which. |
+| `not_computed` | Not computed: a step it needs is missing, or there is no library. |

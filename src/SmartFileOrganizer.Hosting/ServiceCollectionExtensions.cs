@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using SmartFileOrganizer.Application.Library;
 using SmartFileOrganizer.Application.Bundles;
 using SmartFileOrganizer.Application.Evaluation;
+using SmartFileOrganizer.Application.Findings;
 using SmartFileOrganizer.Application.Services;
 using SmartFileOrganizer.Domain.Interfaces;
 using SmartFileOrganizer.Infrastructure;
@@ -191,6 +192,14 @@ public static class ServiceCollectionExtensions
             return match;
         });
         services.AddSingleton<LibraryTargetService>();
+
+        // Findings (https://github.com/crack666/smart_file_organizer/issues/26): computed from stored data, only
+        // decisions are stored. The advisor is the seam for the content check of target folders.
+        services.AddSingleton<IFindingDecisionRepository, FindingDecisionRepository>();
+        services.AddSingleton(sp =>
+            sp.GetRequiredService<IConfiguration>().GetSection("Findings").Get<FindingOptions>() ?? new FindingOptions());
+        services.AddSingleton<IFindingTargetAdvisor, LibraryFindingTargetAdvisor>();
+        services.AddSingleton<FindingService>();
 
         return services;
     }

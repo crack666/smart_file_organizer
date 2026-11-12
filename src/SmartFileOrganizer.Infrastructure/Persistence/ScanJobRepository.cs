@@ -94,7 +94,8 @@ public class ScanJobRepository : IScanJobRepository
             DELETE FROM ai_results          WHERE file_node_id IN (SELECT id FROM file_nodes WHERE job_id = @id);
             DELETE FROM ai_directory_results WHERE directory_node_id IN (SELECT id FROM directory_nodes WHERE job_id = @id);
             DELETE FROM library_advice      WHERE job_id = @id;
-            DELETE FROM file_nodes          WHERE job_id = @id;
+            DELETE FROM finding_decisions   WHERE job_id = @id;
+            DELETE FROM file_nodes         WHERE job_id = @id;
             DELETE FROM directory_nodes     WHERE job_id = @id;
             DELETE FROM scan_jobs           WHERE id = @id;
             """;

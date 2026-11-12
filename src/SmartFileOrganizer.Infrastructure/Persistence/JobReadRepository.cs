@@ -19,6 +19,7 @@ public class JobReadRepository : IJobReadRepository
                a.analyzed_at AS ai_analyzed_at, {0} AS ai_raw_response, a.error AS ai_error,
                a.is_ai_result AS ai_is_ai_result, a.sensitive_markers AS ai_sensitive_markers,
                a.certainty AS ai_certainty, a.attempts AS ai_attempts, a.previous_error AS ai_previous_error,
+               a.origin AS ai_origin, a.keep_hint AS ai_keep_hint,
                o.id AS ovr_id, o.overridden_category AS ovr_category, o.overridden_target AS ovr_target,
                o.note AS ovr_note, o.overridden_at AS ovr_at,
                CASE WHEN dv.id IS NULL THEN NULL WHEN dv.verdict IS NULL THEN 'error' ELSE dv.verdict END AS dir_verdict,
@@ -46,7 +47,7 @@ public class JobReadRepository : IJobReadRepository
             SELECT d.id, d.full_path, d.name, d.parent_path, d.relative_path, d.depth, d.dir_status,
                    d.subdir_count, d.sensitive_markers, d.sensitive_rule,
                    dv.verdict, dv.source AS verdict_source, dv.rule AS verdict_rule, dv.retention,
-                   dv.purpose, dv.reason, dv.error AS verdict_error,
+                   dv.purpose, dv.reason, dv.error AS verdict_error, dv.escalated_from,
                    s.summary AS ai_summary, s.error AS ai_summary_error,
                    s.model_used AS ai_summary_model, s.marked_inputs AS ai_summary_marked_inputs
             FROM directory_nodes d
@@ -182,6 +183,8 @@ public class JobReadRepository : IJobReadRepository
         public string? AiCertainty { get; set; }
         public int? AiAttempts { get; set; }
         public string? AiPreviousError { get; set; }
+        public string? AiOrigin { get; set; }
+        public string? AiKeepHint { get; set; }
 
         public long? OvrId { get; set; }
         public int OvrCategory { get; set; }
@@ -234,7 +237,9 @@ public class JobReadRepository : IJobReadRepository
                     SensitiveMarkers = SensitiveMarkerNames.Parse(AiSensitiveMarkers),
                     Certainty = VerdictCodes.ParseNullable<ResultCertainty>(AiCertainty),
                     Attempts = AiAttempts ?? 1,
-                    PreviousError = AiPreviousError
+                    PreviousError = AiPreviousError,
+                    Origin = VerdictCodes.ParseNullable<ResultOrigin>(AiOrigin),
+                    KeepHint = VerdictCodes.ParseNullable<KeepHint>(AiKeepHint)
                 };
             }
 

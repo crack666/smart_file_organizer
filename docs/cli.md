@@ -615,6 +615,8 @@ sfo summary 7 --json
   "unbundled_files", "dumps": {...}, "without_dumps": {...} }`, each part with `directories`,
   `empty_directories`, `files`, `total_bytes` and `by_file_type`. The other numbers of the summary
   include dumps.
+- `findings`: counts of [`sfo findings`](#sfo-findings-job): `{ "listed", "sure", "unsure", "by_kind",
+  "by_certainty", "by_state", "missing_steps" }` (listed are open and accepted findings); `null` for a library.
 
 ### `sfo dirs <job>`
 
@@ -1002,6 +1004,77 @@ One page of bundles (paging as in [Lists and paging](#lists-and-paging)): the to
 `{ "job_id", "bundle": {...}, "children": [ {...} ] }` with the fields of `list`. The files:
 `sfo files <job> --bundle <bundle>`. Errors: `job_not_found` (1), `bundle_not_found` (1).
 
+## Findings
+
+The short list a job ends in (https://github.com/crack666/smart_file_organizer/issues/26). Rules, certainty,
+ranking and thresholds: [architecture.md, Findings flow](architecture.md#findings-flow). No model call, no
+scanned file opened; decisions change only their row.
+
+### `sfo findings <job>`
+
+| Option | Meaning |
+|---|---|
+| `--summary` | One page: counts per kind, certainty and state, coverage, missing steps and the first findings. Stays under 20 kB for a 10,000-file job. |
+| `--top <n>` | With `--summary`: findings listed, 0 to 20, default 10. |
+| `--kind <code>` | `not_backed_up`, `in_noise`, `misplaced`, `sensitive`, `duplicate`. Repeatable. |
+| `--under <path>` | Only findings about files or folders at or below this folder (full, or relative to the job root). |
+| `--min-certainty <code>` | `certain`, `likely`, `uncertain`, `review`: only findings at least this certain. |
+| `--state <code>` | `open`, `accepted`, `rejected`, `wrong`. Repeatable. Default: open and accepted. |
+| `--limit`, `--offset` | Paging as in every list. |
+
+```json
+{
+  "job_id": 1, "total": 12, "limit": 200, "offset": 0, "next_offset": null,
+  "items": [
+    { "rank": 1, "key": "not_backed_up-880444df56", "kind": "not_backed_up", "certainty": "likely",
+      "section": "sure", "state": "open",
+      "title": "300 files worth keeping, not in the library: loose files in Neuer Ordner",
+      "reason": "300 files of the 300 in Neuer Ordner are worth keeping by the model, and the comparison with library job 2 on 2026-11-12 found no file with the same content.",
+      "path": "...", "relative_path": "Neuer Ordner", "bundle_id": null, "bundle_kind": null,
+      "files": 300, "bytes": 61200, "by_file_type": { "image": 300 },
+      "period": { "from": "2018-08-05T10:00:00", "to": "2018-08-05T14:59:00", "time_source": "file_name" },
+      "comparison": { "new": 300 }, "markers": [], "sensitive_rules": [],
+      "action": { "kind": "move", "reason": "...", "single_decision": false },
+      "target": null, "duplicates": null,
+      "examples": [ "Neuer Ordner/IMG_20180805_100000.jpg", "..." ], "notes": [ "..." ],
+      "decided_by": null, "decided_at": null, "decision_note": null }
+  ],
+  "inputs": { "files", "files_judged", "files_pending", "directories", "directories_judged",
+              "bundles_built_at", "library_job_id", "library_compared_at", "duplicates_compared_at" },
+  "coverage": { "not_backed_up": { "coverage": "complete", "note": null }, "...": "" },
+  "missing_steps": []
+}
+```
+
+- `section` is `sure` (certainty `certain` or `likely`) or `unsure`; unsure findings come last.
+- `key` is stable across `sfo bundles build` and a rescan of the same tree.
+- `bytes` of a `duplicate` is what removing the redundant copies frees; `duplicates` gives `groups`,
+  `redundant_files`, `redundant_bytes`, `directories` (at most 10), `directories_total` and `keep`.
+- `target` (for `misplaced`): `path`, `relative_path`, `certainty`, `reason`, `same_content_files`,
+  `content_check` (`not_checked` until targets are checked by content).
+- `sensitive` findings name path, marker and rule ids, never content.
+- `--summary` gives `{ "job_id", "root_path", "inputs", "coverage", "missing_steps", "listed", "sure", "unsure",
+  "by_kind": { "<kind>": { "findings", "sure", "unsure", "files", "bytes" } }, "by_certainty", "by_state",
+  "below_threshold", "top": [ { "rank", "key", "kind", "certainty", "state", "title", "relative_path", "files",
+  "bytes", "action" } ] }`.
+
+Errors: `job_not_found` (1), `wrong_role` (1, a library), `settings_invalid` (1, a `Findings` value), `usage` (2).
+
+### `sfo findings show <job> <key>`
+
+`{ "job_id", "finding": {...}, "total", "limit", "offset", "next_offset", "files": [ ... ] }`: the finding and
+its files, one page at a time, as `sfo files` writes them (marked files protected; `--include-sensitive` as
+there). Errors: `job_not_found` (1), `finding_not_found` (1).
+
+### `sfo findings accept|reject|wrong|reopen <job> <key>...`
+
+`accept`: the plan turns the finding into an action. `reject`: not listed again. `wrong`: not listed again and
+stored as a test case ([evaluation.md](evaluation.md#findings-reported-wrong)). `reopen`: the decision is
+withdrawn. `--note <text>` is kept with the decision; `--by human|agent` says who decided (default `human`).
+Result: `{ "job_id", "items": [ { "key", "state", "decided_by", "decided_at", "note", "eval_case_id",
+"finding": {...} } ] }`. Changes no file. Errors: `job_not_found` (1), `finding_not_found` (1, the key is not
+part of the job, or the data it rested on changed).
+
 ## Machine contract
 
 Applies to every command, including the ones added later.
@@ -1039,7 +1112,7 @@ one line per phase every 500 ms, plus the final line of a phase.
 | Code | Meaning | `error.code` |
 |---|---|---|
 | 0 | Done | |
-| 1 | The command ran but could not do its job | `job_not_found`, `path_not_found`, `scan_failed`, `scan_not_completed`, `wrong_role`, `compare_incomplete`, `database_error`, `model_missing`, `rules_invalid`, `words_invalid`, `output_inside_job`, `export_failed`, `truth_invalid`, `run_not_found`, `output_not_empty`, `bundle_not_found`, `patterns_invalid`, `library_patterns_invalid`, `settings_invalid`, `internal_error` |
+| 1 | The command ran but could not do its job | `job_not_found`, `path_not_found`, `scan_failed`, `scan_not_completed`, `wrong_role`, `compare_incomplete`, `database_error`, `model_missing`, `rules_invalid`, `words_invalid`, `output_inside_job`, `export_failed`, `truth_invalid`, `run_not_found`, `output_not_empty`, `bundle_not_found`, `patterns_invalid`, `library_patterns_invalid`, `settings_invalid`, `finding_not_found`, `internal_error` |
 | 2 | Wrong invocation: unknown command or option, missing or invalid value | `usage` |
 | 3 | Ollama not reachable | `ollama_unavailable` |
 | 130 | Interrupted with Ctrl+C; stored work stays and the command can be run again | `cancelled` |

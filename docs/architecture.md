@@ -129,6 +129,96 @@ the tree in one transaction. `ListAsync` and `GetAsync` add, when read, the mark
 comparison with a library. `JobReadService.ListFilesAsync` filters by a bundle and its descendants
 (`FileListFilter.BundleIds`), so files of a bundle pass the output guard like every other listing.
 
+## Findings flow
+
+Issue: https://github.com/crack666/smart_file_organizer/issues/26. Command: [cli.md, `sfo findings`](cli.md#sfo-findings-job);
+codes: [glossary.md, Findings](glossary.md#findings).
+
+A job ends in a short list of hints. `FindingService` (Application/Findings) computes them every time they are
+read, from what earlier steps stored: scan rows and rule markers, analysis results and folder verdicts (with
+`escalated_from`), bundles, the comparisons with and without a library, and the library map. It calls no model,
+opens no scanned file and changes nothing on disk. Only decisions are stored (`finding_decisions`, step 14).
+
+| Step | What it gives the findings | Without it |
+|---|---|---|
+| `sfo scan` | files, folders, rule markers, skipped folders | nothing to find |
+| `sfo analyze` | category, keep hint, certainty per file; verdict and retention per folder; model markers | worth rests on bundles, names and file types, never above `likely` |
+| `sfo bundles build` | device copies with worth-keeping and noise parts, program folders, named folders, loose photos | files summarized per folder; app data and program folders not recognised |
+| `sfo compare --against <library>` | which content is in the library; duplicate groups | `not_backed_up` not computed; `in_noise` does not leave out backed-up files |
+| `sfo compare` | duplicate groups | `duplicate` not computed |
+| library map | a place for `misplaced` files | no place proposed |
+
+The result carries `coverage` per kind (`complete`, `partial`, `not_computed` with a note) and `missing_steps`.
+
+**Worth of a file** (`FindingRules.ValueOf`). A human override is certain. An analysis result counts with its
+certainty (older rows: `likely` from confidence 0.8, else `uncertain`): keep hint `worth_keeping` keeps,
+`temporary` drops; photo, video, document scan, document, invoice, personal document and letter are kept unless
+importance is low; screenshot, audio, archive and code only with importance high or critical; trash candidate,
+installer and system file are disposable. `review_needed` or `unknown` counts as keep (`review`) only for
+pictures, videos, documents and audio and never among noise: "look at it" is no sign of worth (a trial on a
+generated user profile had a hundred database files the rules sent to review fill a finding). Without a result
+programs and fonts are disposable; among noise only camera photos and personal documents (office files and PDFs
+not named readme, license, manual and the like) count, as `uncertain`; elsewhere folder retention, then the
+bundle decide, never above `likely`.
+
+**Noise** is the noise part of a device copy (`dump_noise`), a program folder (a software copy recognised by
+programs and libraries alone), or, outside named folders and worth-keeping parts, a folder judged `mixed` (not
+raised from `uniform` by a sample) or `disposable`.
+
+| Kind | Arises from | Certainty | Action |
+|---|---|---|---|
+| `not_backed_up` | files worth keeping with comparison state `new` or `differs`, not among noise, not marked | weakest file certainty | `move` |
+| `in_noise` | files worth keeping in a noise place; backed-up files left out | weakest file certainty | `move` |
+| `misplaced` | a folder judged `uniform` (or raised from it), or without analysis a named folder, with at least 5 pictures, documents or audio files of which 80 % are one group; the not disposable files of another group | weakest file certainty, at most `uncertain` until the target content is checked | `move` with a target, else `leave` |
+| `sensitive` | files marked by rule or model; skipped folders marked by name or place | header rule, or rule and model: `certain`; name or folder rule: `likely`; model alone: its certainty | `leave`, single decision |
+| `duplicate` | identical files (same full SHA-256) of the source, marked files left out | `certain` | `delete_source` if every copy is in the library, `move` one copy with a library, `leave` without |
+
+A file is in at most one of `not_backed_up`, `in_noise`, `sensitive`. `misplaced` may only rest on a target
+whose content was checked (https://github.com/crack666/smart_file_organizer/issues/56). Until that check exists
+every target says `content_check: not_checked`. The check plugs in at `IFindingTargetAdvisor`
+(`LibraryFindingTargetAdvisor` wraps `LibraryTargetService.BestPlacesAsync`): `fits` lifts the cap to the target's
+certainty, `contradicts` drops the target; the rules stay as they are. `sensitive` names path, marker and rule
+ids, never content; files of `sfo findings show` pass the output guard; no checksum of a marked file is written.
+
+**Summarized, then ranked.** One unit per worth-keeping part of a device copy, device copy without parts, or
+named folder; loose files (events, scattered, no bundle) one unit per folder however many events it holds, so
+300 loose photos are one finding; noise per noise part or program folder, else per folder; `sensitive` per
+folder and marker set, inside noise per noise part and marker set; `duplicate` per set of folders; `misplaced`
+per folder and foreign group. `not_backed_up` and `in_noise` split into a sure part (`certain`, `likely`) and an
+unsure part (`uncertain`, `review`). Every sure finding comes before every unsure one; within each by kind
+(`not_backed_up`, `in_noise`, `sensitive`, `misplaced`, `duplicate`), certainty, files, bytes, key. The key
+(`in_noise-4e1f0a9b2c`) is the kind plus ten hex digits of the SHA-256 of a subject built from relative paths and
+codes, so it survives `sfo bundles build` and a rescan of the same tree.
+
+**Decisions.** `accept`, `reject`, `wrong`, `reopen` write or delete one row of `finding_decisions` and change no
+file. Rejected and wrong findings are not listed again. A wrong finding also becomes a test case
+([evaluation.md](evaluation.md#findings-reported-wrong)). The plan (https://github.com/crack666/smart_file_organizer/issues/11)
+reads accepted findings with `FindingService.ListAsync(new FindingQuery { JobId = j, States = [FindingState.Accepted] })`:
+`Action.Kind` (`PlanActionKind`), `Action.SingleDecision`, `Target` with `ContentCheck`, `FileIds`, `Directories`;
+`snapshot_json` keeps what the finding said when accepted. A key that no longer appears rests on changed data.
+
+**Thresholds**, section `Findings`; starting values, not measured ones:
+
+| Setting | Default | Why |
+|---|---|---|
+| `MinFiles` | 1 | One personal document that is nowhere else is what the person wants to hear about. |
+| `MinUncertainFiles` | 1 | Unsure findings are listed last anyway; hiding them would hide the only hint. |
+| `MisplacedMinFolderFiles` | 5 | Below five files a folder has no clear purpose to deviate from. |
+| `MisplacedDominantShare` | 0.8 | Four of five: a folder that is mostly one thing. |
+| `DuplicateMinBytes` | 1 MiB | Smaller groups free nothing worth a decision ... |
+| `DuplicateMinFiles` | 10 | ... unless there are many copies. Below both, copies are counted in `below_threshold`. |
+| `MaxTargetLookups` | 50 | One rule run per group against the library; the largest groups first. |
+| `Examples` | 3 | Enough to check a finding at a glance. |
+
+_Trial, 12.11.2026, built `sfo` of this issue's branch, generated old Windows profile in a temp folder:_ 2,924
+files, 2,476 of them app data in `Anwendungsdaten` and `Lokale Einstellungen/Anwendungsdaten` (two browser
+profiles, a mail profile, caches, six messenger photos, two personal documents), plus documents, pictures,
+desktop and downloads; scripted answers (`sfo eval --stub`), a library with one holiday folder. 11 findings: four
+`not_backed_up`, one `in_noise` (9 files in app data), four `sensitive`, one `duplicate`, one unsure `misplaced`.
+Before the grouping of sensitive files in noise and the review rule the same tree gave 12, with four sensitive
+findings in app data and an unsure `in_noise` of 112 database files. The modern `AppData` is skipped by the
+default scan rules and then shows as one skipped folder marked sensitive.
+
 ## AI flow (current architecture)
 
 The post-scan AI pipeline runs as three sequential phases coordinated by `AiClassificationCoordinator`:
@@ -512,6 +602,9 @@ Important tables:
 - `bundle_files` — the bundle each file belongs to directly (step 11); a file is in at most one
 - `bundle_builds` — per job the last build (step 11): `built_at`, `settings_json`, `stats_json` (with and without dumps).
   Bundles of a job are dropped with a rescan of one of its directories and with the job
+- `finding_decisions` — decisions about findings (step 14): `job_id`, `finding_key`, `kind`, `state` (`accepted`,
+  `rejected`, `wrong`; no row means open), `origin` (`human`, `agent`), `note`, `decided_at`, `snapshot_json`.
+  Findings themselves are computed when read; deleted with the job
 - `db_version` — one row per applied schema step (`version`, `applied_at`)
 
 ## Schema migrations
@@ -528,7 +621,7 @@ The schema is built from numbered steps in `src/SmartFileOrganizer.Infrastructur
 1. Add one file `Migrations/M000N_ShortName.cs` with a class implementing `ISchemaMigration`, or deriving from `SqlSchemaMigration` when plain SQL is enough. `Version` is `N`.
 2. Take the next free number on `master`. Steps are discovered by reflection, so no shared list is edited.
 3. Versions must be exactly `1..N`. If two branches picked the same number, startup and `SchemaMigrationTests` fail with a "Duplicate schema migration versions" message; the branch merged second renumbers its step (file name and `Version`).
-4. Never change a step that has been merged; add a new one. Step 1 (`M0001_InitialSchema`) is the schema as it existed before migrations. Step 2 (`M0002_SensitiveMarkers`) adds the sensitive-marker columns. Step 3 (`M0003_DirectoryVerdicts`) adds `directory_verdicts`. Step 4 (`M0004_ScanJobRules`) adds the scan rules of a job. Step 5 (`M0005_ContentComparison`) adds the comparison with the library. Step 6 (`M0006_DirectorySamples`) adds `directory_samples`, the escalation columns and the origin and keep-hint columns of `ai_results`; its new codes are English. Step 7 (`M0007_FileFacts`) adds `file_facts` and `ai_results.evidence`. Step 8 (`M0008_LibraryReview`) adds `scan_jobs.structure_only` and `library_advice`. Step 9 (`M0009_Evaluation`) adds `eval_cases` and `eval_runs`. Step 10 (`M0010_ResultChecks`) adds certainty, attempts and previous error to `ai_results` and the table `result_checks`. Step 11 (`M0011_Bundles`) adds `bundles`, `bundle_files` and `bundle_builds`. Step 12 (`M0012_SensitiveGaps`) adds the markers of skipped folders, the rule version per file and the marked inputs of directory summaries. Step 13 (`M0013_EnglishCodes`) switches the German codes of steps 2 and 3 to the English codes of [glossary.md](glossary.md): it rebuilds `directory_verdicts` (its CHECK constraints named the old codes), rewrites marker lists token by token, and the texts the program wrote from codes (keep reason, container reason, profile hint, `dominant_type` of the pre-assessment, stored check answers, stored evaluation reports); raw model answers stay as received. The old codes are spelled out in that step, and in step 3, and nowhere else in code.
+4. Never change a step that has been merged; add a new one. Step 1 (`M0001_InitialSchema`) is the schema as it existed before migrations. Step 2 (`M0002_SensitiveMarkers`) adds the sensitive-marker columns. Step 3 (`M0003_DirectoryVerdicts`) adds `directory_verdicts`. Step 4 (`M0004_ScanJobRules`) adds the scan rules of a job. Step 5 (`M0005_ContentComparison`) adds the comparison with the library. Step 6 (`M0006_DirectorySamples`) adds `directory_samples`, the escalation columns and the origin and keep-hint columns of `ai_results`; its new codes are English. Step 7 (`M0007_FileFacts`) adds `file_facts` and `ai_results.evidence`. Step 8 (`M0008_LibraryReview`) adds `scan_jobs.structure_only` and `library_advice`. Step 9 (`M0009_Evaluation`) adds `eval_cases` and `eval_runs`. Step 10 (`M0010_ResultChecks`) adds certainty, attempts and previous error to `ai_results` and the table `result_checks`. Step 11 (`M0011_Bundles`) adds `bundles`, `bundle_files` and `bundle_builds`. Step 12 (`M0012_SensitiveGaps`) adds the markers of skipped folders, the rule version per file and the marked inputs of directory summaries. Step 13 (`M0013_EnglishCodes`) switches the German codes of steps 2 and 3 to the English codes of [glossary.md](glossary.md): it rebuilds `directory_verdicts` (its CHECK constraints named the old codes), rewrites marker lists token by token, and the texts the program wrote from codes (keep reason, container reason, profile hint, `dominant_type` of the pre-assessment, stored check answers, stored evaluation reports); raw model answers stay as received. The old codes are spelled out in that step, and in step 3, and nowhere else in code. Step 14 (`M0014_FindingDecisions`) adds `finding_decisions`.
 5. Do not put `PRAGMA journal_mode` or other transaction-incompatible statements in a step.
 
 ## Architectural rules

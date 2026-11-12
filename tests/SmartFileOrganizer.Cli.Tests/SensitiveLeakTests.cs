@@ -137,12 +137,23 @@ public class SensitiveLeakTests : IDisposable
         foreach (var args in new[]
                  {
                      new[] { "dirs" }, ["dirs", "--sensitive", "yes"], ["files"], ["show", "docs"], ["show", "."],
-                     ["show", Path.Combine("docs", "passwords.txt")], ["summary"], ["status"]
+                     ["show", Path.Combine("docs", "passwords.txt")], ["summary"], ["status"],
+                     ["findings"], ["findings", "--summary"]
                  })
         {
             var run = await SfoAsync([args[0], job.ToString(), .. args.Skip(1), "--json"]);
             Assert.True(run.ExitCode == ExitCodes.Ok, string.Join(' ', args) + ": " + run.Stdout + run.Stderr);
             sb.AppendLine(run.Stdout).AppendLine(run.Stderr);
+        }
+
+        // Every finding with its files (sensitive findings name path and marker only).
+        var findings = await SfoAsync("findings", job.ToString(), "--json");
+        Assert.Contains(findings.Result().GetProperty("items").EnumerateArray(), i => i.GetProperty("kind").GetString() == "sensitive");
+        foreach (var item in findings.Result().GetProperty("items").EnumerateArray())
+        {
+            var show = await SfoAsync("findings", "show", job.ToString(), item.GetProperty("key").GetString()!, "--json");
+            Assert.True(show.ExitCode == ExitCodes.Ok, show.Stdout + show.Stderr);
+            sb.AppendLine(show.Stdout).AppendLine(show.Stderr);
         }
 
         var csv = Path.Combine(_dir, $"export-{Guid.NewGuid():N}.csv");
