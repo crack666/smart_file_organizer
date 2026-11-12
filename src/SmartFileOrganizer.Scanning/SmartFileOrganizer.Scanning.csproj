@@ -9,6 +9,11 @@
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.15" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- The shipped scan rules (docs/scan-rules.md). Embedded so every host, test and tool sees the same file. -->
+    <EmbeddedResource Include="Rules\default-rules.json" LogicalName="SmartFileOrganizer.Scanning.Rules.default-rules.json" />
+  </ItemGroup>
+
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>

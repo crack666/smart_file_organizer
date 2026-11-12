@@ -7,6 +7,7 @@ using SmartFileOrganizer.Domain.Models;
 using SmartFileOrganizer.Infrastructure;
 using SmartFileOrganizer.Infrastructure.Persistence;
 using SmartFileOrganizer.Scanning.Engine;
+using SmartFileOrganizer.Scanning.Rules;
 
 namespace SmartFileOrganizer.Application.Tests;
 
@@ -198,7 +199,7 @@ public class ScanExportServiceTests : IDisposable
 
         var engine = new ScanEngine(
             fakeFs,
-            new HeuristicsEngine(new HeuristicsOptions()),
+            new HeuristicsEngine(ScanRulesFile.Default),
             _fileRepo, _dirRepo, _jobRepo,
             NullLogger<ScanEngine>.Instance);
 

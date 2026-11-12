@@ -9,6 +9,7 @@ using SmartFileOrganizer.Infrastructure.Content;
 using SmartFileOrganizer.Infrastructure.Ollama;
 using SmartFileOrganizer.Infrastructure.Persistence;
 using SmartFileOrganizer.Scanning.Engine;
+using SmartFileOrganizer.Scanning.Rules;
 
 namespace SmartFileOrganizer.Hosting;
 
@@ -86,9 +87,7 @@ public static class ServiceCollectionExtensions
             paths.SettingsPath));
 
         // Scanning
-        services.AddSingleton<HeuristicsOptions>();
-        services.AddSingleton<IHeuristicsEngine>(sp =>
-            new HeuristicsEngine(sp.GetRequiredService<HeuristicsOptions>()));
+        services.AddSingleton<IHeuristicsEngine>(_ => new HeuristicsEngine(ScanRulesFile.Default));
         services.AddSingleton<IScanEngine, ScanEngine>();
         services.AddSingleton<IScopedRefreshService, ScopedRefreshService>();
 

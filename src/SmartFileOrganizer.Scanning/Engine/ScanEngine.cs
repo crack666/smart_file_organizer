@@ -82,9 +82,14 @@ public class ScanEngine : IScanEngine
                 continue;
             }
 
+            // Listed at most once: for the content check (only when a decision depends on it) and for the rows.
+            List<string>? files = null;
+            List<string> Files() => files ??= _fs.EnumerateFiles(dirPath).ToList();
+
             var evaluation = depth == 0
                 ? new DirectoryEvaluation(ScanDecision.Descend, "Descend: scan root")   // always descend root
-                : _heuristics.EvaluateDirectory(job.RootPath, dirPath, depth);
+                : _heuristics.EvaluateDirectory(job.RootPath, dirPath, depth,
+                    () => new DirectoryContent(Files().Select(f => FileTypeDetector.Detect(_fs.GetExtension(f)))));
             var decision = evaluation.Decision;
 
             var dirNode = new DirectoryNode
@@ -112,7 +117,7 @@ public class ScanEngine : IScanEngine
             // Enumerate files in this directory
             int fileCount = 0;
             long dirSize = 0;
-            foreach (var filePath in _fs.EnumerateFiles(dirPath))
+            foreach (var filePath in Files())
             {
                 ct.ThrowIfCancellationRequested();
 
@@ -168,6 +173,12 @@ public class ScanEngine : IScanEngine
                     job.TotalDirectories++;
                 }
                 dirNode.SubdirCount = subdirCount;
+            }
+            else
+            {
+                // Shallow: count the subfolders without entering them, so the stored node shows
+                // that there is more below it instead of looking like a leaf.
+                dirNode.SubdirCount = _fs.EnumerateDirectories(dirPath).Count();
             }
 
             dirBatch.Add(dirNode);

@@ -6,6 +6,7 @@ using SmartFileOrganizer.Domain.Models;
 using SmartFileOrganizer.Infrastructure;
 using SmartFileOrganizer.Infrastructure.Persistence;
 using SmartFileOrganizer.Scanning.Engine;
+using SmartFileOrganizer.Scanning.Rules;
 
 namespace SmartFileOrganizer.Application.Tests;
 
@@ -137,7 +138,7 @@ public class ScanPipelineIntegrationTests : IDisposable
             ["/Scan/Videos/Sub"] = ["/Scan/Videos/Sub/nested.txt"],
         });
 
-        var heuristics = new HeuristicsEngine(new HeuristicsOptions());
+        var heuristics = new HeuristicsEngine(ScanRulesFile.Default);
         var engine = new ScanEngine(fakeFs, heuristics, _fileRepo, _dirRepo, _jobRepo, NullLogger<ScanEngine>.Instance);
 
         var progress = new List<ScanProgress>();
@@ -187,7 +188,7 @@ public class ScanPipelineIntegrationTests : IDisposable
             [root + "/bin"]          = ["/home/alice/AppData/Scan/bin/c.dll"],
         });
 
-        var heuristics = new HeuristicsEngine(new HeuristicsOptions());
+        var heuristics = new HeuristicsEngine(ScanRulesFile.Default);
         var engine = new ScanEngine(fakeFs, heuristics, _fileRepo, _dirRepo, _jobRepo, NullLogger<ScanEngine>.Instance);
         await engine.RunAsync(job, new Progress<ScanProgress>(_ => { }), CancellationToken.None);
 
@@ -199,7 +200,7 @@ public class ScanPipelineIntegrationTests : IDisposable
 
         var bin = await _dirRepo.GetByPathAsync(job.Id, root + "/bin");
         Assert.Equal(DirectoryStatus.Skip, bin!.DirStatus);
-        Assert.Equal("Skip: matches skip pattern 'bin'", bin.DirReason);
+        Assert.Equal("Skip: matches skip rule 'bin' of rules 'default': build output", bin.DirReason);
     }
 
     [Fact]
@@ -213,7 +214,7 @@ public class ScanPipelineIntegrationTests : IDisposable
             ["/Scan"] = ["/Scan/file.txt"],
         });
 
-        var heuristics = new HeuristicsEngine(new HeuristicsOptions());
+        var heuristics = new HeuristicsEngine(ScanRulesFile.Default);
         var engine = new ScanEngine(fakeFs, heuristics, _fileRepo, _dirRepo, _jobRepo, NullLogger<ScanEngine>.Instance);
 
         // Run scan once

@@ -10,6 +10,7 @@ using SmartFileOrganizer.Domain.Models;
 using SmartFileOrganizer.Infrastructure.Ollama;
 using SmartFileOrganizer.Infrastructure.Persistence;
 using SmartFileOrganizer.Scanning.Engine;
+using SmartFileOrganizer.Scanning.Rules;
 
 namespace SmartFileOrganizer.Application.Tests;
 
@@ -48,7 +49,7 @@ public class SensitivePersistenceTests : IDisposable
     private async Task<ScanJob> ScanAsync(FakeFileSystemAccessor fs)
     {
         var job = await _jobRepo.CreateAsync(new ScanJob { RootPath = "/Scan", Status = JobStatus.Created, CreatedAt = DateTime.UtcNow });
-        var engine = new ScanEngine(fs, new HeuristicsEngine(new HeuristicsOptions()), _fileRepo, _dirRepo, _jobRepo, NullLogger<ScanEngine>.Instance);
+        var engine = new ScanEngine(fs, new HeuristicsEngine(ScanRulesFile.Default), _fileRepo, _dirRepo, _jobRepo, NullLogger<ScanEngine>.Instance);
         await engine.RunAsync(job, new Progress<ScanProgress>(_ => { }), CancellationToken.None);
         return job;
     }
