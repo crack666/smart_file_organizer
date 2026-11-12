@@ -1,0 +1,373 @@
+# Glossary of codes
+
+Every fixed value that Smart File Organizer stores in its database, writes to JSON, accepts on the
+command line or asks the model for is an English code from this list. The table of codes was
+decided in https://github.com/crack666/smart_file_organizer/issues/35.
+
+- Codes are lower case, words joined by `_`. They never change with the display language.
+- People see words instead of codes: the GUI and the text output of the CLI translate them through
+  `CodeLabels` (`src/SmartFileOrganizer.Domain/Enums/CodeLabels.cs`), in English or German depending
+  on the summary language in the settings. JSON always carries the code.
+- In code, a code belongs to an enum. The heading of each table below names it. `GlossaryTests`
+  fails when an enum value has no code or no entry here, so a new value cannot be added silently.
+- Before https://github.com/crack666/smart_file_organizer/issues/35 the first groups below were stored
+  as German words (`einheit`, `gemischt`, `zugangsdaten`, ...). Schema step 13 rewrites existing
+  databases; a model answer that still uses a German word is read, and only the code is stored.
+
+## Codes of the decision table
+
+### Directory verdict (`DirectoryVerdictKind`)
+
+| Code | Meaning |
+|---|---|
+| `unit` | A project, program, game or backup that only makes sense as a whole; never split up file by file. |
+| `uniform` | A collection of similar content with one purpose, such as the photos of one trip or the invoices of one year. |
+| `mixed` | Storage without a common purpose (desktop, downloads, misc); its files are handled one by one. |
+| `empty` | Contains no files, neither directly nor in subdirectories. |
+| `system` | An operating system, tool or cache directory that is not user content. |
+
+### Retention value (`RetentionValue`)
+
+| Code | Meaning |
+|---|---|
+| `keep` | Personal or hard to replace. |
+| `review` | Unclear; a person should look. |
+| `disposable` | Can be recreated or downloaded again (installers, caches, temporary files). |
+
+### Origin of a directory verdict (`VerdictSource`)
+
+| Code | Meaning |
+|---|---|
+| `rule` | A deterministic rule decided without calling the model. |
+| `model` | The model decided, or was asked and failed. |
+
+### Origin of a file result (`ResultOrigin`)
+
+| Code | Meaning |
+|---|---|
+| `rule` | A deterministic rule decided. |
+| `model` | The local model judged the file itself, on its own or as a sample member. |
+| `inherited` | The file was not looked at; category and target were taken over from the confirmed sample of its directory. |
+| `human` | A person set the result. |
+| `agent` | A steering agent set the result through the command line. |
+| `external` | The result was imported from another tool. |
+
+### Sensitive markers (`SensitiveMarker`)
+
+A file can carry several markers; they are stored as a comma-separated list in this order.
+
+| Code | Meaning |
+|---|---|
+| `credentials` | Passwords, password stores, login data, API keys or tokens, `.env` files. |
+| `keys` | Private keys, certificates with a private key, crypto wallets or seed phrases. |
+| `private_message` | Private messages: mail archives, chat databases, personal letters. |
+| `identity` | Identity cards, passports, driving licences or scans of them. |
+| `finance` | Bank statements, tax documents, payslips, credit card data. |
+| `health` | Medical findings, doctor letters, health insurance documents. |
+
+### Keep hint for files in mixed directories (`KeepHint`)
+
+| Code | Meaning |
+|---|---|
+| `temporary` | An installer, download remainder, duplicate or other file that can be recreated. |
+| `worth_keeping` | Personal or hard to replace. |
+
+### Role of a scan (`ScanRole`)
+
+| Code | Meaning |
+|---|---|
+| `source` | A medium to be cleaned up (the default). |
+| `library` | The organised archive of the person: only read, never changed, never analysed by a model. |
+
+### Comparison with the library (`ContentState`)
+
+| Code | Meaning |
+|---|---|
+| `backed_up` | A file with exactly the same content (same SHA-256) is in the library. |
+| `new` | No library file has this content, and none has the same name in a folder of the same name. |
+| `differs` | Not in the library by content, but a file with the same name lies in a folder of the same name there. |
+| `error` | The content could not be determined (read error, file gone, library unreachable); never counts as `new` or `backed_up`. |
+
+### Reserved for planned work
+
+These codes are fixed by the decision table but no code uses them yet.
+
+| Group | Codes |
+|---|---|
+| Kind of a plan action | `move`, `copy`, `quarantine`, `delete_source`, `leave` |
+| State of a plan action | `proposed`, `approved`, `rejected`, `executed`, `failed`, `undone` |
+| Findings | `not_backed_up`, `in_noise`, `misplaced`, `sensitive`, `duplicate` |
+
+## Staged analysis
+
+### State of a directory sample (`SampleState`)
+
+| Code | Meaning |
+|---|---|
+| `open` | The sample is drawn; the other files of the directory wait for its result. |
+| `confirmed` | The sample agreed; the other files inherited its result. |
+| `escalated` | The sample disagreed; the directory is now `mixed` and every file is judged on its own. |
+
+### Why a file is in a sample (`SampleRole`)
+
+| Code | Meaning |
+|---|---|
+| `stratum` | Drawn from its extension group, in proportion to the group size. |
+| `size` | The smallest or largest file, or far away from the median size. |
+| `date` | The oldest or newest file. |
+| `anomaly` | Named as anomalous by the directory pre-assessment. |
+| `sensitive` | Marked as sensitive; such a file never inherits and is always judged on its own. |
+
+## Certainty and second checks
+
+### Certainty of a file result (`ResultCertainty`)
+
+| Code | Meaning |
+|---|---|
+| `certain` | Two independent signals agree, or an unambiguous rule decided. |
+| `likely` | One answer that nothing contradicts, an inherited result of a confirmed sample, or a rule category set against the model. |
+| `uncertain` | A second check was due and did not happen, or a rule decided without being sure. |
+| `review` | Two answers disagree, or the model could not say what the file is: a person should look. |
+
+### Reason for a second check (`CheckReason`)
+
+| Code | Meaning |
+|---|---|
+| `missing_confidence` | The model gave no confidence. |
+| `low_confidence` | The confidence of the model is below the configured limit. |
+| `unclear_category` | The model answered ReviewNeeded or Unknown. |
+| `kind_mismatch` | The category does not fit the kind of file the first bytes or the extension name. |
+| `rule_disagrees` | An unambiguous metadata rule contradicts the category; the rule wins without a second call. |
+| `verdict_disagrees` | The file contradicts the retention value of its directory. |
+
+### Outcome of a second check (`CheckOutcome`)
+
+| Code | Meaning |
+|---|---|
+| `agreed` | The second answer agrees with the first; the result is `certain`. |
+| `disagreed` | The answers disagree; the result is `review`. |
+| `corrected` | The first answer broke a rule about the kind of file and the second one fits it; the second stands. |
+| `rule_wins` | An unambiguous rule set the category against the model; no second call. |
+| `failed` | The second call failed; the first answer stays as `uncertain`. |
+| `skipped` | A second check was due but not made (switched off, or a person corrected the file). |
+
+## File facts
+
+### Fact key (`FileFactKey`)
+
+| Code | Meaning |
+|---|---|
+| `detected_format` | Format recognised from the first bytes (`jpeg`, `pdf`, `zip`, `pe`, ...). |
+| `width` | Width in pixels of an image or video. |
+| `height` | Height in pixels of an image or video. |
+| `taken_at` | When a photo or video was taken, from its metadata. |
+| `device` | Camera or recording device (make and model) from the metadata. |
+| `has_location` | `true` when the metadata contain a location; the coordinates are never stored. |
+| `image_origin` | Where an image comes from, as an image origin code. |
+| `page_count` | Number of pages of a document. |
+| `has_text` | `true` when a PDF carries extractable text, `false` for a scanned PDF. |
+| `title` | Document or track title from the file properties or tags. |
+| `author` | Document author from the file properties. |
+| `created_at` | Creation date from the document properties. |
+| `duration_seconds` | Playing time of audio or video in whole seconds. |
+| `artist` | Artist from the audio tags. |
+| `album` | Album from the audio tags. |
+| `audio_kind` | Speech recording or music, as an audio kind code. |
+| `entry_count` | Number of file entries listed in an archive. |
+| `unpacked_bytes` | Sum of the uncompressed sizes of the listed archive entries. |
+| `archive_content` | What an archive mostly holds, as an archive content code. |
+| `encrypted` | `true` when an archive or document is password protected. |
+
+### Source of a fact (`FactSource`)
+
+| Code | Meaning |
+|---|---|
+| `metadata` | Read directly from the file: metadata, tags, properties, page count, archive listing, first bytes. |
+| `rule` | Derived by a deterministic rule from metadata, name and path. |
+| `model` | Reported by the local model. |
+
+### Image origin (`ImageOrigin`)
+
+| Code | Meaning |
+|---|---|
+| `camera` | Taken with a camera or phone. |
+| `screenshot` | A screen capture. |
+| `scan` | A scanned page. |
+
+### Audio kind (`AudioKind`)
+
+| Code | Meaning |
+|---|---|
+| `speech` | A speech recording such as a voice memo or an interview. |
+| `music` | Music. |
+
+### Archive content (`ArchiveContent`)
+
+| Code | Meaning |
+|---|---|
+| `photos` | At least 60 % of the entries are images. |
+| `documents` | At least 60 % are documents (PDF, Office, text). |
+| `media` | At least 60 % are audio or video files. |
+| `software` | Contains a setup program, an installer package, or programs with their libraries. |
+| `code` | At least 60 % are source code, or the listing has a project marker. |
+| `mixed` | None of the above dominates. |
+
+## Library review
+
+### Kind of a library finding (`LibraryFindingKind`)
+
+| Code | Meaning |
+|---|---|
+| `dump` | A device, computer or program dump inside the library. |
+| `naming_inconsistent` | Sibling folders are named after different schemes. |
+| `variant_spellings` | The same level is spelled in several ways ("Season 1", "S01"). |
+| `flat_among_structured` | Folders hold many files flat where most of their siblings are divided into subfolders. |
+| `loose_files` | Loose files at the top of the library, next to folders. |
+| `same_name_elsewhere` | Folders with the same normalised name at several places. |
+| `similar_names` | Nearly equal folder names. |
+| `likely_copy` | Subtrees with the same number of files and the same byte total at different places. |
+| `empty` | Empty folders or branches, also those holding only system files. |
+| `placeholder_name` | Placeholder or catch-all names ("New folder", "misc", "old"). |
+| `camera_folder_name` | Folders still named by the camera (`100CANON`). |
+| `saved_web_page` | Saved web pages: a `*_files` folder next to the `.htm` file of the same name. |
+| `type_mismatch` | The file types do not fit the name of the folder or the area it lies in. |
+| `dominant_file` | A single file holds more than half of the bytes of the library. |
+| `very_full` | A folder with very many files directly in it. |
+| `very_deep` | A branch far deeper than the rest of the library. |
+| `sensitive_location` | Credential, key or identity files, reported with path and marker only. |
+| `case_inconsistent` | A name starts in another letter case than most of its siblings. |
+
+### Impact of a finding (`FindingImpact`)
+
+| Code | Meaning |
+|---|---|
+| `high` | Matters most; listed first. |
+| `medium` | Worth fixing. |
+| `low` | Cosmetic. |
+
+### Kind of dump (`DumpKind`)
+
+| Code | Meaning |
+|---|---|
+| `device` | Phone, camera or memory card storage. |
+| `computer` | A copy of a computer or user profile. |
+| `package` | A project, program or unpacked package. |
+
+### Role of a folder (`FolderRole`)
+
+| Code | Meaning |
+|---|---|
+| `occasion` | One occasion or event. |
+| `person` | One person. |
+| `device` | One device. |
+| `topic` | One topic. |
+| `time` | A time span such as a year or a month. |
+| `media_title` | A film, series or album. |
+| `season` | A season of a series. |
+| `document_type` | One type of document, such as invoices. |
+| `project` | One project. |
+| `collection` | A collection of similar items. |
+| `catch_all` | A place for everything that has no other place. |
+| `dump` | A copy of a device, computer or package. |
+| `mixed` | No single role. |
+
+### Proposed change (`ProposalAction`)
+
+| Code | Meaning |
+|---|---|
+| `rename` | Give a folder another name. |
+| `move` | Move a folder to another place. |
+| `merge` | Join folders into one. |
+| `split` | Divide a folder into several. |
+| `create` | Create a new folder. |
+
+### Origin of advice (`AdviceOrigin`)
+
+| Code | Meaning |
+|---|---|
+| `rule` | Produced by a deterministic rule. |
+| `model` | Produced by the model. |
+
+## Bundles
+
+### Kind of a bundle (`BundleKind`)
+
+| Code | Meaning |
+|---|---|
+| `dump` | A copy of a whole device or computer (phone storage, user profile, system drive, USB stick, unpacked software). |
+| `dump_keep` | The part of a dump worth keeping: camera folder, documents, chat media, ... |
+| `dump_noise` | Everything else of a dump: app data, caches, system folders, empty folders. |
+| `folder` | An existing folder with a meaningful name outside dumps; never split, never renamed. |
+| `event` | Loose photos and videos taken close together in time: one occasion. |
+| `scattered` | Loose photos and videos of one year that formed no group large enough for an event. |
+
+### Origin of a dump (`DumpOrigin`)
+
+| Code | Meaning |
+|---|---|
+| `phone` | Phone or tablet storage. |
+| `computer` | A user profile or a whole system drive of a computer. |
+| `removable_drive` | A copied USB stick or memory card. |
+| `software` | Unpacked software or a code project. |
+
+### Part of a dump worth keeping (`DumpPart`)
+
+| Code | Meaning |
+|---|---|
+| `camera` | Photos and videos of the camera. |
+| `screenshots` | Screen captures. |
+| `chat_media` | Pictures and videos sent in chats. |
+| `received` | Files received from others (Bluetooth, sharing). |
+| `recordings` | Voice and call recordings. |
+| `documents` | Documents. |
+| `pictures` | Other pictures. |
+| `videos` | Other videos. |
+| `music` | Music. |
+| `downloads` | Downloads. |
+| `desktop` | The desktop of a computer. |
+
+### Time source of a bundle (`TimeSource`)
+
+| Code | Meaning |
+|---|---|
+| `capture_date` | Capture date from the photo or video metadata. |
+| `file_name` | A date and time in the file name. |
+| `modified_date` | Modification time from the file system; changes with every copy, so the weakest source. |
+| `mixed` | The files of the bundle rest on more than one of these sources. |
+
+## Evaluation
+
+### Measured kind (`EvalKind`)
+
+| Code | Meaning |
+|---|---|
+| `directory_verdict` | The verdict of a directory. |
+| `file_category` | The category of a file. |
+| `sensitive` | The sensitive markers of a file. |
+
+### Outcome of a measured item (`EvalOutcome`)
+
+| Code | Meaning |
+|---|---|
+| `hit` | The result equals the truth. |
+| `wrong` | There is a result and it differs from the truth. |
+| `missing` | No result: not scanned, not analysed, or the model call failed. |
+
+### Mode of an evaluation run (`EvalRunMode`)
+
+| Code | Meaning |
+|---|---|
+| `corpus` | A corpus with a truth file was scanned, analysed and compared. |
+| `cases` | The stored test cases from corrections were run again. |
+
+### Kind of a test case (`EvalCaseKind`)
+
+| Code | Meaning |
+|---|---|
+| `file_category` | A person set another category for a file than the model. |
+
+### Origin of a test case (`EvalCaseOrigin`)
+
+| Code | Meaning |
+|---|---|
+| `review_override` | A manual override in the review. |
