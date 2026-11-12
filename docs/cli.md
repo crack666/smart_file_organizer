@@ -677,14 +677,14 @@ sfo files 7 --dir photos --max-confidence 0.5 --json
   "items": [
     { "path": "/media/usb-stick/photos/scan_004.jpg", "name": "scan_004.jpg",
       "file_type": "image", "size_bytes": 482113, "last_write_time": "2019-07-02T10:14:00.000Z",
-      "status": "ai_analyzed", "category": "document_scan", "category_source": "ai",
+      "status": "ai_analyzed", "category": "document_scan", "category_source": "model",
       "confidence": 0.42, "summary": "Scanned page of a rental contract.",
       "sensitive": [], "protected": false, "dir_verdict": "...", "certainty": "likely" }
   ]
 }
 ```
 
-`category_source` is `ai`, `user` (an override), `sensitive` (forced to review by a marker) or
+`category_source` is an origin code (see [glossary.md](glossary.md)): `model`, `human` (an override), `rule` (forced to review by a marker; until 12.11.2026 `ai`, `user` and `sensitive`) or
 `null`. `dir_verdict` is the verdict of the directory holding the file. `certainty` says how far the
 result can be relied on: `certain` (two independent signals agree), `likely` (one answer nothing
 contradicts, or inherited), `uncertain` (a due second check did not happen), `review` (a person should

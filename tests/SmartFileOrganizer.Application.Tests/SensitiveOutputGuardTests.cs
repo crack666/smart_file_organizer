@@ -100,7 +100,7 @@ public class SensitiveOutputGuardTests
         // Still marked, and still never proposed as disposable.
         Assert.Equal(["keys"], record.Sensitive);
         Assert.Equal(nameof(FileCategory.ReviewNeeded), record.Category);
-        Assert.Equal("sensitive", record.CategorySource);
+        Assert.Equal("rule", record.CategorySource);
     }
 
     [Fact]
@@ -116,7 +116,7 @@ public class SensitiveOutputGuardTests
         Assert.Equal(RawResponse, record.RawResponse);
         Assert.Equal(ModelSummary, record.Summary);
         Assert.Equal(nameof(FileCategory.TrashCandidate), record.Category);
-        Assert.Equal("ai", record.CategorySource);
+        Assert.Equal("model", record.CategorySource);
     }
 
     // ------------------------------------------------------------------ marker sources
@@ -157,7 +157,7 @@ public class SensitiveOutputGuardTests
         file.Override = new UserOverride { FileNodeId = 7, OverriddenCategory = FileCategory.Invoice, OverriddenTarget = Target };
         var record = SensitiveOutputGuard.Project(file);
         Assert.Equal(nameof(FileCategory.Invoice), record.Category);
-        Assert.Equal("user", record.CategorySource);
+        Assert.Equal("human", record.CategorySource);
         Assert.Null(record.SuggestedTarget);
     }
 

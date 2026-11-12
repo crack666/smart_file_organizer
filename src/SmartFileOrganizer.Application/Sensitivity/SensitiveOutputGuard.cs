@@ -48,7 +48,7 @@ public sealed record FileOutputRecord
 
     [JsonPropertyName("category")] public string? Category { get; init; }
 
-    /// <summary><c>user</c>, <c>ai</c>, <c>sensitive</c> (forced to review because of a marker) or null.</summary>
+    /// <summary>A <see cref="ResultOrigin"/> code: <c>human</c> (an override), <c>model</c>, <c>rule</c> (forced to review because of a marker) or null.</summary>
     [JsonPropertyName("category_source")] public string? CategorySource { get; init; }
 
     [JsonPropertyName("importance")] public string? Importance { get; init; }
@@ -180,7 +180,7 @@ public static class SensitiveOutputGuard
             return record with
             {
                 Category = ovr is not null ? ovr.OverriddenCategory.ToString() : nameof(FileCategory.ReviewNeeded),
-                CategorySource = ovr is not null ? "user" : "sensitive",
+                CategorySource = (ovr is not null ? ResultOrigin.Human : ResultOrigin.Rule).ToCode(),
                 Summary = NeutralSummary(match.Markers, file.FileType)
             };
         }
@@ -190,18 +190,18 @@ public static class SensitiveOutputGuard
         if (ovr is not null)
         {
             category = ovr.OverriddenCategory.ToString();
-            categorySource = "user";
+            categorySource = ResultOrigin.Human.ToCode();
         }
         else if (ai is not null)
         {
             var effective = ApplyReviewRule(ai.Category, match.Markers);
             category = effective.ToString();
-            categorySource = effective != ai.Category ? "sensitive" : "ai";
+            categorySource = (effective != ai.Category ? ResultOrigin.Rule : ResultOrigin.Model).ToCode();
         }
         else
         {
             category = match.IsMatch ? nameof(FileCategory.ReviewNeeded) : null;
-            categorySource = match.IsMatch ? "sensitive" : null;
+            categorySource = match.IsMatch ? ResultOrigin.Rule.ToCode() : null;
         }
 
         return record with

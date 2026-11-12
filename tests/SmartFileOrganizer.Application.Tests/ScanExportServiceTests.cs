@@ -112,7 +112,7 @@ public class ScanExportServiceTests : IDisposable
 
         var fields = sw.ToString().TrimEnd('\r', '\n').Split(',');
         Assert.Equal(nameof(FileCategory.Photo), fields[ColumnIndex("category")]);
-        Assert.Equal("ai", fields[ColumnIndex("category_source")]);
+        Assert.Equal("model", fields[ColumnIndex("category_source")]);
     }
 
     [Fact]
@@ -131,7 +131,7 @@ public class ScanExportServiceTests : IDisposable
 
         var fields = sw.ToString().TrimEnd('\r', '\n').Split(',');
         Assert.Equal(nameof(FileCategory.TrashCandidate), fields[ColumnIndex("category")]);
-        Assert.Equal("user", fields[ColumnIndex("category_source")]);
+        Assert.Equal("human", fields[ColumnIndex("category_source")]);
         Assert.Equal("D:\\Trash", fields[ColumnIndex("suggested_target")]);
     }
 
