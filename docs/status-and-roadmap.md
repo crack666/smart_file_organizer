@@ -15,8 +15,8 @@ its date, or delete it.
 ## What exists
 
 _Checked 12.11.2026 by reading the code on `master`; build and tests run
-locally (`dotnet build` 0 errors, `dotnet test` 271 passed with #9 on top of #19 and #5; the
-line said 47 before) and in CI on Windows and Linux._
+locally (`dotnet build` 0 errors, `dotnet test` 293 passed with #7 on top of #9, #19 and #5; the
+line said 271 before, and 47 before that) and in CI on Windows and Linux._
 
 ### Scan and persistence
 

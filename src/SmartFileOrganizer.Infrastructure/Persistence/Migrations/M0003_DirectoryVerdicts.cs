@@ -1,13 +1,13 @@
 namespace SmartFileOrganizer.Infrastructure.Persistence.Migrations;
 
 /// <summary>
-/// Step 2: one verdict per directory (einheit, einheitlich, gemischt, leer, system) together with
+/// Step 3: one verdict per directory (einheit, einheitlich, gemischt, leer, system) together with
 /// the profile it was based on and whether a rule or the model decided.
 /// See https://github.com/crack666/smart_file_organizer/issues/7.
 /// </summary>
-internal sealed class M0002_DirectoryVerdicts : SqlSchemaMigration
+internal sealed class M0003_DirectoryVerdicts : SqlSchemaMigration
 {
-    public override int Version => 2;
+    public override int Version => 3;
     public override string Description => "Directory verdicts with profile and source";
 
     protected override string Sql => """

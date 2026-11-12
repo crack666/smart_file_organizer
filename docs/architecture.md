@@ -225,7 +225,7 @@ Important tables:
 - `file_nodes` — scanned files with metadata, type, AI status, rule-based sensitive markers (`sensitive_markers`, `sensitive_rule`)
 - `ai_results` — Phase 2 per-file classification results, including model sensitive markers (`sensitive_markers`)
 - `ai_directory_results` — Phase 1 pre-assessment + Phase 3 directory summaries (distinguished by `phase` column)
-- `directory_verdicts` — one verdict per directory (step 2): `verdict`, `source` (`regel`/`modell`), `rule`,
+- `directory_verdicts` — one verdict per directory (step 3): `verdict`, `source` (`regel`/`modell`), `rule`,
   `purpose`, `retention`, `reason`, `unit_directory_node_id` (the directory that is the whole, for `einheit`),
   `profile_json` (snake_case), `model_used`, `raw_response`, `judged_at`, `error`; either `verdict` or `error` is set
 - `user_overrides` — manual category/target corrections
