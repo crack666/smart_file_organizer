@@ -10,7 +10,9 @@ namespace SmartFileOrganizer.Cli.Commands;
 /// <summary><c>sfo scan &lt;path&gt;</c> or <c>sfo scan --resume &lt;job&gt;</c>.</summary>
 public static class ScanCommand
 {
-    public sealed record ScanResult(JobView Job, bool Resumed);
+    /// <param name="RulesChanged">The job was resumed with <c>--rules</c> that differ from its stored rules;
+    /// folders stored as skipped or shallow were re-evaluated.</param>
+    public sealed record ScanResult(JobView Job, bool Resumed, bool RulesChanged = false);
 
     public static Command Create(CliHost host, GlobalOptions globals)
     {
@@ -25,10 +27,15 @@ public static class ScanCommand
             HelpName = "job"
         };
 
+        var rulesFile = RulesCommand.RulesOption(
+            "Rule file (profile) to scan with; stored at the job. Default: the shipped rules. " +
+            "With --resume: switch the job to these rules; stored skip and shallow decisions are re-evaluated.");
+
         var command = new Command("scan", "Create a scan job for a folder and scan it, or resume a job.")
         {
             path,
-            resume
+            resume,
+            rulesFile
         };
         command.Validators.Add(result =>
         {
@@ -43,19 +50,27 @@ public static class ScanCommand
             var services = await ctx.GetServicesAsync(ct);
             var jobs = services.GetRequiredService<ScanJobService>();
 
+            var rulesPath = ctx.ParseResult.GetValue(rulesFile);
+            var (_, profile) = RulesCommand.Load(rulesPath);
+
             long jobId;
+            var rulesChanged = false;
             var resumeId = ctx.ParseResult.GetValue(resume);
             if (resumeId is { } id)
             {
-                jobId = (await JobArguments.RequireJobAsync(jobs, id, ct)).Id;
+                var existing = await JobArguments.RequireJobAsync(jobs, id, ct);
+                jobId = existing.Id;
+                rulesChanged = rulesPath != null && profile.Hash != existing.RulesHash;
+                if (rulesChanged)
+                    ctx.Note($"Job {jobId}: switching rules from '{existing.RulesName ?? "(none recorded)"}' to '{profile.Name}'; skipped and shallow folders are re-evaluated");
             }
             else
             {
                 var root = Path.GetFullPath(ctx.ParseResult.GetValue(path)!);
                 if (!Directory.Exists(root))
                     throw new CliFailureException(ExitCodes.Failure, ErrorCodes.PathNotFound, $"Folder not found: {root}");
-                jobId = (await jobs.CreateJobAsync(root, ct)).Id;
-                ctx.Note($"Created job {jobId} for {root}");
+                jobId = (await jobs.CreateJobAsync(root, profile, ct)).Id;
+                ctx.Note($"Created job {jobId} for {root} with rules '{profile.Name}'");
             }
 
             var progress = new SynchronousProgress<ScanProgress>(p =>
@@ -63,8 +78,9 @@ public static class ScanCommand
 
             try
             {
-                var job = await jobs.RunAsync(jobId, progress, ct);
-                var result = new ScanResult(JobView.From(job), resumeId != null);
+                // Only an explicit --rules switches a resumed job; otherwise it keeps its stored rules.
+                var job = await jobs.RunAsync(jobId, rulesPath != null ? profile : null, progress, ct);
+                var result = new ScanResult(JobView.From(job), resumeId != null, rulesChanged);
                 return job.Status switch
                 {
                     JobStatus.Completed => CommandOutcome.Success(result, () => result.Job.ToLine()),
@@ -77,7 +93,7 @@ public static class ScanCommand
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
                 var job = await jobs.GetJobAsync(jobId, CancellationToken.None);
-                var result = job == null ? null : new ScanResult(JobView.From(job), resumeId != null);
+                var result = job == null ? null : new ScanResult(JobView.From(job), resumeId != null, rulesChanged);
                 return CommandOutcome.Cancelled(
                     $"Scan interrupted. Resume with: sfo scan --resume {jobId}",
                     result,

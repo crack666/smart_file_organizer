@@ -322,6 +322,163 @@ public class CliTests : IDisposable
         Assert.Contains("completed", run.Stdout);
     }
 
+    // ------------------------------------------------------------------ scan rules (#21)
+
+    private string WriteRules(string name, string json)
+    {
+        var path = Path.Combine(_dir, name);
+        File.WriteAllText(path, json);
+        return path;
+    }
+
+    private const string LaptopRules = """
+        {
+          "name": "laptop",
+          "rules": [
+            { "match": "bin", "action": "user_data", "why": "exports live here" },
+            { "match": "Games", "action": "shallow", "why": "installed games" }
+          ]
+        }
+        """;
+
+    [Fact]
+    public async Task RulesCheck_ThreePaths_ReportsRuleAndReasonAsJson()
+    {
+        Directory.CreateDirectory(Path.Combine(_root, "app", "bin"));
+        var bin = Path.Combine(_root, "app", "bin");
+        var docs = Path.Combine(_root, "Documents");
+        var hidden = Path.Combine(_root, "app", "bin", "Documents");
+
+        var run = await SfoAsync(null, "rules", "check", bin, docs, hidden, "--root", _root, "--json");
+
+        Assert.True(run.ExitCode == ExitCodes.Ok, run.Stdout + run.Stderr);
+        var doc = run.Json();
+        AssertEnvelope(doc, "rules check", ok: true, ExitCodes.Ok);
+        var result = doc.GetProperty("result");
+        Assert.Equal("default", result.GetProperty("rules").GetProperty("name").GetString());
+        var checks = result.GetProperty("checks").EnumerateArray().ToList();
+        Assert.Equal(3, checks.Count);
+
+        Assert.Equal("skip", checks[0].GetProperty("decision").GetString());
+        Assert.Equal("rule", checks[0].GetProperty("basis").GetString());
+        Assert.Equal("bin", checks[0].GetProperty("rule").GetProperty("match").GetString());
+        Assert.Equal("skip", checks[0].GetProperty("rule").GetProperty("action").GetString());
+        Assert.Contains("build output", checks[0].GetProperty("reason").GetString());
+        Assert.True(checks[0].GetProperty("exists").GetBoolean());
+        Assert.Equal(2, checks[0].GetProperty("depth").GetInt32());
+
+        Assert.Equal("descend", checks[1].GetProperty("decision").GetString());
+        Assert.Equal("user_data", checks[1].GetProperty("rule").GetProperty("action").GetString());
+        Assert.True(checks[1].GetProperty("reached").GetBoolean());
+
+        // Its own rule says user data, but the scan never gets there: bin above it is skipped.
+        Assert.False(checks[2].GetProperty("reached").GetBoolean());
+        Assert.Equal(bin, checks[2].GetProperty("blocked_by").GetProperty("path").GetString());
+        Assert.Equal("skip", checks[2].GetProperty("blocked_by").GetProperty("decision").GetString());
+    }
+
+    [Fact]
+    public async Task RulesCheck_WithOwnRules_UsesThem()
+    {
+        var rules = WriteRules("laptop.json", LaptopRules);
+
+        var run = await SfoAsync(null, "rules", "check", Path.Combine(_root, "bin"), "--root", _root, "--rules", rules, "--json");
+
+        Assert.Equal(ExitCodes.Ok, run.ExitCode);
+        var result = run.Json().GetProperty("result");
+        Assert.Equal("laptop", result.GetProperty("rules").GetProperty("name").GetString());
+        Assert.Equal(rules, result.GetProperty("rules").GetProperty("source").GetString());
+        Assert.Equal("descend", result.GetProperty("checks")[0].GetProperty("decision").GetString());
+    }
+
+    [Fact]
+    public async Task RulesCheck_PathOutsideRoot_IsUsageError()
+    {
+        var run = await SfoAsync(null, "rules", "check", Path.Combine(_dir, "elsewhere"), "--root", _root, "--json");
+        Assert.Equal(ExitCodes.Usage, run.ExitCode);
+    }
+
+    [Fact]
+    public async Task RulesShow_WithoutJson_PrintsAValidRuleFile()
+    {
+        var run = await SfoAsync(null, "rules", "show");
+
+        Assert.Equal(ExitCodes.Ok, run.ExitCode);
+        var rules = Scanning.Rules.ScanRulesFile.Parse(run.Stdout, "x", "stdout");
+        Assert.Equal(Scanning.Rules.ScanRulesFile.Hash(Scanning.Rules.ScanRulesFile.Default), Scanning.Rules.ScanRulesFile.Hash(rules));
+    }
+
+    [Fact]
+    public async Task Scan_WithOwnRules_ScansSkippedFolder_RecordsGamesShallow_AndStoresProfile()
+    {
+        Directory.CreateDirectory(Path.Combine(_root, "bin"));
+        File.WriteAllText(Path.Combine(_root, "bin", "export.csv"), "a;b");
+        Directory.CreateDirectory(Path.Combine(_root, "Games", "Quake"));
+        File.WriteAllText(Path.Combine(_root, "Games", "readme.txt"), "games");
+        File.WriteAllText(Path.Combine(_root, "Games", "Quake", "save.dat"), "save");
+        var rules = WriteRules("laptop.json", LaptopRules);
+
+        var withDefault = (await SfoAsync(null, "scan", _root, "--json")).Json().GetProperty("result").GetProperty("job");
+        var withOwn = await SfoAsync(null, "scan", _root, "--rules", rules, "--json");
+
+        Assert.True(withOwn.ExitCode == ExitCodes.Ok, withOwn.Stdout + withOwn.Stderr);
+        var job = withOwn.Json().GetProperty("result").GetProperty("job");
+        Assert.Equal("laptop", job.GetProperty("rules").GetProperty("name").GetString());
+        Assert.Equal("default", withDefault.GetProperty("rules").GetProperty("name").GetString());
+        Assert.Equal("built-in", withDefault.GetProperty("rules").GetProperty("source").GetString());
+
+        // Default: 4 base files + Games/readme.txt + Games/Quake/save.dat; bin skipped.
+        Assert.Equal(6, withDefault.GetProperty("files_processed").GetInt64());
+        // Own rules: 4 base files + bin/export.csv + Games/readme.txt; Quake not entered.
+        Assert.Equal(6, job.GetProperty("files_processed").GetInt64());
+        Assert.Equal("completed", job.GetProperty("status").GetString());
+    }
+
+    [Fact]
+    public async Task ScanResume_WithOtherRules_ReopensJob_AndReportsRulesChanged()
+    {
+        Directory.CreateDirectory(Path.Combine(_root, "bin"));
+        File.WriteAllText(Path.Combine(_root, "bin", "export.csv"), "a;b");
+        var jobId = await ScanAsync();
+        var rules = WriteRules("laptop.json", LaptopRules);
+
+        var resume = await SfoAsync(null, "scan", "--resume", jobId.ToString(), "--rules", rules, "--json");
+
+        Assert.Equal(ExitCodes.Ok, resume.ExitCode);
+        var result = resume.Json().GetProperty("result");
+        Assert.True(result.GetProperty("rules_changed").GetBoolean());
+        Assert.Equal("laptop", result.GetProperty("job").GetProperty("rules").GetProperty("name").GetString());
+        Assert.Equal(5, result.GetProperty("job").GetProperty("files_processed").GetInt64());
+    }
+
+    [Theory]
+    [InlineData("""{ "rules": [ { "match": "bin", "action": "ignore" } ] }""", "rules_invalid")]
+    [InlineData(null, "path_not_found")]
+    public async Task Scan_WithBadRules_ExitsWith1(string? json, string code)
+    {
+        var rules = json == null ? Path.Combine(_dir, "missing.json") : WriteRules("bad.json", json);
+
+        var run = await SfoAsync(null, "scan", _root, "--rules", rules, "--json");
+
+        Assert.Equal(ExitCodes.Failure, run.ExitCode);
+        Assert.Equal(code, run.Json().GetProperty("error").GetProperty("code").GetString());
+    }
+
+    [Fact]
+    public async Task Jobs_AfterScanWithSeveralSkippedFolders_ShowsCompleted()
+    {
+        foreach (var skipped in new[] { "bin", "obj", "node_modules" })
+        {
+            Directory.CreateDirectory(Path.Combine(_root, skipped));
+            File.WriteAllText(Path.Combine(_root, skipped, "x.txt"), "x");
+        }
+        await ScanAsync();
+
+        var jobs = await SfoAsync(null, "jobs", "--json");
+
+        Assert.Equal("completed", jobs.Json().GetProperty("result").GetProperty("jobs")[0].GetProperty("status").GetString());
+    }
+
     /// <summary>Settings follow a redirected database, so this file is what the CLI reads.</summary>
     private void WriteSettingsWithOllamaAt(int port)
     {

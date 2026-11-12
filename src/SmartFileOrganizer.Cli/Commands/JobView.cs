@@ -19,15 +19,18 @@ public sealed record JobView(
     long DirectoriesTotal,
     long DirectoriesProcessed,
     int ErrorCount,
-    string? LastError)
+    string? LastError,
+    RulesCommand.RulesView? Rules)
 {
     public static JobView From(ScanJob job) => new(
         job.Id, job.RootPath, job.Status, job.CreatedAt, job.StartedAt, job.CompletedAt,
         job.TotalFiles, job.ProcessedFiles, job.TotalDirectories, job.ProcessedDirectories,
-        job.ErrorCount, job.LastError);
+        job.ErrorCount, job.LastError,
+        job.Rules is { } rules ? RulesCommand.RulesView.From(rules) : null);
 
     public string ToLine() =>
-        $"#{Id}  {Status.ToString().ToLowerInvariant(),-9}  {FilesProcessed} files, {DirectoriesProcessed} dirs, {ErrorCount} errors  {RootPath}";
+        $"#{Id}  {Status.ToString().ToLowerInvariant(),-9}  {FilesProcessed} files, {DirectoriesProcessed} dirs, {ErrorCount} errors  {RootPath}" +
+        (Rules is { } r ? $"  [rules: {r.Name}]" : string.Empty);
 }
 
 /// <summary>Shared helpers for commands that take a job id.</summary>
