@@ -10,7 +10,7 @@ The repository is intentionally split into focused layers.
   - orchestration services and use-case oriented business logic
 - `src/SmartFileOrganizer.Infrastructure`
   - persistence and schema migrations, filesystem access, Ollama HTTP integration
-  - `Content/`: UI-free file evidence extraction (`FileContentExtractor`), the model input builder (`AiClassificationInputPreparer`) and the checksums for the library comparison (`ContentHasher`)
+  - `Content/`: UI-free file evidence extraction (`FileContentExtractor`), metadata readers (`MediaMetadataReader`, `AudioMetadataReader`, `OfficePropertiesReader`, `ArchiveListingReader`, `FileSignature`), optional video frames (`VideoFrameExtractor`), the model input builder (`AiClassificationInputPreparer`) and the checksums for the library comparison (`ContentHasher`)
 - `src/SmartFileOrganizer.Scanning`
   - scan engine, heuristics, file type detection
   - `Rules/`: scan rule files (`ScanRulesFile`, `ScanRuleSet`) and the shipped `default-rules.json` (embedded); format in [scan-rules.md](scan-rules.md)
@@ -90,7 +90,7 @@ Other options: `AppSettingsDirectory` (where the shipped `appsettings.json` defa
 
 - images: original file bytes
 - PDFs: page 1 rendered via Docnet/PDFium with a white background, encoded as PNG by a small built-in encoder
-- `.docx`, `.xlsx`, `.odt`, `.ods`: text extracted from the package XML
+- `.docx`, `.xlsx`, `.pptx`, `.odt`, `.ods`: text extracted from the package XML
 - text-like files: truncated text excerpt (12,000 characters)
 
 ## Comparison flow (source against library)
@@ -189,22 +189,42 @@ and sets the other eligible files from `Discovered` to `Deferred` in one transac
 
 **Judge.** One producer-consumer pass over `Discovered` files, as before:
 
-1. `GetPendingAiAnalysisAsync` selects `Discovered` files with `file_type IN (1, 2, 4)` — Image, Video, Document;
-   `Deferred` files are not selected
-2. `IClassificationInputPreparer` (implemented by `AiClassificationInputPreparer` in `Infrastructure/Content`) builds evidence per file type:
-   - **Image** (≤ `MaxImageUploadBytes`): base64 image payload
-   - **Image** (oversized): text-only note about size
-   - **Video**: `[Video file. Classify based on the filename and directory name only.]` — no bytes
-   - **Document** (≤ `MaxDocumentUploadBytes`): rendered page image or extracted text preview
-3. `ClassifyAsync` sends a structured `/api/chat` request with `think: false`
+1. `GetPendingAiAnalysisAsync` selects all `Discovered` files of the job (until 12.11.2026: only Image, Video,
+   Document; since then every type, [#22](https://github.com/crack666/smart_file_organizer/issues/22)); `Deferred` files
+   are not selected. The sample still draws only images, videos and documents, so the other files of a uniform
+   directory are judged one by one (by rule or by the model)
+2. `IClassificationInputPreparer` (implemented by `AiClassificationInputPreparer` in `Infrastructure/Content`) builds the
+   evidence (`OllamaClassificationInput`): content for the model, **facts** read without the model, and two lists,
+   `Contains` and `Missing`, that tell the model what the evidence holds and what it lacks, so it does not guess.
+   The first 4 KB decide the format (`FileSignature`, fact `detected_format`); for `Other`/`Unknown` files the format
+   routes the file (a `.dat` that is a JPEG is read as an image).
+
+   | Kind | Facts (source `metadata` unless noted) | Content for the model | Typical "missing" notes |
+   |---|---|---|---|
+   | Image | `width`, `height`, `taken_at`, `device`, `has_location` (true only; coordinates are never read out), `image_origin` (`rule`: `camera`, `screenshot`, `scan`) | the image (JPEG, PNG, GIF, WebP up to `MaxImageUploadBytes`); SVG as source text | capture date, device, origin, pixels of HEIC/TIFF/RAW or oversized files |
+   | Video | `duration_seconds`, `width`, `height`, `taken_at`, `device`, `has_location` | two still frames (10 % and 50 %) if `ffmpeg` is on the PATH; the video itself never | frames without the tool, sound and picture content |
+   | Audio | `title`, `artist`, `album`, `duration_seconds`, `audio_kind` (`rule`: `speech`, `music`) | genre, year, format, channels, bitrate as text | sound content (no transcription), tags |
+   | Archive (ZIP, RAR, 7z, TAR) | `entry_count`, `unpacked_bytes`, `encrypted`, `archive_content` (`rule`: `photos`, `documents`, `media`, `software`, `code`, `mixed`) | listing of the first 60 entries (name, uncompressed size); at most 10,000 entries are read; nothing is unpacked | contents; `.gz`, `.bz2`, `.xz`, `.iso` are not listed |
+   | PDF | `page_count`, `has_text` | embedded text of the first pages up to 6,000 characters; page 1 rendered; for a PDF without text (scan) also the middle page (up to `MaxDocumentUploadBytes`) | text of later pages, document properties |
+   | Office (OOXML, ODF) | `title`, `author`, `created_at`, `page_count` | document text (12,000 characters) | legacy `.doc`/`.xls`/`.ppt` text |
+   | Code, text, text-like `Other` | — | text excerpt | — |
+   | Program, library, font, database, unknown binary | `detected_format` | none: a **rule result** (`RuleResult`), no model call | file content |
+
+   Rule results: installers and programs → `SoftwareInstaller`, libraries and fonts → `SystemFile`, `Thumbs.db` →
+   `TrashCandidate`, other databases → `ReviewNeeded`, unknown binaries → `Unknown`. They are stored with
+   `is_ai_result = 0` and `model_used = rule:<id>` (`rule:program`, `rule:unknown-binary`, ...).
+3. Otherwise `ClassifyAsync` sends a structured `/api/chat` request with `think: false`. The prompt lists the facts as
+   reliable (`taken_at: 2019-07-14T10:22:33 (metadata)`), then "The evidence contains" and "Not available (do not guess these)"
 4. `ParseResponse` handles gemma4's field aliasing (`classification` → `category`, missing `confidence` → 0.85)
 5. The schema also asks for `sensitive` (array of marker tokens); parsed into `FileClassification.SensitiveMarkers`
 6. For files of mixed and uniform directories the schema also asks for `keep_hint` (`temporary` or
    `worth_keeping`) with `keep_reason`; uniform ones too, so that the hint is there if the sample escalates
 7. A marked file (rule or model) proposed as `TrashCandidate` is stored as `ReviewNeeded`, one proposed as
    `temporary` as `worth_keeping` (the model's reason is replaced by a neutral one)
-8. Result stored in `ai_results` with `origin = model`, even when the run is being stopped; file status
-   updated to `AiAnalyzed` or `Error`
+8. Result stored in `ai_results` with `origin = model` (`rule` for a rule result) and `evidence`
+   (`{"contains":[...],"missing":[...]}`), even when the run is being stopped; facts replace the file's rows in
+   `file_facts`. For a file marked sensitive (rule or model), free-text facts (`title`, `author`, `artist`, `album`)
+   are not stored. File status becomes `AiAnalyzed` (rule or model result) or `Error`
 
 **Resolve.** `DirectorySamplingService.ResolveAsync` evaluates every `open` sample whose members are all
 done (`DirectorySampler.Evaluate`). Failed members count as deviating. The sample confirms only if
@@ -317,7 +337,10 @@ Important tables:
 - `scan_jobs` — job lifecycle, counters, status, and the scan rules of the job (step 4: `rules_name`, `rules_source`, `rules_hash`, `rules_json`), role (`source`/`library`)
 - `directory_nodes` — scanned directories with heuristic metadata and stats; `dir_status = Error` for directories the scan could not read
 - `file_nodes` — scanned files with metadata, type, AI status, rule-based sensitive markers (`sensitive_markers`, `sensitive_rule`)
-- `ai_results` — Phase 2 per-file classification results, including model sensitive markers (`sensitive_markers`)
+- `ai_results` — Phase 2 per-file classification results, including model sensitive markers (`sensitive_markers`) and the evidence notes (`evidence`, step 7)
+- `file_facts` — facts per file read without the model (step 7): `file_node_id`, `fact`, `value`, `source`
+  (`metadata`, `rule`, `model`), `recorded_at`; one row per file and fact. Codes are defined on the Domain enums
+  `FileFactKey` and `FactSource` (`FileFactCodes.cs`)
 - `ai_directory_results` — Phase 1 pre-assessment + Phase 3 directory summaries (distinguished by `phase` column)
 - `directory_verdicts` — one verdict per directory (step 3): `verdict`, `source` (`regel`/`modell`), `rule`,
   `purpose`, `retention`, `reason`, `unit_directory_node_id` (the directory that is the whole, for `einheit`),

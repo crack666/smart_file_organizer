@@ -57,6 +57,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IFileRepository, FileRepository>();
         services.AddSingleton<IDirectoryRepository, DirectoryRepository>();
         services.AddSingleton<IClassificationRepository, ClassificationRepository>();
+        services.AddSingleton<IFileFactRepository, FileFactRepository>();
         services.AddSingleton<IUserOverrideRepository, UserOverrideRepository>();
         services.AddSingleton<IDirectoryClassificationRepository, DirectoryClassificationRepository>();
         services.AddSingleton<IJobStatisticsRepository, JobStatisticsRepository>();
@@ -68,7 +69,11 @@ public static class ServiceCollectionExtensions
         // Infrastructure
         services.AddSingleton<IFileSystemAccessor, FileSystemAccessor>();
         services.AddSingleton<FileContentExtractor>();
-        services.AddSingleton<IClassificationInputPreparer, AiClassificationInputPreparer>();
+        services.AddSingleton(_ => new VideoFrameExtractor());
+        services.AddSingleton<IClassificationInputPreparer>(sp => new AiClassificationInputPreparer(
+            sp.GetRequiredService<FileContentExtractor>(),
+            sp.GetRequiredService<OllamaOptions>(),
+            sp.GetRequiredService<VideoFrameExtractor>()));
         services.AddSingleton<IContentHasher, ContentHasher>();
 
         // Ollama
@@ -102,6 +107,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ClassificationService>(sp => new ClassificationService(
             sp.GetRequiredService<IFileRepository>(),
             sp.GetRequiredService<IClassificationRepository>(),
+            sp.GetRequiredService<IFileFactRepository>(),
             sp.GetRequiredService<IClassificationInputPreparer>(),
             sp.GetRequiredService<IOllamaService>(),
             sp.GetRequiredService<DirectorySamplingService>(),

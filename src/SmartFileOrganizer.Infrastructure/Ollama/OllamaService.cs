@@ -9,9 +9,8 @@ using SmartFileOrganizer.Domain.Models;
 namespace SmartFileOrganizer.Infrastructure.Ollama;
 
 /// <summary>
-/// Calls the Ollama HTTP API to classify files semantically.
-/// For image/video/document files it sends a structured prompt;
-/// for other types it returns a heuristic result without calling Ollama.
+/// Calls the Ollama HTTP API to classify files semantically from the evidence built by
+/// <c>IClassificationInputPreparer</c>. Files decided by a rule never reach this class.
 /// </summary>
 public class OllamaService : IOllamaService
 {
@@ -95,7 +94,7 @@ public class OllamaService : IOllamaService
 
         try
         {
-            var prompt = BuildPrompt(input, _options.SummaryLanguage);
+            var prompt = BuildClassificationPrompt(input, _options.SummaryLanguage);
             _logger.LogInformation("[Phase2] PROMPT for '{File}' (images={ImgCount}, textLen={TextLen}):\n{Prompt}",
                 file.Name, input.Base64Images.Count, input.ExtractedText?.Length ?? 0,
                 Trunc(prompt, 800));
@@ -155,7 +154,11 @@ public class OllamaService : IOllamaService
         return result;
     }
 
-    private static string BuildPrompt(OllamaClassificationInput input, string summaryLanguage = "English")
+    /// <summary>
+    /// The Phase 2 prompt: file identity, facts read without the model (marked as reliable),
+    /// what the evidence contains and what is missing, then the extracted text and the guidance.
+    /// </summary>
+    public static string BuildClassificationPrompt(OllamaClassificationInput input, string summaryLanguage = "English")
     {
         var file = input.File;
         var sb = new StringBuilder();
@@ -167,8 +170,32 @@ public class OllamaService : IOllamaService
         sb.AppendLine($"Size (bytes): {file.Size}");
         sb.AppendLine($"Last modified: {file.LastWriteTime:yyyy-MM-dd}");
         sb.AppendLine($"Directory: {file.RelativeDir}");
-        sb.AppendLine($"Has visual attachment: {(input.Base64Images.Count > 0 ? "yes" : "no")}");
+        sb.AppendLine($"Attached images: {input.Base64Images.Count}");
         sb.AppendLine();
+
+        if (input.Facts.Count > 0)
+        {
+            sb.AppendLine("Facts read from the file without a model (reliable; prefer them over your own impression):");
+            foreach (var fact in input.Facts)
+                sb.AppendLine($"  {fact.Key.ToCode()}: {fact.Value} ({fact.Source.ToCode()})");
+            sb.AppendLine();
+        }
+
+        if (input.Contains.Count > 0)
+        {
+            sb.AppendLine("The evidence contains:");
+            foreach (var item in input.Contains)
+                sb.AppendLine($"  - {item}");
+            sb.AppendLine();
+        }
+
+        if (input.Missing.Count > 0)
+        {
+            sb.AppendLine("Not available (do not guess these; say so in the summary if they matter):");
+            foreach (var item in input.Missing)
+                sb.AppendLine($"  - {item}");
+            sb.AppendLine();
+        }
 
         if (!string.IsNullOrWhiteSpace(input.ExtractedText))
         {
@@ -186,6 +213,9 @@ public class OllamaService : IOllamaService
         sb.AppendLine("- Financial records (invoices, bank statements): Invoice or Document, importance High");
         sb.AppendLine("- Software installers, update packages, build artifacts: SoftwareInstaller or SystemFile, importance Low");
         sb.AppendLine("- Temporary files, logs, crash dumps, cache: TrashCandidate, importance Low");
+        sb.AppendLine("- Images: image_origin camera = Photo, screenshot = Screenshot, scan = DocumentScan");
+        sb.AppendLine("- Own speech recordings (audio_kind speech: voice memos, interviews): Audio, importance High; music: Audio, importance Medium");
+        sb.AppendLine("- Archives: judge by the listing; photos or personal documents inside: Archive, importance High; programs or installers: SoftwareInstaller, importance Low");
         sb.AppendLine("- Anything personal or user-created but hard to categorize: ReviewNeeded");
         sb.AppendLine();
         sb.AppendLine("Do NOT use TrashCandidate for personal documents, even if they appear old or superseded.");

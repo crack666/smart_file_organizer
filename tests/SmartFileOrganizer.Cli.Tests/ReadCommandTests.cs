@@ -333,8 +333,8 @@ public class ReadCommandTests : IDisposable
         var files = result.GetProperty("files");
         Assert.Equal(6, files.GetProperty("total").GetInt64());
         Assert.Equal(2, files.GetProperty("sensitive").GetInt64());
-        // Waiting for classification: notes.txt (document) and big.png (image); id_rsa is not eligible.
-        Assert.Equal(2, files.GetProperty("pending").GetInt64());
+        // Waiting for classification: notes.txt, big.png and id_rsa (every file type takes part in Phase 2).
+        Assert.Equal(3, files.GetProperty("pending").GetInt64());
         Assert.Equal(1, result.GetProperty("by_category").GetProperty("invoice").GetInt64());
         Assert.Equal(2, result.GetProperty("by_category").GetProperty("review_needed").GetInt64());
         Assert.Equal(1, result.GetProperty("directories_by_verdict").GetProperty("error").GetInt64());

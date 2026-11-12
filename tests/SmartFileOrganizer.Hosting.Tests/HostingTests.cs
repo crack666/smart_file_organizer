@@ -151,7 +151,7 @@ public class HostingTests : IDisposable
         Directory.CreateDirectory(Path.Combine(root, "sub"));
         await File.WriteAllTextAsync(Path.Combine(root, "a.txt"), "alpha");
         await File.WriteAllBytesAsync(Path.Combine(root, "sub", "b.png"), [0x89, 0x50, 0x4E, 0x47, 1]);
-        await File.WriteAllTextAsync(Path.Combine(root, "sub", "c.bin"), "not eligible");
+        await File.WriteAllBytesAsync(Path.Combine(root, "sub", "c.bin"), [0x00, 0x01, 0x00, 0xFE]); // decided by rule
 
         var ollama = new FakeOllamaService();
         await using var provider = BuildProvider(ollama);
@@ -166,8 +166,8 @@ public class HostingTests : IDisposable
         var before = await status.GetAsync(job.Id);
         Assert.NotNull(before);
         Assert.Equal(3, before!.Statistics.FilesTotal);
-        Assert.Equal(2, before.Statistics.FilesAiEligible);
-        Assert.Equal(2, before.Statistics.FilesAiPending);
+        Assert.Equal(3, before.Statistics.FilesAiEligible);
+        Assert.Equal(3, before.Statistics.FilesAiPending);
         Assert.Equal(2, before.Statistics.DirectoriesTotal);
         Assert.Equal(0, before.Statistics.DirectoriesPreAssessed);
 
@@ -182,7 +182,7 @@ public class HostingTests : IDisposable
         Assert.Empty(ollama.PreAssessedDirectories);
 
         var after = (await status.GetAsync(job.Id))!.Statistics;
-        Assert.Equal(2, after.FilesAiAnalyzed);
+        Assert.Equal(3, after.FilesAiAnalyzed);
         Assert.Equal(0, after.FilesAiPending);
         Assert.Equal(0, after.DirectoriesSummarized);
         Assert.Empty(after.RecentErrors);

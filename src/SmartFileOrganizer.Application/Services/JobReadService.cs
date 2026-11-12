@@ -187,7 +187,8 @@ public class JobReadService
             Increment(byType, file.FileType.ToString());
             Increment(byStatus, file.Status.ToString());
 
-            if (file.Status is FileNodeStatus.Discovered or FileNodeStatus.Processing && IsAiEligible(file.FileType))
+            // Every file type takes part in Phase 2 (rule or model result).
+            if (file.Status is FileNodeStatus.Discovered or FileNodeStatus.Processing)
                 pending++;
             if (file.Status == FileNodeStatus.Error)
                 errors++;
@@ -265,8 +266,6 @@ public class JobReadService
 
     private static bool Matches(IReadOnlyCollection<string> wanted, string code) =>
         wanted.Contains(code, StringComparer.OrdinalIgnoreCase);
-
-    private static bool IsAiEligible(FileType type) => type is FileType.Image or FileType.Video or FileType.Document;
 
     private static void Increment(Dictionary<string, long> counts, string key) =>
         counts[key] = counts.GetValueOrDefault(key) + 1;

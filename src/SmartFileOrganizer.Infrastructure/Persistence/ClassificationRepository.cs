@@ -23,11 +23,13 @@ public class ClassificationRepository : IClassificationRepository
         INSERT INTO ai_results
             (file_node_id, category, importance, confidence, summary,
              suggested_target, model_used, analyzed_at, raw_response, error, is_ai_result,
-             sensitive_markers, origin, inherited_from_directory_node_id, keep_hint, keep_reason)
+             sensitive_markers, origin, inherited_from_directory_node_id, keep_hint, keep_reason,
+             evidence)
         VALUES
             (@FileNodeId, @Category, @Importance, @Confidence, @Summary,
              @SuggestedTarget, @ModelUsed, @AnalyzedAt, @RawResponse, @Error, @IsAiResult,
-             @SensitiveMarkers, @Origin, @InheritedFromDirectoryNodeId, @KeepHint, @KeepReason)
+             @SensitiveMarkers, @Origin, @InheritedFromDirectoryNodeId, @KeepHint, @KeepReason,
+             @Evidence)
         ON CONFLICT(file_node_id) DO UPDATE SET
             category = excluded.category,
             importance = excluded.importance,
@@ -43,7 +45,8 @@ public class ClassificationRepository : IClassificationRepository
             origin = excluded.origin,
             inherited_from_directory_node_id = excluded.inherited_from_directory_node_id,
             keep_hint = excluded.keep_hint,
-            keep_reason = excluded.keep_reason
+            keep_reason = excluded.keep_reason,
+            evidence = excluded.evidence
         """;
 
     /// <summary>
@@ -67,7 +70,8 @@ public class ClassificationRepository : IClassificationRepository
         Origin = c.Origin.ToCode(),
         c.InheritedFromDirectoryNodeId,
         KeepHint = c.KeepHint.ToCode(),
-        c.KeepReason
+        c.KeepReason,
+        c.Evidence
     };
 
     public async Task<FileClassification?> GetByFileNodeIdAsync(long fileNodeId, CancellationToken ct = default)

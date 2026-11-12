@@ -56,6 +56,31 @@ It introduces native PDFium runtimes. That is acceptable, but it means:
 - enterprise environments may enforce additional application control policies
 - packaging/runtime verification matters more than for pure managed libraries
 
+## Metadata, tags and archive listings
+
+Added 12.11.2026 for [#22](https://github.com/crack666/smart_file_organizer/issues/22): what can be read from
+metadata is more reliable than any model answer and costs no GPU time. All three are pure managed code,
+referenced by `SmartFileOrganizer.Infrastructure`, and run on Windows and Linux.
+
+| Library | License | Used for |
+|---|---|---|
+| MetadataExtractor 2.9 | Apache-2.0 (pulls in XmpCore, BSD) | EXIF/PNG/QuickTime/MP4/AVI metadata of images and videos, without decoding pixels |
+| z440.atl.core (ATL, Audio Tools Library) 7.19 | MIT | audio tags (ID3, Vorbis, MP4, ...) and duration |
+| SharpCompress 0.50 | MIT | table of contents of ZIP, RAR, 7z and TAR archives |
+
+Rejected: TagLibSharp (LGPL-2.1, not permissive). Office properties and text are read from the package XML with
+`System.IO.Compression`, PDF page count and text through Docnet.Core, which was already there.
+
+Archives are never unpacked: only the archive directory is read, at most 10,000 entries
+(`ArchiveListingReader.MaxEntries`), so an archive bomb costs nothing. Compressed tarballs (`.tar.gz`, `.gz`, `.bz2`,
+`.xz`) are therefore not listed; the evidence says so.
+
+### Optional external tool: ffmpeg
+
+Video still frames come from `ffmpeg` if it is found on the `PATH` (`VideoFrameExtractor`). It is not a dependency
+and not shipped: without it videos get their container metadata only, and the evidence tells the model that frames
+are missing. Each call has a 30 s timeout and reads one frame, scaled to 768 px width.
+
 ## System.CommandLine for the CLI
 
 `sfo` parses arguments with System.CommandLine (MIT, maintained by the .NET team, version 2.0). It gives typed arguments and options, validation, help and typo suggestions without own parsing code.
@@ -177,22 +202,25 @@ Trade-off:
 - keeping big models resident improves responsiveness
 - but it also reserves GPU memory longer and may conflict with other GPU workloads
 
-## 7. Multimodal evidence is intentionally incremental
+## 7. Evidence per file type: facts first, and say what is missing
 
-The current multimodal evidence path is practical rather than complete:
+Decided 12.11.2026 in [#22](https://github.com/crack666/smart_file_organizer/issues/22): quality comes before
+throughput, and misassignments come from thin evidence. Until then the model saw images without capture data, PDFs
+by their first page, videos by name only, and audio, archives and everything else not at all.
 
-- original image bytes for image files
-- first-page rendered image for PDFs
-- preview-sized extracted text for text-like files
+- Facts that metadata settle (capture date, device, page count, tags, archive listing summary) are stored as facts with
+  their source in `file_facts`, not only written into the prompt. A later decision step can use them without the model
+  ([#37](https://github.com/crack666/smart_file_organizer/issues/37)).
+- Some facts are derived by a rule (`image_origin`, `audio_kind`, `archive_content`) and carry source `rule`.
+- Every piece of evidence lists what it contains and what is missing, so the model does not guess (no frames, no tags,
+  text cut after page 4).
+- Location metadata are reduced to `has_location = true`; coordinates are never stored. For sensitive files,
+  free-text facts (title, author, artist, album) are not stored.
+- Files whose content no model can judge (programs, fonts, databases, unknown binaries) get a rule result instead of a
+  model call, so Phase 2 leaves no file without a result.
 
-Reason:
-
-- this gives real vision capability quickly without waiting for a full document/OCR subsystem
-- it shares one extraction path (`FileContentExtractor`) with the GUI preview
-
-Known limitation:
-
-- long or multi-page documents are not yet fully understood
+Still missing: OCR beyond what the vision model reads from rendered pages, audio transcription, PDF document
+properties, text of legacy binary Office formats, listings of compressed tarballs and ISO images.
 
 ## 8. Sensitive files: local and external readers
 
