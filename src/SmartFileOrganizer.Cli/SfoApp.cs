@@ -18,6 +18,7 @@ public static class SfoApp
         root.Subcommands.Add(AnalyzeCommand.Create(host, globals));
         root.Subcommands.Add(JobsCommand.Create(host, globals));
         root.Subcommands.Add(StatusCommand.Create(host, globals));
+        root.Subcommands.Add(CompareCommand.Create(host, globals));
         root.Subcommands.Add(DoctorCommand.Create(host, globals));
         root.Subcommands.Add(RulesCommand.Create(host, globals));
         root.Subcommands.Add(SummaryCommand.Create(host, globals));

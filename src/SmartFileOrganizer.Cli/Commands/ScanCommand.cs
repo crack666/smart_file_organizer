@@ -30,12 +30,19 @@ public static class ScanCommand
         var rulesFile = RulesCommand.RulesOption(
             "Rule file (profile) to scan with; stored at the job. Default: the shipped rules. " +
             "With --resume: switch the job to these rules; stored skip and shallow decisions are re-evaluated.");
+        var role = new Option<string?>("--role")
+        {
+            Description = "quelle (default): a medium to clean up. bestand: the organised archive; only read, never analysed.",
+            HelpName = "role"
+        };
+        role.AcceptOnlyFromAmong([.. ScanRoleValues.All]);
 
         var command = new Command("scan", "Create a scan job for a folder and scan it, or resume a job.")
         {
             path,
             resume,
-            rulesFile
+            rulesFile,
+            role
         };
         command.Validators.Add(result =>
         {
@@ -43,6 +50,8 @@ public static class ScanCommand
             var hasResume = result.GetValue(resume) != null;
             if (hasPath == hasResume)
                 result.AddError("Give either a path or --resume <job>, not both and not neither.");
+            else if (hasResume && result.GetValue(role) != null)
+                result.AddError("--role is set when a job is created; it cannot be given with --resume.");
         });
 
         CommandRunner.SetHandler(command, host, globals, async (ctx, ct) =>
@@ -69,8 +78,9 @@ public static class ScanCommand
                 var root = Path.GetFullPath(ctx.ParseResult.GetValue(path)!);
                 if (!Directory.Exists(root))
                     throw new CliFailureException(ExitCodes.Failure, ErrorCodes.PathNotFound, $"Folder not found: {root}");
-                jobId = (await jobs.CreateJobAsync(root, profile, ct)).Id;
-                ctx.Note($"Created job {jobId} for {root} with rules '{profile.Name}'");
+                var scanRole = ctx.ParseResult.GetValue(role) is { } r ? ScanRoleValues.Parse(r) : ScanRole.Quelle;
+                jobId = (await jobs.CreateJobAsync(root, profile, scanRole, ct)).Id;
+                ctx.Note($"Created {scanRole.ToValue()} job {jobId} for {root} with rules '{profile.Name}'");
             }
 
             var progress = new SynchronousProgress<ScanProgress>(p =>

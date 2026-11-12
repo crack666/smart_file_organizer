@@ -244,9 +244,105 @@ public class CliTests : IDisposable
         Assert.Equal(4, result.GetProperty("job").GetProperty("files_processed").GetInt64());
     }
 
+    /// <summary>An archive next to the source: notes.txt renamed (same content), letter.txt with other content.</summary>
+    private async Task<(long Source, long Archive, string ArchiveRoot)> ScanSourceAndArchiveAsync()
+    {
+        var archive = Path.Combine(_dir, "archive");
+        Directory.CreateDirectory(Path.Combine(archive, "Listen"));
+        Directory.CreateDirectory(Path.Combine(archive, "docs"));
+        File.WriteAllText(Path.Combine(archive, "Listen", "einkauf.txt"), "Shopping list: milk, bread");
+        File.WriteAllText(Path.Combine(archive, "docs", "letter.txt"), "Dear landlord, again");
+
+        var source = await ScanAsync();
+        var scan = await SfoAsync(null, "scan", archive, "--role", "bestand", "--json");
+        Assert.True(scan.ExitCode == 0, scan.Stderr + scan.Stdout);
+        var job = scan.Json().GetProperty("result").GetProperty("job");
+        Assert.Equal("bestand", job.GetProperty("role").GetString());
+        return (source, job.GetProperty("id").GetInt64(), archive);
+    }
+
+    [Fact]
+    public async Task Compare_Json_SetsStatesPerFile_AndCounts()
+    {
+        var (source, archive, archiveRoot) = await ScanSourceAndArchiveAsync();
+
+        var run = await SfoAsync(null, "compare", source.ToString(), "--against", archive.ToString(), "--files", "all", "--json");
+
+        Assert.True(run.ExitCode == ExitCodes.Ok, run.Stdout + run.Stderr);
+        var doc = run.Json();
+        AssertEnvelope(doc, "compare", ok: true, ExitCodes.Ok);
+        var result = doc.GetProperty("result");
+        Assert.True(result.GetProperty("complete").GetBoolean());
+        Assert.Equal("quelle", result.GetProperty("source").GetProperty("role").GetString());
+        var counts = result.GetProperty("counts");
+        Assert.Equal(4, counts.GetProperty("files").GetInt32());
+        Assert.Equal(1, counts.GetProperty("gesichert").GetInt32());
+        Assert.Equal(2, counts.GetProperty("neu").GetInt32());
+        Assert.Equal(1, counts.GetProperty("abweichend").GetInt32());
+
+        var files = result.GetProperty("files").EnumerateArray()
+            .ToDictionary(f => Path.GetFileName(f.GetProperty("path").GetString()!), f => f);
+        Assert.Equal("gesichert", files["notes.txt"].GetProperty("state").GetString());
+        Assert.Equal(Path.Combine(archiveRoot, "Listen", "einkauf.txt"), files["notes.txt"].GetProperty("match_path").GetString());
+        Assert.Equal("abweichend", files["letter.txt"].GetProperty("state").GetString());
+        Assert.Equal("neu", files["pic.png"].GetProperty("state").GetString());
+
+        var root = result.GetProperty("directories").EnumerateArray()
+            .Single(d => d.GetProperty("path").GetString() == Path.GetFullPath(_root));
+        Assert.Equal(0.25, root.GetProperty("backed_up_share").GetDouble());
+        Assert.Equal(0, result.GetProperty("errors_total").GetInt32());
+    }
+
+    [Fact]
+    public async Task Compare_UnreadableArchiveFile_ExitsWith1_CompareIncomplete_WithResult()
+    {
+        var (source, archive, archiveRoot) = await ScanSourceAndArchiveAsync();
+        File.Delete(Path.Combine(archiveRoot, "Listen", "einkauf.txt"));
+
+        var run = await SfoAsync(null, "compare", source.ToString(), "--against", archive.ToString(), "--files", "fehler", "--json");
+
+        Assert.Equal(ExitCodes.Failure, run.ExitCode);
+        var doc = run.Json();
+        AssertEnvelope(doc, "compare", ok: false, ExitCodes.Failure);
+        Assert.Equal(ErrorCodes.CompareIncomplete, doc.GetProperty("error").GetProperty("code").GetString());
+        var result = doc.GetProperty("result");
+        Assert.False(result.GetProperty("complete").GetBoolean());
+        Assert.Equal(1, result.GetProperty("counts").GetProperty("fehler").GetInt32());
+        Assert.Equal("notes.txt", Path.GetFileName(Assert.Single(result.GetProperty("files").EnumerateArray()).GetProperty("path").GetString()));
+        Assert.Contains(result.GetProperty("errors").EnumerateArray(), e => e.GetProperty("role").GetString() == "bestand");
+    }
+
+    [Fact]
+    public async Task Compare_WithSwappedRoles_ExitsWith1_WrongRole()
+    {
+        var (source, archive, _) = await ScanSourceAndArchiveAsync();
+
+        var run = await SfoAsync(null, "compare", archive.ToString(), "--against", source.ToString(), "--json");
+
+        Assert.Equal(ExitCodes.Failure, run.ExitCode);
+        Assert.Equal(ErrorCodes.WrongRole, run.Json().GetProperty("error").GetProperty("code").GetString());
+    }
+
+    [Fact]
+    public async Task Analyze_OfArchive_IsRefused_AndNoModelIsAsked()
+    {
+        var (_, archive, _) = await ScanSourceAndArchiveAsync();
+        var ollama = new FakeOllamaService();
+
+        var run = await SfoAsync(ollama, "analyze", archive.ToString(), "--json");
+
+        Assert.Equal(ExitCodes.Failure, run.ExitCode);
+        Assert.Equal(ErrorCodes.WrongRole, run.Json().GetProperty("error").GetProperty("code").GetString());
+        Assert.Empty(ollama.FileInputs);
+    }
+
     [Theory]
     [InlineData("scan")]
     [InlineData("scan", "somewhere", "--resume", "1")]
+    [InlineData("scan", "somewhere", "--role", "archiv")]
+    [InlineData("scan", "--resume", "1", "--role", "bestand")]
+    [InlineData("compare")]
+    [InlineData("compare", "1", "--files", "everything")]
     [InlineData("analyze", "1", "--parallel", "9")]
     [InlineData("analyze", "1", "--phase", "everything")]
     [InlineData("status", "not-a-number")]

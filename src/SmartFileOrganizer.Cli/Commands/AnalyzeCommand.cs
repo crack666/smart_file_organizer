@@ -60,6 +60,11 @@ public static class AnalyzeCommand
             var services = await ctx.GetServicesAsync(ct);
             var jobId = ctx.ParseResult.GetValue(job);
             var scanJob = await JobArguments.RequireJobAsync(services.GetRequiredService<ScanJobService>(), jobId, ct);
+            if (scanJob.Role == ScanRole.Bestand)
+            {
+                throw new CliFailureException(ExitCodes.Failure, ErrorCodes.WrongRole,
+                    $"Job {jobId} is a bestand (the archive); it is only read and compared, never analysed by a model.");
+            }
             if (scanJob.Status != JobStatus.Completed)
             {
                 throw new CliFailureException(ExitCodes.Failure, ErrorCodes.ScanNotCompleted,
