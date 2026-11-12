@@ -585,7 +585,8 @@ thresholds, the word file and the target file are described in
 ### `sfo library review <job>`
 
 Runs the structure rules on a completed job and, unless `--no-model` is given, asks the
-local model about roles and a few changes.
+local model about roles and a few changes. It is meant for a job with the role `library`;
+a `source` job is judged too, with a note on stderr and in `role_note` (otherwise `null`).
 
 | Option | Meaning |
 |---|---|
@@ -597,7 +598,7 @@ local model about roles and a few changes.
 | `--words <file>` | Word file with extra words and exceptions. |
 
 ```bash
-sfo scan /media/archive --structure-only --json
+sfo scan /media/archive --role library --structure-only --json
 sfo library review 7 --no-model --json
 ```
 
@@ -610,6 +611,7 @@ sfo library review 7 --no-model --json
   "by_kind": { "dump": 2, "naming_inconsistent": 2, "...": 1 },
   "excluded_by_exceptions": 0,
   "words": "built-in",
+  "role_note": null,
   "job_id": 7, "total": 21, "limit": 50, "offset": 0, "next_offset": null,
   "items": [
     {

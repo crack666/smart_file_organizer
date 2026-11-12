@@ -94,9 +94,9 @@ public class LibraryCommandTests : IDisposable
         return run;
     }
 
-    private async Task<long> ScanStructureAsync()
+    private async Task<long> ScanStructureAsync(string role = "library")
     {
-        var scan = await OkAsync(null, "scan", _root, "--structure-only");
+        var scan = await OkAsync(null, "scan", _root, "--structure-only", "--role", role);
         var job = scan.Result().GetProperty("job");
         Assert.True(job.GetProperty("structure_only").GetBoolean());
         return job.GetProperty("id").GetInt64();
@@ -127,6 +127,7 @@ public class LibraryCommandTests : IDisposable
         Assert.Equal("library review", doc.GetProperty("command").GetString());
         var result = doc.GetProperty("result");
         Assert.Equal("skipped", result.GetProperty("advice").GetProperty("status").GetString());
+        Assert.Equal(JsonValueKind.Null, result.GetProperty("role_note").ValueKind);
         Assert.Equal(1, result.GetProperty("structure").GetProperty("dumps").GetInt32());
         var kinds = Kinds(result);
         foreach (var expected in new[] { "dump", "naming_inconsistent", "same_name_elsewhere", "similar_names", "placeholder_name", "empty", "type_mismatch", "sensitive_location" })
@@ -141,6 +142,19 @@ public class LibraryCommandTests : IDisposable
         Assert.Equal("Dokumente/geheim-tresor.kdbx", sensitive.GetProperty("items")[0].GetString());
 
         Assert.Equal(before, Snapshot());
+    }
+
+    [Fact]
+    public async Task Review_OfASourceJob_RunsButSaysItIsMeantForALibrary()
+    {
+        var job = await ScanStructureAsync("source");
+
+        var run = await OkAsync(null, "library", "review", job.ToString(), "--no-model");
+
+        var note = run.Result().GetProperty("role_note").GetString();
+        Assert.Contains("role source", note);
+        Assert.Contains("--role library", note);
+        Assert.NotEmpty(Items(run.Result()));
     }
 
     [Fact]

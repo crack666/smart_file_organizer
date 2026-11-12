@@ -66,6 +66,7 @@ public static class LibraryCommand
         IReadOnlyDictionary<string, int> ByKind,
         int ExcludedByExceptions,
         string Words,
+        string? RoleNote,
         long JobId,
         int Total,
         int Limit,
@@ -178,8 +179,17 @@ public static class LibraryCommand
                 throw ToFailure(ex);
             }
 
+            // The review is meant for the organised archive (role library). A source job is judged
+            // too, because a medium can be worth a look before it is sorted, but the caller is told.
+            string? roleNote = null;
+            if (review.Job.Role != ScanRole.Library)
+            {
+                roleNote = $"Job {review.Job.Id} has the role {review.Job.Role.ToValue()}; library review is meant for a library job (sfo scan <path> --role library --structure-only).";
+                ctx.Note(roleNote);
+            }
+
             var result = new ReviewResult(JobView.From(review.Job), review.Structure, review.ByKind, review.ExcludedByExceptions,
-                review.WordsSource, review.Job.Id, review.Total, review.Limit, review.Offset, review.NextOffset,
+                review.WordsSource, roleNote, review.Job.Id, review.Total, review.Limit, review.Offset, review.NextOffset,
                 review.Items.Select(FindingView.From).ToList(), AdviceView.From(review.Advice));
 
             return review.Advice.Status == AdviceStatus.Unavailable
