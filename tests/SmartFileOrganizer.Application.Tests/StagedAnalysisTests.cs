@@ -8,6 +8,7 @@ using SmartFileOrganizer.Domain.Models;
 using SmartFileOrganizer.Infrastructure;
 using SmartFileOrganizer.Infrastructure.Persistence;
 using SmartFileOrganizer.Scanning.Engine;
+using SmartFileOrganizer.Scanning.Rules;
 
 namespace SmartFileOrganizer.Application.Tests;
 
@@ -86,9 +87,18 @@ public class StagedAnalysisTests : IDisposable
 
     private async Task<long> ScanAsync(string root)
     {
-        var job = await _jobRepo.CreateAsync(new ScanJob { RootPath = root, Status = JobStatus.Created, CreatedAt = DateTime.UtcNow });
-        var heuristics = new HeuristicsEngine(new HeuristicsOptions { SkipPatterns = ["$Recycle.Bin"], UserDataPatterns = [] });
-        var engine = new ScanEngine(new FileSystemAccessor(), heuristics, _fileRepo, _dirRepo, _jobRepo, NullLogger<ScanEngine>.Instance);
+        // Temp paths can contain "AppData" or user-data names; only the rules under test are active here.
+        var rules = new ScanRuleSet
+        {
+            Name = "test",
+            Rules = [new ScanRule("$Recycle.Bin", ScanRuleAction.Skip)]
+        };
+        var job = await _jobRepo.CreateAsync(new ScanJob
+        {
+            RootPath = root, Status = JobStatus.Created, CreatedAt = DateTime.UtcNow,
+            Rules = ScanRulesFile.ToProfile(rules, "test")
+        });
+        var engine = new ScanEngine(new FileSystemAccessor(), _fileRepo, _dirRepo, _jobRepo, NullLogger<ScanEngine>.Instance);
         await engine.RunAsync(job, new Progress<ScanProgress>(_ => { }), CancellationToken.None);
         return job.Id;
     }

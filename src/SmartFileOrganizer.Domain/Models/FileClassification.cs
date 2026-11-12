@@ -21,7 +21,7 @@ public class FileClassification
     /// Stored as tokens in <c>ai_results.sensitive_markers</c>.</summary>
     public SensitiveMarker SensitiveMarkers { get; set; }
 
-    /// <summary>Where the result came from; null for rows written before schema step 4 (all judged by the model).
+    /// <summary>Where the result came from; null for rows written before schema step 5 (all judged by the model).
     /// An <see cref="ResultOrigin.Inherited"/> result has <see cref="IsAiResult"/> false and a capped confidence.</summary>
     public ResultOrigin? Origin { get; set; }
 
