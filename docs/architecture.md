@@ -217,16 +217,75 @@ and sets the other eligible files from `Discovered` to `Deferred` in one transac
    `is_ai_result = 0` and `model_used = rule:<id>` (`rule:program`, `rule:unknown-binary`, ...).
 3. Otherwise `ClassifyAsync` sends a structured `/api/chat` request with `think: false`. The prompt lists the facts as
    reliable (`taken_at: 2019-07-14T10:22:33 (metadata)`), then "The evidence contains" and "Not available (do not guess these)"
-4. `ParseResponse` handles gemma4's field aliasing (`classification` → `category`, missing `confidence` → 0.85)
+4. `ParseResponse` handles gemma4's field aliasing (`classification` → `category`). A missing `confidence` is not
+   assumed (until 12.11.2026 it became 0.85): it stays 0, `ConfidenceMissing` is set and the answer gets a second check
 5. The schema also asks for `sensitive` (array of marker tokens); parsed into `FileClassification.SensitiveMarkers`
 6. For files of mixed and uniform directories the schema also asks for `keep_hint` (`temporary` or
    `worth_keeping`) with `keep_reason`; uniform ones too, so that the hint is there if the sample escalates
 7. A marked file (rule or model) proposed as `TrashCandidate` is stored as `ReviewNeeded`, one proposed as
    `temporary` as `worth_keeping` (the model's reason is replaced by a neutral one)
-8. Result stored in `ai_results` with `origin = model` (`rule` for a rule result) and `evidence`
+8. Second check (see below): an unsure or contradicted answer is asked again before anything is stored
+9. Result stored in `ai_results` with `origin = model` (`rule` for a rule result), `certainty` and `evidence`
    (`{"contains":[...],"missing":[...]}`), even when the run is being stopped; facts replace the file's rows in
    `file_facts`. For a file marked sensitive (rule or model), free-text facts (`title`, `author`, `artist`, `album`)
    are not stored. File status becomes `AiAnalyzed` (rule or model result) or `Error`
+
+**Second check** ([#23](https://github.com/crack666/smart_file_organizer/issues/23); `ResultCheckRules`,
+`SecondCheckOptions`). What the tool calls sure has to be right, and what is unsure has to show as unsure. The
+confidence a model states about itself is weakly calibrated, so certainty rests on agreement between independent
+signals. `ResultCheckRules.Find` lists what speaks against a first answer (codes in `CheckReason`):
+
+| Reason | When |
+|---|---|
+| `missing_confidence` | the model gave no confidence |
+| `low_confidence` | confidence below `BelowConfidence` (0.7) |
+| `unclear_category` | `ReviewNeeded` or `Unknown` |
+| `kind_mismatch` | `Photo`/`Screenshot` for a file that is no image, `Video` for no video, `Audio` for no audio; header bytes (`detected_format`) decide, the extension where the header is ambiguous (`mp4` is also HEIC and MOV, `mp3` a weak test) |
+| `rule_disagrees` | an unambiguous metadata rule: `image_origin = screenshot` against `Photo`, `image_origin = camera` with a device against `Screenshot`. The rule sets the category, no second call. A scan is not forced: a scanned print may be a photo |
+| `verdict_disagrees` | retention of the directory verdict `entbehrlich` and importance High or Critical, or `behalten` and `TrashCandidate` or keep hint `temporary` |
+
+Any reason except `rule_disagrees` leads to a second call, made right after the first in the same worker: the
+preparer runs again with `EvidenceDepth.Extended` (PDF text up to 24,000 characters plus the middle and last page
+rendered, 300 archive names, four video frames, 24,000 characters of text in the prompt), and the prompt gets a
+context section with verdict, purpose and retention of the directory and up to `MaxNeighbours` (20) other files
+with their category so far. It never sees the first answer. `ResultCheckRules.Combine`:
+
+- same category, same keep hint (when both have one), and the second fits the kind rule: `agreed`, the second
+  answer is stored, confidence `1 - (1 - c1)(1 - c2)` (a missing one counts as 0.5), certainty `certain`
+  (`review` if the agreed category is `ReviewNeeded`/`Unknown`);
+- the first broke the kind rule and the second fits it: `corrected`, the second stands, `likely`;
+- otherwise `disagreed`: category `ReviewNeeded`, the higher importance, the lower confidence, no target, keep
+  hint `worth_keeping` if either says so, all markers, a summary naming both categories only (no model text);
+  certainty `review`;
+- second call failed: `failed`, the first answer stays as `uncertain`.
+
+Second check off (`Enabled = false`) or a file a person corrected (`user_overrides`): no call, outcome
+`skipped`, `uncertain`. Every check is a row in `result_checks` with reasons, outcome, rule note and both answers
+as JSON, written in one transaction with the result (`IClassificationRepository.SaveAsync`); rows are only
+added. The sensitive review rule runs on both answers and on the stored result, so a marked file never becomes
+`TrashCandidate` or `temporary` after a check either. A stop during either call stores nothing for the file: it
+stays `Processing` and is judged anew on resume (also a first call that failed only because the run stopped; until
+12.11.2026 that was stored as an error).
+
+Certainty (`ai_results.certainty`, `ResultCertainty`) without a check: `certain` when a rule fact says the same as
+the model (`image_origin` camera/screenshot/scan with Photo/Screenshot/DocumentScan, `audio_kind` with Audio),
+otherwise `likely`. Rule results: `certain` at rule confidence 0.9 or more, else `uncertain`. Inherited results:
+`likely`. When a sample confirms, its agreeing members go from `likely` to `certain` (the file fits the confirmed
+sample of its directory). A member left in `review` is `ReviewNeeded` and therefore deviates, so a sample whose
+members contradict their verdict escalates instead of passing the contradiction on to inherited files; inherited
+results themselves are not checked one by one (they carry the sample's result and were never looked at).
+
+Settings (`SecondCheckOptions`, configuration section `SecondCheck`): `Enabled` true, `BelowConfidence` 0.7,
+`CheckUnclearCategory` true, `CheckVerdictContradictions` true, `MaxNeighbours` 20. Starting values; the
+measurement of [#10](https://github.com/crack666/smart_file_organizer/issues/10) should set them.
+
+Rule results (`origin = rule`) stay out of samples: they cost no call and would mix other kinds of files into the
+majority vote.
+
+**Retry.** `sfo analyze --retry-errors` calls `IFileRepository.ReleaseFailedAsync` before the pass: files with
+status `Error` (not those a person corrected) go back to `Discovered`. Every write of a result counts
+`ai_results.attempts` up and keeps the error it replaces in `previous_error`; a second call of a check is not an
+attempt.
 
 **Resolve.** `DirectorySamplingService.ResolveAsync` evaluates every `open` sample whose members are all
 done (`DirectorySampler.Evaluate`). Failed members count as deviating. The sample confirms only if
@@ -274,7 +333,8 @@ judges the members and resolves, so it spends the same calls as a run.
 
 - Single `IsAvailableAsync` check at start of `AiClassificationCoordinator.StartOrResumeAsync`
 - `think: false` in all three phase request bodies
-- Full prompt + truncated response logged at `Information` level per Ollama call
+- Full prompt + truncated response logged at `Information` level per Ollama call; the second call of a check
+  (more content, names of neighbouring files) at `Debug` only
 - Pause/resume/cancel supported at any phase boundary via `WaitIfPausedAsync`
 
 ## Sensitive files
@@ -369,6 +429,12 @@ Important tables:
 - `ai_results` columns of step 6: `origin` (`rule`, `model`, `inherited`, `human`, `agent`, `external`; NULL for
   older rows, all judged by the model), `inherited_from_directory_node_id`, `keep_hint` (`temporary`,
   `worth_keeping`), `keep_reason`. File statuses `Deferred` (waits for its sample) and `Inherited` are new
+- `ai_results` columns of step 10: `certainty` (`certain`, `likely`, `uncertain`, `review`; NULL for older rows),
+  `attempts`, `previous_error`
+- `result_checks` — one row per second check (step 10): `file_node_id`, `reasons` (comma-separated `CheckReason`
+  codes), `outcome` (`agreed`, `disagreed`, `corrected`, `rule_wins`, `failed`, `skipped`), `rule_note`,
+  `first_answer` and `second_answer` (JSON, snake_case: category, importance, confidence or null, summary, target,
+  keep hint, markers, model, raw response, evidence, error), `checked_at`
 - `user_overrides` — manual category/target corrections
 - `content_fingerprints` — head-and-tail and full SHA-256 per path, with the size and modification time (`last_write_ticks`) they belong to and the time the full checksum was computed (`full_hash_at`); shared by all jobs
 - `comparisons` — one row per compared pair of source job and library job (`against_job_id` null: duplicates only), with `complete` and `error_count`
@@ -396,7 +462,8 @@ The schema is built from numbered steps in `src/SmartFileOrganizer.Infrastructur
 1. Add one file `Migrations/M000N_ShortName.cs` with a class implementing `ISchemaMigration`, or deriving from `SqlSchemaMigration` when plain SQL is enough. `Version` is `N`.
 2. Take the next free number on `master`. Steps are discovered by reflection, so no shared list is edited.
 3. Versions must be exactly `1..N`. If two branches picked the same number, startup and `SchemaMigrationTests` fail with a "Duplicate schema migration versions" message; the branch merged second renumbers its step (file name and `Version`).
-4. Never change a step that has been merged; add a new one. Step 1 (`M0001_InitialSchema`) is the schema as it existed before migrations. Step 2 (`M0002_SensitiveMarkers`) adds the sensitive-marker columns. Step 3 (`M0003_DirectoryVerdicts`) adds `directory_verdicts`. Step 4 (`M0004_ScanJobRules`) adds the scan rules of a job. Step 5 (`M0005_ContentComparison`) adds the comparison with the library. Step 6 (`M0006_DirectorySamples`) adds `directory_samples`, the escalation columns and the origin and keep-hint columns of `ai_results`; its new codes are English. Step 7 (`M0007_FileFacts`) adds `file_facts` and `ai_results.evidence`. Step 8 (`M0008_LibraryReview`) adds `scan_jobs.structure_only` and `library_advice`. Step 9 (`M0009_Evaluation`) adds `eval_cases` and `eval_runs`.
+<<<<<<< HEAD
+4. Never change a step that has been merged; add a new one. Step 1 (`M0001_InitialSchema`) is the schema as it existed before migrations. Step 2 (`M0002_SensitiveMarkers`) adds the sensitive-marker columns. Step 3 (`M0003_DirectoryVerdicts`) adds `directory_verdicts`. Step 4 (`M0004_ScanJobRules`) adds the scan rules of a job. Step 5 (`M0005_ContentComparison`) adds the comparison with the library. Step 6 (`M0006_DirectorySamples`) adds `directory_samples`, the escalation columns and the origin and keep-hint columns of `ai_results`; its new codes are English. Step 7 (`M0007_FileFacts`) adds `file_facts` and `ai_results.evidence`. Step 8 (`M0008_LibraryReview`) adds `scan_jobs.structure_only` and `library_advice`. Step 9 (`M0009_Evaluation`) adds `eval_cases` and `eval_runs`. Step 10 (`M0010_ResultChecks`) adds certainty, attempts and previous error to `ai_results` and the table `result_checks`.
 5. Do not put `PRAGMA journal_mode` or other transaction-incompatible statements in a step.
 
 ## Architectural rules

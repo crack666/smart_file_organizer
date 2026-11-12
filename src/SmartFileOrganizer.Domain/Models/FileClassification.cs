@@ -39,7 +39,7 @@ public class FileClassification
     /// result can be traced to thin evidence or to a wrong judgement.</summary>
     public string? Evidence { get; set; }
 
-    /// <summary>How far the result can be relied on; null for rows written before schema step 8.
+    /// <summary>How far the result can be relied on; null for rows written before schema step 10.
     /// Stored as code in <c>ai_results.certainty</c>.</summary>
     public ResultCertainty? Certainty { get; set; }
 

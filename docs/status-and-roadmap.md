@@ -15,8 +15,8 @@ its date, or delete it.
 ## What exists
 
 _Checked 12.11.2026 by reading the code on `master`; build and tests run
-locally (`dotnet build` 0 errors and 0 warnings, `dotnet test` 454 passed with
-https://github.com/crack666/smart_file_organizer/issues/22 on top of #8; the line said 411 with #8 on top of the
+locally (`dotnet build` 0 errors and 0 warnings, `dotnet test` 482 passed with
+https://github.com/crack666/smart_file_organizer/issues/23 on top of #22; the line said 454 with #22 on top of #8, 411 with #8 on top of the
 scan rules, read commands and library comparison, 312 before that, 293 before that, 271 before that, and 47
 before that) and in CI on Windows and Linux._
 
@@ -102,6 +102,13 @@ before that) and in CI on Windows and Linux._
    and as `worth_keeping` instead of `temporary`. The thresholds are starting
    values until the measurement of
    [#10](https://github.com/crack666/smart_file_organizer/issues/10).
+   Since 12.11.2026 ([#23](https://github.com/crack666/smart_file_organizer/issues/23))
+   every result carries a certainty (`certain`, `likely`, `uncertain`,
+   `review`) from agreement between signals; unsure or contradicted answers
+   get a second call with more evidence and the directory as context, both
+   answers are kept in `result_checks` (schema step 10), disagreement puts the
+   file to `review`. `sfo analyze --retry-errors` retries failed files and
+   counts the attempts.
    Samples draw only images, videos and documents; the other files of a
    uniform directory are judged one by one. (Until 12.11.2026 this line
    read: "Files of other types (audio, archives, executables, ...) still get
@@ -189,8 +196,15 @@ against two temp folders and a temp database._
   is not on the PATH. The evidence names each of these as missing.
 - Files of units and system directories stay `Skipped` without a Phase 2
   result of their own; their directory verdict carries it.
-- If the model gives a valid category but omits `confidence`, the parser
-  sets `0.85`.
+- A missing `confidence` is no longer assumed: the result gets a second
+  check (until 12.11.2026 this line read "If the model gives a valid
+  category but omits `confidence`, the parser sets `0.85`").
+- The second check and its thresholds are tested with a scripted model only
+  (`SecondCheckTests`); how often the real model agrees with itself, and so
+  how many extra calls a run costs, is not measured yet
+  (https://github.com/crack666/smart_file_organizer/issues/10).
+- `--retry-errors` retries files only; directories whose Phase 1 call failed
+  and summaries already written are not redone by it.
 - gemma4 ignores schema field names; the parser accepts aliases such as
   `classification` for `category`. Other models may differ.
 - No bulk review, no review filters, no file operations (move, copy,

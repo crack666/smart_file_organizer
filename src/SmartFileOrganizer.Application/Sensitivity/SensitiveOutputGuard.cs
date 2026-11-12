@@ -55,7 +55,7 @@ public sealed record FileOutputRecord
     [JsonPropertyName("confidence")] public double? Confidence { get; init; }
 
     /// <summary>Code <c>certain</c>, <c>likely</c>, <c>uncertain</c> or <c>review</c>; null without a result or for
-    /// results written before schema step 8. Says nothing about the content, so it stays on protected records.</summary>
+    /// results written before schema step 10. Says nothing about the content, so it stays on protected records.</summary>
     [JsonPropertyName("certainty")] public string? Certainty { get; init; }
 
     /// <summary>How often the file went through Phase 2.</summary>
