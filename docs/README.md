@@ -120,7 +120,9 @@ src/
 ├── SmartFileOrganizer.Application     # Use-case services, AI pipeline orchestration
 ├── SmartFileOrganizer.Infrastructure  # SQLite persistence, Ollama HTTP client
 ├── SmartFileOrganizer.Scanning        # Scan engine, heuristics, FileType detection
-└── SmartFileOrganizer.Desktop         # Avalonia UI, ViewModels, DI wiring
+├── SmartFileOrganizer.Hosting         # Composition root without GUI, default settings
+├── SmartFileOrganizer.Desktop         # Avalonia UI, ViewModels, DI wiring
+└── SmartFileOrganizer.Cli             # Command line "sfo" (see cli.md)
 ```
 
 ---

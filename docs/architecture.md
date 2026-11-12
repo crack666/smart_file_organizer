@@ -18,9 +18,12 @@ The repository is intentionally split into focused layers.
   - resolves database and settings paths, ships the default `appsettings.json`
 - `src/SmartFileOrganizer.Desktop`
   - Avalonia UI, MVVM view models, GUI-only services (preview bitmap adapter)
+- `src/SmartFileOrganizer.Cli`
+  - command line `sfo` on top of the Hosting project; commands and the JSON contract are described in [cli.md](cli.md)
 - `tests/*`
   - unit and integration-style validation for the core logic
   - `SmartFileOrganizer.Hosting.Tests` references only the Hosting project and proves the core runs without the GUI
+  - `SmartFileOrganizer.Cli.Tests` runs `sfo` in-process against a temp folder and database
 
 ## Design intent
 
@@ -35,6 +38,16 @@ Everything except views, view models and bitmap conversion must run without Aval
 The caller adds its own logging providers. To substitute a service (for example a fake `IOllamaService` in tests), register it after `AddSmartFileOrganizerCore`.
 
 The desktop `ServiceConfigurator` calls the same method and only adds console/debug logging, `FilePreviewService` and the view models.
+
+The CLI calls it once per invocation with `ReloadSettingsOnChange = false`, the `--db` option as `DatabasePath`, and a logging provider that writes to stderr only.
+
+### Event-driven vs. awaited runs
+
+The GUI starts work in the background and follows it through events: `ScanJobService.StartAsync` (`JobStateChanged`) and `AiClassificationCoordinator.StartOrResumeAsync` (`StateChanged`, with pause and resume). Hosts without an event loop await the same work instead:
+
+- `ScanJobService.RunAsync(jobId, progress, ct)` returns the persisted job. Cancelling stores the job as `Paused`, so it can be resumed, and throws `OperationCanceledException`.
+- `AiClassificationCoordinator.RunAsync(jobId, phases, progress, ct)` runs the selected `AiPhases` and returns one result per phase; `OllamaAvailable = false` means nothing ran. Both paths share the phase loop.
+- `JobStatusService.GetAsync(jobId)` returns the job with counters per phase and recent errors (`IJobStatisticsRepository`).
 
 ### File locations
 
