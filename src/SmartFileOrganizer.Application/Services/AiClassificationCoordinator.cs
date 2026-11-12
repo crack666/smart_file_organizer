@@ -66,26 +66,21 @@ public class AiClassificationCoordinator
                 {
                     StateChanged?.Invoke(this, new AiProcessingStateChanged(jobId, AiProcessingState.Running, "AI classification running…"));
 
-                    // Single availability check — avoids 3x /api/tags calls
-                    if (!await _ollama.IsAvailableAsync(_cts.Token))
+                    var run = await RunPhasesAsync(
+                        jobId,
+                        AiPhases.All,
+                        phase => StateChanged?.Invoke(this, new AiProcessingStateChanged(jobId, AiProcessingState.Running, PhaseStartText(phase))),
+                        _ => progress,
+                        WaitIfPausedAsync,
+                        _cts.Token);
+
+                    if (!run.OllamaAvailable)
                     {
                         StateChanged?.Invoke(this, new AiProcessingStateChanged(jobId, AiProcessingState.Unavailable, "Ollama is not available."));
                         return;
                     }
 
-                    // ── Phase 1: Directory reconnaissance ──────────────────
-                    StateChanged?.Invoke(this, new AiProcessingStateChanged(jobId, AiProcessingState.Running, "Phase 1/3: Directory reconnaissance…"));
-                    var phase1 = await _preAssessmentService.RunAsync(jobId, progress, WaitIfPausedAsync, _cts.Token);
-
-                    // ── Phase 2: Targeted per-file deep analysis ────────────
-                    StateChanged?.Invoke(this, new AiProcessingStateChanged(jobId, AiProcessingState.Running, "Phase 2/3: Deep file analysis…"));
-                    var result = await _classificationService.RunAsync(jobId, progress, WaitIfPausedAsync, _cts.Token);
-
-                    // ── Phase 3: Directory summaries ────────────────────────
-                    StateChanged?.Invoke(this, new AiProcessingStateChanged(jobId, AiProcessingState.Running, "Phase 3/3: Directory summaries…"));
-                    var phase3 = await _directorySummaryService.RunAsync(jobId, progress, WaitIfPausedAsync, _cts.Token);
-
-                    var totalErrors = phase1.ErrorCount + result.ErrorCount + phase3.ErrorCount;
+                    var totalErrors = run.ErrorCount;
                     var finalMsg = totalErrors > 0
                         ? $"AI classification finished with {totalErrors} error(s)."
                         : "AI classification completed.";
@@ -105,6 +100,84 @@ public class AiClassificationCoordinator
         }
 
         return Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Runs the selected phases in the caller's flow and returns when they are done, for hosts
+    /// without an event loop (CLI, tests). Independent of <see cref="StartOrResumeAsync"/>: no
+    /// <see cref="StateChanged"/> events, no pause. Cancelling <paramref name="ct"/> throws
+    /// <see cref="OperationCanceledException"/>; finished work is persisted, so a later run resumes.
+    /// </summary>
+    public Task<AiPipelineRunResult> RunAsync(
+        long jobId,
+        AiPhases phases = AiPhases.All,
+        IProgress<AiPhaseProgress>? progress = null,
+        CancellationToken ct = default)
+    {
+        return RunPhasesAsync(
+            jobId,
+            phases,
+            onPhaseStarting: null,
+            progressFor: phase => progress == null
+                ? null
+                : new SynchronousProgress<AiClassificationProgress>(p => progress.Report(new AiPhaseProgress(phase, p))),
+            waitIfPausedAsync: null,
+            ct);
+    }
+
+    private async Task<AiPipelineRunResult> RunPhasesAsync(
+        long jobId,
+        AiPhases phases,
+        Action<AiPhases>? onPhaseStarting,
+        Func<AiPhases, IProgress<AiClassificationProgress>?> progressFor,
+        Func<CancellationToken, Task>? waitIfPausedAsync,
+        CancellationToken ct)
+    {
+        // Single availability check — avoids 3x /api/tags calls
+        if (!await _ollama.IsAvailableAsync(ct))
+            return new AiPipelineRunResult(false, []);
+
+        var results = new List<AiPhaseRunResult>();
+
+        // ── Phase 1: Directory reconnaissance ──────────────────
+        if (phases.HasFlag(AiPhases.PreAssessment))
+        {
+            onPhaseStarting?.Invoke(AiPhases.PreAssessment);
+            var r = await _preAssessmentService.RunAsync(jobId, progressFor(AiPhases.PreAssessment), waitIfPausedAsync, ct);
+            results.Add(new AiPhaseRunResult(AiPhases.PreAssessment, r));
+        }
+
+        // ── Phase 2: Targeted per-file deep analysis ────────────
+        if (phases.HasFlag(AiPhases.Classification))
+        {
+            onPhaseStarting?.Invoke(AiPhases.Classification);
+            var r = await _classificationService.RunAsync(jobId, progressFor(AiPhases.Classification), waitIfPausedAsync, ct);
+            results.Add(new AiPhaseRunResult(AiPhases.Classification, r));
+        }
+
+        // ── Phase 3: Directory summaries ────────────────────────
+        if (phases.HasFlag(AiPhases.Summary))
+        {
+            onPhaseStarting?.Invoke(AiPhases.Summary);
+            var r = await _directorySummaryService.RunAsync(jobId, progressFor(AiPhases.Summary), waitIfPausedAsync, ct);
+            results.Add(new AiPhaseRunResult(AiPhases.Summary, r));
+        }
+
+        return new AiPipelineRunResult(true, results);
+    }
+
+    private static string PhaseStartText(AiPhases phase) => phase switch
+    {
+        AiPhases.PreAssessment => "Phase 1/3: Directory reconnaissance…",
+        AiPhases.Classification => "Phase 2/3: Deep file analysis…",
+        _ => "Phase 3/3: Directory summaries…"
+    };
+
+    /// <summary>Reports on the calling thread. <see cref="Progress{T}"/> would post to the thread pool,
+    /// so a caller could still receive reports after <see cref="RunAsync"/> returned.</summary>
+    private sealed class SynchronousProgress<T>(Action<T> report) : IProgress<T>
+    {
+        public void Report(T value) => report(value);
     }
 
     public void Pause()
