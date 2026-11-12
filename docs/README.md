@@ -95,7 +95,9 @@ dotnet run --project src/SmartFileOrganizer.Desktop
 
 ### Configuration
 
-Settings are stored in `%APPDATA%\SmartFileOrganizer\settings.json` and override `appsettings.json`:
+Settings are stored in `%APPDATA%\SmartFileOrganizer\settings.json` and override `appsettings.json`.
+Set `SFO_DB` to use a different database file; `settings.json` is then read from and written next to it
+(or set `SFO_SETTINGS` explicitly). Details in [architecture.md](architecture.md#file-locations).
 
 ```json
 {
