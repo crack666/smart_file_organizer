@@ -9,17 +9,45 @@ The repository is intentionally split into focused layers.
 - `src/SmartFileOrganizer.Application`
   - orchestration services and use-case oriented business logic
 - `src/SmartFileOrganizer.Infrastructure`
-  - persistence, filesystem access, Ollama HTTP integration
+  - persistence and schema migrations, filesystem access, Ollama HTTP integration
+  - `Content/`: UI-free file evidence extraction (`FileContentExtractor`) and the model input builder (`AiClassificationInputPreparer`)
 - `src/SmartFileOrganizer.Scanning`
   - scan engine, heuristics, file type detection
+- `src/SmartFileOrganizer.Hosting`
+  - composition root for everything except the GUI; no Avalonia reference
+  - resolves database and settings paths, ships the default `appsettings.json`
 - `src/SmartFileOrganizer.Desktop`
-  - Avalonia UI, MVVM view models, DI composition, preview services
+  - Avalonia UI, MVVM view models, GUI-only services (preview bitmap adapter)
 - `tests/*`
   - unit and integration-style validation for the core logic
+  - `SmartFileOrganizer.Hosting.Tests` references only the Hosting project and proves the core runs without the GUI
 
 ## Design intent
 
 The UI must not own scanning, SQL generation, or Ollama HTTP logic. Those responsibilities live behind services and repositories so they remain testable and replaceable.
+
+Everything except views, view models and bitmap conversion must run without Avalonia, so that a CLI or a test can scan and analyse with the same code the GUI uses.
+
+## Composition (Hosting)
+
+`services.AddSmartFileOrganizerCore(configure?)` registers configuration, repositories, scanning, the Ollama client, evidence extraction, `OllamaSettingsService` and all application services. After building the provider, call `provider.InitializeSmartFileOrganizerDatabaseAsync()` (creates the file if needed and applies pending migrations).
+
+The caller adds its own logging providers. To substitute a service (for example a fake `IOllamaService` in tests), register it after `AddSmartFileOrganizerCore`.
+
+The desktop `ServiceConfigurator` calls the same method and only adds console/debug logging, `FilePreviewService` and the view models.
+
+### File locations
+
+Resolved once by `SmartFileOrganizerPaths.Resolve` and registered as `SmartFileOrganizerPaths`:
+
+| | First match wins |
+|---|---|
+| Database | `SmartFileOrganizerHostOptions.DatabasePath` → `SFO_DB` → `<AppData>/SmartFileOrganizer/data.db` |
+| User settings | `SmartFileOrganizerHostOptions.SettingsPath` → `SFO_SETTINGS` → `settings.json` next to the database if the database was redirected → `<AppData>/SmartFileOrganizer/settings.json` |
+
+`<AppData>` is `Environment.SpecialFolder.ApplicationData`. Settings follow a redirected database so that a scratch or test database never reads or overwrites the user's real settings.
+
+Other options: `AppSettingsDirectory` (where the shipped `appsettings.json` defaults are read from; default: application base directory) and `ReloadSettingsOnChange` (default `true`).
 
 ## Runtime flow
 
@@ -43,9 +71,12 @@ The UI must not own scanning, SQL generation, or Ollama HTTP logic. Those respon
 
 ## Preview flow
 
-- images load directly as Avalonia bitmaps
-- text-like files are read as truncated text previews
-- PDFs render page 1 via Docnet/PDFium to an Avalonia bitmap
+`FileContentExtractor` (Infrastructure) reads the content once, without UI types; `FilePreviewService` (Desktop) only decodes the returned image bytes into an Avalonia bitmap. Preview and model input therefore come from the same code.
+
+- images: original file bytes
+- PDFs: page 1 rendered via Docnet/PDFium with a white background, encoded as PNG by a small built-in encoder
+- `.docx`, `.xlsx`, `.odt`, `.ods`: text extracted from the package XML
+- text-like files: truncated text excerpt (12,000 characters)
 
 ## AI flow (current architecture)
 
@@ -64,7 +95,7 @@ The post-scan AI pipeline runs as three sequential phases coordinated by `AiClas
 ### Phase 2 — Per-File Classification (`ClassificationService`)
 
 1. `GetPendingAiAnalysisAsync` selects `Discovered` files with `file_type IN (1, 2, 4)` — Image, Video, Document
-2. `IClassificationInputPreparer` builds evidence per file type:
+2. `IClassificationInputPreparer` (implemented by `AiClassificationInputPreparer` in `Infrastructure/Content`) builds evidence per file type:
    - **Image** (≤ `MaxImageUploadBytes`): base64 image payload
    - **Image** (oversized): text-only note about size
    - **Video**: `[Video file. Classify based on the filename and directory name only.]` — no bytes
@@ -92,8 +123,8 @@ The post-scan AI pipeline runs as three sequential phases coordinated by `AiClas
 
 ## Ollama configuration flow
 
-1. default settings come from `src/SmartFileOrganizer.Desktop/appsettings.json`
-2. user overrides are saved to `%AppData%\SmartFileOrganizer\settings.json`
+1. default settings come from `src/SmartFileOrganizer.Hosting/appsettings.json` (copied into every referencing app's output)
+2. user overrides are saved to the resolved settings file (see "File locations" above)
 3. `MainViewModel` can refresh the live model list from Ollama via `/api/tags`
 4. the selected model, base URL, and `keep_alive` are applied to subsequent requests
 5. a warm-up action can preload the selected model via an empty `/api/chat` request
@@ -127,6 +158,24 @@ Important tables:
 - `ai_results` — Phase 2 per-file classification results
 - `ai_directory_results` — Phase 1 pre-assessment + Phase 3 directory summaries (distinguished by `phase` column)
 - `user_overrides` — manual category/target corrections
+- `db_version` — one row per applied schema step (`version`, `applied_at`)
+
+## Schema migrations
+
+The schema is built from numbered steps in `src/SmartFileOrganizer.Infrastructure/Persistence/Migrations/`. `DatabaseContext.InitializeAsync` sets `journal_mode=WAL` (not allowed inside a transaction) and then runs `SchemaMigrator`.
+
+- The current version is `MAX(version)` in `db_version`.
+- Each pending step runs in its own transaction together with its `db_version` row; a failing step leaves the database at the previous version.
+- A database created before migrations existed has the step-1 tables but no `db_version` row; it is recorded as version 1 without re-running step 1.
+- A database whose version is higher than the newest step in the build is refused.
+
+### Adding a step
+
+1. Add one file `Migrations/M000N_ShortName.cs` with a class implementing `ISchemaMigration`, or deriving from `SqlSchemaMigration` when plain SQL is enough. `Version` is `N`.
+2. Take the next free number on `master`. Steps are discovered by reflection, so no shared list is edited.
+3. Versions must be exactly `1..N`. If two branches picked the same number, startup and `SchemaMigrationTests` fail with a "Duplicate schema migration versions" message; the branch merged second renumbers its step (file name and `Version`).
+4. Never change a step that has been merged; add a new one. Step 1 (`M0001_InitialSchema`) is the schema as it existed before migrations.
+5. Do not put `PRAGMA journal_mode` or other transaction-incompatible statements in a step.
 
 ## Architectural rules
 
