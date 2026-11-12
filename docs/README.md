@@ -8,6 +8,9 @@ A cross-platform desktop application built with **.NET 10 + Avalonia** that recu
 
 ## ✨ What it does
 
+_Status checked against the code on 12.11.2026; details and limits in
+[status-and-roadmap.md](status-and-roadmap.md)._
+
 | Feature | Status |
 |---|---|
 | 🔍 Recursive directory scan with smart skip rules | ✅ Done |
@@ -18,7 +21,7 @@ A cross-platform desktop application built with **.NET 10 + Avalonia** that recu
 | 🌲 Interactive folder tree with lazy loading | ✅ Done |
 | 📊 File table with category color-coding, confidence & summary | ✅ Done |
 | 🗒️ Directory AI summary banner (per-folder insight) | ✅ Done |
-| 🔎 Reveal in Explorer (right-click folder) | ✅ Done |
+| 🔎 Reveal in Explorer (right-click folder) | ✅ Done (Windows only) |
 | ✏️ Manual review & category override | ✅ Done |
 | ⚙️ Configurable Ollama model, timeout, language | ✅ Done |
 | 📦 Move/copy confirmed files to target folders | 🔜 Planned |
@@ -85,8 +88,8 @@ All AI inference runs **100% locally** through Ollama. No API keys, no data leav
 ### Run
 
 ```bash
-git clone https://github.com/youruser/smart-file-organizer
-cd smart-file-organizer
+git clone https://github.com/crack666/smart_file_organizer
+cd smart_file_organizer
 dotnet run --project src/SmartFileOrganizer.Desktop
 ```
 
@@ -202,12 +205,8 @@ Each result also includes an **importance rating** (`Low / Medium / High / Criti
 
 ## 🏗️ Roadmap
 
-- [ ] File move/copy actions after review
-- [ ] Bulk-select & apply operations
-- [ ] Export report (CSV / JSON)
-- [ ] Custom skip-pattern editor in UI
-- [ ] Support for remote Ollama instances
-- [ ] macOS / Linux packaging
+Open work is tracked as issues in the milestones:
+https://github.com/crack666/smart_file_organizer/milestones
 
 ---
 
@@ -215,9 +214,8 @@ Each result also includes an **importance rating** (`Low / Medium / High / Criti
 
 | Doc | Purpose |
 |---|---|
-| [status-and-roadmap.md](status-and-roadmap.md) | What's done, what's limited, what's next |
+| [status-and-roadmap.md](status-and-roadmap.md) | What exists (dated), known limits, operating notes, traps |
 | [architecture.md](architecture.md) | Layer structure, runtime flows, DB schema |
-| [next-session-handover.md](next-session-handover.md) | Practical handover for next dev/agent session |
 | [engineering-decisions.md](engineering-decisions.md) | Library choices, trade-offs, lessons learned |
 | [code-guidelines.md](code-guidelines.md) | Repo-specific conventions and rules |
 | [product-overview.md](product-overview.md) | Vision, use cases, non-goals |
@@ -227,11 +225,3 @@ Each result also includes an **importance rating** (`Low / Medium / High / Criti
 ## 📄 License
 
 MIT
-- file details panel with image/text/PDF preview
-- pause/cancel job controls
-- asynchronous post-scan AI classification with pause/resume/stop controls
-- Ollama model discovery, model selection, keep-alive configuration, and manual warm-up
-- multimodal classification input preparation for images, PDFs, and text-like documents
-- repository and service abstractions across Domain / Application / Infrastructure / Desktop
-
-The largest missing product features are now the review/override workflow, stronger document understanding beyond preview-sized excerpts/first-page PDF renderings, and the final action pipeline for safe file moves/copies/archive operations.

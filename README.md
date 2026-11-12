@@ -1,0 +1,56 @@
+# Smart File Organizer
+
+[![CI](https://github.com/crack666/smart_file_organizer/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/crack666/smart_file_organizer/actions/workflows/ci.yml)
+
+Smart File Organizer scans old drives, USB sticks, backups and home folders
+and records every directory and file in a local SQLite database. A local
+model served by [Ollama](https://ollama.com) then judges folders and files
+(what they are, whether they matter, where they belong), so nothing leaves
+the machine. The goal is a reviewed plan for tidying the data, executed only
+after the user confirms it.
+
+Product description, file type support and configuration:
+[docs/README.md](docs/README.md). What exists today and the known traps:
+[docs/status-and-roadmap.md](docs/status-and-roadmap.md).
+
+## Build and test
+
+Requires the [.NET 10 SDK](https://dotnet.microsoft.com/download).
+
+```bash
+dotnet build SmartFileOrganizer.slnx
+dotnet test SmartFileOrganizer.slnx
+```
+
+The tests need neither Ollama nor a GPU. CI runs the same build and tests
+on Windows and Linux for every push and pull request
+([.github/workflows/ci.yml](.github/workflows/ci.yml)).
+
+To run the desktop app (needs a running Ollama for the AI part):
+
+```bash
+dotnet run --project src/SmartFileOrganizer.Desktop
+```
+
+## Roadmap
+
+Open work lives in GitHub issues, grouped into milestones A to D:
+https://github.com/crack666/smart_file_organizer/milestones
+
+Each issue ends with a checkable "done when" section.
+
+## Labels
+
+| Label | Meaning |
+|---|---|
+| `cloud` | Can be done by an agent without a GPU and without files outside the repository. |
+| `lokal` | Needs the local machine: GPU, a running Ollama or real data outside the repository. |
+| `mensch` | Needs a human: identity, credentials or a judgement call. |
+| `in-arbeit` | Someone is working on it; leave it alone. The claiming comment names branch and owner. |
+| `wartet:mensch` | Unfinished, waiting for a human. |
+| `wartet:gpu` | Unfinished, waiting for GPU time. |
+| `wartet:agent` | Unfinished, waiting for an agent to pick it up. |
+
+## License
+
+MIT

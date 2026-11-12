@@ -84,6 +84,8 @@
 
 ## Documentation rules
 
-- keep `Plan.md` as the aspirational source document
+- `docs/urspruenglicher-plan.md` is the historical planning brief; do not update it
 - keep `docs/` focused on reality: architecture, status, decisions, guidelines
+- open work lives in GitHub milestones and issues, not in prose roadmaps
+- a statement about current state carries the date it was measured
 - update status docs when major milestones or caveats change
