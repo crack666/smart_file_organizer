@@ -251,23 +251,52 @@ How it is enforced:
   summary is written by the guard from markers and file type, not by the
   model, so a model that quotes a password in its summary cannot leak it.
 - The guard re-evaluates the name rules, so rows from older scans are
-  protected without a backfill.
+  protected without a backfill. The rules that read the file (header lines)
+  cannot run at output time: each file stores the rule version that ran on
+  it, and the next analysis runs the rules again for older rows before any
+  model call (`SensitiveRulesBackfill`). Markers are only ever added.
 - `--include-sensitive` (`SensitiveOutputOptions.IncludeSensitive`) lifts the
   protection on purpose. It is meant for a human at the machine, never set by
   an external caller.
 - Marked files are never proposed as disposable: a model `TrashCandidate`
   becomes `ReviewNeeded`. A user override stays as the user set it.
-- Directory summaries are stored and shown as well, so a marked file enters
-  the directory-summary prompt with its neutral line, not with its model
-  summary.
+- Directory output is protected at the source. Phase 1 (verdict, purpose,
+  reason, anomaly reasons) sees names and the folder profile only, never
+  content. Phase 3 gives a marked file to the model as its neutral line and
+  stores which marked files entered that way; a summary written before a
+  file of its directory was marked is withheld and written again by the next
+  analysis (`DirectorySummaryGuard`). `DirectoryTextGuard` stays as a second
+  net: a directory text that names a marked file is withheld.
+- A directory sample inherits its suggested target from unmarked members
+  only; a target suggested for a marked file is model text about it.
+- `sfo compare` leaves out the full checksum of a marked file (and of a file
+  whose match is marked): for a short secret it confirms a guess offline.
+- Folders the scan skips without entering (`.ssh`, `.gnupg`, wallets,
+  `AppData`, ...) are marked by their name, so a caller learns that a
+  sensitive folder exists without the scan ever reading it.
+- Logs: prompts and model answers are written under the category
+  `ModelTraffic` at Debug level. The CLI never writes that category to
+  stderr; with `--verbose` it goes to `sfo-debug.log` next to the database
+  instead, and for a marked file even there the prompt and answer are
+  replaced by a fixed placeholder. Warnings and errors carry status codes,
+  not response bodies.
 
 Trade-off: the rules prefer false positives (a presentation `.key`, a file
 named `Befund`), which only cost a manual review, over false negatives.
 
-Not covered by the guard: the GUI (local by definition), log output (prompts
-contain text excerpts), the SQLite file itself, directory-level output
-(pre-assessment theme and anomaly reasons are model text about file names),
-and the header rule for rows scanned before schema step 2.
+Decided in [#33](https://github.com/crack666/smart_file_organizer/issues/33)
+what stays outside the boundary on purpose:
+
+- **The GUI:** local by definition; it shows everything to the user at the
+  machine.
+- **The SQLite file itself:** it holds extracted text, model answers, facts
+  and checksums of every file, marked or not. Whoever can read the database
+  file can read the content. It is protected like any other local file, by
+  the account it lives in; do not hand it out.
+- **`sfo-debug.log`:** a local file next to the database with the prompts of
+  unmarked files. It exists only after a run with `--verbose`.
+- **Facts stored before a file was marked** are dropped when the header check
+  catches up, but facts are not CLI output in the first place.
 
 ## 9. Scan rules: in doubt, enter the folder
 

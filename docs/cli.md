@@ -21,7 +21,7 @@ Accepted by every command.
 | `--json` | Write exactly one JSON document to stdout. |
 | `--progress none\|text\|jsonl` | Progress on stderr. Default `text`, or `none` with `--json`. |
 | `--db <path>` | SQLite database. Overrides `SFO_DB`. |
-| `-v`, `--verbose` | Log at information level (default: warnings and errors). |
+| `-v`, `--verbose` | Log at information level on stderr (default: warnings and errors). Prompts and model answers never go to stderr; with `--verbose` they are written at debug level to `sfo-debug.log` next to the database (appended, rotated to `sfo-debug.log.1` above 50 MB). For a marked file even that file holds a placeholder instead of prompt and answer. |
 | `-h`, `--help` | Help for the command. |
 
 Database and settings are found as described in
@@ -213,7 +213,7 @@ State per source file:
 
 | `state` | Meaning |
 |---|---|
-| `backed_up` | A file with exactly the same content is in the library: the full SHA-256 of both files is equal (head and tail alone never count). `match_path` is one of them (first by path), `match_count` how many, `match_hash` the shared full SHA-256 and `match_verified_at` the older of the two times that checksum was computed from the files (possibly in an earlier run, see the cache below). A step that deletes the source file must read both files again and compare with `match_hash` first. |
+| `backed_up` | A file with exactly the same content is in the library: the full SHA-256 of both files is equal (head and tail alone never count). `match_path` is one of them (first by path), `match_count` how many, `match_hash` the shared full SHA-256 and `match_verified_at` the older of the two times that checksum was computed from the files (possibly in an earlier run, see the cache below). A step that deletes the source file must read both files again and compare with `match_hash` first. For a marked file, or a file whose match is marked, `match_hash` is `null`: for a short secret the checksum would confirm a guess of its content. |
 | `new` | No library file has this content, and none has the same name in a folder of the same name. |
 | `differs` | Not in the library by content, but a file with the same name lies in a folder of the same name there (`match_path`): probably another version. |
 | `error` | The content could not be determined: the source file is unreadable, gone or changed since its scan, or a library file of the same size that could hold this content cannot be read. `error` says which. Never counted as `new` or `backed_up`. |
@@ -542,8 +542,18 @@ Filters see the same values: `--category trash_candidate` never returns a marked
 Model texts about a directory (purpose, reason, summary, error texts, raw verdict answer,
 anomaly reasons) are replaced by a neutral hint when they name a marked file of the subtree
 (full name, or the name without extension if it has at least 4 characters). The item then has
-`text_withheld: true`. This is a name check: a text can still describe a marked file without
-naming it (https://github.com/crack666/smart_file_organizer/issues/33).
+`text_withheld: true`. This name check is a second net; the protection is at the source: the
+verdict model sees names and the folder profile only, and the summary model sees a marked file
+as its neutral line. A summary written before a file of its directory was marked is shown as
+a stale hint (summary, theme, anomaly reasons and error withheld, `text_withheld: true`) until
+the next `sfo analyze` writes it again
+(https://github.com/crack666/smart_file_organizer/issues/33).
+
+Folders the scan skipped without entering are marked by their name (`.ssh`, `.gnupg`,
+`.aws`, wallets, `AppData`, browser and mail profiles). `dirs` and `show` give such a folder
+`sensitive` (marker tokens) and `sensitive_rule` (for example `dir:ssh`); `sensitive_dirs`
+counts marked folders in the subtree, this one included, and `--sensitive yes` lists them.
+`summary` has `sensitive_directories`.
 
 `--include-sensitive` turns both protections off for one run and writes a note to stderr. No
 setting or environment variable turns it on.
@@ -569,6 +579,7 @@ sfo summary 7 --json
   "result": {
     "job": { "id": 7, "status": "completed", "...": "same fields as scan" },
     "directories": 112,
+    "sensitive_directories": 2,
     "files": { "total": 1830, "pending": 330, "errors": 3, "sensitive": 4, "total_bytes": 9126805504 },
     "by_category": { "unclassified": 1220, "photo": 410, "invoice": 120, "review_needed": 80 },
     "by_file_type": { "image": 700, "document": 640, "other": 490 },
@@ -619,6 +630,7 @@ sfo dirs 7 --sort size --depth 1 --limit 2 --json
     { "path": "/media/usb-stick", "relative_path": ".", "depth": 0, "status": "scanned",
       "size_bytes": 9126805504, "files": 1830, "direct_files": 12, "subdirs": 8,
       "verdict": "...", "verdict_source": "...", "retention": "...", "sensitive_files": 4,
+      "sensitive": [], "sensitive_rule": null, "sensitive_dirs": 1,
       "purpose": "...", "summary": "...", "text_withheld": false }
   ]
 }
@@ -626,8 +638,9 @@ sfo dirs 7 --sort size --depth 1 --limit 2 --json
 
 `status` is the scan state (`scanned`, `skip`, `shallow`, `error`, `pending`). `verdict` is a
 verdict code, `error` or `null`; `verdict_source` tells whether a rule or the model decided.
-`size_bytes`, `files` and `sensitive_files` cover the subtree, `direct_files` the directory
-itself. `summary` is the Phase 3 summary, `null` until that phase ran.
+`size_bytes`, `files`, `sensitive_files` and `sensitive_dirs` cover the subtree, `direct_files`
+the directory itself. `sensitive` and `sensitive_rule` are the markers of the folder itself
+(a skipped folder such as `.ssh`). `summary` is the Phase 3 summary, `null` until that phase ran.
 
 ### `sfo files <job>`
 
