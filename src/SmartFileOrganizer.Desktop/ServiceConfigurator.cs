@@ -7,6 +7,7 @@ using SmartFileOrganizer.Desktop.Services;
 using SmartFileOrganizer.Desktop.ViewModels;
 using SmartFileOrganizer.Domain.Interfaces;
 using SmartFileOrganizer.Infrastructure;
+using SmartFileOrganizer.Infrastructure.Content;
 using SmartFileOrganizer.Infrastructure.Ollama;
 using SmartFileOrganizer.Infrastructure.Persistence;
 using SmartFileOrganizer.Scanning.Engine;
@@ -117,6 +118,7 @@ public static class ServiceConfigurator
         services.AddSingleton<ReviewService>();
         services.AddSingleton<ScanExportService>();
         services.AddSingleton<FocusedRescanService>();
+        services.AddSingleton<FileContentExtractor>();
         services.AddSingleton<FilePreviewService>();
         services.AddSingleton<IClassificationInputPreparer, AiClassificationInputPreparer>();
 
