@@ -288,6 +288,51 @@ These codes are fixed by the decision table but no code uses them yet.
 | `rule` | Produced by a deterministic rule. |
 | `model` | Produced by the model. |
 
+## Target proposals
+
+`sfo library match` ([library-match.md](library-match.md)). Proposals are data; nothing is moved.
+
+### Placement of a proposal (`MatchPlacement`)
+
+| Code | Meaning |
+|---|---|
+| `into_existing` | The files go into an existing folder of the library. |
+| `as_subfolder` | A named source folder goes, whole and under its own name, into an existing folder next to its kind. |
+| `new_folder` | No existing folder fits; a new folder, named in the style of its siblings. |
+
+### Signal behind a proposal (`MatchSignal`)
+
+| Code | Meaning |
+|---|---|
+| `content_neighbours` | Files with exactly the same content already lie there (from `sfo compare`). |
+| `period` | The times of the files fit the period of the folder. |
+| `name` | Words of the names agree (folder name, file names, document kind). |
+| `file_type` | The folder holds files of the same kind. |
+| `siblings` | The folder's subfolders are of the same kind as the source folder. |
+
+### What was matched (`MatchUnitKind`)
+
+| Code | Meaning |
+|---|---|
+| `file` | A single file. |
+| `folder` | A folder of the source. |
+| `bundle` | A bundle ([bundles.md](bundles.md)). |
+
+### How the library was chosen (`LibraryChoice`)
+
+| Code | Meaning |
+|---|---|
+| `option` | Given with `--against`. |
+| `comparison` | The library of the source's latest `sfo compare`. |
+| `latest` | The newest completed library job; there was no comparison. |
+
+### Whether a library was there (`MatchStatus`)
+
+| Code | Meaning |
+|---|---|
+| `ok` | A library was found and matched against. |
+| `no_library` | No library has been scanned; nothing is proposed. |
+
 ## Bundles
 
 ### Kind of a bundle (`BundleKind`)
