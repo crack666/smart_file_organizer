@@ -286,6 +286,24 @@ public class FileRepository : IFileRepository
             });
     }
 
+    public async Task<int> ReleaseFailedAsync(long jobId, CancellationToken ct = default)
+    {
+        await using var conn = _db.CreateConnection();
+        await conn.OpenAsync(ct);
+        return await conn.ExecuteAsync(
+            """
+            UPDATE file_nodes SET status = @discovered
+            WHERE job_id = @jobId AND status = @error
+              AND id NOT IN (SELECT file_node_id FROM user_overrides)
+            """,
+            new
+            {
+                discovered = (int)FileNodeStatus.Discovered,
+                jobId,
+                error = (int)FileNodeStatus.Error
+            });
+    }
+
     /// <summary>
     /// Parameter object for inserts and updates. Dapper would bind <see cref="SensitiveMarker"/>
     /// as its integer value; the column holds the fixed token list instead.

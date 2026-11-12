@@ -39,9 +39,23 @@ public class AiClassificationInputPreparer : IClassificationInputPreparer
     private static readonly HashSet<string> RasterVisionExtensions =
         [".jpg", ".jpeg", ".png", ".gif", ".webp"];
 
-    public async Task<OllamaClassificationInput> PrepareAsync(FileNode file, CancellationToken ct = default)
+    /// <summary>Characters of embedded PDF text for the second call of a check.</summary>
+    public const int MaxPdfTextCharsExtended = 24_000;
+
+    /// <summary>Archive entries listed by name for the second call of a check.</summary>
+    public const int MaxListedArchiveEntriesExtended = 300;
+
+    public Task<OllamaClassificationInput> PrepareAsync(FileNode file, CancellationToken ct = default) =>
+        PrepareAsync(file, EvidenceDepth.Standard, ct);
+
+    /// <summary>
+    /// With <see cref="EvidenceDepth.Extended"/> the limits that the standard evidence names as missing are
+    /// raised: more PDF text and three rendered pages (first, middle, last), more archive names, four video
+    /// frames instead of two. Everything else is the same as the first look.
+    /// </summary>
+    public async Task<OllamaClassificationInput> PrepareAsync(FileNode file, EvidenceDepth depth, CancellationToken ct = default)
     {
-        var ev = new Evidence();
+        var ev = new Evidence { Depth = depth };
 
         if (string.IsNullOrWhiteSpace(file.FullPath) || !File.Exists(file.FullPath))
         {
@@ -191,7 +205,9 @@ public class AiClassificationInputPreparer : IClassificationInputPreparer
         }
 
         var duration = ev.FactValue(FileFactKey.DurationSeconds) is { } s && double.TryParse(s, CultureInfo.InvariantCulture, out var secs) ? secs : 0;
-        var positions = duration >= 4 ? new[] { duration * 0.1, duration * 0.5 } : [Math.Min(1.0, duration / 2)];
+        var positions = duration < 4 ? [Math.Min(1.0, duration / 2)]
+            : ev.Extended ? new[] { duration * 0.1, duration * 0.35, duration * 0.6, duration * 0.85 }
+            : new[] { duration * 0.1, duration * 0.5 };
         var frames = await _frames.ExtractAsync(file.FullPath, positions, ct);
         for (var i = 0; i < frames.Count; i++)
             ev.Image(frames[i], $"still frame at {TimeSpan.FromSeconds(positions[Math.Min(i, positions.Length - 1)]):h\\:mm\\:ss}");
@@ -271,15 +287,16 @@ public class AiClassificationInputPreparer : IClassificationInputPreparer
         if (ArchiveListingReader.DecideContent(listing.Entries) is { } content)
             ev.Fact(FileFactKey.ArchiveContent, content);
 
-        var shown = listing.Entries.Take(MaxListedArchiveEntries).Select(e => $"{e.Name} | {e.Size}");
+        var maxListed = ev.Extended ? MaxListedArchiveEntriesExtended : MaxListedArchiveEntries;
+        var shown = listing.Entries.Take(maxListed).Select(e => $"{e.Name} | {e.Size}");
         ev.Section(
-            $"Archive listing ({Math.Min(listing.Entries.Count, MaxListedArchiveEntries)} of {listing.Entries.Count}{(listing.Truncated ? "+" : string.Empty)} files, name | uncompressed bytes)",
+            $"Archive listing ({Math.Min(listing.Entries.Count, maxListed)} of {listing.Entries.Count}{(listing.Truncated ? "+" : string.Empty)} files, name | uncompressed bytes)",
             string.Join(Environment.NewLine, shown));
         ev.Has("archive listing (names and sizes, not unpacked)");
         if (listing.Truncated)
             ev.Lacks($"archive listing: stopped after {ArchiveListingReader.MaxEntries:N0} entries");
-        if (listing.Entries.Count > MaxListedArchiveEntries)
-            ev.Lacks($"archive listing: only the first {MaxListedArchiveEntries} names are shown");
+        if (listing.Entries.Count > maxListed)
+            ev.Lacks($"archive listing: only the first {maxListed} names are shown");
         ev.Lacks("archive file contents: entries are never unpacked");
     }
 
@@ -337,9 +354,10 @@ public class AiClassificationInputPreparer : IClassificationInputPreparer
     private void AddPdf(FileNode file, Evidence ev, CancellationToken ct)
     {
         PdfEvidence pdf;
+        var maxChars = ev.Extended ? MaxPdfTextCharsExtended : MaxPdfTextChars;
         try
         {
-            pdf = _extractor.ReadPdf(file.FullPath, MaxPdfTextChars, ct);
+            pdf = _extractor.ReadPdf(file.FullPath, maxChars, ct, renderMorePages: ev.Extended);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -354,7 +372,7 @@ public class AiClassificationInputPreparer : IClassificationInputPreparer
         {
             ev.Section("Embedded PDF text", pdf.Text);
             var pages = pdf.PagesRead == pdf.PageCount ? $"all {pdf.PageCount} pages" : $"pages 1-{pdf.PagesRead} of {pdf.PageCount}";
-            ev.Has($"embedded text of {pages}{(pdf.TextTruncated ? $", cut at {MaxPdfTextChars:N0} characters" : string.Empty)}");
+            ev.Has($"embedded text of {pages}{(pdf.TextTruncated ? $", cut at {maxChars:N0} characters" : string.Empty)}");
             if (pdf.PagesRead < pdf.PageCount) ev.Lacks($"text of pages {pdf.PagesRead + 1}-{pdf.PageCount}: above the character limit");
         }
         else

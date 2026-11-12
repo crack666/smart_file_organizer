@@ -21,4 +21,10 @@ public interface IFileRepository
     Task MarkAsProcessingAsync(IReadOnlyList<long> ids, CancellationToken ct = default);
     /// <summary>Resets any files stuck in Processing (e.g. from a previous cancelled run) back to Discovered.</summary>
     Task ResetStaleProcessingAsync(long jobId, CancellationToken ct = default);
+    /// <summary>
+    /// Sets failed files (status Error) of the job back to Discovered so Phase 2 tries them again; files a
+    /// person corrected are left alone. Their failed result stays until the new attempt replaces it.
+    /// Returns the number of files released.
+    /// </summary>
+    Task<int> ReleaseFailedAsync(long jobId, CancellationToken ct = default);
 }

@@ -38,4 +38,19 @@ public class FileClassification
     /// (<c>{"contains":[...],"missing":[...]}</c>). Stored in <c>ai_results.evidence</c>, so a wrong
     /// result can be traced to thin evidence or to a wrong judgement.</summary>
     public string? Evidence { get; set; }
+
+    /// <summary>How far the result can be relied on; null for rows written before schema step 8.
+    /// Stored as code in <c>ai_results.certainty</c>.</summary>
+    public ResultCertainty? Certainty { get; set; }
+
+    /// <summary>How often the file went through Phase 2 (a retry of a failed file counts; the second
+    /// call of a check does not). Stored in <c>ai_results.attempts</c>; the database counts it.</summary>
+    public int Attempts { get; set; } = 1;
+
+    /// <summary>Error of the attempt before this one, kept when a retry replaces a failed result.</summary>
+    public string? PreviousError { get; set; }
+
+    /// <summary>Set by the parser when the model gave no confidence; <see cref="Confidence"/> is then 0.
+    /// Not stored: the check reason <c>missing_confidence</c> records it.</summary>
+    public bool ConfidenceMissing { get; set; }
 }

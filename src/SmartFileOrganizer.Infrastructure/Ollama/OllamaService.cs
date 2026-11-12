@@ -95,7 +95,9 @@ public class OllamaService : IOllamaService
         try
         {
             var prompt = BuildClassificationPrompt(input, _options.SummaryLanguage);
-            _logger.LogInformation("[Phase2] PROMPT for '{File}' (images={ImgCount}, textLen={TextLen}):\n{Prompt}",
+            // The second call of a check carries more content and the names of neighbouring files: Debug only.
+            _logger.Log(input.Depth == EvidenceDepth.Extended ? LogLevel.Debug : LogLevel.Information,
+                "[Phase2] PROMPT for '{File}' (images={ImgCount}, textLen={TextLen}):\n{Prompt}",
                 file.Name, input.Base64Images.Count, input.ExtractedText?.Length ?? 0,
                 Trunc(prompt, 800));
 
@@ -137,7 +139,8 @@ public class OllamaService : IOllamaService
             result.RawResponse = json;
 
             ParseResponse(json, result);
-            _logger.LogInformation("[Phase2] '{File}': {Category} ({Confidence:P0}) in {Elapsed:F1}s — RAW: {Raw}",
+            _logger.Log(input.Depth == EvidenceDepth.Extended ? LogLevel.Debug : LogLevel.Information,
+                "[Phase2] '{File}': {Category} ({Confidence:P0}) in {Elapsed:F1}s — RAW: {Raw}",
                 file.Name, result.Category, result.Confidence, sw.Elapsed.TotalSeconds, Trunc(json, 400));
         }
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
@@ -240,12 +243,16 @@ public class OllamaService : IOllamaService
 
         if (!string.IsNullOrWhiteSpace(input.ExtractedText))
         {
+            var maxText = input.Depth == EvidenceDepth.Extended ? 24_000 : 8_000;
             sb.AppendLine("Extracted text / preview content:");
-            sb.AppendLine(input.ExtractedText.Length > 8000
-                ? input.ExtractedText[..8000]
+            sb.AppendLine(input.ExtractedText.Length > maxText
+                ? input.ExtractedText[..maxText]
                 : input.ExtractedText);
             sb.AppendLine();
         }
+
+        if (input.Context is { } context)
+            AppendContext(sb, context);
 
         sb.AppendLine("Classification guidance:");
         sb.AppendLine("- Personal documents (CVs, tax returns, contracts, letters, medical records): PersonalDocument or Letter, importance High or Critical");
@@ -288,6 +295,26 @@ public class OllamaService : IOllamaService
 
         sb.AppendLine("Return only JSON matching the provided schema.");
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// The directory around the file, for the second call of a check: verdict, purpose, retention and other
+    /// files with their category. Background only; the prompt says the file's own content decides.
+    /// </summary>
+    private static void AppendContext(StringBuilder sb, ClassificationContext context)
+    {
+        sb.AppendLine("Context: the directory this file is in (background only; the file's own content decides):");
+        if (context.Verdict is not null) sb.AppendLine($"  Directory verdict: {context.Verdict}");
+        if (!string.IsNullOrWhiteSpace(context.Purpose)) sb.AppendLine($"  Purpose: {context.Purpose}");
+        if (context.Retention is not null) sb.AppendLine($"  Retention: {context.Retention}");
+        sb.AppendLine($"  Files in the directory: {context.FilesInDirectory}");
+        if (context.Neighbours.Count > 0)
+        {
+            sb.AppendLine("  Other files (name | category given so far):");
+            foreach (var n in context.Neighbours)
+                sb.AppendLine($"    {n.Name} | {n.Category ?? "not judged yet"}");
+        }
+        sb.AppendLine();
     }
 
     /// <summary>JSON schema of the classification answer; with <paramref name="askKeepHint"/> also keep hint and reason.</summary>
@@ -352,6 +379,9 @@ public class OllamaService : IOllamaService
                 responseText = responseProp.GetString();
             }
 
+            // Until a confidence is read, there is none.
+            result.ConfidenceMissing = true;
+
             if (string.IsNullOrWhiteSpace(responseText))
                 return;
 
@@ -377,11 +407,17 @@ public class OllamaService : IOllamaService
                 Enum.TryParse<Importance>(imp.GetString(), true, out var parsedImp))
                 result.Importance = parsedImp;
 
-            // confidence may be missing — derive a default from whether category was parsed
-            if (inner.TryGetProperty("confidence", out var conf))
-                result.Confidence = conf.GetDouble();
-            else if (result.Category != FileCategory.Unknown)
-                result.Confidence = 0.85; // model gave a valid category but omitted confidence
+            // A missing confidence is not assumed (until 12.11.2026 it became 0.85): the result counts as
+            // uncertain and gets a second check (https://github.com/crack666/smart_file_organizer/issues/23).
+            if (inner.TryGetProperty("confidence", out var conf) && conf.ValueKind == JsonValueKind.Number)
+            {
+                result.Confidence = Math.Clamp(conf.GetDouble(), 0, 1);
+            }
+            else
+            {
+                result.Confidence = 0;
+                result.ConfidenceMissing = true;
+            }
 
             if (inner.TryGetProperty("summary", out var summary))
                 result.Summary = summary.GetString();
