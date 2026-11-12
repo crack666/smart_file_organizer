@@ -16,7 +16,8 @@ public interface IDirectorySampleRepository
 
     /// <summary>
     /// Stores the confirmed sample and, for every given result whose file is still Deferred, the inherited
-    /// result with file status Inherited. Returns how many files inherited.
+    /// result with file status Inherited. Deferred files without a given result go back to Discovered and are
+    /// judged one by one (an empty list: the verdict stands, but nothing inherits). Returns how many files inherited.
     /// </summary>
     Task<int> ConfirmAsync(DirectorySample sample, IReadOnlyList<FileClassification> inherited, CancellationToken ct = default);
 

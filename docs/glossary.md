@@ -105,7 +105,7 @@ These codes are fixed by the decision table but no code uses them yet.
 | Code | Meaning |
 |---|---|
 | `open` | The sample is drawn; the other files of the directory wait for its result. |
-| `confirmed` | The sample agreed; the other files inherited its result. |
+| `confirmed` | The verdict stands: the sample agreed, or the directory has so few files (three by default) that each was judged on its own. The other files inherited the result of the sample, unless the model found a sensitive marker the rules had missed; then each of them was judged on its own. |
 | `escalated` | The sample disagreed; the directory is now `mixed` and every file is judged on its own. |
 
 ### Why a file is in a sample (`SampleRole`)

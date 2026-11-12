@@ -150,7 +150,9 @@ Every `sfo eval` run is stored in `eval_runs`: mode (`corpus` or `cases`), subje
 (`small v1 seed 36` or `cases`), start and end, job, model or stub, prompt fingerprint, app
 version (with the commit when the build knows it), the settings and thresholds of the run
 (`ollama.max_parallel_requests`, `ollama.max_samples_per_directory`, upload limits, timeout,
-summary language, scan rules with hash) and the full report.
+summary language, scan rules with hash, and for corpus runs since 12.11.2026 the sample thresholds
+`sampling.sample_size`, `sampling.max_deviation_share`, `sampling.small_directory_max_files`) and the
+full report.
 
 The prompt fingerprint (`OllamaService.PromptFingerprint`) is a hash over the system prompt, the
 summary language, the prompt templates built for a fixed sample (classification with and without
