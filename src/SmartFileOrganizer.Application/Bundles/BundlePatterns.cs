@@ -94,6 +94,30 @@ public sealed class BundlePatterns
         return new BundlePatterns(file!, source, hash);
     }
 
+    /// <summary>
+    /// The one place that decides whether a directory is a dump: the best-scoring signature whose
+    /// threshold and key marker are met, or <c>null</c>. Used by the bundles and by the library review.
+    /// </summary>
+    /// <param name="subdirectories">Names of the direct subdirectories.</param>
+    /// <param name="files">Names of the direct files.</param>
+    /// <param name="isRoot">The scan root itself; only signatures with <c>at_root</c> apply there.</param>
+    /// <param name="mediaShare">Share of photos and videos among the files of the subtree, asked only when a signature limits it.</param>
+    public DumpRecognition? Recognise(
+        IReadOnlyCollection<string> subdirectories, IReadOnlyCollection<string> files, bool isRoot, Func<double> mediaShare)
+    {
+        DumpRecognition? best = null;
+        foreach (var signature in Signatures)
+        {
+            if (isRoot && !signature.AtRoot) continue;
+            var (score, hasKey, matched) = signature.Evaluate(subdirectories, files);
+            if (score < signature.MinScore || !hasKey) continue;
+            if (signature.MaxMediaShare is { } maxShare && mediaShare() > maxShare) continue;
+            if (best is null || score > best.Score)
+                best = new DumpRecognition(signature, score, matched);
+        }
+        return best;
+    }
+
     /// <summary>A folder name that says nothing about an occasion (<c>Neuer Ordner</c>, <c>100CANON</c>, <c>2015</c>).</summary>
     public bool IsGenericName(string name)
     {
@@ -226,6 +250,14 @@ public sealed class BundlePatterns
 }
 
 /// <summary>One way of recognising a dump from the names directly inside a directory.</summary>
+/// <summary>A directory recognised as a dump by <see cref="BundlePatterns.Recognise"/>.</summary>
+public sealed record DumpRecognition(DumpSignature Signature, int Score, List<string> Markers)
+{
+    public string Describe() =>
+        $"{Signature.Origin.ToCode()} dump by signature '{Signature.Name}' "
+        + $"(score {Score} of at least {Signature.MinScore}): {string.Join(", ", Markers)}";
+}
+
 public sealed class DumpSignature
 {
     internal DumpSignature(BundlePatterns.SignatureEntry entry)

@@ -28,11 +28,17 @@ sums, so the rules see recursive totals.
 
 ## Dump detection
 
-| `dump_kind` | Detected when the folder holds |
+Dumps are recognised by the signatures shared with the bundles: `bundle-patterns.json`, described in
+[bundles.md](bundles.md#how-a-dump-is-recognised). The origin of the signature gives the kind:
+
+| `dump_kind` | Signature origin |
 |---|---|
-| `device` | `LOST.DIR`, or at least 2 device markers among its children (`Android`, `DCIM`, `.thumbnails`, `MIUI`, `WhatsApp`, `Notifications`, `Ringtones`, `Alarms`), or at least 3 children named like app packages (`com.example.app`); the dump is then the folder above `Android` |
-| `computer` | at least 2 computer markers (`Windows`, `Program Files`, `Users`, `AppData`, `$Recycle.Bin`, ...) |
-| `package` | one package marker (`.git`, `node_modules`, `.venv`, `site-packages`, `__pycache__`, `.idea`, ...), or the unit markers of the directory profile when the folder has files of its own |
+| `device` | `phone` (`LOST.DIR`, `Android`, `DCIM`, `WhatsApp`, app package names, ...) or `removable_drive` (`System Volume Information`, `autorun.inf`, ...); found at `Android/data`, the dump is the folder above `Android` |
+| `computer` | `computer` (`Windows`, `Program Files`, `AppData`, `NTUSER.DAT`, ...) |
+| `package` | `software` (`.git`, `node_modules`, `.venv`, `site-packages`, `.idea`, ...), or the unit markers of the directory profile when the folder has files of its own |
+
+The shipped word list has no dump markers of its own any more; `device_markers`, `computer_markers`,
+`package_markers` and `app_package_pattern` in a `--words` file add markers on top of the signatures.
 
 Only the outermost dump counts; everything below it belongs to it. A dump finding carries
 `dump_kind`, `empty_dirs`, `levels`, `share_of_dirs` and `evidence` in `details`.

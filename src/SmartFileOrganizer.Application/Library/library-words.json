@@ -72,19 +72,16 @@
   // Extra words in file names that mark access data, beyond the scan's sensitive-file rules.
   "sensitive_name_words": ["recovery", "wiederherstellung", "2fa", "backup codes", "backup-codes", "backupcodes", "mnemonic", "tan-liste", "tanliste", "puk"],
 
-  // Child folder names of a device dump. Two of them, or "lost.dir" alone, mark the parent.
-  // (Not "pictures" or "movies": an ordinary library has those, too.)
-  "device_markers": ["lost.dir", "android", "dcim", ".thumbnails", "miui", "whatsapp", "notifications", "ringtones", "alarms"],
-
-  // Child folder names of a computer or profile copy. Two of them mark the parent.
-  "computer_markers": ["windows", "program files", "program files (x86)", "programdata", "users", "documents and settings",
-                       "appdata", "$recycle.bin", "system volume information", "recovery", "perflogs", "boot", "efi"],
-
-  // Child folder names of a project or unpacked package. One marks the parent.
-  "package_markers": [".git", ".svn", ".hg", "node_modules", ".venv", "venv", "site-packages", "__pycache__", ".idea", ".vs", ".gradle"],
-
-  // App package names (com.example.app); this many children named like that mark a device dump.
-  "app_package_pattern": "^(?:com|org|net|de|io|tv|me|jp|cn|uk|fr|eu)\\.[a-z0-9_]+(?:\\.[a-z0-9_]+)+$",
+  // Dumps are recognised by the signatures shared with the bundles (Application/Bundles/bundle-patterns.json,
+  // docs/bundles.md). The lists below are empty on purpose: a --words file can add markers there, and they
+  // count in addition to the signatures.
+  // device_markers: two of them, or "lost.dir" alone, mark the parent as a device dump.
+  "device_markers": [],
+  // computer_markers: two of them mark the parent as a computer or profile copy.
+  "computer_markers": [],
+  // package_markers: one marks the parent as a project or unpacked package.
+  "package_markers": [],
+  // app_package_pattern: this many children named like it (com.example.app) mark a device dump.
   "app_package_min_children": 3,
 
   // Folders the person keeps on purpose the way they are. Only useful in a --words file:

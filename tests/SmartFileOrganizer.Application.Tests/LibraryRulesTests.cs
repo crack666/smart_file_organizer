@@ -134,6 +134,32 @@ public class LibraryRulesTests
         Assert.DoesNotContain(result.Findings, x => x.Kind != LibraryFindingKind.Dump && Touches(x, "Handy"));
     }
 
+    /// <summary>
+    /// Dumps are recognised by the signatures shared with the bundles
+    /// (https://github.com/crack666/smart_file_organizer/issues/39): a USB stick and a profile copy, which the
+    /// library word list never knew, are dumps here too, and the reason names the signature.
+    /// </summary>
+    [Fact]
+    public async Task Dumps_AreRecognisedByTheSharedBundleSignatures()
+    {
+        var t = new LibraryTreeFixture();
+        t.Numbered("Fotos/Zelten 2020", "IMG_", ".jpg", 12, size: 2000);
+        t.Numbered("Stick alt/System Volume Information", "x", ".dat", 1, size: 10);
+        t.Numbered("Stick alt/Lieder", "song", ".mp3", 4, size: 900);
+        t.Dir("Stick alt/.Trashes");
+        t.Dir("Profil Laptop/AppData/Local");
+        t.Numbered("Profil Laptop/Desktop", "notiz", ".txt", 2, size: 20);
+        t.Numbered("Profil Laptop/Documents", "brief", ".pdf", 2, size: 700);
+
+        var result = await RunAsync(t);
+
+        var dumps = result.Findings.Where(x => x.Kind == LibraryFindingKind.Dump).ToDictionary(x => x.RelativePath);
+        Assert.Equal("device", dumps["Stick alt"].Details["dump_kind"]);
+        Assert.Equal("computer", dumps["Profil Laptop"].Details["dump_kind"]);
+        Assert.Contains("signature 'user-profile'", dumps["Profil Laptop"].Details["evidence"]?.ToString());
+        Assert.DoesNotContain(result.Findings, x => Touches(x, "Fotos"));
+    }
+
     [Fact]
     public async Task SiblingRules_NeedFiveSiblings()
     {

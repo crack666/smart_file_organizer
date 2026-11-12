@@ -55,11 +55,15 @@ nothing below a dump is checked again. A dump nested in folders that hold nothin
 
 | Signature | Origin | Key markers (examples) | Split |
 |---|---|---|---|
-| `phone-storage` | `phone` | `DCIM`, `Android`, `LOST.DIR`, app package names (`com.example.app`, up to 3 counted) | yes |
+| `phone-storage` | `phone` | `DCIM`, `Android`, `LOST.DIR` (alone enough), `WhatsApp`, `MIUI`, `Alarms`, `Notifications`, `Ringtones`, app package names (`com.example.app`, up to 3 counted) | yes |
 | `user-profile` | `computer` | `AppData`, `Application Data`, `Local Settings`, `NTUSER.DAT`, `.bashrc`, `.config` | yes |
 | `system-drive` | `computer` | `Windows`, `Program Files`, `Documents and Settings` | yes |
 | `removable-drive` | `removable_drive` | `System Volume Information`, `autorun.inf`, `.Trashes`, `.Spotlight-V100` | no |
-| `software` | `software` | `.git`, `node_modules`, `.venv`, `package.json`, `.sln`, `.exe` (with `.dll`) | no |
+| `software` | `software` | `.git`, `.hg`, `node_modules`, `.venv`, `.idea`, `package.json`, `.sln`, `.exe` (with `.dll`) | no |
+
+This recognition (`BundlePatterns.Recognise`) is the only one in the program: the structure review of a
+library (`sfo library review`, [library-review.md](library-review.md)) asks it too, so a phone copy is the
+same dump in both places.
 
 Guards against false dumps:
 

@@ -1,3 +1,4 @@
+using SmartFileOrganizer.Application.Bundles;
 using SmartFileOrganizer.Domain.Enums;
 
 namespace SmartFileOrganizer.Application.Library;
@@ -11,13 +12,18 @@ public static class DumpDetector
 {
     private const string AndroidFolder = "android";
 
-    /// <summary>Marks every dump root and its subtree. Returns the dump roots, outermost only.</summary>
-    public static IReadOnlyList<LibraryNode> Mark(LibraryTree tree, LibraryWords words)
+    /// <summary>
+    /// Marks every dump root and its subtree. Returns the dump roots, outermost only. Recognition is the
+    /// shared one of the bundles (<see cref="BundlePatterns.Recognise"/>, <c>bundle-patterns.json</c>); the
+    /// dump markers of a word file only add to it.
+    /// </summary>
+    public static IReadOnlyList<LibraryNode> Mark(LibraryTree tree, LibraryWords words, BundlePatterns? patterns = null)
     {
+        patterns ??= BundlePatterns.Default;
         var candidates = new List<(LibraryNode Node, DumpKind Kind, string Reason)>();
         foreach (var node in tree.All)
         {
-            if (Detect(node, words) is { } hit)
+            if (Detect(node, words, patterns) is { } hit)
                 candidates.Add(hit);
         }
 
@@ -35,8 +41,21 @@ public static class DumpDetector
         return roots;
     }
 
-    private static (LibraryNode Node, DumpKind Kind, string Reason)? Detect(LibraryNode node, LibraryWords words)
+    private static (LibraryNode Node, DumpKind Kind, string Reason)? Detect(LibraryNode node, LibraryWords words, BundlePatterns patterns)
     {
+        var recognition = patterns.Recognise(
+            node.Children.Select(c => c.Name).ToList(),
+            node.Files.Select(f => f.Name).ToList(),
+            isRoot: node.Parent is null,
+            mediaShare: () => node.TreeFiles == 0
+                ? 0
+                : (double)(node.TreeTypes[(int)FileType.Image] + node.TreeTypes[(int)FileType.Video]) / node.TreeFiles);
+        if (recognition is not null)
+        {
+            var kind = KindOf(recognition.Signature.Origin);
+            return (kind == DumpKind.Device ? LiftOutOfAndroid(node) : node, kind, recognition.Describe());
+        }
+
         var childNames = node.Children.Select(c => LibraryWords.Normalize(c.Name)).ToList();
 
         var device = childNames.Where(words.DeviceMarkers.Contains).Distinct().ToList();
@@ -46,12 +65,7 @@ public static class DumpDetector
         var packages = node.Children.Where(c => words.AppPackagePattern.IsMatch(c.Name)).ToList();
         if (packages.Count >= words.AppPackageMinChildren)
         {
-            // Android/data/com.example.app: the dump is the storage that holds "Android".
-            var android = node.Name.Equals(AndroidFolder, StringComparison.OrdinalIgnoreCase)
-                ? node
-                : node.Ancestors().FirstOrDefault(a => a.Name.Equals(AndroidFolder, StringComparison.OrdinalIgnoreCase));
-            var root = android?.Parent ?? node;
-            return (root, DumpKind.Device, $"{packages.Count} app package folders such as {packages[0].Name} under {node.RelativePath}");
+            return (LiftOutOfAndroid(node), DumpKind.Device, $"{packages.Count} app package folders such as {packages[0].Name} under {node.RelativePath}");
         }
 
         var computer = childNames.Where(words.ComputerMarkers.Contains).Distinct().ToList();
@@ -66,6 +80,22 @@ public static class DumpDetector
             return (node, DumpKind.Package, $"markers {string.Join(", ", node.Profile.UnitMarkers)}");
 
         return null;
+    }
+
+    private static DumpKind KindOf(DumpOrigin origin) => origin switch
+    {
+        DumpOrigin.Computer => DumpKind.Computer,
+        DumpOrigin.Software => DumpKind.Package,
+        _ => DumpKind.Device   // phone and removable drive
+    };
+
+    /// <summary>Android/data/com.example.app: the dump is the storage that holds "Android".</summary>
+    private static LibraryNode LiftOutOfAndroid(LibraryNode node)
+    {
+        var android = node.Name.Equals(AndroidFolder, StringComparison.OrdinalIgnoreCase)
+            ? node
+            : node.Ancestors().FirstOrDefault(a => a.Name.Equals(AndroidFolder, StringComparison.OrdinalIgnoreCase));
+        return android?.Parent ?? node;
     }
 
     /// <summary>The original spelling of the matched child names.</summary>

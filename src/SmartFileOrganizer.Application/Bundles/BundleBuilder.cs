@@ -100,7 +100,11 @@ public sealed class BundleBuilder
 
     // ---------------------------------------------------------------- dumps
 
-    private sealed record DumpMatch(DirectoryReadRow Directory, DumpSignature Signature, int Score, List<string> Markers);
+    private sealed record DumpMatch(DirectoryReadRow Directory, DumpRecognition Recognition)
+    {
+        public DumpSignature Signature => Recognition.Signature;
+        public List<string> Markers => Recognition.Markers;
+    }
 
     private List<DumpMatch> FindDumps(Tree tree)
     {
@@ -123,28 +127,16 @@ public sealed class BundleBuilder
 
     private DumpMatch? Detect(Tree tree, DirectoryReadRow dir)
     {
-        var isRoot = ReferenceEquals(dir, tree.Root);
-        var subdirectories = tree.ChildrenOf(dir).Select(c => c.Name).ToList();
-        var fileNames = tree.FilesIn(dir).Select(f => f.Name).ToList();
-
-        DumpMatch? best = null;
-        foreach (var signature in _patterns.Signatures)
-        {
-            if (isRoot && !signature.AtRoot) continue;
-            var (score, hasKey, matched) = signature.Evaluate(subdirectories, fileNames);
-            if (score < signature.MinScore || !hasKey) continue;
-
-            if (signature.MaxMediaShare is { } maxShare)
+        var recognition = _patterns.Recognise(
+            tree.ChildrenOf(dir).Select(c => c.Name).ToList(),
+            tree.FilesIn(dir).Select(f => f.Name).ToList(),
+            isRoot: ReferenceEquals(dir, tree.Root),
+            mediaShare: () =>
             {
                 var total = tree.SubtreeFiles(dir);
-                var media = tree.SubtreeMedia(dir);
-                if (total > 0 && (double)media / total > maxShare) continue;
-            }
-
-            if (best is null || score > best.Score)
-                best = new DumpMatch(dir, signature, score, matched);
-        }
-        return best;
+                return total == 0 ? 0 : (double)tree.SubtreeMedia(dir) / total;
+            });
+        return recognition is null ? null : new DumpMatch(dir, recognition);
     }
 
     /// <summary>A dump nested in folders that hold nothing else (<c>Phone/Internal storage/DCIM</c>) starts at the outermost of them.</summary>
@@ -169,8 +161,7 @@ public sealed class BundleBuilder
             Origin = match.Signature.Origin,
             RootPath = dir.FullPath,
             RootDirectoryNodeId = dir.Id,
-            Reason = $"Recognised as {match.Signature.Origin.ToCode()} dump by signature '{match.Signature.Name}' "
-                     + $"(score {match.Score} of at least {match.Signature.MinScore}): {string.Join(", ", match.Markers)}.",
+            Reason = $"Recognised as {match.Recognition.Describe()}.",
             Facts = { Markers = match.Markers }
         };
 
