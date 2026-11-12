@@ -209,9 +209,25 @@ the phone backup is one `phone` dump with `DCIM` as `camera` part; the two progr
   see [bundles.md](bundles.md).
 - Capture dates exist only after `sfo analyze` has run Phase 2 on the photos; for a job that was only
   scanned, events rest on names and modification times (`period.time_source` says which).
-- Not yet used by anything else: findings
+- Used by `sfo library match --bundle`. Not yet used by findings
   (https://github.com/crack666/smart_file_organizer/issues/26) and the plan
-  (https://github.com/crack666/smart_file_organizer/issues/11) are meant to work per bundle.
+  (https://github.com/crack666/smart_file_organizer/issues/11), which are meant to work per bundle.
+  (Until 12.11.2026: "Not yet used by anything else".)
+
+### Placing into the library
+
+_Checked 12.11.2026 on the branch for
+https://github.com/crack666/smart_file_organizer/issues/25, rebased on the sensitive-output work: `dotnet test` 621 passed; `sfo scan --role library
+--structure-only`, `scan`, `compare`, `bundles build`, `library show` and `library match` (a folder of loose photos,
+a named folder, a camera folder without a fitting target, a single invoice) run by hand with `--json` on generated
+trees against a temp database, output checked with a JSON parser. No run with a real model._
+
+- `sfo library show <job>` reads the target map of a library: role, purpose, period and naming habit per
+  folder, filtered by subtree, depth, name, period and role; the habits go into a hand-editable patterns file.
+- `sfo library match <job> <path>|--bundle <id>` names the best existing folders with reasons and a certainty
+  (`certain`, `likely`, `uncertain`, `review`) from agreeing signals, or a new folder in the library's style; a
+  named source folder keeps its name and stays whole; see [library-match.md](library-match.md).
+- Thresholds are starting values: the evaluation corpus has no library with known truth yet.
 
 ### Known limits
 

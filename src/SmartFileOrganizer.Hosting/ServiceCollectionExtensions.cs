@@ -178,6 +178,16 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<IConfiguration>().GetSection("Bundles").Get<BundleOptions>() ?? new BundleOptions());
         services.AddSingleton<BundleService>();
 
+        // Target map and target proposals (https://github.com/crack666/smart_file_organizer/issues/25). The patterns
+        // files lie next to the database, so a scratch database never touches the real ones.
+        services.AddSingleton(sp =>
+        {
+            var match = sp.GetRequiredService<IConfiguration>().GetSection("LibraryMatch").Get<LibraryMatchOptions>() ?? new LibraryMatchOptions();
+            match.PatternsDirectory ??= Path.Combine(Path.GetDirectoryName(paths.DatabasePath)!, "library-patterns");
+            return match;
+        });
+        services.AddSingleton<LibraryTargetService>();
+
         return services;
     }
 

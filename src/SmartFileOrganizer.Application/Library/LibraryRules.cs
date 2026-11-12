@@ -114,6 +114,20 @@ public static partial class LibraryRules
         return findings;
     }
 
+    /// <summary>
+    /// Whether a folder name says nothing about its content: <c>placeholder</c> (<c>Neuer Ordner</c>),
+    /// <c>catch_all</c> (<c>Sonstiges</c>), <c>keyboard</c> (<c>asdf</c>), or null. Copy numbers are ignored.
+    /// </summary>
+    public static string? PlaceholderKind(string name, LibraryWords words)
+    {
+        var n = CopyNumberRegex().Replace(LibraryWords.Normalize(name), string.Empty).Trim();
+        if (n.Length == 0) return null;
+        if (words.PlaceholderNames.Contains(n)) return "placeholder";
+        if (words.CatchAllNames.Contains(n)) return "catch_all";
+        if (LibraryText.IsKeyboardMash(n)) return "keyboard";
+        return null;
+    }
+
     // ------------------------------------------------------------------ context and helpers
 
     private sealed class Ctx(LibraryTree tree, LibraryWords words, LibraryReviewOptions options)
@@ -141,15 +155,7 @@ public static partial class LibraryRules
         public bool IsPlaceholder(LibraryNode n) => PlaceholderKind(n.Name) is not null;
 
         /// <summary><c>placeholder</c>, <c>catch_all</c>, <c>keyboard</c> or null.</summary>
-        public string? PlaceholderKind(string name)
-        {
-            var n = CopyNumberRegex().Replace(LibraryWords.Normalize(name), string.Empty).Trim();
-            if (n.Length == 0) return null;
-            if (Words.PlaceholderNames.Contains(n)) return "placeholder";
-            if (Words.CatchAllNames.Contains(n)) return "catch_all";
-            if (LibraryText.IsKeyboardMash(n)) return "keyboard";
-            return null;
-        }
+        public string? PlaceholderKind(string name) => LibraryRules.PlaceholderKind(name, Words);
 
         public string? VariantOf(string name, VariantGroup group) => group.Match(name.Trim());
 

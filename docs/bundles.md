@@ -164,10 +164,11 @@ when read, so they follow later analysis and comparisons without a rebuild.
 
 ## Not decided here
 
-- `styled_name` stays empty: a name in the style of the library needs a model
-  (https://github.com/crack666/smart_file_organizer/issues/25,
-  https://github.com/crack666/smart_file_organizer/issues/29). `suggested_name` is the folder name, the
-  date or date range, or the dump folder with origin and years.
+- `styled_name` stays empty. Since https://github.com/crack666/smart_file_organizer/issues/25 a name in
+  the style of the library is proposed per match by `sfo library match --bundle <id>` (`new_folder.name`,
+  see [library-match.md](library-match.md)); it depends on the chosen library and is not stored on the
+  bundle. (Until 12.11.2026 this line said such a name needs a model.) `suggested_name` is the folder
+  name, the date or date range, or the dump folder with origin and years.
 - Whether a named folder is an occasion, a person or a topic: it is a bundle either way, never split.
   Only a folder holding two or more named folders with files is opened up.
 - Content of unsplit dumps: a copied USB stick or a project stays one bundle, even if it holds photos;

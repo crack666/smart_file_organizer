@@ -181,6 +181,22 @@ public class ContentComparisonRepository : IContentComparisonRepository
             : new ComparisonHeader(row.Id, row.SourceJobId, row.AgainstJobId, row.ComparedAt, row.Complete != 0, (int)row.ErrorCount);
     }
 
+    public async Task<ComparisonHeader?> GetLatestWithLibraryAsync(long sourceJobId, CancellationToken ct = default)
+    {
+        await using var conn = _db.CreateConnection();
+        await conn.OpenAsync(ct);
+        var row = await conn.QueryFirstOrDefaultAsync<HeaderRow>(new CommandDefinition(
+            """
+            SELECT id, source_job_id, against_job_id, compared_at, complete, error_count
+            FROM comparisons WHERE source_job_id = @sourceJobId AND against_job_id IS NOT NULL
+            ORDER BY compared_at DESC, id DESC LIMIT 1
+            """,
+            new { sourceJobId }, cancellationToken: ct));
+        return row == null
+            ? null
+            : new ComparisonHeader(row.Id, row.SourceJobId, row.AgainstJobId, row.ComparedAt, row.Complete != 0, (int)row.ErrorCount);
+    }
+
     public async Task<IReadOnlyList<FileComparison>> GetFileComparisonsAsync(long comparisonId, CancellationToken ct = default)
     {
         await using var conn = _db.CreateConnection();

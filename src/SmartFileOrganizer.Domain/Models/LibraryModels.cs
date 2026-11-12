@@ -21,7 +21,13 @@ public enum LibraryAdviceTask
     Review,
 
     /// <summary>No library yet: propose a target structure for what a source holds.</summary>
-    Propose
+    Propose,
+
+    /// <summary>Say in one sentence what each folder of a library is for, from names, counts and patterns.</summary>
+    Map,
+
+    /// <summary>Name a new folder in the style of its siblings in the library.</summary>
+    Name
 }
 
 /// <summary>A question to the local model. <see cref="Facts"/> is the compact description built from scan data.</summary>

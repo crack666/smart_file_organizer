@@ -62,6 +62,8 @@ Resolved once by `SmartFileOrganizerPaths.Resolve` and registered as `SmartFileO
 | Database | `SmartFileOrganizerHostOptions.DatabasePath` → `SFO_DB` → `<AppData>/SmartFileOrganizer/data.db` |
 | User settings | `SmartFileOrganizerHostOptions.SettingsPath` → `SFO_SETTINGS` → `settings.json` next to the database if the database was redirected → `<AppData>/SmartFileOrganizer/settings.json` |
 
+The patterns files of `sfo library show|match` go to `library-patterns/` next to the database unless `LibraryMatch:PatternsDirectory` is set.
+
 `<AppData>` is `Environment.SpecialFolder.ApplicationData`. Settings follow a redirected database so that a scratch or test database never reads or overwrites the user's real settings.
 
 Other options: `AppSettingsDirectory` (where the shipped `appsettings.json` defaults are read from; default: application base directory) and `ReloadSettingsOnChange` (default `true`).
@@ -394,6 +396,12 @@ string json = SensitiveOutputGuard.ToJson(record);   // or ToJson(records) for a
 - `TargetProposer` builds the target structure from the rules or the model answer; `TargetStructureFile` writes, reads and validates it.
 - `sfo scan --structure-only` stores `scan_jobs.structure_only`; `ScanEngine` and `ScopedRefreshService` then call `SensitiveFileRules.Apply` without a header probe, so no file is opened.
 
+`LibraryTargetService` answers `sfo library show` and `match` ([library-match.md](library-match.md)), on top of the same tree and rules:
+
+- `LibraryMap.Build` turns tree and findings into one entry per folder (role, period, naming habit, findings); dumps are one entry each. `LibraryMap.ToPatterns` writes the habits as a target file (`LibraryMatch:PatternsDirectory`, by default `library-patterns/` next to the database); a hand-edited file wins over the rules.
+- The match unit (folder, file or bundle) is built from `IJobReadRepository`, `IBundleRepository` and the latest comparison (`IContentComparisonRepository.GetLatestWithLibraryAsync`); its time follows `EventGrouper.TimeOf`.
+- `LibraryMatcher` scores existing folders and, when none fits, a new folder; it has no I/O and is tested on its own. The model is asked only for folder purposes (task `map`) and a new folder name (task `name`), through `ILibraryAdvisor` and the same `library_advice` cache.
+
 ## Ollama configuration flow
 
 1. default settings come from `src/SmartFileOrganizer.Hosting/appsettings.json` (copied into every referencing app's output)
@@ -457,7 +465,9 @@ Important tables:
 - `content_fingerprints` — head-and-tail and full SHA-256 per path, with the size and modification time (`last_write_ticks`) they belong to and the time the full checksum was computed (`full_hash_at`); shared by all jobs
 - `comparisons` — one row per compared pair of source job and library job (`against_job_id` null: duplicates only), with `complete` and `error_count`
 - `comparison_files` — per source file: `state` (`backed_up`, `new`, `differs`, `error`; null without library), `match_file_node_id`, `match_count`, `match_hash`, `match_verified_at`, `duplicate_group`, `error`
-- `library_advice` — model answers of `sfo library` (step 8): `job_id`, `task` (`review`/`propose`), `input_hash`, `model`, `created_at`, `content`, `raw_response`, `error`
+- `library_advice` — model answers of `sfo library` (step 8): `job_id`, `task` (`review`/`propose`; since
+  https://github.com/crack666/smart_file_organizer/issues/25 also `map` for folder purposes and `name` for a new
+  folder, no schema change), `input_hash`, `model`, `created_at`, `content`, `raw_response`, `error`
 - `eval_cases` — test cases from corrections (step 9): `kind`, `origin`, `job_id`, `file_node_id`,
   `subject_path`, `relative_path`, `expected`, `observed`, `observed_model`, `sensitive_markers`,
   `evidence_json` (what the model saw; `NULL` for sensitive files), `created_at`, `updated_at`; one
@@ -466,7 +476,7 @@ Important tables:
   `prompt_fingerprint`, `app_version`, `settings_json`, `report_json`, start and end
 - `bundles` — one row per bundle (step 11): `job_id`, `parent_bundle_id`, `kind` (`dump`, `dump_keep`, `dump_noise`,
   `folder`, `event`, `scattered`), `origin`, `part`, `root_path`, `root_directory_node_id`, `suggested_name`,
-  `styled_name` (empty until a model names bundles), `first_time`/`last_time` (local wall-clock time), `time_source`,
+  `styled_name` (empty; names in the library's style come per match from `sfo library match`), `first_time`/`last_time` (local wall-clock time), `time_source`,
   `file_count`, `total_bytes`, `directory_count`, `empty_directory_count`, `reason`, `facts_json`, `built_at`
 - `bundle_files` — the bundle each file belongs to directly (step 11); a file is in at most one
 - `bundle_builds` — per job the last build (step 11): `built_at`, `settings_json`, `stats_json` (with and without dumps).
