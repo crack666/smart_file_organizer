@@ -337,6 +337,42 @@ public class FileEvidenceTests : IDisposable
         Assert.Contains("Attached images: 1", prompt);
     }
 
+    /// <summary>
+    /// Issue 50: three real models marked the same ordinary invoices and a rental contract as finance and the
+    /// same formal letters to companies and authorities as private messages, because the prompt called invoices
+    /// financial records and named letters without saying which. The prompt now draws the line with examples on
+    /// both sides, and no longer files invoices next to bank statements.
+    /// </summary>
+    [Fact]
+    public void Prompt_DrawsTheLineOfFinanceAndPrivateMessage_WithExamplesOnBothSides()
+    {
+        var prompt = OllamaService.BuildClassificationPrompt(new OllamaClassificationInput
+        {
+            File = new FileNode { Name = "Rechnung.pdf", Extension = ".pdf", FileType = FileType.Document }
+        });
+
+        Assert.DoesNotContain("invoices, bank statements", prompt);
+        var finance = prompt.Split('\n').Single(l => l.StartsWith("- finance:", StringComparison.Ordinal));
+        Assert.Contains("bank", finance);
+        Assert.Contains("payslips", finance);
+        Assert.Contains("Not:", finance);
+        Assert.Contains("invoice", finance[finance.IndexOf("Not:", StringComparison.Ordinal)..]);
+        Assert.Contains("rental", finance[finance.IndexOf("Not:", StringComparison.Ordinal)..]);
+
+        var message = prompt.Split('\n').Single(l => l.StartsWith("- private_message:", StringComparison.Ordinal));
+        Assert.Contains("personal letters", message);
+        Assert.Contains("chat", message);
+        var notMessage = message[message.IndexOf("Not:", StringComparison.Ordinal)..];
+        Assert.Contains("company", notMessage);
+        Assert.Contains("authority", notMessage);
+
+        // One category per kind of paper: the old "PersonalDocument or Letter", "Invoice or Document" are gone.
+        Assert.DoesNotContain("PersonalDocument or Letter", prompt);
+        Assert.DoesNotContain("Invoice or Document", prompt);
+        foreach (var category in new[] { "- Invoice:", "- Letter:", "- PersonalDocument:", "- Document:", "- DocumentScan:" })
+            Assert.Contains(category, prompt);
+    }
+
     [Fact]
     public async Task Prompt_ListsWhatIsMissing()
     {

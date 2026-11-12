@@ -22,13 +22,15 @@ public enum SensitiveMarker
     /// <summary><c>keys</c>: private keys, certificates with key, crypto wallets.</summary>
     Keys = 1 << 1,
 
-    /// <summary><c>private_message</c>: mail archives, chat databases, private letters.</summary>
+    /// <summary><c>private_message</c>: mail archives, chat databases and exports, personal letters; not a formal
+    /// letter to a company or an authority (docs/glossary.md draws the line).</summary>
     PrivateMessage = 1 << 2,
 
     /// <summary><c>identity</c>: identity cards, passports, driving licences.</summary>
     Identity = 1 << 3,
 
-    /// <summary><c>finance</c>: bank statements, tax returns, payslips, wallets.</summary>
+    /// <summary><c>finance</c>: bank statements, tax returns, payslips, depot and loan papers, wallets; not an
+    /// ordinary invoice or a rental contract (docs/glossary.md draws the line).</summary>
     Finance = 1 << 4,
 
     /// <summary><c>health</c>: medical findings, doctor letters, health insurance.</summary>

@@ -271,11 +271,16 @@ public class OllamaService : IOllamaService
         if (input.Context is { } context)
             AppendContext(sb, context);
 
+        // The kinds of documents, one category each (https://github.com/crack666/smart_file_organizer/issues/50;
+        // the same wording for people is in docs/glossary.md). The category says what the paper is, not how
+        // important or how private it is: that is the importance and the sensitive markers below.
         sb.AppendLine("Classification guidance:");
-        sb.AppendLine("- Personal documents (CVs, tax returns, contracts, letters, medical records): PersonalDocument or Letter, importance High or Critical");
         sb.AppendLine("- Family or personal photos and videos: Photo or Video, importance High");
-        sb.AppendLine("- Scanned documents (receipts, official letters, forms): DocumentScan, importance Medium or High");
-        sb.AppendLine("- Financial records (invoices, bank statements): Invoice or Document, importance High");
+        sb.AppendLine("- DocumentScan: a picture of a paper page (a scan, or a PDF of page images without text), whatever the paper says; importance Medium or High");
+        sb.AppendLine("- Invoice: a bill or receipt for goods or services (electricity, internet, a craftsman, a shop, a garage); importance Medium");
+        sb.AppendLine("- Letter: correspondence written to or from someone: a cancellation, an objection, an application, a complaint, a personal letter; importance Medium, a personal letter High");
+        sb.AppendLine("- PersonalDocument: a record about the person that is not correspondence: CV, certificate, contract (rental, employment, loan), tax papers, bank and pay statements, medical findings and doctor letters; importance High or Critical");
+        sb.AppendLine("- Document: any other text: a manual, an article, notes, a list, a table, a form; importance by content");
         sb.AppendLine("- Software installers, update packages, build artifacts: SoftwareInstaller or SystemFile, importance Low");
         sb.AppendLine("- Temporary files, logs, crash dumps, cache: TrashCandidate, importance Low");
         sb.AppendLine("- Images: image_origin camera = Photo, screenshot = Screenshot, scan = DocumentScan");
@@ -286,12 +291,18 @@ public class OllamaService : IOllamaService
         sb.AppendLine("Do NOT use TrashCandidate for personal documents, even if they appear old or superseded.");
         sb.AppendLine("Use ReviewNeeded if you are uncertain — do not guess TrashCandidate.");
         sb.AppendLine();
-        sb.AppendLine("Sensitive content: list every marker that applies in the sensitive field (empty list if none):");
-        sb.AppendLine($"- {SensitiveMarkerNames.Credentials}: passwords, password lists, login data, API keys or tokens");
+        // Where each marker ends, with examples on both sides (issue 50: three models marked the same ordinary
+        // invoices as finance and the same letters to companies as private messages). A false alarm costs rework
+        // and breaks folder verdicts; a missed marker can let private content out. docs/glossary.md says the same.
+        sb.AppendLine("Sensitive content: list every marker that applies in the sensitive field (empty list if none).");
+        sb.AppendLine("A marker means the content would expose the person if it got out; mark by what the file shows, not by its topic:");
+        sb.AppendLine($"- {SensitiveMarkerNames.Credentials}: passwords, password lists, login data, recovery codes, API keys or tokens");
         sb.AppendLine($"- {SensitiveMarkerNames.Keys}: private keys, certificates with private key, crypto wallets or seed phrases");
-        sb.AppendLine($"- {SensitiveMarkerNames.PrivateMessage}: private messages, chats, e-mails, personal letters");
+        sb.AppendLine($"- {SensitiveMarkerNames.PrivateMessage}: personal messages between people who know each other: personal letters, chats and chat exports, private e-mails, mail archives. " +
+                      "Not: a formal letter to or from a company, an authority or a landlord (a cancellation, an objection, an application, a complaint), a newsletter, an order confirmation");
         sb.AppendLine($"- {SensitiveMarkerNames.Identity}: identity card, passport, driving licence or a scan of one");
-        sb.AppendLine($"- {SensitiveMarkerNames.Finance}: bank statements, tax documents, payslips, credit card data");
+        sb.AppendLine($"- {SensitiveMarkerNames.Finance}: papers that show the person's money, income or debts: bank and credit card statements, tax returns and tax certificates, payslips, depot and loan papers, card numbers. " +
+                      "Not: an ordinary invoice or receipt for something bought, a rental or other contract, a price list or a table of amounts without account, income or debt");
         sb.AppendLine($"- {SensitiveMarkerNames.Health}: medical findings, doctor letters, health insurance documents");
         sb.AppendLine("If any marker applies: never use TrashCandidate, and keep the summary neutral (what kind of document it is),");
         sb.AppendLine("without quoting passwords, keys, numbers, names or message text.");
