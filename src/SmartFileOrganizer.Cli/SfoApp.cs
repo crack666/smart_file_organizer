@@ -20,6 +20,11 @@ public static class SfoApp
         root.Subcommands.Add(StatusCommand.Create(host, globals));
         root.Subcommands.Add(DoctorCommand.Create(host, globals));
         root.Subcommands.Add(RulesCommand.Create(host, globals));
+        root.Subcommands.Add(SummaryCommand.Create(host, globals));
+        root.Subcommands.Add(DirsCommand.Create(host, globals));
+        root.Subcommands.Add(FilesCommand.Create(host, globals));
+        root.Subcommands.Add(ShowCommand.Create(host, globals));
+        root.Subcommands.Add(ExportCommand.Create(host, globals));
         return root;
     }
 

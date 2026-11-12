@@ -141,6 +141,7 @@ call) or `modell`.
    [#8](https://github.com/crack666/smart_file_organizer/issues/8)).
 
 `DirectoryQueryService.GetVerdictAsync` and `GetVerdictsAsync` read verdicts with their profile.
+The CLI read commands use `JobReadService` (see [Read side](#read-side-for-the-cli)).
 
 ### Phase 2 — Per-File Classification (`ClassificationService`)
 
@@ -189,6 +190,17 @@ string json = SensitiveOutputGuard.ToJson(record);   // or ToJson(records) for a
 ```
 
 `fileNode` needs `Classification` and `Override` loaded (as `IFileRepository.GetByIdAsync` and `GetByDirectoryAsync` return them). A protected record has `protected: true`, the marker tokens in `sensitive`, a neutral `summary`, and `null` for excerpt, raw response, model summary, target, importance, confidence, model and error. `ScanExportService` formats the same record as CSV (columns `sensitive` and `sensitive_rule` appended at the end).
+- `DirectoryTextGuard` (Application/Sensitivity) withholds model texts about a directory that name a marked file of its subtree (name check only; https://github.com/crack666/smart_file_organizer/issues/33).
+
+## Read side for the CLI
+
+`JobReadService` (Application) answers `sfo summary`, `dirs`, `files` and `show`
+([cli.md](cli.md#reading-results)); `IJobReadRepository` / `JobReadRepository` hold its SQL.
+
+- Read-only: the job is read through `IScanJobRepository`, not `ScanJobService.GetJobAsync`, which may store a normalised status.
+- Files are streamed (`StreamFilesAsync`, Dapper unbuffered), so a listing holds one page in memory. The database filters job, directory, type and status; everything the output guard can change (category, confidence, markers) is filtered after `SensitiveOutputGuard.Project`, so filters see what the caller sees.
+- Directory sizes and file counts are rolled up along the parent chain from `file_nodes`, because `directory_nodes.total_size` holds the direct files only and `recursive_file_count` is not filled by the scan.
+- Directory listings and the summary stream every file of the job once to count marked files per subtree (the name rules are code, not SQL).
 
 ## Ollama configuration flow
 

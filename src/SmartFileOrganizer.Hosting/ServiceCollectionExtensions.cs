@@ -61,6 +61,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IDirectoryClassificationRepository, DirectoryClassificationRepository>();
         services.AddSingleton<IJobStatisticsRepository, JobStatisticsRepository>();
         services.AddSingleton<IDirectoryVerdictRepository, DirectoryVerdictRepository>();
+        services.AddSingleton<IJobReadRepository, JobReadRepository>();
 
         // Infrastructure
         services.AddSingleton<IFileSystemAccessor, FileSystemAccessor>();
@@ -94,6 +95,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<JobStatusService>();
         services.AddSingleton<FileQueryService>();
         services.AddSingleton<DirectoryQueryService>();
+        services.AddSingleton<JobReadService>();
         services.AddSingleton<ClassificationService>(sp => new ClassificationService(
             sp.GetRequiredService<IFileRepository>(),
             sp.GetRequiredService<IClassificationRepository>(),

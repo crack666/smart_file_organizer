@@ -266,6 +266,217 @@ the shipped rules. Without `--json` the output is a valid rule file, so
 `sfo rules show > my-disk.json` starts a profile. With `--json`, `result` is
 `{ "rules": { "name", "source", "hash" }, "content": { ...the rule file... } }`.
 
+## Reading results
+
+Issue: https://github.com/crack666/smart_file_organizer/issues/6
+
+`summary`, `dirs`, `files`, `show` and `export` read a job without changing it. They are
+built for a model that reads in small, predictable pieces: start with `sfo summary`, narrow
+down with `dirs` and `files`, look at single entries with `show`.
+
+**Paths.** Wherever a command takes a path (`--under`, `--dir`, `show`), give the full path
+as listed, or a path relative to the job root (`photos/2024`, `.` for the root).
+
+**Verdict codes.** `--verdict` and `--retention` accept the codes the core defines in
+`VerdictCodes` (see [architecture.md](architecture.md), Phase 1), plus `error` (only an error
+is stored for the directory) and `none` (not judged yet, or no retention). Output carries the
+same codes. When the codes change in the core, the accepted values change with them; `sfo dirs
+--help` always lists the current ones.
+
+### Lists and paging
+
+`dirs` and `files` return one page:
+
+```json
+{
+  "job_id": 7,
+  "total": 1830,
+  "limit": 200,
+  "offset": 0,
+  "next_offset": 200,
+  "items": [ ... ]
+}
+```
+
+| Option | Meaning |
+|---|---|
+| `--limit <n>` | Items per page, 1 to 1000. Default 200. |
+| `--offset <n>` | Items to skip. Use `next_offset` from the previous page; it is `null` on the last page. |
+
+Order is stable (ties are broken by path), so paging with `next_offset` sees every item once.
+
+Filters shared by `dirs` and `files` (for `files` they apply to the directory holding the file):
+
+| Option | Meaning |
+|---|---|
+| `--verdict <code>` | Directory verdict, `error` or `none`. Repeatable; any value matches. |
+| `--retention <code>` | Retention code or `none`. Repeatable. |
+| `--sensitive yes\|no` | `yes`: only marked files, or directories with marked files in their subtree. `no`: the others. |
+| `--include-sensitive` | Lift the protection described below. For a person at this machine only. |
+
+### Sensitive files
+
+Every file passes `SensitiveOutputGuard` (see
+[engineering-decisions.md](engineering-decisions.md#8-sensitive-files-local-and-external-readers)).
+A marked file shows path, type, markers (`sensitive`), `protected: true`, a neutral summary,
+category `review_needed`, and `null` for confidence, importance, target and model output.
+Filters see the same values: `--category trash_candidate` never returns a marked file, and
+`--max-confidence` leaves marked files out.
+
+Model texts about a directory (purpose, reason, summary, error texts, raw verdict answer,
+anomaly reasons) are replaced by a neutral hint when they name a marked file of the subtree
+(full name, or the name without extension if it has at least 4 characters). The item then has
+`text_withheld: true`. This is a name check: a text can still describe a marked file without
+naming it (https://github.com/crack666/smart_file_organizer/issues/33).
+
+`--include-sensitive` turns both protections off for one run and writes a note to stderr. No
+setting or environment variable turns it on.
+
+### `sfo summary <job>`
+
+One page as an entry point. Its size does not grow with the number of files: counts,
+distributions over fixed value sets and the largest directories. `--top <n>` (0 to 25,
+default 10) sets how many directories are listed. With 10,000 files the JSON is about 4 kB at
+the default and 8 kB at `--top 25` (measured 12.11.2026 by
+`ReadCommandTests.Summary_OfTenThousandFiles_StaysUnder20KB`, which fails above 20 kB).
+
+```bash
+sfo summary 7 --json
+```
+
+```json
+{
+  "schema_version": 1,
+  "command": "summary",
+  "ok": true,
+  "exit_code": 0,
+  "result": {
+    "job": { "id": 7, "status": "completed", "...": "same fields as scan" },
+    "directories": 112,
+    "files": { "total": 1830, "pending": 330, "errors": 3, "sensitive": 4, "total_bytes": 9126805504 },
+    "by_category": { "unclassified": 1220, "photo": 410, "invoice": 120, "review_needed": 80 },
+    "by_file_type": { "image": 700, "document": 640, "other": 490 },
+    "by_status": { "discovered": 1100, "ai_analyzed": 610, "skipped": 117, "error": 3 },
+    "by_sensitive_marker": { "...": "marker code: count" },
+    "directories_by_verdict": { "...": "verdict code, error or none: count" },
+    "directories_by_retention": { "...": "retention code or none: count" },
+    "largest_directories": [
+      { "relative_path": "photos", "size_bytes": 7340032000, "files": 900,
+        "verdict": "...", "retention": "...", "sensitive_files": 0 }
+    ]
+  },
+  "error": null
+}
+```
+
+- `files.pending`: image, video and document files still waiting for classification (as in
+  `sfo status`). `files.errors`: files whose classification failed.
+- `by_category` counts the category `files` reports, so marked files count as `review_needed`;
+  `unclassified` are files without a category.
+- Distributions are sorted by count, largest first. `largest_directories` leaves out the job
+  root; sizes and file counts cover the whole subtree.
+
+### `sfo dirs <job>`
+
+Directories with subtree size, file count, verdict and summary.
+
+| Option | Meaning |
+|---|---|
+| `--under <path>` | Only this directory and its subtree. |
+| `--depth <n>` | Levels below `--under` (or the root); `0` lists only that directory. |
+| `--min-size <size>` | Minimum subtree size: bytes or with `K`, `M`, `G`, `T` (powers of 1024), for example `500M`. |
+| `--sort size\|files\|path` | Largest or most files first, or by path (default). |
+
+```bash
+sfo dirs 7 --sort size --depth 1 --limit 2 --json
+```
+
+```json
+{
+  "job_id": 7, "total": 9, "limit": 2, "offset": 0, "next_offset": 2,
+  "items": [
+    { "path": "/media/usb-stick", "relative_path": ".", "depth": 0, "status": "scanned",
+      "size_bytes": 9126805504, "files": 1830, "direct_files": 12, "subdirs": 8,
+      "verdict": "...", "verdict_source": "...", "retention": "...", "sensitive_files": 4,
+      "purpose": "...", "summary": "...", "text_withheld": false }
+  ]
+}
+```
+
+`status` is the scan state (`scanned`, `skip`, `shallow`, `error`, `pending`). `verdict` is a
+verdict code, `error` or `null`; `verdict_source` tells whether a rule or the model decided.
+`size_bytes`, `files` and `sensitive_files` cover the subtree, `direct_files` the directory
+itself. `summary` is the Phase 3 summary, `null` until that phase ran.
+
+### `sfo files <job>`
+
+Files with type, category, confidence, summary and status.
+
+| Option | Meaning |
+|---|---|
+| `--dir <path>` | Only files directly in this directory. |
+| `--recursive`, `-r` | With `--dir`: include subdirectories. |
+| `--category <value>` | Category as reported (`photo`, `invoice`, `review_needed`, ...). `unknown` also matches unclassified files. Repeatable. |
+| `--status <value>` | `discovered`, `ai_analyzed`, `skipped`, `error`, ..., or `pending` (`discovered` or `processing`). Repeatable. |
+| `--type <value>` | `image`, `video`, `document`, `archive`, ... Repeatable. |
+| `--max-confidence <x>` | Confidence at most `x` (0 to 1, decimal point). Files without a confidence are left out. |
+| `--sort path\|size` | By path (default) or largest first. |
+
+`sfo files --help` lists every accepted value. Values are `snake_case`; `ReviewNeeded` is
+accepted as well.
+
+```bash
+sfo files 7 --dir photos --max-confidence 0.5 --json
+```
+
+```json
+{
+  "job_id": 7, "total": 1, "limit": 200, "offset": 0, "next_offset": null,
+  "items": [
+    { "path": "/media/usb-stick/photos/scan_004.jpg", "name": "scan_004.jpg",
+      "file_type": "image", "size_bytes": 482113, "last_write_time": "2019-07-02T10:14:00.000Z",
+      "status": "ai_analyzed", "category": "document_scan", "category_source": "ai",
+      "confidence": 0.42, "summary": "Scanned page of a rental contract.",
+      "sensitive": [], "protected": false, "dir_verdict": "..." }
+  ]
+}
+```
+
+`category_source` is `ai`, `user` (an override), `sensitive` (forced to review by a marker) or
+`null`. `dir_verdict` is the verdict of the directory holding the file.
+
+### `sfo show <job> <path>`
+
+One directory or file with everything that is known about it. `kind` is `directory` or
+`file`; the other member is `null`.
+
+- File: every field of `files`, plus `relative_dir`, `extension`, `importance`,
+  `suggested_target`, `model_used`, `analyzed_at`, `error`, `raw_response`, `sensitive_rule`
+  and `dir_retention`.
+- Directory: every field of `dirs`, plus `verdict_rule`, `reason`, `verdict_error`,
+  `unit_directory` (for a unit: the directory that is the whole), `verdict_model`,
+  `judged_at`, `verdict_raw_response`, `profile` (the facts the verdict was based on, as
+  stored), `summary_error` and `analyses` (the stored pre-assessment and summary rows with
+  theme, sampling and anomalies).
+
+```bash
+sfo show 7 photos/2019 --json
+```
+
+A path that is neither a directory nor a file of the job fails with `path_not_found` (1).
+
+### `sfo export <job> --csv <file>`
+
+Writes every file of the job as CSV (UTF-8 with BOM, the columns of `ScanExportService`) and
+nothing else. An existing file is replaced. `--include-sensitive` as above.
+
+```json
+{ "job_id": 7, "path": "/home/me/usb-stick.csv", "rows": 1830, "include_sensitive": false }
+```
+
+Errors: `job_not_found` (1), `path_not_found` (1, the target folder does not exist),
+`export_failed` (1, the file could not be written).
+
 ## Machine contract
 
 Applies to every command, including the ones added later.
@@ -303,7 +514,7 @@ one line per phase every 500 ms, plus the final line of a phase.
 | Code | Meaning | `error.code` |
 |---|---|---|
 | 0 | Done | |
-| 1 | The command ran but could not do its job | `job_not_found`, `path_not_found`, `scan_failed`, `scan_not_completed`, `database_error`, `model_missing`, `rules_invalid`, `internal_error` |
+| 1 | The command ran but could not do its job | `job_not_found`, `path_not_found`, `scan_failed`, `scan_not_completed`, `database_error`, `model_missing`, `rules_invalid`, `export_failed`, `internal_error` |
 | 2 | Wrong invocation: unknown command or option, missing or invalid value | `usage` |
 | 3 | Ollama not reachable | `ollama_unavailable` |
 | 130 | Interrupted with Ctrl+C; stored work stays and the command can be run again | `cancelled` |
@@ -322,7 +533,9 @@ The contract is enforced in one place, so a new command does not repeat it:
    `Fail(exitCode, ErrorCodes.X, message)`. Throwing `CliFailureException` does the same.
    Never write to stdout.
 3. Define the result as records in the command class; `CliJson` turns them into `snake_case`.
-   Reuse `JobView` for jobs.
+   Reuse `JobView` for jobs. A command that lists or prints files reuses `ReadOptions` (paging,
+   filters, `--include-sensitive`) and gets its files from `JobReadService`, which applies
+   `SensitiveOutputGuard`.
 4. Register the command in `SfoApp.BuildRoot`, describe it here, and add tests in
    `tests/SmartFileOrganizer.Cli.Tests`.
 

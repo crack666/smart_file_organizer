@@ -38,6 +38,7 @@ and models ([docs/cli.md](docs/cli.md)):
 ```bash
 dotnet run --project src/SmartFileOrganizer.Cli -- scan <folder>
 dotnet run --project src/SmartFileOrganizer.Cli -- status <job>
+dotnet run --project src/SmartFileOrganizer.Cli -- summary <job> --json
 ```
 
 ## Roadmap
