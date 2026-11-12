@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Composition root for everything except the GUI. Must stay free of Avalonia so a CLI
+       (or a test) can scan and analyse without a UI toolkit. -->
+
+  <ItemGroup>
+    <ProjectReference Include="..\SmartFileOrganizer.Domain\SmartFileOrganizer.Domain.csproj" />
+    <ProjectReference Include="..\SmartFileOrganizer.Application\SmartFileOrganizer.Application.csproj" />
+    <ProjectReference Include="..\SmartFileOrganizer.Infrastructure\SmartFileOrganizer.Infrastructure.csproj" />
+    <ProjectReference Include="..\SmartFileOrganizer.Scanning\SmartFileOrganizer.Scanning.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Configuration" Version="10.0.15" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Binder" Version="10.0.15" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="10.0.15" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.15" />
+    <PackageReference Include="Microsoft.Extensions.Http" Version="10.0.15" />
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="10.0.15" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Default Ollama settings; copied into the output of every app that references this project. -->
+    <None Update="appsettings.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+</Project>

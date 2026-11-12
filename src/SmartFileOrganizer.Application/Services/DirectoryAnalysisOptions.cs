@@ -2,7 +2,7 @@ namespace SmartFileOrganizer.Application.Services;
 
 /// <summary>
 /// Lightweight options for the directory analysis pipeline.
-/// Values are populated from OllamaOptions at startup via ServiceConfigurator.
+/// Values are populated from OllamaOptions at startup via AddSmartFileOrganizerCore (Hosting).
 /// </summary>
 public class DirectoryAnalysisOptions
 {

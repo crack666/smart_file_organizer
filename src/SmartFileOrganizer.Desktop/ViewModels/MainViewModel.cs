@@ -5,6 +5,7 @@ using SmartFileOrganizer.Application.Services;
 using SmartFileOrganizer.Desktop.Services;
 using SmartFileOrganizer.Domain.Interfaces;
 using SmartFileOrganizer.Domain.Models;
+using SmartFileOrganizer.Hosting;
 using SmartFileOrganizer.Infrastructure.Ollama;
 
 namespace SmartFileOrganizer.Desktop.ViewModels;
