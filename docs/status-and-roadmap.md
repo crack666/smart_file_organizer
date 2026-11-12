@@ -217,7 +217,7 @@ the phone backup is one `phone` dump with `DCIM` as `camera` part; the two progr
 ### Placing into the library
 
 _Checked 12.11.2026 on the branch for
-https://github.com/crack666/smart_file_organizer/issues/25: `dotnet test` 605 passed; `sfo scan --role library
+https://github.com/crack666/smart_file_organizer/issues/25, rebased on the sensitive-output work: `dotnet test` 621 passed; `sfo scan --role library
 --structure-only`, `scan`, `compare`, `bundles build`, `library show` and `library match` (a folder of loose photos,
 a named folder, a camera folder without a fitting target, a single invoice) run by hand with `--json` on generated
 trees against a temp database, output checked with a JSON parser. No run with a real model._
