@@ -109,7 +109,11 @@ public sealed class EvalCaseService
         }
     }
 
-    /// <summary>Runs every stored case through <paramref name="ollama"/> and scores it like a corpus item.</summary>
+    /// <summary>
+    /// Runs every stored case of a model judgement through <paramref name="ollama"/> and scores it like a
+    /// corpus item. Findings reported as wrong (<see cref="EvalCaseKind.Finding"/>) ask no model: they are
+    /// rule results, counted by the measurement series, and left out here.
+    /// </summary>
     /// <param name="modelName">Model name for the report (<c>decided_by</c>).</param>
     public async Task<EvalReport> RunCasesAsync(
         IOllamaService ollama,
@@ -118,7 +122,7 @@ public sealed class EvalCaseService
         CancellationToken ct = default)
     {
         var report = new EvalReportBuilder();
-        var cases = await _cases.GetAllAsync(null, ct);
+        var cases = await _cases.GetAllAsync(EvalCaseKind.FileCategory, ct);
         var done = 0;
         foreach (var evalCase in cases)
         {

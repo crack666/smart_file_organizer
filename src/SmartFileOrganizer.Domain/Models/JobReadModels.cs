@@ -30,6 +30,9 @@ public sealed class DirectoryReadRow
     public string? Reason { get; set; }
     public string? VerdictError { get; set; }
 
+    /// <summary>The verdict code before a sample raised the directory to <c>mixed</c> (<c>uniform</c>); null otherwise.</summary>
+    public string? EscalatedFrom { get; set; }
+
     /// <summary>Phase 3 directory summary written by the model.</summary>
     public string? AiSummary { get; set; }
 

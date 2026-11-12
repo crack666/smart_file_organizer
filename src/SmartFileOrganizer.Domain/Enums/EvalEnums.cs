@@ -10,14 +10,20 @@ namespace SmartFileOrganizer.Domain.Enums;
 public enum EvalCaseKind
 {
     /// <summary>The human set another category for a file than the model.</summary>
-    [JsonStringEnumMemberName("file_category")] FileCategory
+    [JsonStringEnumMemberName("file_category")] FileCategory,
+
+    /// <summary>A finding was reported as wrong (<c>sfo findings wrong</c>): it should not have been found.</summary>
+    [JsonStringEnumMemberName("finding")] Finding
 }
 
 /// <summary>Where a test case came from.</summary>
 public enum EvalCaseOrigin
 {
     /// <summary>A manual override in the review (<c>ReviewService.ApplyOverrideAsync</c>).</summary>
-    [JsonStringEnumMemberName("review_override")] ReviewOverride
+    [JsonStringEnumMemberName("review_override")] ReviewOverride,
+
+    /// <summary>A person or a steering agent reported a finding as wrong.</summary>
+    [JsonStringEnumMemberName("finding_reported_wrong")] FindingReportedWrong
 }
 
 /// <summary>What an evaluation run measured.</summary>
