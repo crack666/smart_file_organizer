@@ -1,3 +1,4 @@
+using SmartFileOrganizer.Application.Sensitivity;
 using SmartFileOrganizer.Application.Services;
 using SmartFileOrganizer.Domain.Enums;
 using SmartFileOrganizer.Domain.Interfaces;
@@ -74,6 +75,7 @@ public class ScopedRefreshService : IScopedRefreshService
         file.FileType = FileTypeDetector.Detect(file.Extension);
         file.Status = FileNodeStatus.Discovered;
         file.ScannedAt = DateTime.UtcNow;
+        SensitiveFileRules.Apply(file, maxBytes => _fs.ReadPrefix(file.FullPath, maxBytes));
 
         await _fileRepo.UpdateMetadataAsync(file, ct);
         return file;
@@ -84,7 +86,7 @@ public class ScopedRefreshService : IScopedRefreshService
         foreach (var filePath in _fs.EnumerateFiles(directoryPath))
         {
             var ext = _fs.GetExtension(filePath);
-            yield return new FileNode
+            var node = new FileNode
             {
                 JobId = job.Id,
                 FullPath = filePath,
@@ -101,6 +103,8 @@ public class ScopedRefreshService : IScopedRefreshService
                 Status = FileNodeStatus.Discovered,
                 ScannedAt = DateTime.UtcNow
             };
+            SensitiveFileRules.Apply(node, maxBytes => _fs.ReadPrefix(filePath, maxBytes));
+            yield return node;
         }
     }
 }

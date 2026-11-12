@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using SmartFileOrganizer.Application.Sensitivity;
 using SmartFileOrganizer.Domain.Enums;
 using SmartFileOrganizer.Domain.Interfaces;
 using SmartFileOrganizer.Domain.Models;
@@ -137,6 +138,10 @@ public class ScanEngine : IScanEngine
                     Status = FileNodeStatus.Discovered,
                     ScannedAt = DateTime.UtcNow
                 };
+
+                // Sensitive-file rules run here, not in the AI phase, so they also cover files
+                // the model never sees. Only small, non-media files are probed for a header.
+                SensitiveFileRules.Apply(fileNode, maxBytes => _fs.ReadPrefix(filePath, maxBytes));
 
                 fileBatch.Add(fileNode);
                 job.TotalFiles++;
