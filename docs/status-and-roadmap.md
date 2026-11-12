@@ -223,11 +223,11 @@ the phone backup is one `phone` dump with `DCIM` as `camera` part; the two progr
 ### Findings
 
 _Checked 12.11.2026 on the branch for https://github.com/crack666/smart_file_organizer/issues/26 (decisions
-migration is step 14): `dotnet test` TESTCOUNT passed; `sfo eval --stub`, `scan --role library`, `compare`,
+migration is step 14): `dotnet test` 722 passed; `sfo eval --stub`, `scan --role library`, `compare`,
 `bundles build`, `findings`, `findings --summary` run by hand with `--json` on generated trees against a temp
 database, output checked with a JSON parser: the evaluation corpus with 300 loose photos, copies, a photo among
-invoices and a document in a program folder (28 findings, every kind, 300 loose photos one finding; without a
-library 15, `not_backed_up` not computed), and a generated old Windows profile with 2,476 of 2,924 files app data
+invoices and a document in a program folder (30 findings, every kind, the 200 loose photos not in the library one finding; without a
+library 17, `not_backed_up` not computed), and a generated old Windows profile with 2,476 of 2,924 files app data
 (11 findings). No run with a real model._
 
 - `sfo findings <job>` lists `not_backed_up`, `in_noise`, `misplaced`, `sensitive`, `duplicate`, summarized per
