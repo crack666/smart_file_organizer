@@ -1,4 +1,5 @@
 using Dapper;
+using SmartFileOrganizer.Domain.Enums;
 using SmartFileOrganizer.Domain.Interfaces;
 using SmartFileOrganizer.Domain.Models;
 
@@ -18,10 +19,12 @@ public class ClassificationRepository : IClassificationRepository
         const string sql = """
             INSERT INTO ai_results
                 (file_node_id, category, importance, confidence, summary,
-                 suggested_target, model_used, analyzed_at, raw_response, error, is_ai_result)
+                 suggested_target, model_used, analyzed_at, raw_response, error, is_ai_result,
+                 sensitive_markers)
             VALUES
                 (@FileNodeId, @Category, @Importance, @Confidence, @Summary,
-                 @SuggestedTarget, @ModelUsed, @AnalyzedAt, @RawResponse, @Error, @IsAiResult)
+                 @SuggestedTarget, @ModelUsed, @AnalyzedAt, @RawResponse, @Error, @IsAiResult,
+                 @SensitiveMarkers)
             ON CONFLICT(file_node_id) DO UPDATE SET
                 category = excluded.category,
                 importance = excluded.importance,
@@ -32,10 +35,26 @@ public class ClassificationRepository : IClassificationRepository
                 analyzed_at = excluded.analyzed_at,
                 raw_response = excluded.raw_response,
                 error = excluded.error,
-                is_ai_result = excluded.is_ai_result
+                is_ai_result = excluded.is_ai_result,
+                sensitive_markers = excluded.sensitive_markers
             """;
 
-        await conn.ExecuteAsync(sql, c);
+        // SensitiveMarkers is bound as its token list; Dapper would bind the enum as an integer.
+        await conn.ExecuteAsync(sql, new
+        {
+            c.FileNodeId,
+            c.Category,
+            c.Importance,
+            c.Confidence,
+            c.Summary,
+            c.SuggestedTarget,
+            c.ModelUsed,
+            c.AnalyzedAt,
+            c.RawResponse,
+            c.Error,
+            c.IsAiResult,
+            SensitiveMarkers = SensitiveMarkerNames.Format(c.SensitiveMarkers)
+        });
     }
 
     public async Task<FileClassification?> GetByFileNodeIdAsync(long fileNodeId, CancellationToken ct = default)

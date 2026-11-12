@@ -21,14 +21,14 @@ public class FileRepository : IFileRepository
             INSERT OR IGNORE INTO file_nodes
                 (job_id, full_path, name, parent_path, root_path, relative_path,
                  relative_dir, depth, size, last_write_time, extension,
-                 file_type, status, scanned_at)
+                 file_type, status, scanned_at, sensitive_markers, sensitive_rule)
             VALUES
                 (@JobId, @FullPath, @Name, @ParentPath, @RootPath, @RelativePath,
                  @RelativeDir, @Depth, @Size, @LastWriteTime, @Extension,
-                 @FileType, @Status, @ScannedAt)
+                 @FileType, @Status, @ScannedAt, @SensitiveMarkers, @SensitiveRule)
             """;
 
-        await conn.ExecuteAsync(sql, nodes, transaction: tx);
+        await conn.ExecuteAsync(sql, nodes.Select(ToParameters), transaction: tx);
         await tx.CommitAsync(ct);
     }
 
@@ -63,14 +63,14 @@ public class FileRepository : IFileRepository
                 INSERT INTO file_nodes
                     (job_id, full_path, name, parent_path, root_path, relative_path,
                      relative_dir, depth, size, last_write_time, extension,
-                     file_type, status, scanned_at)
+                     file_type, status, scanned_at, sensitive_markers, sensitive_rule)
                 VALUES
                     (@JobId, @FullPath, @Name, @ParentPath, @RootPath, @RelativePath,
                      @RelativeDir, @Depth, @Size, @LastWriteTime, @Extension,
-                     @FileType, @Status, @ScannedAt)
+                     @FileType, @Status, @ScannedAt, @SensitiveMarkers, @SensitiveRule)
                 """;
 
-            await conn.ExecuteAsync(insertSql, nodeList, transaction: tx);
+            await conn.ExecuteAsync(insertSql, nodeList.Select(ToParameters), transaction: tx);
         }
 
         await tx.CommitAsync(ct);
@@ -193,10 +193,12 @@ public class FileRepository : IFileRepository
                 extension = @Extension,
                 file_type = @FileType,
                 status = @Status,
-                scanned_at = @ScannedAt
+                scanned_at = @ScannedAt,
+                sensitive_markers = @SensitiveMarkers,
+                sensitive_rule = @SensitiveRule
             WHERE id = @Id
             """,
-            node);
+            ToParameters(node));
     }
 
     public async Task UpdateStatusAsync(long id, FileNodeStatus status, CancellationToken ct = default)
@@ -275,4 +277,29 @@ public class FileRepository : IFileRepository
                 processing = (int)FileNodeStatus.Processing
             });
     }
+
+    /// <summary>
+    /// Parameter object for inserts and updates. Dapper would bind <see cref="SensitiveMarker"/>
+    /// as its integer value; the column holds the fixed token list instead.
+    /// </summary>
+    private static object ToParameters(FileNode n) => new
+    {
+        n.Id,
+        n.JobId,
+        n.FullPath,
+        n.Name,
+        n.ParentPath,
+        n.RootPath,
+        n.RelativePath,
+        n.RelativeDir,
+        n.Depth,
+        n.Size,
+        n.LastWriteTime,
+        n.Extension,
+        n.FileType,
+        n.Status,
+        n.ScannedAt,
+        SensitiveMarkers = SensitiveMarkerNames.Format(n.SensitiveMarkers),
+        n.SensitiveRule
+    };
 }
