@@ -15,8 +15,10 @@ namespace SmartFileOrganizer.Application.Services;
 /// <remarks>
 /// <para>For every directory of the job a <see cref="DirectoryProfile"/> is computed from scan data, then
 /// <see cref="DirectoryVerdictRules"/> decide the clear cases without a model call (part of a unit,
-/// unit markers, skipped or hidden, a dump recognised by <see cref="BundlePatterns.Recognise"/>, empty,
-/// judged from subdirectories). Only the rest goes to Ollama,
+/// unit markers, skipped or hidden, a dump recognised by <see cref="BundlePatterns.Recognise"/>, the noise
+/// of a dump, empty, judged from subdirectories). A dump (a copy of a phone, computer or user profile) is
+/// no unit: only its noise paths are skipped, every other part is judged like any directory, at the scan
+/// root as below it. Only the rest goes to Ollama,
 /// which gets the profile with the file list and returns verdict, purpose, retention and reason together
 /// with the sampling recommendation.</para>
 /// <para>Directories are processed level by level from the root, so a directory the model judges as

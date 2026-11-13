@@ -64,8 +64,9 @@ nothing below a dump is checked again. A dump nested in folders that hold nothin
 This recognition (`BundlePatterns.Recognise`) is the only one in the program: the structure review of a
 library (`sfo library review`, [library-review.md](library-review.md)) and the directory verdict of the
 analysis (rule `dump`, [architecture.md](architecture.md#phase-1--directory-verdict-and-pre-assessment-directorypreassessmentservice))
-ask it too, so a phone copy is the same dump in all three places. The verdict never makes the scan root
-itself a unit.
+ask it too, so a phone copy is the same dump in all three places. The verdict gives a dump the code
+`dump`, judges its parts and skips only its noise paths, at the scan root as below it (until Issue 59 on
+13.11.2026 it made a dump a unit and never the scan root).
 
 Guards against false dumps:
 

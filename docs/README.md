@@ -36,8 +36,9 @@ Smart File Organizer runs a **3-phase AI pipeline** after scanning your director
 ```
 Phase 1 — Directory Verdict
    ↳ For every folder: profile of types, sizes, dates, naming patterns, project/program markers
-   ↳ Verdict unit / uniform / mixed / empty / system, with purpose, retention, reason (codes: glossary.md)
-   ↳ Clear cases (Git repo, program, empty, skipped) by rule without a model call
+   ↳ Verdict unit / uniform / mixed / empty / system / dump, with purpose, retention, reason (codes: glossary.md)
+   ↳ Clear cases (Git repo, program, empty, skipped, device or profile copy) by rule without a model call
+   ↳ A dump (phone, profile, old computer) is no unit: its parts are judged, only its noise is skipped
    ↳ Units and system folders: no file analysis, the folder carries the result
    ↳ Verdict stored in directory_verdicts, pre-assessment in ai_directory_results (phase = 'pre_assessment')
 

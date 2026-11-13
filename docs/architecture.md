@@ -243,6 +243,7 @@ the parser still reads those words in a model answer and stores the code. People
 | `mixed` | storage without a common purpose (desktop, downloads); handled file by file |
 | `empty` | no files, neither directly nor below |
 | `system` | operating system, tool or cache data, or excluded by the scan |
+| `dump` | copy of a phone, computer, user profile or removable drive; only a rule gives it, never the model |
 
 Retention is `keep`, `review` or `disposable`; the source is `rule` (a rule decided, no model
 call) or `model`.
@@ -257,14 +258,26 @@ call) or `model`.
    series, `mixed` from three or more types with none above 50 %).
 3. `DirectoryVerdictRules` decide the clear cases without the model, in this order: below a directory
    judged `unit` (`inside-unit`), skipped by the scan (`scan-skip`), name starting with a dot
-   (`hidden`), unit markers (`marker`), a dump (`dump`), no files and no subdirectories (`empty`).
+   (`hidden`), inside a dump at or below one of its noise paths (`dump-noise`), unit markers
+   (`marker`), a dump (`dump`), no files and no subdirectories (`empty`).
    `dump` uses the one recognition the bundles and the library review use (`BundlePatterns.Recognise`,
-   `bundle-patterns.json`, or `Bundles:PatternsFile` when set): a copy of a phone, a user profile, a
-   system drive, a USB stick or unpacked software is a unit, so everything inside it is `inside-unit`
-   and none of its files is judged one by one. Never the scan root: a scanned phone as one unit would
-   leave nothing to judge; the bundles split it into its parts
+   `bundle-patterns.json`, or `Bundles:PatternsFile` when set). Unpacked software is a `unit`, so
+   everything inside it is `inside-unit` and none of its files is judged one by one. A copy of a phone,
+   a user profile, a system drive or a USB stick gets the verdict `dump` (retention `review`) and is no
+   unit ([#59](https://github.com/crack666/smart_file_organizer/issues/59)): below it, a directory at or
+   below a `noise_paths` entry of the patterns (`AppData`, `Android/data`, `Lokale Einstellungen`; `Cookies` is not one)
+   is `system` by `dump-noise` with retention `review`, and its files are skipped; every other part,
+   the worth-keeping ones (`Documents`, `DCIM`) and folders no pattern names, goes on through the rules
+   and the model like any directory. Files directly in the dump root (`NTUSER.DAT`) are analysed with
+   `analyze_all`. The scan root is recognised as well (only signatures with `at_root`), so a profile
+   gets the same verdicts whether it is the scan root or lies below it; a dump inside a dump (a phone
+   backup in the documents of a profile) is a dump of its own, and its own noise paths count from it.
+   Until Issue 59 (13.11.2026) every dump was a unit and the scan root was never one
    ([#50](https://github.com/crack666/smart_file_organizer/issues/50), measured on the corpus of
-   [evaluation.md](evaluation.md)).
+   [evaluation.md](evaluation.md)). Verdicts stored before schema step 15 stay as they were; a job
+   needs a new scan (or a new job) to get `dump` verdicts. The bundles split a dump the same way, but
+   count a folder no pattern names as noise ([bundles.md](bundles.md#worth-keeping-and-noise)); the
+   verdict judges it, because a folder of its own name may hold anything.
 4. Directories are processed level by level from the root. What no rule decides goes to Ollama in
    parallel (`PreAssessDirectoryAsync`): file list, subdirectory names and the profile. The model returns
    verdict, purpose, retention and reason, together with the sampling fields used so far
@@ -272,8 +285,9 @@ call) or `model`.
    `PreAssessmentResponseParser` reads the answer; a missing or unknown verdict is stored as an error.
    A directory the model judges `unit` spares all calls below it.
 5. Directories without direct files but with subdirectories are decided last, bottom-up, from their
-   subdirectories (`container`): all empty → `empty`; only system → `system`; all units, or all
-   `uniform` with the same dominant file type → `uniform`; otherwise `mixed`.
+   subdirectories (`container`): all empty → `empty`; only system → `system`; all units, all dumps
+   (a `Users` folder with several profiles), or all `uniform` with the same dominant file type →
+   `uniform`; otherwise `mixed`.
 6. The verdict is stored in `directory_verdicts`; the pre-assessment in `ai_directory_results`
    (phase=`pre_assessment`) for directories Phase 2 and 3 work on. Directories inside a unit get no
    pre-assessment row and no summary of their own.
@@ -572,6 +586,7 @@ Important tables:
 - `directory_verdicts` — one verdict per directory (step 3): `verdict`, `source` (`rule`/`model`), `rule`,
   `purpose`, `retention`, `reason`, `unit_directory_node_id` (the directory that is the whole, for `unit`),
   `profile_json` (snake_case), `model_used`, `raw_response`, `judged_at`, `error`; either `verdict` or `error` is set;
+  step 15 widens the check of `verdict` by `dump` and changes no stored row;
   `escalated_from` and `escalation_reason` when a sample raised the directory to `mixed` (step 6)
 - `directory_samples` — one sample per uniform directory (step 6): `seed`, `state` (`open`, `confirmed`,
   `escalated`), `eligible_count`, `members_json` (file id, name, `role` = `stratum`/`size`/`date`/`anomaly`/`sensitive`,

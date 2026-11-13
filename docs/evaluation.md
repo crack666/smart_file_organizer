@@ -31,8 +31,8 @@ reference and JSON shapes: [cli.md](cli.md#sfo-eval-corpus).
 
 `sfo eval generate <dir> [--seed n]` writes `<dir>/tree/` (the folder that is scanned) and
 `<dir>/truth.json`. The generator is `SmallCorpusGenerator` (Infrastructure/Evaluation); the same
-seed gives the same bytes and timestamps. Version 2 has 42 folders and 100 files (version 1: 41
-and 97; the changes are listed under [Truth changes](#truth-changes)):
+seed gives the same bytes and timestamps. Version 3 has 62 folders and 160 files (version 2: 42
+and 100, version 1: 41 and 97; the changes are listed under [Truth changes](#truth-changes)):
 
 | Kind | Example | Truth |
 |---|---|---|
@@ -41,7 +41,8 @@ and 97; the changes are listed under [Truth changes](#truth-changes)):
 | Documents by topic | `Dokumente/Rechnungen 2023`, `Steuer 2022`, `Bank`, `Gesundheit`, `Briefe` | `uniform` |
 | Software projects | `package.json`, `.git` | `unit`, also everything inside |
 | Program and game | exe next to dll, exe next to `_Data` | `unit` |
-| Phone dump | `DCIM/Camera`, `Android/data/<package>`, empty `LOST.DIR` | `unit`, also everything inside |
+| Phone dump | `DCIM/Camera`, `Android/data/<package>`, empty `LOST.DIR` | `dump`; camera `uniform`, app data `system`, `LOST.DIR` `empty` |
+| User profiles of an old computer (version 3) | `Profile alter PC/max` (`AppData`, `Documents`, `Desktop`, `Downloads`, `Pictures`, `NTUSER.DAT`), `Profile alter PC/lisa` (old style: `Anwendungsdaten`, `Lokale Einstellungen/Temp`, `Cookies`, `Eigene Dateien`) | each `dump`; documents, desktop, pictures judged like any folder, app data, caches and cookies `system`; the folder of both `uniform` |
 | Media | `Musik`, `Videos`, `Screenshots` | `uniform` |
 | Placeholder | `Neuer Ordner` (empty) | `empty` |
 | Hidden tool folder | `.ssh` | `system` |
@@ -64,7 +65,7 @@ runs of different corpora are never compared as equal.
 ```json
 {
   "schema_version": 1,
-  "corpus": { "name": "small", "generator_version": 2, "seed": 36, "description": "..." },
+  "corpus": { "name": "small", "generator_version": 3, "seed": 36, "description": "..." },
   "root": "tree",
   "directories": [
     { "path": ".", "verdict": "mixed", "note": "Drive root: folders with different purposes." },
@@ -91,7 +92,8 @@ runs of different corpora are never compared as equal.
   also rewrote the expected and actual values of stored reports.)
 - The truth must be unambiguous. `category: null` means no single category is right (a shopping
   list is `document`, `review_needed` or `trash_candidate`) and only the markers are measured; files
-  inside a unit have no category, because units are not classified file by file. `sensitive: []`
+  inside a unit, and the noise of a dump (app data, caches), have no category, because they are not
+  classified file by file. `sensitive: []`
   means the file must not be marked. `note` says why, for people.
 
 The same file shape serves as an answer sheet for `--stub`: the truth itself answers perfectly,
@@ -102,6 +104,33 @@ stub answers `document`, because a model has to commit to one as well.
 
 Every change of the truth is listed here with its reason. The truth follows what is right for the
 user, never what the program happens to answer.
+
+### Version 3 (13.11.2026, https://github.com/crack666/smart_file_organizer/issues/59)
+
+A copy of a phone or a user profile is no unit: nothing in it only makes sense as a whole, and its
+photos and papers are what the person wants back. Version 2 said `unit` with everything inside,
+which hid the camera photos from the analysis. The new verdict `dump` says what the folder is; its
+parts get the verdict they would get anywhere:
+
+| Folder | Version 2 | Version 3 | Why |
+|---|---|---|---|
+| `Handy-Backup 2021` | `unit` | `dump` | A phone copy, recognised by `DCIM`, `Android`, `LOST.DIR`. |
+| `Handy-Backup 2021/DCIM`, `DCIM/Camera` | `unit` | `uniform` | Camera photos of one phone. |
+| `Handy-Backup 2021/LOST.DIR` | `unit` | `empty` | It is empty. |
+| `Handy-Backup 2021/Android` and below | `unit` | `system` | App data of the phone. |
+| the five photos in `DCIM/Camera` | no category | `photo` | They are photos and are analysed now. |
+
+New: `Profile alter PC` with two Windows profiles (the folder of both is `uniform`, a collection of
+dumps). `max` is a newer profile (`AppData` with `Local/Temp`, which the scan rules skip, so those two
+folders have no verdict in the truth; `Desktop`, `Documents` with `Steuer 2014`, `Downloads`,
+`Pictures`), `lisa` an old one (`Anwendungsdaten/Mozilla` with a password store, `Lokale
+Einstellungen` with 30 temp and cache files, `Cookies`, `Eigene Dateien` with `Eigene Bilder`). Both
+have `NTUSER.DAT`. The documents, desktop and picture folders are `mixed` or `uniform` with real
+categories; the noise is `system` and its files have no category. `Cookies` is no noise path of the
+patterns, so the model judges it, and the truth says `system`. A credentials file on the desktop of
+`max` and the password store of `lisa` must stay marked. The parent folder was first called `Benutzer`,
+which next to `Programme` made the corpus root look like a system drive; it was renamed, because the
+corpus root is no computer.
 
 ### Version 2 (12.11.2026, https://github.com/crack666/smart_file_organizer/issues/50)
 
@@ -156,7 +185,7 @@ every expected marker, how many lack one, and false alarms on unmarked files.
 A failure names the item, the expectation, the result, who decided and why:
 
 ```text
-directory_verdict wrong   Handy-Backup 2021/LOST.DIR: expected unit, got empty  [rule empty]  No files and no subdirectories.
+directory_verdict wrong   Handy-Backup 2021/LOST.DIR: expected empty, got unit  [rule inside-unit]  Part of the unit 'Handy-Backup 2021'; a unit is handled only as a whole.
 directory_verdict wrong   Fotos/Sommerfest 2022: expected uniform, got mixed  [sample]  raised from uniform (model gemma4:26b): 5 of 6 sample files are Photo, 1 deviate, ...
 file_category     wrong   Downloads/IMG_20230812_143012.jpg: expected photo, got screenshot  [model gemma4:26b]
 sensitive         wrong   Desktop/wiederherstellungscodes.txt: expected credentials, got none  missed credentials
@@ -240,6 +269,25 @@ items fixed and the new failures.
 
 ## Measured
 
+### Scripted answers after issue 59 (13.11.2026)
+
+_Scripted answers (`--stub truth.json`), on the branch of
+https://github.com/crack666/smart_file_organizer/issues/59, prompt fingerprint `d2f30ce0d015d9d5`
+(unchanged: `dump` is a rule-only verdict and not in the answer schema), sampling 15 / 10 % / small
+folders up to 3 files:_
+
+| Corpus | `directory_verdict` | `file_category` | `sensitive` |
+|---|---|---|---|
+| small v3 seed 36, before (rules of issue 50) | 35/60 | 58/78 | 158/160 (19 marked, 18 found, 1 false alarm) |
+| small v3 seed 36, after | 60/60 | 78/78 | 159/160 (19 marked, 19 found, 1 false alarm) |
+
+`sfo eval --compare` lists 46 fixed failures and no new one. Before, all 25 folders of the phone
+dump and the two profiles were `unit` (the dumps by rule `dump`, everything else `inside-unit`), so
+none of the 20 photos and papers in them was classified, and the tax notice in `max/Documents/Steuer
+2014` missed its `finance` marker, which only the analysis gives. After, the one remaining failure is
+the deliberate false alarm of `.ssh/id_ed25519.pub`. The two credentials files in the profiles were
+found before and after: the name rules mark them whether their folder is analysed or skipped.
+
 ### Scripted answers after issue 50 (12.11.2026)
 
 _Scripted answers (`--stub truth.json`), on the branch of
@@ -260,7 +308,8 @@ one remaining failure is that false alarm. How the issues were fixed:
 
 - The phone dump: a folder that `bundle-patterns.json` recognises as a copy of a device, a computer
   or software is a `unit` by rule `dump`, with everything inside. Bundles, library review and the
-  verdict now share one recognition. The scan root is never a dump.
+  verdict now share one recognition. The scan root is never a dump. (Changed by issue 59 on
+  13.11.2026: a copy of a device or profile is `dump`, its parts are judged, and the scan root can be one.)
 - The sample check counts by purpose: a video next to photos, and invoice, letter, personal
   document, document scan next to document, are no deviation. At least one deviation is
   tolerated in every folder (5 photos and 1 video stay `uniform`). Folders of at most 3 files keep
