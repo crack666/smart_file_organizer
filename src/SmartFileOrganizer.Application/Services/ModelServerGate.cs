@@ -45,9 +45,9 @@ public readonly record struct ModelCallOutcome<T>(ModelCallState State, T? Value
 /// (<see cref="ModelServerUnavailableException"/>), and from <see cref="ModelServerOptions.OutageAfterFailures"/>
 /// on it closes: calls in flight are cancelled (their items stay open), new calls wait, and one probe loop asks
 /// the server every <see cref="ModelServerOptions.ProbeInterval"/> whether server and model are back. Then the
-/// model is loaded once with a generous time limit and the gate opens again. The episode ends with the first
-/// call that succeeds; if it lasts longer than <see cref="ModelServerOptions.MaxWait"/>, every waiting caller
-/// gets <see cref="ModelServerLostException"/>.
+/// model is loaded once with a generous time limit and the gate opens again; the outage is over then, and a new
+/// one needs failures in a row again. If the wait lasts longer than <see cref="ModelServerOptions.MaxWait"/>,
+/// every waiting caller gets <see cref="ModelServerLostException"/>.
 /// </summary>
 /// <remarks>
 /// Provider-independent: it sees only <see cref="IOllamaService"/> and the exception of its contract, so a second
@@ -236,6 +236,14 @@ public sealed class ModelServerGate
             }
 
             await WarmAsync();
+            // The server answers: the outage is over, not only once a held call succeeds. Otherwise an item that
+            // alone keeps failing (the last file left, which crashes the server) would never count against itself,
+            // since every probe ends the wait at once: the run would loop without end.
+            lock (_sync)
+            {
+                _downSince = null;
+                _consecutiveFailures = 0;
+            }
             _logger.LogInformation("Model server and model answer again; the run continues.");
             Report(ModelServerWaitState.Resumed, since, cause);
         }

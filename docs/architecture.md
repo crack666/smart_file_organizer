@@ -521,6 +521,8 @@ resets the count.
    and lists the model (`IsReadyAsync`), touching `checked_at` each time.
 3. Back: the model is loaded first with an empty chat request, allowed `WarmupTimeoutSeconds`, so the
    first held calls do not time out on a cold load. Then `resumed`, the row is removed, held calls go on.
+   The outage is over at that point, not only once a held call succeeds: a new one needs
+   `OutageAfterFailures` failures in a row again, and failures count against their items again.
 4. Longer than `MaxWaitMinutes` since the server counted as down: `given_up`, `ModelServerLostException`, the
    run ends with exit code 4 (CLI) or `Unavailable` (GUI). Nothing open is stored as an error.
 
