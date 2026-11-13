@@ -230,12 +230,39 @@ public class Phase2EvidenceTests : IDisposable
         Assert.Equal([new FileFact(FileFactKey.AudioKind, "speech", FactSource.Rule)], read);
     }
 
+    [Fact]
+    public async Task Description_IsStoredAsFactsWithSourceModel_NextToTheMetadata()
+    {
+        await File.WriteAllTextAsync(Path.Combine(_dir, "bill.txt"), "Invoice 2019-0042, Stadtwerke, total 81.20 EUR");
+        await File.WriteAllTextAsync(Path.Combine(_dir, "kontoauszug.txt"), "Statement of account");
+        var jobId = await InsertAsync(
+            ("bill.txt", FileType.Document, SensitiveMarker.None),
+            ("kontoauszug.txt", FileType.Document, SensitiveMarker.Finance));
+        _ollama.Described =
+        [
+            new FileFact(FileFactKey.DocumentKind, "invoice", FactSource.Model),
+            new FileFact(FileFactKey.Issuer, "Stadtwerke", FactSource.Model),
+            new FileFact(FileFactKey.Year, "2019", FactSource.Model)
+        ];
+
+        await Service().RunAsync(jobId);
+
+        await using var conn = _db.CreateConnection();
+        var stored = (await conn.QueryAsync<(string Name, string Fact, string Value, string Source)>(
+            "SELECT f.name, ff.fact, ff.value, ff.source FROM file_facts ff JOIN file_nodes f ON f.id = ff.file_node_id")).ToList();
+        Assert.Contains(("bill.txt", "document_kind", "invoice", "model"), stored);
+        Assert.Contains(("bill.txt", "issuer", "Stadtwerke", "model"), stored);
+        Assert.Contains(("bill.txt", "year", "2019", "model"), stored);
+        Assert.DoesNotContain(stored, s => s.Name == "kontoauszug.txt" && s.Source == "model");
+    }
+
     /// <summary>Answers every classification with a fixed result and records which files it saw.</summary>
     private sealed class AnsweringOllama : IOllamaService
     {
         private readonly ConcurrentBag<string> _names = [];
         public IReadOnlyList<string> Names => _names.ToList();
         public FileCategory Answer { get; set; } = FileCategory.Document;
+        public List<FileFact> Described { get; set; } = [];
 
         public Task<FileClassification> ClassifyAsync(OllamaClassificationInput input, CancellationToken ct = default)
         {
@@ -249,7 +276,8 @@ public class Phase2EvidenceTests : IDisposable
                 Summary = "scripted",
                 ModelUsed = "scripted",
                 AnalyzedAt = DateTime.UtcNow,
-                IsAiResult = true
+                IsAiResult = true,
+                DescribedFacts = [.. Described]
             });
         }
 

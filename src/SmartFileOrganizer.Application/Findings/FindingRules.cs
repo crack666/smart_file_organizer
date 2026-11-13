@@ -28,6 +28,9 @@ public readonly record struct FileValue(FileWorth Worth, ResultCertainty Certain
 /// <summary>Where a file lies, as far as the findings care: the bundle around it and the verdict of its folder.</summary>
 public sealed record FilePlace(Bundle? Bundle, Bundle? Part, DirectoryReadRow? Directory, CaptureInfo? Capture, bool NoiseByBundle, bool NoiseByDirectory);
 
+/// <summary>A file with its place, its worth as the findings use it, and its stored facts (input of <c>sfo decide</c>).</summary>
+public sealed record FileValueRow(FileNode File, FilePlace Place, FileValue Value, IReadOnlyList<FileFact> Facts);
+
 /// <summary>
 /// The pure rules of the findings (https://github.com/crack666/smart_file_organizer/issues/26): what a file is worth,
 /// whether it lies among noise, how certain a finding is, its key and its place in the list. No database, no model.
@@ -310,9 +313,9 @@ public static class FindingRules
     public static bool IsWholeVerdict(string? verdict) =>
         verdict == VerdictCodes.ToCode(DirectoryVerdictKind.Unit) || verdict == VerdictCodes.ToCode(DirectoryVerdictKind.System);
 
-    /// <summary>Whether the worth of a file rests on a judgement of the file itself (person, agent, model, rule, a confirmed sample).</summary>
+    /// <summary>Whether the worth of a file rests on a judgement of the file itself (person, agent, model, rule, a confirmed sample, its described facts).</summary>
     public static bool RestsOnFile(FileValue value) =>
-        value.Basis is "human" or "agent" or "model" or "rule" or "inherited";
+        value.Basis is "human" or "agent" or "model" or "rule" or "inherited" or "facts";
 
     /// <summary>Relative path with <c>/</c>; <c>.</c> for the root.</summary>
     public static string Rel(string? relative)

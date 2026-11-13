@@ -199,6 +199,8 @@ public class DatabaseIntegrityTests : IDisposable
             INSERT INTO ai_results (file_node_id, analyzed_at, inherited_from_directory_node_id) VALUES (@file, @T, @dir);
             INSERT INTO user_overrides (file_node_id, overridden_at) VALUES (@file, @T);
             INSERT INTO file_facts (file_node_id, fact, value, source, recorded_at) VALUES (@file, 'title', 'x', 'rule', @T);
+            INSERT INTO file_decisions (file_node_id, job_id, worth, certainty, rule, basis, decided_at)
+                VALUES (@file, @job, 'keep', 'likely', 'facts', '[]', @T);
             INSERT INTO result_checks (file_node_id, reasons, outcome, first_answer, checked_at) VALUES (@file, 'r', 'agreed', '{}', @T);
             INSERT INTO ai_directory_results (directory_node_id, phase, analyzed_at) VALUES (@dir, 'summary', @T);
             INSERT INTO directory_verdicts (directory_node_id, verdict, source, unit_directory_node_id, profile_json, judged_at)

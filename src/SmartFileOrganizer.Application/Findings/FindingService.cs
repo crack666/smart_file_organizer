@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.Logging;
 using SmartFileOrganizer.Application.Bundles;
+using SmartFileOrganizer.Application.Decisions;
 using SmartFileOrganizer.Application.Library;
 using SmartFileOrganizer.Application.Sensitivity;
 using SmartFileOrganizer.Application.Services;
@@ -100,6 +101,7 @@ public sealed class FindingService
     private readonly IFindingDecisionRepository _decisions;
     private readonly IEvalCaseRepository _evalCases;
     private readonly IFindingTargetAdvisor _advisor;
+    private readonly IFileFactRepository _facts;
     private readonly FindingOptions _options;
     private readonly BundleOptions _bundleOptions;
     private readonly ILogger<FindingService> _logger;
@@ -113,6 +115,7 @@ public sealed class FindingService
         IFindingDecisionRepository decisions,
         IEvalCaseRepository evalCases,
         IFindingTargetAdvisor advisor,
+        IFileFactRepository facts,
         FindingOptions options,
         BundleOptions bundleOptions,
         ILogger<FindingService> logger)
@@ -125,6 +128,7 @@ public sealed class FindingService
         _decisions = decisions;
         _evalCases = evalCases;
         _advisor = advisor;
+        _facts = facts;
         _options = options;
         _bundleOptions = bundleOptions;
         _logger = logger;
@@ -175,6 +179,16 @@ public sealed class FindingService
         return new FindingSummary(report.Job, report.Inputs, report.Coverage, report.MissingSteps,
             listed.Count, listed.Count(f => !f.Unsure), listed.Count(f => f.Unsure),
             byKind, byCertainty, byState, briefs, report.BelowThreshold);
+    }
+
+    /// <summary>
+    /// The worth of every file of the job as the findings see it, with its place and its stored facts: the input of
+    /// stage 2 (<c>sfo decide</c>, https://github.com/crack666/smart_file_organizer/issues/37), and the findings beside it.
+    /// </summary>
+    public async Task<(FindingReport Report, IReadOnlyList<FileValueRow> Files)> ComputeValuesAsync(long jobId, CancellationToken ct = default)
+    {
+        var computed = await ComputeInternalAsync(jobId, ct);
+        return (computed.Report, computed.Values);
     }
 
     /// <summary>One finding by key, in any state.</summary>
@@ -315,7 +329,7 @@ public sealed class FindingService
 
     // ------------------------------------------------------------------ computing
 
-    private sealed record Computed(FindingReport Report, IReadOnlyDictionary<long, FileNode> Files);
+    private sealed record Computed(FindingReport Report, IReadOnlyDictionary<long, FileNode> Files, IReadOnlyList<FileValueRow> Values);
 
     /// <summary>A part of the source findings summarize: a bundle, or the loose files of one folder.</summary>
     private sealed record Unit(string Subject, string? Path, string Rel, string Label, Bundle? Bundle, string? Noise);
@@ -347,6 +361,7 @@ public sealed class FindingService
         IReadOnlyDictionary<long, long> membership = build is null ? new Dictionary<long, long>() : await _bundles.GetMembershipAsync(jobId, ct);
         var bundleById = bundles.ToDictionary(b => b.Id);
         var captures = await _captures.GetAsync(jobId, ct);
+        var factsByFile = await _facts.GetByJobAsync(jobId, ct);
 
         var libHeader = await _comparisons.GetLatestWithLibraryAsync(jobId, ct);
         var libRows = libHeader is null
@@ -380,6 +395,7 @@ public sealed class FindingService
 
         // ---- every file: where it lies, what it is worth, whether it is marked
         var facts = new List<FileFacts>(rows.Count);
+        var values = new List<FileValueRow>(rows.Count);
         foreach (var row in rows)
         {
             var f = row.File;
@@ -402,7 +418,8 @@ public sealed class FindingService
             var place = new FilePlace(top, part, dir, capture, noiseByBundle, noiseByDir);
 
             var whole = WholeOf(f.ParentPath);
-            var value = FindingRules.ValueOf(f, place);
+            var fileFacts = factsByFile.TryGetValue(f.Id, out var stored) ? stored : [];
+            var value = DecisionRules.ValueOf(f, place, fileFacts);
             // Where a file lies is no reason to keep it when it lies inside a unit (the sounds of a program on the
             // desktop): only a judgement of the file itself counts there.
             if (whole.InUnit && value.Worth == FileWorth.Keep && !FindingRules.RestsOnFile(value))
@@ -414,6 +431,7 @@ public sealed class FindingService
             var container = whole.Root
                             ?? (programFolder ? top!.RootPath : null)
                             ?? (part?.Kind == BundleKind.DumpNoise ? part.RootPath ?? "dump_noise|" + part.Id : null);
+            values.Add(new FileValueRow(f, place, value, fileFacts));
             facts.Add(new FileFacts(f, place, value, match, cmp,
                 UnitOf(job, f, place, dir, part, top, besidePrograms && noiseByDir && keptByBundle),
                 EventGrouper.TimeOf(f, captures), container));
@@ -489,7 +507,7 @@ public sealed class FindingService
             dupHeader,
             libHeader?.AgainstJobId);
         var (coverage, missing) = Coverage(job, inputs);
-        return new Computed(new FindingReport(job, inputs, coverage, missing, ranked, below), fileById);
+        return new Computed(new FindingReport(job, inputs, coverage, missing, ranked, below), fileById, values);
     }
 
     private static Unit UnitOf(ScanJob job, FileNode f, FilePlace place, DirectoryReadRow? dir, Bundle? part, Bundle? top, bool besidePrograms)

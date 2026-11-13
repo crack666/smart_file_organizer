@@ -68,7 +68,37 @@ public enum FileFactKey
     [JsonStringEnumMemberName("archive_content")] ArchiveContent,
 
     /// <summary><c>true</c> when an archive or document is password protected.</summary>
-    [JsonStringEnumMemberName("encrypted")] Encrypted
+    [JsonStringEnumMemberName("encrypted")] Encrypted,
+
+    // ── Description by the model (stage 1, https://github.com/crack666/smart_file_organizer/issues/37) ──
+    // Asked in the same call as the category, stored with source model, never for a marked file.
+
+    /// <summary>What a picture shows, in a few words (free text, at most 40 characters).</summary>
+    [JsonStringEnumMemberName("scene")] Scene,
+
+    /// <summary>What the people in a picture do, in a few words (free text, at most 40 characters).</summary>
+    [JsonStringEnumMemberName("activity")] Activity,
+
+    /// <summary>Indoors or outdoors, as a <see cref="SceneSetting"/> code.</summary>
+    [JsonStringEnumMemberName("setting")] Setting,
+
+    /// <summary>The season a picture shows, as a <see cref="Enums.Season"/> code; only when the picture shows it.</summary>
+    [JsonStringEnumMemberName("season")] Season,
+
+    /// <summary>The kind of occasion of a picture, as an <see cref="OccasionKind"/> code.</summary>
+    [JsonStringEnumMemberName("occasion")] Occasion,
+
+    /// <summary><c>true</c> when a person is visible in a picture.</summary>
+    [JsonStringEnumMemberName("people")] People,
+
+    /// <summary>The kind of a document, as a <see cref="Enums.DocumentKind"/> code.</summary>
+    [JsonStringEnumMemberName("document_kind")] DocumentKind,
+
+    /// <summary>Who issued a document: company, authority or person, as written on it (free text, at most 60 characters).</summary>
+    [JsonStringEnumMemberName("issuer")] Issuer,
+
+    /// <summary>The year a document is dated, as read from its content (four digits).</summary>
+    [JsonStringEnumMemberName("year")] Year
 }
 
 /// <summary>Where a stored fact comes from.</summary>
@@ -126,13 +156,78 @@ public enum ArchiveContent
     [JsonStringEnumMemberName("mixed")] Mixed
 }
 
+/// <summary>Whether a picture was taken indoors or outdoors.</summary>
+public enum SceneSetting
+{
+    [JsonStringEnumMemberName("indoor")] Indoor,
+    [JsonStringEnumMemberName("outdoor")] Outdoor
+}
+
+/// <summary>The season a picture shows (snow, blossom, foliage, summer light); never guessed from a date.</summary>
+public enum Season
+{
+    [JsonStringEnumMemberName("spring")] Spring,
+    [JsonStringEnumMemberName("summer")] Summer,
+    [JsonStringEnumMemberName("autumn")] Autumn,
+    [JsonStringEnumMemberName("winter")] Winter
+}
+
+/// <summary>The kind of occasion a picture belongs to, as far as the picture shows it.</summary>
+public enum OccasionKind
+{
+    /// <summary>A journey or holiday away from home.</summary>
+    [JsonStringEnumMemberName("holiday")] Holiday,
+
+    /// <summary>A birthday, wedding, party, family feast or festival.</summary>
+    [JsonStringEnumMemberName("celebration")] Celebration,
+
+    /// <summary>A day trip or excursion: a hike, a zoo, a city walk.</summary>
+    [JsonStringEnumMemberName("outing")] Outing,
+
+    /// <summary>Doing or watching sport.</summary>
+    [JsonStringEnumMemberName("sport")] Sport,
+
+    /// <summary>Everyday life at home or around it.</summary>
+    [JsonStringEnumMemberName("everyday")] Everyday,
+
+    /// <summary>Work, school or study.</summary>
+    [JsonStringEnumMemberName("work")] Work,
+
+    /// <summary>No occasion: a product photo, a picture of a thing, a meme, a picture of a document.</summary>
+    [JsonStringEnumMemberName("none")] None
+}
+
+/// <summary>The kind of a document, finer than its category, read from its content.</summary>
+public enum DocumentKind
+{
+    [JsonStringEnumMemberName("invoice")] Invoice,
+    [JsonStringEnumMemberName("receipt")] Receipt,
+    [JsonStringEnumMemberName("contract")] Contract,
+    [JsonStringEnumMemberName("statement")] Statement,
+    [JsonStringEnumMemberName("tax")] Tax,
+    [JsonStringEnumMemberName("payslip")] Payslip,
+    [JsonStringEnumMemberName("certificate")] Certificate,
+    [JsonStringEnumMemberName("insurance")] Insurance,
+    [JsonStringEnumMemberName("medical")] Medical,
+    [JsonStringEnumMemberName("official")] Official,
+    [JsonStringEnumMemberName("correspondence")] Correspondence,
+    [JsonStringEnumMemberName("manual")] Manual,
+    [JsonStringEnumMemberName("form")] Form,
+    [JsonStringEnumMemberName("notes")] Notes,
+    [JsonStringEnumMemberName("other")] Other
+}
+
 public static class FileFactKeys
 {
     /// <summary>
-    /// Facts that carry free text written by a person (title, author, artist, album). For a file
-    /// marked sensitive only the other facts are stored, so that the marker stays the only
-    /// statement about its content.
+    /// Facts that carry free text (title, author, artist, album; the scene, activity and issuer the model
+    /// describes). For a file marked sensitive only the other facts are stored, so that the marker stays the
+    /// only statement about its content.
     /// </summary>
     public static bool IsFreeText(this FileFactKey key) =>
-        key is FileFactKey.Title or FileFactKey.Author or FileFactKey.Artist or FileFactKey.Album;
+        key is FileFactKey.Title or FileFactKey.Author or FileFactKey.Artist or FileFactKey.Album
+            or FileFactKey.Scene or FileFactKey.Activity or FileFactKey.Issuer;
+
+    /// <summary>Facts the model describes in stage 1 (scene, occasion, document kind, ...), always with source model.</summary>
+    public static bool IsDescription(this FileFactKey key) => key >= FileFactKey.Scene;
 }

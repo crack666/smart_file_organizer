@@ -53,6 +53,15 @@ public sealed class FakeModelServer : HttpMessageHandler
 
     public IReadOnlyList<FakeRequest> Log { get { lock (_sync) return _log.ToList(); } }
 
+    /// <summary>Description fields added to a classification answer when its schema asks for them (stage 1 of Issue 37),
+    /// by file name; files not listed get <see cref="DefaultPicture"/> or <see cref="DefaultDocument"/>.</summary>
+    public Dictionary<string, string> Descriptions { get; } = new(StringComparer.Ordinal);
+
+    public string DefaultPicture { get; set; } =
+        "\"scene\":\"garden\",\"activity\":\"\",\"setting\":\"outdoor\",\"season\":\"unknown\",\"occasion\":\"everyday\",\"people\":false";
+
+    public string DefaultDocument { get; set; } = "\"document_kind\":\"notes\",\"issuer\":\"\",\"year\":0";
+
     /// <summary>Requests of a kind that the server answered like Ollama.</summary>
     public int Answered(string kind, string? name = null) =>
         Log.Count(r => r.Kind == kind && r.Answer == FakeServerMode.Up && (name is null || r.Name == name));
@@ -61,7 +70,7 @@ public sealed class FakeModelServer : HttpMessageHandler
 
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
     {
-        var (kind, name) = await ReadAsync(request, ct);
+        var (kind, name, fields) = await ReadAsync(request, ct);
         var probe = new FakeRequest(kind, name, Mode);
         var answer = Script?.Invoke(probe) ?? Mode;
         lock (_sync) _log.Add(probe with { Answer = answer });
@@ -94,8 +103,15 @@ public sealed class FakeModelServer : HttpMessageHandler
             "warm" => """{"done":true}""",
             "pre_assessment" => Chat("""{"verdict":"mixed","purpose":"test files","retention":"keep","reason":"fake","homogeneity":"low","dominant_type":"text","theme":"test","anomalous_files":[],"sampling_strategy":"analyze_all","suggested_sample_size":1}"""),
             "summary" => Chat("""{"summary":"fake summary","theme":"test","confirmed_anomalies":[]}"""),
-            _ => Chat($$"""{"category":"Document","importance":"Medium","confidence":{{(kind == "classification" && name is not null && UnsureFiles.Contains(name) ? "0.3" : "0.95")}},"summary":"a text","suggested_target":"Docs","sensitive":[],"keep_hint":"worth_keeping","keep_reason":"fake"}""")
+            _ => Chat($$"""{"category":"Document","importance":"Medium","confidence":{{(kind == "classification" && name is not null && UnsureFiles.Contains(name) ? "0.3" : "0.95")}},"summary":"a text","suggested_target":"Docs","sensitive":[],"keep_hint":"worth_keeping","keep_reason":"fake"{{Describe(name, fields)}}}""")
         });
+    }
+
+    private string Describe(string? name, IReadOnlySet<string> fields)
+    {
+        if (!fields.Contains("scene") && !fields.Contains("document_kind")) return string.Empty;
+        if (name is not null && Descriptions.TryGetValue(name, out var own)) return "," + own;
+        return "," + (fields.Contains("scene") ? DefaultPicture : DefaultDocument);
     }
 
     private static HttpResponseMessage Json(string body) =>
@@ -111,25 +127,30 @@ public sealed class FakeModelServer : HttpMessageHandler
             prompt_eval_duration = 100_000_000L, eval_duration = 200_000_000L
         });
 
-    private static async Task<(string Kind, string? Name)> ReadAsync(HttpRequestMessage request, CancellationToken ct)
+    private static async Task<(string Kind, string? Name, IReadOnlySet<string> Fields)> ReadAsync(HttpRequestMessage request, CancellationToken ct)
     {
+        var none = new HashSet<string>();
         var path = request.RequestUri?.AbsolutePath ?? string.Empty;
-        if (path.EndsWith("/api/tags", StringComparison.Ordinal)) return ("tags", null);
+        if (path.EndsWith("/api/tags", StringComparison.Ordinal)) return ("tags", null, none);
 
         var body = request.Content is null ? string.Empty : await request.Content.ReadAsStringAsync(ct);
         using var doc = JsonDocument.Parse(body);
         var messages = doc.RootElement.GetProperty("messages");
-        if (messages.GetArrayLength() == 0) return ("warm", null);
+        if (messages.GetArrayLength() == 0) return ("warm", null, none);
+        var fields = doc.RootElement.TryGetProperty("format", out var format) && format.ValueKind == JsonValueKind.Object
+                     && format.TryGetProperty("properties", out var props)
+            ? props.EnumerateObject().Select(p => p.Name).ToHashSet(StringComparer.Ordinal)
+            : none;
 
         // The fixed task of a phase is the system message, the file or directory the last message.
         var task = messages[0].GetProperty("content").GetString() ?? string.Empty;
         var prompt = messages[messages.GetArrayLength() - 1].GetProperty("content").GetString() ?? string.Empty;
         if (task.StartsWith("You are judging a directory", StringComparison.Ordinal))
-            return ("pre_assessment", Line(prompt, "Relative path: "));
+            return ("pre_assessment", Line(prompt, "Relative path: "), fields);
         if (task.StartsWith("You are writing a final summary", StringComparison.Ordinal))
-            return ("summary", Line(prompt, "Relative path: "));
+            return ("summary", Line(prompt, "Relative path: "), fields);
         var kind = prompt.Contains("Context: the directory this file is in", StringComparison.Ordinal) ? "second_check" : "classification";
-        return (kind, Line(prompt, "File name: "));
+        return (kind, Line(prompt, "File name: "), fields);
     }
 
     private static string? Line(string prompt, string prefix)

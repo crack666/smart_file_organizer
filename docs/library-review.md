@@ -176,3 +176,9 @@ Without the model, the rules build one target per type group that occurs (photos
 music, documents by area and year, archives, software, device backups), named in English or,
 with `--lang de`, in German. `TargetStructureFile.Load` validates a file and lists every
 problem. The file is meant as input for later sorting steps; this command applies nothing.
+`sfo decide <job> --targets <file>` reads it ([cli.md](cli.md#sfo-decide-job)): a kept file goes to the first target
+whose `holds` names its type, and the pattern is filled from the stored facts of the file. Placeholders are fact codes
+of [glossary.md](glossary.md#fact-key-filefactkey) (`{occasion}`, `{year}`, `{issuer}`, `{scene}`, ...) and the names
+the rules write: `{area}` is the document kind, `{year}` the year of the document, else the year it was taken or
+created; the German names (`{Anlass}`, `{Jahr}`, `{Bereich}`, `{Aussteller}`, `{Titel}`, `{Interpret}`, `{Gerät}`)
+mean the same. `{name}` has no fact and stays open.

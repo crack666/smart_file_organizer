@@ -1165,6 +1165,56 @@ Result: `{ "job_id", "items": [ { "key", "state", "decided_by", "decided_at", "n
 "finding": {...} } ] }`. Changes no file. Errors: `job_not_found` (1), `finding_not_found` (1, the key is not
 part of the job, or the data it rested on changed).
 
+## Deciding
+
+### `sfo decide <job>`
+
+Stage 2 of https://github.com/crack666/smart_file_organizer/issues/37: worth and target of every file, computed anew
+by rule from what the analysis stored (facts, results, folder verdicts) and from bundles and comparison, and stored
+(`file_decisions`). No model call, no scanned file opened, nothing changed on disk. After a changed target structure
+or changed rules this is all that has to run; the description of stage 1 stays as it is. Rules and inputs:
+[architecture.md, Decision flow](architecture.md#decision-flow).
+
+| Option | Meaning |
+|---|---|
+| `--targets <file>` | Target structure (`sfo library propose --out`, edited by hand; format in [library-review.md](library-review.md#target-structure-file-library-propose---out-file)): kept files get a target from it. Without it, worth only. |
+| `--changed` | List only files whose worth, certainty or target changed against the decisions stored before. |
+| `--limit`, `--offset` | Paging of `items`, as in every list. |
+
+```json
+{
+  "job_id": 1, "decided_at": "2026-11-13T10:00:00Z", "previous_decided_at": "2026-11-13T09:00:00Z",
+  "files": 5, "by_worth": { "keep": 5, "disposable": 0, "none": 0 },
+  "by_certainty": { "certain": 0, "likely": 5, "uncertain": 0, "review": 0 },
+  "targets": { "structure": "/path/targets.json", "proposed": 4, "unresolved": 1, "kept_without_target": 1 },
+  "changed": 4, "findings": { "not_backed_up": 0, "in_noise": 0, "sensitive": 1, "misplaced": 0, "duplicate": 0 },
+  "total": 5, "limit": 200, "offset": 0, "next_offset": null,
+  "items": [
+    { "file_id": 3, "relative_path": "rechnungen/strom.txt", "worth": "keep", "certainty": "likely", "rule": "model",
+      "basis": [ { "key": "category", "value": "invoice", "source": "model" },
+                 { "key": "keep_hint", "value": "worth_keeping", "source": "model" } ],
+      "target": { "id": "papiere", "path": "Archiv/Papiere/Stadtwerke/2019", "rule": "target_structure",
+                  "basis": [ { "key": "file_type", "value": "document", "source": "scan" },
+                             { "key": "issuer", "value": "Stadtwerke", "source": "model" },
+                             { "key": "year", "value": "2019", "source": "model" } ],
+                  "unresolved": [] },
+      "previous_target": "Documents/invoice/2019", "changed": true }
+  ]
+}
+```
+
+- `worth` is `keep`, `disposable` or `null` (the stored results say nothing about the file); `rule` says what decided
+  it and `basis` the inputs it rests on ([glossary](glossary.md#decisions)). The findings use the same worth.
+- A target is proposed for kept files only: the first target whose `holds` names the file type, its `pattern` filled
+  from the facts. A placeholder no fact fills (`unresolved`) leaves the folder level of the pattern out. `basis` names
+  the file type and one input per filled placeholder.
+- A marked file rests on its marker alone (`rule` `sensitive`, `basis` key `sensitive` with the marker and the rule
+  ids), is kept and gets no target; its description is never stored.
+- `previous_target` and `changed` compare with the decisions stored before this run.
+
+Errors: `job_not_found` (1), `wrong_role` (1, a library), `path_not_found` (1, the target file), `targets_invalid` (1,
+the target file is not a valid target structure), `settings_invalid` (1, a `Findings` value), `usage` (2).
+
 ## Machine contract
 
 Applies to every command, including the ones added later.
@@ -1206,7 +1256,7 @@ lines when it starts or stops waiting for the model server (see `sfo analyze`); 
 | Code | Meaning | `error.code` |
 |---|---|---|
 | 0 | Done | |
-| 1 | The command ran but could not do its job | `job_not_found`, `path_not_found`, `scan_failed`, `scan_not_completed`, `wrong_role`, `compare_incomplete`, `database_error`, `model_missing`, `rules_invalid`, `words_invalid`, `output_inside_job`, `export_failed`, `truth_invalid`, `run_not_found`, `output_not_empty`, `bundle_not_found`, `patterns_invalid`, `library_patterns_invalid`, `settings_invalid`, `finding_not_found`, `internal_error` |
+| 1 | The command ran but could not do its job | `job_not_found`, `path_not_found`, `scan_failed`, `scan_not_completed`, `wrong_role`, `compare_incomplete`, `database_error`, `model_missing`, `rules_invalid`, `words_invalid`, `output_inside_job`, `export_failed`, `truth_invalid`, `run_not_found`, `output_not_empty`, `bundle_not_found`, `patterns_invalid`, `library_patterns_invalid`, `settings_invalid`, `finding_not_found`, `targets_invalid`, `internal_error` |
 | 2 | Wrong invocation: unknown command or option, missing or invalid value | `usage` |
 | 3 | Ollama not reachable | `ollama_unavailable` |
 | 4 | The model server went away during `sfo analyze` and did not come back within `ModelServer.MaxWaitMinutes`; open items stay open, run the command again | `model_server_lost` |

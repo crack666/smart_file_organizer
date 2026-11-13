@@ -216,8 +216,8 @@ throughput, and misassignments come from thin evidence. Until then the model saw
 by their first page, videos by name only, and audio, archives and everything else not at all.
 
 - Facts that metadata settle (capture date, device, page count, tags, archive listing summary) are stored as facts with
-  their source in `file_facts`, not only written into the prompt. A later decision step can use them without the model
-  ([#37](https://github.com/crack666/smart_file_organizer/issues/37)).
+  their source in `file_facts`, not only written into the prompt. The decision step uses them without the model
+  (`sfo decide`, [#37](https://github.com/crack666/smart_file_organizer/issues/37); see [11](#11-describe-once-decide-often)).
 - Some facts are derived by a rule (`image_origin`, `audio_kind`, `archive_content`) and carry source `rule`.
 - Every piece of evidence lists what it contains and what is missing, so the model does not guess (no frames, no tags,
   text cut after page 4).
@@ -353,6 +353,25 @@ renamed or split.
 
 Trade-off: the thresholds are starting values without a measured library yet; they are
 settings (`LibraryMatch`), not constants.
+
+## 11. Describe once, decide often
+
+Decided 13.11.2026 in https://github.com/crack666/smart_file_organizer/issues/37. One model call used to say at once
+what a file is, how much it is worth and where it should go. A changed target structure or rule then meant analysing
+again, and a wrong result did not show whether the model had seen wrong or decided wrong. The measurement of 12.11.2026
+found the categories right with every model; the errors lay in markers and folder verdicts.
+
+- Stage 1 describes: category, markers and, in the same call, a few fixed facts of what is to be seen (scene, occasion,
+  people of a picture; kind, issuer, year of a document), each stored with its source. No second call, no longer
+  fixed part: the fields come through the answer schema, only for pictures and documents.
+- Stage 2 decides by rule from what is stored (`sfo decide`): worth, and a target from a target structure. It has no
+  model service, so its cost is a database read, and each decision names the inputs it rests on: a wrong decision
+  with a right fact is a rule to fix, a wrong fact is a description to fix.
+- A marked file is not described, and its decision rests on its marker alone.
+
+Trade-off: the description costs a few dozen answer tokens per picture and document. Importance and keep hint are
+still asked in stage 1; moving them into stage 2 needs the measurement of the corpus first. A model call over facts
+for what no rule can judge is left for later.
 
 ## Design stance going forward
 
