@@ -251,7 +251,7 @@ library 17, `not_backed_up` not computed), and a generated old Windows profile w
 ### Describing and deciding
 
 _Checked 13.11.2026 on the branch for https://github.com/crack666/smart_file_organizer/issues/37 (schema step 20):
-`dotnet test` 825 passed, 2 skipped; `scan`, `analyze` and `decide` run in-process against the fake model server
+`dotnet test` 831 passed, 2 skipped; `scan`, `analyze` and `decide` run in-process against the fake model server
 and a temp database (`DecideCommandTests`). No run with a real model: whether real models fill the description
 fields well, and what they cost in answer tokens, is not measured._
 

@@ -97,6 +97,7 @@ public class ScanJobRepository : IScanJobRepository
             DELETE FROM user_overrides      WHERE file_node_id IN (SELECT id FROM file_nodes WHERE job_id = @id);
             DELETE FROM ai_results          WHERE file_node_id IN (SELECT id FROM file_nodes WHERE job_id = @id);
             DELETE FROM file_facts          WHERE file_node_id IN (SELECT id FROM file_nodes WHERE job_id = @id);
+            DELETE FROM file_decisions      WHERE job_id = @id OR file_node_id IN (SELECT id FROM file_nodes WHERE job_id = @id);
             DELETE FROM result_checks       WHERE file_node_id IN (SELECT id FROM file_nodes WHERE job_id = @id);
             DELETE FROM ai_directory_results WHERE directory_node_id IN (SELECT id FROM directory_nodes WHERE job_id = @id);
             DELETE FROM directory_samples   WHERE directory_node_id IN (SELECT id FROM directory_nodes WHERE job_id = @id);

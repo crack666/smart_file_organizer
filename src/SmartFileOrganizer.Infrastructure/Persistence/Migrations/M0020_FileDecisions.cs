@@ -1,16 +1,16 @@
 namespace SmartFileOrganizer.Infrastructure.Persistence.Migrations;
 
 /// <summary>
-/// Step 19: the decisions of stage 2 (https://github.com/crack666/smart_file_organizer/issues/37). Stage 1 describes
+/// Step 20: the decisions of stage 2 (https://github.com/crack666/smart_file_organizer/issues/37). Stage 1 describes
 /// a file once (results and <c>file_facts</c>, which stay as they are, so earlier analyses stay readable and can be
 /// decided without a new model call); <c>sfo decide</c> computes worth and target from them by rule and replaces the
 /// rows of the job. <c>worth</c> is a retention code (<c>keep</c>, <c>disposable</c>) or null for no statement;
 /// <c>basis</c> and <c>target_basis</c> are JSON lists of the inputs (<c>key</c>, <c>value</c>, <c>source</c>).
 /// Rows go with their file (a rescan of its folder) and are written anew by the next <c>sfo decide</c>.
 /// </summary>
-internal sealed class M0019_FileDecisions : SqlSchemaMigration
+internal sealed class M0020_FileDecisions : SqlSchemaMigration
 {
-    public override int Version => 19;
+    public override int Version => 20;
     public override string Description => "Stage 2: decisions per file from facts and rules";
 
     protected override string Sql => """

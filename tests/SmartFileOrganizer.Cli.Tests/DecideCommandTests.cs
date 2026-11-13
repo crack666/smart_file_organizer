@@ -160,7 +160,7 @@ public class DecideCommandTests : IDisposable
         Directory.CreateDirectory(Path.GetDirectoryName(_dbPath)!);
         using (var conn = Open())
         {
-            await new SchemaMigrator(SchemaMigrator.BuiltIn.Where(m => m.Version < 19), NullLogger.Instance).MigrateAsync(conn);
+            await new SchemaMigrator(SchemaMigrator.BuiltIn.Where(m => m.Version < 20), NullLogger.Instance).MigrateAsync(conn);
             await conn.ExecuteAsync($"""
                 INSERT INTO scan_jobs (root_path, status, created_at, role) VALUES ('{_source}', 3, '2026-11-01T00:00:00Z', 'source');
                 INSERT INTO file_nodes (job_id, full_path, name, parent_path, root_path, relative_path, relative_dir, size, last_write_time, extension, file_type, status, scanned_at)
