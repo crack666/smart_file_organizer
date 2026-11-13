@@ -232,7 +232,7 @@ public class OllamaService : IOllamaService
                 stream = false,
                 think = false,
                 keep_alive = _options.KeepAlive,
-                format = BuildClassificationSchema(input.AskKeepHint),
+                format = BuildClassificationSchema(input.AskKeepHint, DescriptionOf(input)),
                 options = new { num_predict = _options.ClassificationMaxAnswerTokens },
                 messages = new object[]
                 {
@@ -332,6 +332,8 @@ public class OllamaService : IOllamaService
         [
             JsonSerializer.Serialize(BuildClassificationSchema(askKeepHint: false)),
             JsonSerializer.Serialize(BuildClassificationSchema(askKeepHint: true)),
+            JsonSerializer.Serialize(BuildClassificationSchema(askKeepHint: false, DescriptionKind.Picture)),
+            JsonSerializer.Serialize(BuildClassificationSchema(askKeepHint: false, DescriptionKind.Document)),
             JsonSerializer.Serialize(BuildPreAssessmentSchema()),
             JsonSerializer.Serialize(BuildSummarySchema())
         ]);
@@ -458,10 +460,19 @@ public class OllamaService : IOllamaService
         sb.AppendLine("without quoting passwords, keys, numbers, names or message text.");
         sb.AppendLine();
         sb.AppendLine("summary: one short sentence saying what the file is.");
+        // Stage 1 of https://github.com/crack666/smart_file_organizer/issues/37: facts about what is to be seen,
+        // asked through the schema only for pictures and documents and never for a marked file. The text stays the
+        // same for every file, so the fixed part of the call can come from the prompt cache.
+        sb.AppendLine("Describe what you see when the schema asks for it, in codes or a few words, never a sentence; unknown if it does not show:");
+        sb.AppendLine("- picture: scene (what is shown, at most four words), activity (what the people do, at most three words, empty if nothing), " +
+                      "setting (indoor, outdoor), season (only from snow, blossom, foliage or light, never from a date), " +
+                      $"occasion ({string.Join(", ", VerdictCodes.All<OccasionKind>())}), people (true if a person is visible)");
+        sb.AppendLine($"- document: document_kind ({string.Join(", ", VerdictCodes.All<DocumentKind>())}), " +
+                      "issuer (company, authority or person that issued it, as written; empty if none), year (the year it is dated, 0 if none)");
         if (!string.IsNullOrWhiteSpace(summaryLanguage) &&
             !string.Equals(summaryLanguage, "English", StringComparison.OrdinalIgnoreCase))
         {
-            sb.AppendLine($"Write the summary field in: {summaryLanguage}.");
+            sb.AppendLine($"Write the summary, scene and activity fields in: {summaryLanguage}.");
         }
 
         sb.AppendLine("Return only JSON matching the provided schema.");
@@ -505,11 +516,35 @@ public class OllamaService : IOllamaService
     /// <summary>Upper bound of the <c>keep_reason</c> field in characters.</summary>
     public const int KeepReasonMaxLength = 120;
 
+    /// <summary>Upper bound of the <c>scene</c> and <c>activity</c> fields in characters.</summary>
+    public const int SceneMaxLength = 40;
+
+    /// <summary>Upper bound of the <c>issuer</c> field in characters.</summary>
+    public const int IssuerMaxLength = 60;
+
+    /// <summary>
+    /// Which description a call asks for (stage 1 of https://github.com/crack666/smart_file_organizer/issues/37):
+    /// a picture the model sees (an image or video frames are attached), a document, or none. A file the rules
+    /// marked sensitive is never described: its marker stays the only statement about its content.
+    /// </summary>
+    public static DescriptionKind DescriptionOf(OllamaClassificationInput input)
+    {
+        if (SensitiveOutputGuard.IsSensitive(input.File)) return DescriptionKind.None;
+        return input.File.FileType switch
+        {
+            FileType.Image or FileType.Video when input.Base64Images.Count > 0 => DescriptionKind.Picture,
+            FileType.Document => DescriptionKind.Document,
+            _ => DescriptionKind.None
+        };
+    }
+
     /// <summary>
     /// JSON schema of the classification answer; with <paramref name="askKeepHint"/> also the keep hint and,
-    /// optional, the reason (asked for <c>temporary</c> only). No target: targets come from the library match.
+    /// optional, the reason (asked for <c>temporary</c> only); with <paramref name="describe"/> the description
+    /// fields of a picture or a document, all required, so the answer grows only by a few codes and words for
+    /// the files that have them. No target: targets come from the library match and <c>sfo decide</c>.
     /// </summary>
-    public static object BuildClassificationSchema(bool askKeepHint)
+    public static object BuildClassificationSchema(bool askKeepHint, DescriptionKind describe = DescriptionKind.None)
     {
         var properties = new Dictionary<string, object>
         {
@@ -546,7 +581,74 @@ public class OllamaService : IOllamaService
             required.Add("keep_hint");
         }
 
+        string[] WithUnknown(IEnumerable<string> codes) => [.. codes, "unknown"];
+        switch (describe)
+        {
+            case DescriptionKind.Picture:
+                properties["scene"] = new { type = "string", maxLength = SceneMaxLength };
+                properties["activity"] = new { type = "string", maxLength = SceneMaxLength };
+                properties["setting"] = new { type = "string", @enum = WithUnknown(VerdictCodes.All<SceneSetting>()) };
+                properties["season"] = new { type = "string", @enum = WithUnknown(VerdictCodes.All<Season>()) };
+                properties["occasion"] = new { type = "string", @enum = WithUnknown(VerdictCodes.All<OccasionKind>()) };
+                properties["people"] = new { type = "boolean" };
+                required.AddRange(["scene", "activity", "setting", "season", "occasion", "people"]);
+                break;
+            case DescriptionKind.Document:
+                properties["document_kind"] = new { type = "string", @enum = WithUnknown(VerdictCodes.All<DocumentKind>()) };
+                properties["issuer"] = new { type = "string", maxLength = IssuerMaxLength };
+                properties["year"] = new { type = "integer" };
+                required.AddRange(["document_kind", "issuer", "year"]);
+                break;
+        }
+
         return new { type = "object", properties, required };
+    }
+
+    /// <summary>
+    /// Reads the description fields of an answer into facts with source model. Only fixed codes count for the coded
+    /// fields; <c>unknown</c>, an empty text, <c>none</c> as an activity and a year outside 1900 to 2100 are left out
+    /// rather than stored as a statement. Texts are cut to their limit.
+    /// </summary>
+    public static List<FileFact> ParseDescription(JsonElement inner)
+    {
+        var facts = new List<FileFact>();
+        void Text(string field, FileFactKey key, int max)
+        {
+            if (!inner.TryGetProperty(field, out var p) || p.ValueKind != JsonValueKind.String) return;
+            var value = p.GetString()?.Trim();
+            if (string.IsNullOrEmpty(value) || value.Equals("unknown", StringComparison.OrdinalIgnoreCase)
+                || value.Equals("none", StringComparison.OrdinalIgnoreCase) || value == "-") return;
+            facts.Add(new FileFact(key, value.Length > max ? value[..max].TrimEnd() : value, FactSource.Model));
+        }
+        void Code<T>(string field, FileFactKey key) where T : struct, Enum
+        {
+            if (inner.TryGetProperty(field, out var p) && p.ValueKind == JsonValueKind.String
+                && VerdictCodes.TryParse<T>(p.GetString()?.Trim().ToLowerInvariant(), out var code))
+                facts.Add(new FileFact(key, code.ToCode(), FactSource.Model));
+        }
+
+        Text("scene", FileFactKey.Scene, SceneMaxLength);
+        Text("activity", FileFactKey.Activity, SceneMaxLength);
+        Code<SceneSetting>("setting", FileFactKey.Setting);
+        Code<Season>("season", FileFactKey.Season);
+        Code<OccasionKind>("occasion", FileFactKey.Occasion);
+        if (inner.TryGetProperty("people", out var people) && people.ValueKind is JsonValueKind.True or JsonValueKind.False)
+            facts.Add(new FileFact(FileFactKey.People, people.ValueKind == JsonValueKind.True ? "true" : "false", FactSource.Model));
+        Code<DocumentKind>("document_kind", FileFactKey.DocumentKind);
+        Text("issuer", FileFactKey.Issuer, IssuerMaxLength);
+        if (inner.TryGetProperty("year", out var year))
+        {
+            int? y = year.ValueKind switch
+            {
+                JsonValueKind.Number when year.TryGetInt32(out var n) => n,
+                JsonValueKind.String when int.TryParse(year.GetString(), System.Globalization.NumberStyles.None,
+                    System.Globalization.CultureInfo.InvariantCulture, out var s) => s,
+                _ => null
+            };
+            if (y is >= 1900 and <= 2100)
+                facts.Add(new FileFact(FileFactKey.Year, y.Value.ToString(System.Globalization.CultureInfo.InvariantCulture), FactSource.Model));
+        }
+        return facts;
     }
 
     /// <summary>Reads an <c>/api/chat</c> answer of the classification call into <paramref name="result"/>; malformed parts are left at their defaults.</summary>
@@ -628,6 +730,8 @@ public class OllamaService : IOllamaService
                 if (inner.TryGetProperty("keep_reason", out var keepReason) && keepReason.ValueKind == JsonValueKind.String)
                     result.KeepReason = keepReason.GetString();
             }
+
+            result.DescribedFacts = ParseDescription(inner);
         }
         catch
         {
@@ -1132,4 +1236,17 @@ public class OllamaService : IOllamaService
         var baseUrl = _options.BaseUrl.TrimEnd('/') + "/";
         return new Uri(new Uri(baseUrl), relativePath);
     }
+}
+
+/// <summary>Which description fields a classification call asks for (<see cref="OllamaService.DescriptionOf"/>).</summary>
+public enum DescriptionKind
+{
+    /// <summary>No description: the model sees no picture and no document, or the file is marked sensitive.</summary>
+    None,
+
+    /// <summary>Scene, activity, setting, season, occasion and people of an image or of video frames.</summary>
+    Picture,
+
+    /// <summary>Kind, issuer and year of a document.</summary>
+    Document
 }

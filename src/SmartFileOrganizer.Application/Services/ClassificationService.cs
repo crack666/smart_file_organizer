@@ -560,13 +560,20 @@ public class ClassificationService
     };
 
     /// <summary>
-    /// For a file marked sensitive (by rule or by the model) free-text facts such as title or
-    /// author are dropped: the marker stays the only statement about its content.
+    /// The facts read without the model, then what the model described in the same call (stage 1 of
+    /// https://github.com/crack666/smart_file_organizer/issues/37; none for a failed call). For a file marked
+    /// sensitive (by rule or by the model) free-text facts such as title or author and every description by the
+    /// model are dropped: the marker stays the only statement about its content.
     /// </summary>
     public static IReadOnlyList<FileFact> FactsToStore(FileNode file, FileClassification result, IReadOnlyList<FileFact> facts)
     {
+        IEnumerable<FileFact> all = result.Error is null && result.DescribedFacts.Count > 0
+            ? facts.Concat(result.DescribedFacts.Where(f => f.Key.IsDescription()))
+            : facts;
         var markers = SensitiveOutputGuard.GetMarkers(file) | result.SensitiveMarkers;
-        return markers == SensitiveMarker.None ? facts : facts.Where(f => !f.Key.IsFreeText()).ToList();
+        return markers == SensitiveMarker.None
+            ? all.ToList()
+            : all.Where(f => !f.Key.IsFreeText() && !f.Key.IsDescription()).ToList();
     }
 
     /// <summary><c>{"contains":[...],"missing":[...]}</c>, or null when the evidence says nothing.</summary>

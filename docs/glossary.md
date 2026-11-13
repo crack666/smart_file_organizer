@@ -301,6 +301,22 @@ Counted per run in `model_calls` of `sfo analyze --json` and `sfo eval --json`.
 | `unpacked_bytes` | Sum of the uncompressed sizes of the listed archive entries. |
 | `archive_content` | What an archive mostly holds, as an archive content code. |
 | `encrypted` | `true` when an archive or document is password protected. |
+| `scene` | What a picture shows, in a few words of the summary language (`beach with sea`); source `model`. Free text, at most 40 characters. |
+| `activity` | What the people in a picture do, in a few words (`skiing`); source `model`. Free text, at most 40 characters. |
+| `setting` | Indoors or outdoors, as a scene setting code; source `model`. |
+| `season` | The season a picture shows, as a season code; source `model`. Only when the picture shows it, never from a date. |
+| `occasion` | The kind of occasion of a picture, as an occasion code; source `model`. |
+| `people` | `true` when a person is visible in a picture, `false` when none is; source `model`. |
+| `document_kind` | The kind of a document, as a document kind code; source `model`. |
+| `issuer` | Who issued a document (company, authority, person) as written on it; source `model`. Free text, at most 60 characters. |
+| `year` | The year a document is dated, read from its content; source `model`. |
+
+The last nine are the description of stage 1 (https://github.com/crack666/smart_file_organizer/issues/37): the
+model gives them in the same call as the category, only for pictures it sees (`scene` to `people`) and for
+documents (`document_kind` to `year`). An answer `unknown`, an empty text or a year 0 is not stored. A file marked
+sensitive is not described: no description is asked for a file the rules marked, and none is stored for a file
+the model marks, so the marker stays the only statement about its content. Free-text facts (`title`, `author`,
+`artist`, `album`, `scene`, `activity`, `issuer`) are never stored for a marked file.
 
 ### Source of a fact (`FactSource`)
 
@@ -335,6 +351,58 @@ Counted per run in `model_calls` of `sfo analyze --json` and `sfo eval --json`.
 | `software` | Contains a setup program, an installer package, or programs with their libraries. |
 | `code` | At least 60 % are source code, or the listing has a project marker. |
 | `mixed` | None of the above dominates. |
+
+### Scene setting (`SceneSetting`)
+
+| Code | Meaning |
+|---|---|
+| `indoor` | Taken inside a building or a vehicle. |
+| `outdoor` | Taken outside. |
+
+### Season (`Season`)
+
+Only what the picture shows (snow, blossom, autumn leaves, summer light), never a guess from the date.
+
+| Code | Meaning |
+|---|---|
+| `spring` | Spring. |
+| `summer` | Summer. |
+| `autumn` | Autumn. |
+| `winter` | Winter. |
+
+### Occasion (`OccasionKind`)
+
+| Code | Meaning |
+|---|---|
+| `holiday` | A journey or holiday away from home. |
+| `celebration` | A birthday, wedding, party, family feast or festival. |
+| `outing` | A day trip or excursion: a hike, a zoo, a city walk. |
+| `sport` | Doing or watching sport. |
+| `everyday` | Everyday life at home or around it. |
+| `work` | Work, school or study. |
+| `none` | No occasion: a product photo, a picture of a thing, a meme, a picture of a document. |
+
+### Document kind (`DocumentKind`)
+
+Finer than the category: the category says invoice, letter or personal document, the kind says which paper it is.
+
+| Code | Meaning |
+|---|---|
+| `invoice` | A bill for goods or services. |
+| `receipt` | A receipt, a till slip, an order or payment confirmation. |
+| `contract` | A contract: rental, employment, loan, phone, insurance policy terms. |
+| `statement` | An account statement: bank, credit card, depot, a yearly statement of a utility. |
+| `tax` | A tax return, a tax assessment or a tax certificate. |
+| `payslip` | A payslip or a wage statement. |
+| `certificate` | A certificate, a diploma, a reference, a birth or marriage certificate. |
+| `insurance` | A paper of an insurance other than its contract: a claim, a confirmation. |
+| `medical` | A medical finding, a doctor letter, a prescription. |
+| `official` | A notice or decision of an authority. |
+| `correspondence` | A letter or message to or from someone that is none of the above. |
+| `manual` | A manual, a data sheet, instructions. |
+| `form` | A form, filled in or blank. |
+| `notes` | Notes, lists, drafts of the person. |
+| `other` | Any other document. |
 
 ## Library review
 

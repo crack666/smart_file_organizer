@@ -53,4 +53,11 @@ public class FileClassification
     /// <summary>Set by the parser when the model gave no confidence; <see cref="Confidence"/> is then 0.
     /// Not stored: the check reason <c>missing_confidence</c> records it.</summary>
     public bool ConfidenceMissing { get; set; }
+
+    /// <summary>
+    /// What the model described in the same call (stage 1 of https://github.com/crack666/smart_file_organizer/issues/37):
+    /// scene, occasion, people of a picture, kind, issuer and year of a document; source model, codes where the
+    /// value is fixed. Not a column of <c>ai_results</c>: they are written to <c>file_facts</c>, never for a marked file.
+    /// </summary>
+    public List<FileFact> DescribedFacts { get; set; } = [];
 }
