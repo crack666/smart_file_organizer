@@ -19,9 +19,6 @@ public class ModelServerOutageTests : IDisposable
     private readonly string _root;
     private readonly FakeModelServer _server = new();
 
-    /// <summary>The exit code of a run whose model server stayed away; new with this change.</summary>
-    private const int ModelServerLostExitCode = 4;
-
     /// <summary>Files of the corpus that go to the model (all in mixed folders, so each is judged on its own).</summary>
     private static readonly string[] ModelFiles =
         ["notes.txt", "todo.txt", "letter.txt", "offer.txt", "plan.txt", "recipe.txt", "diary.txt", "poem.txt"];
@@ -61,10 +58,12 @@ public class ModelServerOutageTests : IDisposable
         if (phase == "second_check") _server.UnsureFiles.Add("letter.txt");
         // After the first answer of the phase the server refuses the next 14 requests (calls, retries and probes),
         // then answers again: long enough for the run to decide the server is gone and wait for it.
+        // There is only one second check, so that outage starts at its very first request.
+        var answersBefore = phase == "second_check" ? 0 : 1;
         var refused = 0;
         _server.Script = r =>
         {
-            if (refused == 0 && !(r.Kind == phase && _server.Answered(phase) >= 1)) return null;
+            if (refused == 0 && !(r.Kind == phase && _server.Answered(phase) >= answersBefore)) return null;
             return Interlocked.Increment(ref refused) <= 14 ? FakeServerMode.Refusing : FakeServerMode.Up;
         };
 
@@ -87,8 +86,11 @@ public class ModelServerOutageTests : IDisposable
         Assert.Equal(ModelFiles.Order(), rows.Select(r => r.Name).Order());
         Assert.All(rows, r => Assert.Null(r.Error));
         Assert.All(rows, r => Assert.Equal(1, r.Attempts));
+        // An outage during the second check discards the first look too, so letter.txt is looked at twice there.
         foreach (var name in ModelFiles)
-            Assert.Equal(1, _server.Answered("classification", name));
+            Assert.Equal(phase == "second_check" && name == "letter.txt" ? 2 : 1, _server.Answered("classification", name));
+        if (phase == "second_check")
+            Assert.Equal(1, _server.Answered("second_check"));
         Assert.All(DirectoryErrors(), e => Assert.Null(e));
     }
 
@@ -103,7 +105,8 @@ public class ModelServerOutageTests : IDisposable
 
         var lost = await SfoAsync("analyze", jobId.ToString(), "--json", "--progress", "jsonl");
 
-        Assert.True(lost.ExitCode == ModelServerLostExitCode, lost.Stdout + lost.Stderr);
+        Assert.True(lost.ExitCode == ExitCodes.ModelServerLost, lost.Stdout + lost.Stderr);
+        Assert.Equal(4, ExitCodes.ModelServerLost);
         var doc = lost.Json();
         Assert.Equal("model_server_lost", doc.GetProperty("error").GetProperty("code").GetString());
         Assert.Contains(WaitEvents(lost), e => e.State == "given_up");
@@ -227,16 +230,16 @@ public class ModelServerOutageTests : IDisposable
         _server.Script = r => broken && r.Kind == "classification" && r.Name == "letter.txt" ? FakeServerMode.BadRequest : null;
         var first = await SfoAsync("analyze", jobId.ToString(), "--json");
         Assert.Equal(1, first.Json().GetProperty("result").GetProperty("error_count").GetInt32());
-        Assert.Equal(1, _server.Answered("summary", "docs"));
+        Assert.Equal(1, _server.Answered("summary", "misc"));
 
         broken = false;
         var retry = await SfoAsync("analyze", jobId.ToString(), "--json", "--retry-errors");
 
         Assert.True(retry.ExitCode == ExitCodes.Ok, retry.Stdout + retry.Stderr);
         Assert.All(ResultRows(), r => Assert.Null(r.Error));
-        // The summary of docs was written while letter.txt had no result; it is written again, the others are not.
-        Assert.Equal(2, _server.Answered("summary", "docs"));
-        Assert.Equal(1, _server.Answered("summary", "misc"));
+        // letter.txt lies in misc. Its summary was written while letter.txt had no result; it is written again, the others are not.
+        Assert.Equal(2, _server.Answered("summary", "misc"));
+        Assert.Equal(1, _server.Answered("summary", "docs"));
     }
 
     [Fact]

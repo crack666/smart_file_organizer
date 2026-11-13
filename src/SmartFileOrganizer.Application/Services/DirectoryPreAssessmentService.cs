@@ -72,11 +72,14 @@ public class DirectoryPreAssessmentService
         _logger = logger;
     }
 
+    /// <param name="gate">Holds the model calls while the server is away; without one, such a call throws
+    /// <see cref="ModelServerUnavailableException"/>. Either way no error is stored for that directory.</param>
     public async Task<AiClassificationRunResult> RunAsync(
         long jobId,
         IProgress<AiClassificationProgress>? progress = null,
         Func<CancellationToken, Task>? waitIfPausedAsync = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        ModelServerGate? gate = null)
     {
         var allDirs = await _dirRepo.GetAllForJobOrderedByDepthAsync(jobId, ct);
         if (allDirs.Count == 0)
@@ -146,17 +149,25 @@ public class DirectoryPreAssessmentService
                 }
             }
 
-            await Parallel.ForEachAsync(
-                askModel,
-                new ParallelOptions { MaxDegreeOfParallelism = workerCount, CancellationToken = ct },
-                async (prepared, token) =>
-                {
-                    if (waitIfPausedAsync != null) await waitIfPausedAsync(token);
-                    Report(prepared.Directory.FullPath);
-                    Interlocked.Increment(ref modelCalls);
-                    var verdict = await AskModelAsync(prepared, tree, token);
-                    Count(verdict, prepared.Directory.FullPath);
-                });
+            // Directories whose call found no server stay without a row and are asked again once the gate opens,
+            // before the next level: their verdict decides whether the level below needs the model at all.
+            while (askModel.Count > 0)
+            {
+                var open = new ConcurrentBag<PreparedDirectory>();
+                await Parallel.ForEachAsync(
+                    askModel,
+                    new ParallelOptions { MaxDegreeOfParallelism = workerCount, CancellationToken = ct },
+                    async (prepared, token) =>
+                    {
+                        if (waitIfPausedAsync != null) await waitIfPausedAsync(token);
+                        Report(prepared.Directory.FullPath);
+                        Interlocked.Increment(ref modelCalls);
+                        var verdict = await AskModelAsync(prepared, tree, gate, token);
+                        if (verdict is null) open.Add(prepared);
+                        else Count(verdict, prepared.Directory.FullPath);
+                    });
+                askModel = open.OrderBy(p => p.Directory.FullPath, StringComparer.Ordinal).ToList();
+            }
         }
 
         // Bottom-up: directories without direct files, from their subdirectories.
@@ -205,7 +216,7 @@ public class DirectoryPreAssessmentService
                 await StoreFromSubdirectoriesAsync(prepared, tree, ct);
                 break;
             default:
-                await AskModelAsync(prepared, tree, ct);
+                await AskModelAsync(prepared, tree, gate: null, ct);
                 break;
         }
 
@@ -335,7 +346,8 @@ public class DirectoryPreAssessmentService
         return verdict;
     }
 
-    private async Task<DirectoryVerdict> AskModelAsync(PreparedDirectory p, JobTree tree, CancellationToken ct)
+    /// <summary>Asks the model and stores verdict and pre-assessment. Null when the server was away: nothing is stored.</summary>
+    private async Task<DirectoryVerdict?> AskModelAsync(PreparedDirectory p, JobTree tree, ModelServerGate? gate, CancellationToken ct)
     {
         var dir = p.Directory;
         var input = new DirectoryPreAssessmentInput
@@ -346,18 +358,33 @@ public class DirectoryPreAssessmentService
             Profile = p.Profile
         };
 
-        DirectoryPreAssessmentOutcome outcome;
-        try
+        static DirectoryPreAssessmentOutcome FailedOutcome(string error) => new(
+            new DirectoryClassificationResult { Phase = PreAssessmentPhase, AnalyzedAt = DateTime.UtcNow, Error = error },
+            new DirectoryVerdict { Source = VerdictSource.Model, JudgedAt = DateTime.UtcNow, Error = error });
+
+        async Task<DirectoryPreAssessmentOutcome> AskAsync(CancellationToken token)
         {
-            outcome = await _ollama.PreAssessDirectoryAsync(input, ct);
+            try
+            {
+                return await _ollama.PreAssessDirectoryAsync(input, token);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException and not ModelServerUnavailableException)
+            {
+                // The service contract is to return errors, but a failing call must still leave a stored error.
+                return FailedOutcome($"Pre-assessment failed: {ex.Message}");
+            }
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+
+        DirectoryPreAssessmentOutcome outcome;
+        if (gate is null)
         {
-            // The service contract is to return errors, but a failing call must still leave a stored error.
-            var error = $"Pre-assessment failed: {ex.Message}";
-            outcome = new DirectoryPreAssessmentOutcome(
-                new DirectoryClassificationResult { Phase = PreAssessmentPhase, AnalyzedAt = DateTime.UtcNow, Error = error },
-                new DirectoryVerdict { Source = VerdictSource.Model, JudgedAt = DateTime.UtcNow, Error = error });
+            outcome = await AskAsync(ct);
+        }
+        else
+        {
+            var call = await gate.CallAsync((PreAssessmentPhase, dir.Id), AskAsync, ct);
+            if (call.State == ModelCallState.Open) return null;
+            outcome = call.State == ModelCallState.GaveUp ? FailedOutcome(call.Error!) : call.Value!;
         }
 
         var assessment = outcome.Assessment;

@@ -92,10 +92,19 @@ public static class ServiceCollectionExtensions
 
             return configured ?? new OllamaOptions();
         });
+        // Section "ModelServer": retries and waiting for a model server that went away
+        // (https://github.com/crack666/smart_file_organizer/issues/63); provider-independent.
+        services.TryAddSingleton(TimeProvider.System);
+        services.AddSingleton(sp =>
+            sp.GetRequiredService<IConfiguration>().GetSection("ModelServer").Get<ModelServerOptions>() ?? new ModelServerOptions());
+        services.AddSingleton<IModelServerWaitRepository, ModelServerWaitRepository>();
         services.AddHttpClient<IOllamaService, OllamaService>((sp, client) =>
         {
             var opts = sp.GetRequiredService<OllamaOptions>();
             client.BaseAddress = new Uri(opts.BaseUrl);
+            // Every call sets its own limit (Ollama.TimeoutSeconds per attempt, longer for loading the model).
+            // The client default of 100 s used to cut every call short of the 180 s configured.
+            client.Timeout = Timeout.InfiniteTimeSpan;
         });
         services.AddHttpClient<ILibraryAdvisor, OllamaLibraryAdvisor>((sp, client) =>
         {

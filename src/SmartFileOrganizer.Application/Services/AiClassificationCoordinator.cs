@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Logging;
 using SmartFileOrganizer.Application.Sensitivity;
+using SmartFileOrganizer.Domain.Enums;
 using SmartFileOrganizer.Domain.Interfaces;
 
 namespace SmartFileOrganizer.Application.Services;
@@ -12,6 +13,9 @@ public class AiClassificationCoordinator
     private readonly IOllamaService _ollama;
     private readonly ILogger<AiClassificationCoordinator> _logger;
     private readonly SensitiveRulesBackfill? _rulesBackfill;
+    private readonly ModelServerOptions _serverOptions;
+    private readonly IModelServerWaitRepository? _waits;
+    private readonly TimeProvider _time;
 
     private readonly object _sync = new();
     private CancellationTokenSource? _cts;
@@ -32,7 +36,10 @@ public class AiClassificationCoordinator
         DirectorySummaryService directorySummaryService,
         IOllamaService ollama,
         ILogger<AiClassificationCoordinator> logger,
-        SensitiveRulesBackfill? rulesBackfill = null)
+        SensitiveRulesBackfill? rulesBackfill = null,
+        ModelServerOptions? serverOptions = null,
+        IModelServerWaitRepository? waits = null,
+        TimeProvider? time = null)
     {
         _rulesBackfill = rulesBackfill;
         _classificationService = classificationService;
@@ -40,6 +47,9 @@ public class AiClassificationCoordinator
         _directorySummaryService = directorySummaryService;
         _ollama = ollama;
         _logger = logger;
+        _serverOptions = serverOptions ?? new ModelServerOptions();
+        _waits = waits;
+        _time = time ?? TimeProvider.System;
     }
 
     public Task StartOrResumeAsync(long jobId, CancellationToken appCt = default)
@@ -76,11 +86,20 @@ public class AiClassificationCoordinator
                         phase => StateChanged?.Invoke(this, new AiProcessingStateChanged(jobId, AiProcessingState.Running, PhaseStartText(phase))),
                         _ => progress,
                         WaitIfPausedAsync,
+                        (phase, wait) => StateChanged?.Invoke(this, WaitStateChange(jobId, phase, wait)),
                         _cts.Token);
 
                     if (!run.OllamaAvailable)
                     {
                         StateChanged?.Invoke(this, new AiProcessingStateChanged(jobId, AiProcessingState.Unavailable, "Ollama is not available."));
+                        return;
+                    }
+
+                    if (run.Lost is { } lost)
+                    {
+                        StateChanged?.Invoke(this, new AiProcessingStateChanged(jobId, AiProcessingState.Unavailable,
+                            $"The model server did not answer for {lost.Waited.TotalMinutes:F0} min; the analysis stopped. " +
+                            "Files not judged stay open: start the analysis again when the server is back."));
                         return;
                     }
 
@@ -112,13 +131,16 @@ public class AiClassificationCoordinator
     /// <see cref="StateChanged"/> events, no pause. Cancelling <paramref name="ct"/> throws
     /// <see cref="OperationCanceledException"/>; finished work is persisted, so a later run resumes.
     /// </summary>
-    /// <param name="retryErrors">Phase 2 first sets failed files back to Discovered and tries them again.</param>
+    /// <param name="retryErrors">Phase 2 first sets failed files back to Discovered and tries them again; Phase 3
+    /// then writes again the summaries that failed or that predate a new result in their directory.</param>
+    /// <param name="onWait">Called when the run starts or stops waiting for the model server, with the phase.</param>
     public Task<AiPipelineRunResult> RunAsync(
         long jobId,
         AiPhases phases = AiPhases.All,
         IProgress<AiPhaseProgress>? progress = null,
         CancellationToken ct = default,
-        bool retryErrors = false)
+        bool retryErrors = false,
+        Action<AiPhases, ModelServerWaitEvent>? onWait = null)
     {
         return RunPhasesAsync(
             jobId,
@@ -128,6 +150,7 @@ public class AiClassificationCoordinator
                 ? null
                 : new SynchronousProgress<AiClassificationProgress>(p => progress.Report(new AiPhaseProgress(phase, p))),
             waitIfPausedAsync: null,
+            onWait,
             ct,
             retryErrors);
     }
@@ -138,10 +161,12 @@ public class AiClassificationCoordinator
         Action<AiPhases>? onPhaseStarting,
         Func<AiPhases, IProgress<AiClassificationProgress>?> progressFor,
         Func<CancellationToken, Task>? waitIfPausedAsync,
+        Action<AiPhases, ModelServerWaitEvent>? onWait,
         CancellationToken ct,
         bool retryErrors = false)
     {
-        // Single availability check — avoids 3x /api/tags calls
+        // Single availability check — avoids 3x /api/tags calls. A server that is away when the run starts is
+        // reported at once; waiting is for a server that goes away during the run.
         if (!await _ollama.IsAvailableAsync(ct))
             return new AiPipelineRunResult(false, []);
 
@@ -150,33 +175,70 @@ public class AiClassificationCoordinator
             await _rulesBackfill.RunAsync(jobId, ct);
 
         var results = new List<AiPhaseRunResult>();
+        var current = AiPhases.None;
+        var gate = new ModelServerGate(_ollama, _serverOptions, jobId, _waits, _time, _logger,
+            wait => onWait?.Invoke(current, wait), ct);
+        // A wait left behind by a run that was killed while waiting.
+        await ClearWaitAsync(jobId);
 
-        // ── Phase 1: Directory reconnaissance ──────────────────
-        if (phases.HasFlag(AiPhases.PreAssessment))
+        try
         {
-            onPhaseStarting?.Invoke(AiPhases.PreAssessment);
-            var r = await _preAssessmentService.RunAsync(jobId, progressFor(AiPhases.PreAssessment), waitIfPausedAsync, ct);
-            results.Add(new AiPhaseRunResult(AiPhases.PreAssessment, r));
+            // ── Phase 1: Directory reconnaissance ──────────────────
+            if (phases.HasFlag(AiPhases.PreAssessment))
+            {
+                current = AiPhases.PreAssessment;
+                onPhaseStarting?.Invoke(AiPhases.PreAssessment);
+                var r = await _preAssessmentService.RunAsync(jobId, progressFor(AiPhases.PreAssessment), waitIfPausedAsync, ct, gate);
+                results.Add(new AiPhaseRunResult(AiPhases.PreAssessment, r));
+            }
+
+            // ── Phase 2: Targeted per-file deep analysis ────────────
+            if (phases.HasFlag(AiPhases.Classification))
+            {
+                current = AiPhases.Classification;
+                onPhaseStarting?.Invoke(AiPhases.Classification);
+                var r = await _classificationService.RunAsync(jobId, progressFor(AiPhases.Classification), waitIfPausedAsync, ct, retryErrors, gate);
+                results.Add(new AiPhaseRunResult(AiPhases.Classification, r));
+            }
+
+            // ── Phase 3: Directory summaries ────────────────────────
+            if (phases.HasFlag(AiPhases.Summary))
+            {
+                current = AiPhases.Summary;
+                onPhaseStarting?.Invoke(AiPhases.Summary);
+                var r = await _directorySummaryService.RunAsync(jobId, progressFor(AiPhases.Summary), waitIfPausedAsync, ct, retryErrors, gate);
+                results.Add(new AiPhaseRunResult(AiPhases.Summary, r));
+            }
         }
-
-        // ── Phase 2: Targeted per-file deep analysis ────────────
-        if (phases.HasFlag(AiPhases.Classification))
+        catch (ModelServerLostException lost)
         {
-            onPhaseStarting?.Invoke(AiPhases.Classification);
-            var r = await _classificationService.RunAsync(jobId, progressFor(AiPhases.Classification), waitIfPausedAsync, ct, retryErrors);
-            results.Add(new AiPhaseRunResult(AiPhases.Classification, r));
+            return new AiPipelineRunResult(true, results, new AiModelServerLost(current, lost.Since, lost.Cause, lost.Waited));
         }
-
-        // ── Phase 3: Directory summaries ────────────────────────
-        if (phases.HasFlag(AiPhases.Summary))
+        finally
         {
-            onPhaseStarting?.Invoke(AiPhases.Summary);
-            var r = await _directorySummaryService.RunAsync(jobId, progressFor(AiPhases.Summary), waitIfPausedAsync, ct);
-            results.Add(new AiPhaseRunResult(AiPhases.Summary, r));
+            await ClearWaitAsync(jobId);
         }
 
         return new AiPipelineRunResult(true, results);
     }
+
+    private async Task ClearWaitAsync(long jobId)
+    {
+        if (_waits is null) return;
+        try { await _waits.ClearAsync(jobId, CancellationToken.None); }
+        catch (Exception ex) { _logger.LogWarning("The wait of job {JobId} could not be cleared: {Error}", jobId, ex.Message); }
+    }
+
+    private static AiProcessingStateChanged WaitStateChange(long jobId, AiPhases phase, ModelServerWaitEvent wait) => wait.State switch
+    {
+        ModelServerWaitState.Waiting => new AiProcessingStateChanged(jobId, AiProcessingState.WaitingForModelServer,
+            $"Waiting for the model server since {wait.Since.ToLocalTime():HH:mm:ss} ({wait.Cause.ToCode()}); " +
+            $"{PhaseStartText(phase).TrimEnd('…')} continues when it answers."),
+        ModelServerWaitState.Resumed => new AiProcessingStateChanged(jobId, AiProcessingState.Running,
+            $"Model server is back after {wait.Waited.TotalSeconds:F0}s; AI classification continues…"),
+        _ => new AiProcessingStateChanged(jobId, AiProcessingState.WaitingForModelServer,
+            $"The model server did not answer for {wait.Waited.TotalMinutes:F0} min; stopping…")
+    };
 
     private static string PhaseStartText(AiPhases phase) => phase switch
     {

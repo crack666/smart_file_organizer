@@ -85,12 +85,36 @@ public class ClassificationService
 
     /// <param name="retryErrors">First set failed files back to Discovered, so they are tried again
     /// (<c>sfo analyze --retry-errors</c>). Files with a result are never called again.</param>
+    /// <param name="gate">Holds the model calls while the server is away; a file whose call found no server stays
+    /// Discovered and is sent again in the same run. Without a gate such a call throws
+    /// <see cref="ModelServerUnavailableException"/> and nothing is stored for the file.</param>
     public async Task<AiClassificationRunResult> RunAsync(
         long jobId,
         IProgress<AiClassificationProgress>? progress = null,
         Func<CancellationToken, Task>? waitIfPausedAsync = null,
         CancellationToken ct = default,
-        bool retryErrors = false)
+        bool retryErrors = false,
+        ModelServerGate? gate = null)
+    {
+        try
+        {
+            return await RunCoreAsync(jobId, progress, waitIfPausedAsync, ct, retryErrors, gate);
+        }
+        catch (ModelServerLostException)
+        {
+            // Files already handed to the workers are open again for the next run, not left as Processing.
+            await _fileRepo.ResetStaleProcessingAsync(jobId, CancellationToken.None);
+            throw;
+        }
+    }
+
+    private async Task<AiClassificationRunResult> RunCoreAsync(
+        long jobId,
+        IProgress<AiClassificationProgress>? progress,
+        Func<CancellationToken, Task>? waitIfPausedAsync,
+        CancellationToken ct,
+        bool retryErrors,
+        ModelServerGate? gate)
     {
         var retried = retryErrors ? await _fileRepo.ReleaseFailedAsync(jobId, ct) : 0;
         if (retried > 0)
@@ -113,7 +137,15 @@ public class ClassificationService
         for (var pass = 1; pass <= MaxPasses; pass++)
         {
             var context = await _sampling.GetContextAsync(jobId, ct);
-            errorCount += await RunPassAsync(jobId, totalEligible, context, counters, progress, waitIfPausedAsync, ct);
+            // Files left open by an outage are Discovered again: the same pass runs once more for them, after the
+            // gate let the calls through again (an outage is no new stage of the analysis).
+            int leftOpen;
+            do
+            {
+                var before = gate?.LeftOpen ?? 0;
+                errorCount += await RunPassAsync(jobId, totalEligible, context, counters, progress, waitIfPausedAsync, gate, ct);
+                leftOpen = (gate?.LeftOpen ?? 0) - before;
+            } while (leftOpen > 0 && await _fileRepo.CountPendingAiAnalysisAsync(jobId, ct) > 0);
 
             var resolved = await _sampling.ResolveAsync(jobId, waitIfPausedAsync, ct);
             inherited += resolved.Inherited;
@@ -141,10 +173,16 @@ public class ClassificationService
         RunCounters counters,
         IProgress<AiClassificationProgress>? progress,
         Func<CancellationToken, Task>? waitIfPausedAsync,
-        CancellationToken ct)
+        ModelServerGate? gate,
+        CancellationToken runToken)
     {
-        var pendingAtStart = await _fileRepo.CountPendingAiAnalysisAsync(jobId, ct);
+        var pendingAtStart = await _fileRepo.CountPendingAiAnalysisAsync(jobId, runToken);
         if (pendingAtStart == 0) return 0;
+
+        // A worker that fails (the server stayed away too long) stops the producer too, so it does not wait
+        // forever on a full channel.
+        using var passCts = CancellationTokenSource.CreateLinkedTokenSource(runToken);
+        var ct = passCts.Token;
 
         long processed = Math.Max(0, totalEligible - pendingAtStart);
         var errorCount = 0;
@@ -211,6 +249,19 @@ public class ClassificationService
 
         var workerTasks = Enumerable.Range(0, workerCount).Select(_ => Task.Run(async () =>
         {
+            try
+            {
+                await WorkAsync();
+            }
+            catch
+            {
+                passCts.Cancel();
+                throw;
+            }
+        }, ct)).ToArray();
+
+        async Task WorkAsync()
+        {
             await foreach (var (file, input) in channel.Reader.ReadAllAsync(ct))
             {
                 if (waitIfPausedAsync != null) await waitIfPausedAsync(ct);
@@ -227,7 +278,13 @@ public class ClassificationService
 
                 _logger.LogDebug("Classifying: {Path}", file.FullPath);
 
-                var result = await CompleteAsync(file, input, context, counters, ct);
+                var result = await CompleteAsync(file, input, context, counters, gate, ct);
+                if (result is null)
+                {
+                    // The server was away: no result, the file is open again and is sent once the gate opens.
+                    await _fileRepo.UpdateStatusAsync(file.Id, FileNodeStatus.Discovered, CancellationToken.None);
+                    continue;
+                }
 
                 if (result.Error != null)
                     Interlocked.Increment(ref errorCount);
@@ -249,10 +306,17 @@ public class ClassificationService
                     result.Category,
                     result.Confidence);
             }
-        }, ct)).ToArray();
+        }
 
-        await Task.WhenAll(workerTasks);
-        await producerTask;
+        try
+        {
+            await Task.WhenAll(workerTasks);
+        }
+        finally
+        {
+            // The producer ends with the pass token; its own errors are logged there.
+            try { await producerTask; } catch (OperationCanceledException) { }
+        }
 
         return Volatile.Read(ref errorCount);
     }
@@ -264,17 +328,21 @@ public class ClassificationService
         var input = await _inputPreparer.PrepareAsync(file, ct);
         input.AskKeepHint = askKeepHint;
         var context = await _sampling.GetContextAsync(file.JobId, ct);
-        return await CompleteAsync(file, input, context, new RunCounters(), ct);
+        // No gate for a single file: if the server is away, the exception reaches the caller and nothing is stored.
+        return (await CompleteAsync(file, input, context, new RunCounters(), gate: null, ct))!;
     }
 
     /// <summary>
     /// Takes the rule result or asks the model, checks an unsure or contradicted answer a second time, applies
     /// the sensitive review rule, and stores result, check, evidence notes and facts. Every file leaves here
     /// with a stored result: a rule result (<see cref="ResultOrigin.Rule"/>), a model result, or a model
-    /// error. Rule results also set status <see cref="FileNodeStatus.AiAnalyzed"/>: Phase 2 is done for the file.
+    /// error, except when the server was away during one of its calls: then nothing is stored, not even the
+    /// first answer of a check, and null is returned (the file is judged anew). Rule results also set status
+    /// <see cref="FileNodeStatus.AiAnalyzed"/>: Phase 2 is done for the file.
     /// </summary>
-    private async Task<FileClassification> CompleteAsync(
-        FileNode file, OllamaClassificationInput input, DirectorySamplingService.Context context, RunCounters counters, CancellationToken ct)
+    private async Task<FileClassification?> CompleteAsync(
+        FileNode file, OllamaClassificationInput input, DirectorySamplingService.Context context, RunCounters counters,
+        ModelServerGate? gate, CancellationToken ct)
     {
         FileClassification result;
         ResultCheck? check = null;
@@ -287,10 +355,37 @@ public class ClassificationService
         }
         else
         {
-            var first = await AskModelAsync(file, input, ct);
-            (result, check) = first.Error is null
-                ? await CheckAsync(file, input, first, context, counters, ct)
-                : (first, null);
+            async Task<(FileClassification, ResultCheck?)> AskAsync(CancellationToken token)
+            {
+                var first = await AskModelAsync(file, input, token);
+                return first.Error is null
+                    ? await CheckAsync(file, input, first, context, counters, token)
+                    : (first, null);
+            }
+
+            if (gate is null)
+            {
+                (result, check) = await AskAsync(ct);
+            }
+            else
+            {
+                var outcome = await gate.CallAsync(("file", file.Id), AskAsync, ct);
+                switch (outcome.State)
+                {
+                    case ModelCallState.Open:
+                        return null;
+                    case ModelCallState.GaveUp:
+                        result = new FileClassification
+                        {
+                            FileNodeId = file.Id, AnalyzedAt = DateTime.UtcNow, IsAiResult = true,
+                            Origin = ResultOrigin.Model, Error = outcome.Error, Evidence = FormatEvidence(input)
+                        };
+                        break;
+                    default:
+                        (result, check) = outcome.Value;
+                        break;
+                }
+            }
         }
         result.FileNodeId = file.Id;
         result.InheritedFromDirectoryNodeId = null;

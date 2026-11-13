@@ -23,6 +23,20 @@ public sealed record ProgressEvent(
     string? CurrentPath,
     string? Message);
 
+/// <summary>A change in waiting for the model server, as written in <see cref="ProgressMode.Jsonl"/> mode (<c>"type": "wait"</c>).</summary>
+/// <param name="State"><c>waiting</c>, <c>resumed</c> or <c>given_up</c>.</param>
+/// <param name="Since">When the server was first considered away.</param>
+/// <param name="WaitedSeconds">How long the run has waited so far.</param>
+public sealed record WaitEventLine(
+    int SchemaVersion,
+    string Type,
+    string Phase,
+    string State,
+    DateTime Since,
+    string Cause,
+    double WaitedSeconds,
+    string Message);
+
 /// <summary>
 /// Writes progress to stderr, throttled to one line per phase every <see cref="Interval"/>,
 /// plus always the first event and the one where <c>processed == total</c>. Thread-safe.
@@ -71,6 +85,24 @@ public sealed class ProgressReporter
             var errorPart = errors > 0 ? $", {errors} error(s)" : string.Empty;
             var pathPart = string.IsNullOrEmpty(currentPath) ? string.Empty : $"  {currentPath}";
             _stderr.WriteLine($"[{phase}] {processed}/{total}{errorPart}{pathPart}");
+        }
+    }
+
+    /// <summary>A change in waiting for the model server. Never throttled: each one is a single line.</summary>
+    public void ReportWait(string phase, string state, DateTime since, string cause, TimeSpan waited, string message)
+    {
+        if (Mode == ProgressMode.None)
+            return;
+
+        if (Mode == ProgressMode.Jsonl)
+        {
+            _stderr.WriteLine(CliJson.Serialize(
+                new WaitEventLine(CliJson.SchemaVersion, "wait", phase, state, since, cause, Math.Round(waited.TotalSeconds, 1), message),
+                indented: false));
+        }
+        else
+        {
+            _stderr.WriteLine($"[{phase}] {message}");
         }
     }
 }
