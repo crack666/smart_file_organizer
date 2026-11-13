@@ -15,15 +15,19 @@ public static class OfficePropertiesReader
     public static bool Supports(string extension) => extension.ToLowerInvariant() is
         ".docx" or ".xlsx" or ".pptx" or ".docm" or ".xlsm" or ".pptm" or ".odt" or ".ods" or ".odp";
 
+    /// <summary>Property parts are a few KB; a larger one is skipped instead of inflated.</summary>
+    private const long MaxPropertyPartBytes = 1024 * 1024;
+
+    /// <exception cref="ContentLimitException">The package has more entries than <see cref="OfficePackage.MaxEntries"/>.</exception>
     public static OfficeProperties? Read(string path)
     {
-        using var archive = ZipFile.OpenRead(path);
+        using var archive = OfficePackage.Open(path);
 
         var core = archive.GetEntry("docProps/core.xml");
         if (core is not null)
         {
-            var doc = Load(core);
-            var app = archive.GetEntry("docProps/app.xml") is { } appEntry ? Load(appEntry) : null;
+            var doc = Load(archive, core);
+            var app = archive.GetEntry("docProps/app.xml") is { } appEntry ? Load(archive, appEntry) : null;
             return new OfficeProperties(
                 Value(doc, "title"),
                 Value(doc, "creator") ?? Value(doc, "lastModifiedBy"),
@@ -35,7 +39,7 @@ public static class OfficePropertiesReader
         var meta = archive.GetEntry("meta.xml");
         if (meta is not null)
         {
-            var doc = Load(meta);
+            var doc = Load(archive, meta);
             var stats = doc.Descendants().FirstOrDefault(e => e.Name.LocalName == "document-statistic");
             var pageCount = stats?.Attributes().FirstOrDefault(a => a.Name.LocalName == "page-count")?.Value;
             return new OfficeProperties(
@@ -49,12 +53,16 @@ public static class OfficePropertiesReader
         return null;
     }
 
-    private static XDocument Load(ZipArchiveEntry entry)
+    private static XDocument Load(OfficePackage archive, ZipArchiveEntry entry)
     {
-        // Property parts are a few KB; refuse anything large instead of inflating it.
-        if (entry.Length > 1024 * 1024) return new XDocument(new XElement("empty"));
-        using var stream = entry.Open();
-        return XDocument.Load(stream);
+        try
+        {
+            return archive.Load(entry, MaxPropertyPartBytes);
+        }
+        catch (ContentLimitException)
+        {
+            return new XDocument(new XElement("empty"));
+        }
     }
 
     private static string? Value(XDocument doc, string localName)

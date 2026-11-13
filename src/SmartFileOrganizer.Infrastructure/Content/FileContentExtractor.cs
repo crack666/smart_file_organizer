@@ -26,6 +26,12 @@ public sealed class FileContent
     public string TextPreview { get; init; } = string.Empty;
     public string Message { get; init; } = string.Empty;
 
+    /// <summary>
+    /// Set when the file was deliberately not read because it crosses a limit of <see cref="OfficePackage"/>
+    /// (too many entries, a part or all parts unpacking to too much); says which limit and where.
+    /// </summary>
+    public string? NotReadCause { get; init; }
+
     public bool HasImage => ImageBytes is { Length: > 0 };
     public bool HasText => !string.IsNullOrWhiteSpace(TextPreview);
 }
@@ -47,7 +53,8 @@ public sealed record PdfEvidence(
 
 /// <summary>
 /// Reads file content for preview and AI evidence: images as bytes, PDF page 1 rendered via
-/// PDFium (Docnet.Core), Office/OpenDocument text, and text-like files as a truncated excerpt.
+/// PDFium (Docnet.Core), Office/OpenDocument text (within the limits of <see cref="OfficePackage"/>),
+/// and text-like files as a truncated excerpt.
 /// </summary>
 public class FileContentExtractor
 {
@@ -93,6 +100,10 @@ public class FileContentExtractor
                 Message = "No built-in preview for this file type yet. Images and text-like files are previewed directly."
             };
         }
+        catch (ContentLimitException ex)
+        {
+            return new FileContent { Message = $"Not read: {ex.Message}.", NotReadCause = ex.Message };
+        }
         catch (Exception ex)
         {
             return new FileContent { Message = $"Preview unavailable: {ex.Message}" };
@@ -132,12 +143,11 @@ public class FileContentExtractor
 
     private static string ExtractDocxText(string path, CancellationToken ct)
     {
-        using var archive = ZipFile.OpenRead(path);
+        using var archive = OfficePackage.Open(path);
         var entry = archive.GetEntry("word/document.xml");
         if (entry == null) return string.Empty;
 
-        using var stream = entry.Open();
-        var doc = XDocument.Load(stream);
+        var doc = archive.Load(entry);
 
         // Word text lives in w:t, paragraphs in w:p
         var sb = new StringBuilder();
@@ -157,15 +167,14 @@ public class FileContentExtractor
 
     private static string ExtractXlsxText(string path, CancellationToken ct)
     {
-        using var archive = ZipFile.OpenRead(path);
+        using var archive = OfficePackage.Open(path);
 
         // shared strings table (optional)
         var sharedStrings = new List<string>();
         var sstEntry = archive.GetEntry("xl/sharedStrings.xml");
         if (sstEntry != null)
         {
-            using var sstStream = sstEntry.Open();
-            var sstDoc = XDocument.Load(sstStream);
+            var sstDoc = archive.Load(sstEntry);
             foreach (var si in sstDoc.Descendants().Where(e => e.Name.LocalName == "si"))
             {
                 ct.ThrowIfCancellationRequested();
@@ -184,8 +193,7 @@ public class FileContentExtractor
         foreach (var sheetEntry in sheetEntries)
         {
             ct.ThrowIfCancellationRequested();
-            using var sheetStream = sheetEntry.Open();
-            var sheetDoc = XDocument.Load(sheetStream);
+            var sheetDoc = archive.Load(sheetEntry);
 
             foreach (var row in sheetDoc.Descendants().Where(e => e.Name.LocalName == "row"))
             {
@@ -228,12 +236,11 @@ public class FileContentExtractor
 
     private static string ExtractOdtText(string path, CancellationToken ct)
     {
-        using var archive = ZipFile.OpenRead(path);
+        using var archive = OfficePackage.Open(path);
         var entry = archive.GetEntry("content.xml");
         if (entry == null) return string.Empty;
 
-        using var stream = entry.Open();
-        var doc = XDocument.Load(stream);
+        var doc = archive.Load(entry);
 
         var sb = new StringBuilder();
         var paragraphs = doc.Descendants().Where(e => e.Name.LocalName is "p" or "h");
@@ -251,12 +258,11 @@ public class FileContentExtractor
 
     private static string ExtractOdsText(string path, CancellationToken ct)
     {
-        using var archive = ZipFile.OpenRead(path);
+        using var archive = OfficePackage.Open(path);
         var entry = archive.GetEntry("content.xml");
         if (entry == null) return string.Empty;
 
-        using var stream = entry.Open();
-        var doc = XDocument.Load(stream);
+        var doc = archive.Load(entry);
 
         var sb = new StringBuilder();
         var rows = doc.Descendants().Where(e => e.Name.LocalName == "table-row");
@@ -279,7 +285,7 @@ public class FileContentExtractor
 
     private static string ExtractPptxText(string path, CancellationToken ct)
     {
-        using var archive = ZipFile.OpenRead(path);
+        using var archive = OfficePackage.Open(path);
         var slides = archive.Entries
             .Where(e => e.FullName.StartsWith("ppt/slides/slide", StringComparison.OrdinalIgnoreCase)
                      && e.FullName.EndsWith(".xml", StringComparison.OrdinalIgnoreCase))
@@ -291,8 +297,7 @@ public class FileContentExtractor
         foreach (var (entry, number) in slides)
         {
             ct.ThrowIfCancellationRequested();
-            using var stream = entry.Open();
-            var doc = XDocument.Load(stream);
+            var doc = archive.Load(entry);
             var lines = doc.Descendants().Where(e => e.Name.LocalName == "p")
                 .Select(p => string.Concat(p.Descendants().Where(e => e.Name.LocalName == "t").Select(e => e.Value)).Trim())
                 .Where(l => l.Length > 0)

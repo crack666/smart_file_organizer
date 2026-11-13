@@ -85,6 +85,69 @@ public class FileContentExtractorTests : IDisposable
 
         Assert.Contains("Dear tax office", content.TextPreview);
         Assert.Contains("Second line", content.TextPreview);
+        Assert.Null(content.NotReadCause);
+    }
+
+    /// <summary>A docx whose text part unpacks to just over the part limit while the file itself stays small.</summary>
+    private string WriteInflatingDocx(string name)
+    {
+        var path = Path.Combine(_dir, name);
+        using var zip = ZipFile.Open(path, ZipArchiveMode.Create);
+        var entry = zip.CreateEntry("word/document.xml", CompressionLevel.Optimal);
+        using var writer = new StreamWriter(entry.Open());
+        writer.Write("""<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>""");
+        var chunk = new string('a', 64 * 1024);
+        for (long written = 0; written <= OfficePackage.MaxPartBytes; written += chunk.Length)
+            writer.Write(chunk);
+        writer.Write("</w:t></w:r></w:p></w:body></w:document>");
+        return path;
+    }
+
+    [Fact]
+    public async Task Docx_UnpackingAboveTheLimit_IsNotRead_AndCarriesTheCause()
+    {
+        var path = WriteInflatingDocx("bomb.docx");
+        Assert.True(new FileInfo(path).Length < 1024 * 1024, "the packed file stays small");
+
+        var content = await _extractor.ExtractAsync(Node("bomb.docx", FileType.Document));
+
+        Assert.False(content.HasText);
+        Assert.NotNull(content.NotReadCause);
+        Assert.Contains("word/document.xml", content.NotReadCause);
+        Assert.Contains("limit", content.NotReadCause);
+        Assert.StartsWith("Not read:", content.Message);
+    }
+
+    [Fact]
+    public async Task Docx_WithMoreEntriesThanTheLimit_IsNotRead_AndCarriesTheCause()
+    {
+        var path = Path.Combine(_dir, "many.docx");
+        using (var zip = ZipFile.Open(path, ZipArchiveMode.Create))
+        {
+            await using (var writer = new StreamWriter(zip.CreateEntry("word/document.xml").Open()))
+                await writer.WriteAsync("""<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>Hi</w:t></w:r></w:p></w:body></w:document>""");
+            for (var i = 0; i < OfficePackage.MaxEntries; i++)
+                zip.CreateEntry($"x/{i}.xml", CompressionLevel.NoCompression);
+        }
+
+        var content = await _extractor.ExtractAsync(Node("many.docx", FileType.Document));
+
+        Assert.False(content.HasText);
+        Assert.Contains("entries", content.NotReadCause);
+        using var stream = File.OpenRead(path);
+        Assert.Equal(OfficePackage.MaxEntries + 1, OfficePackage.DeclaredEntryCount(stream));
+    }
+
+    [Fact]
+    public async Task InputPreparer_NamesWhyAnOfficeFileAboveTheLimitWasNotRead()
+    {
+        WriteInflatingDocx("bomb.docx");
+        var preparer = new AiClassificationInputPreparer(_extractor, new OllamaOptions());
+
+        var input = await preparer.PrepareAsync(Node("bomb.docx", FileType.Document));
+
+        Assert.Contains(input.Missing, m => m.StartsWith("document text: not read, word/document.xml", StringComparison.Ordinal));
+        Assert.DoesNotContain(input.Missing, m => m.Contains("none found"));
     }
 
     [Fact]
