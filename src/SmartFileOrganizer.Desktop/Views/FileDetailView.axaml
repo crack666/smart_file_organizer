@@ -50,10 +50,6 @@
                     <TextBlock Grid.Row="7" Grid.Column="2" Text="{Binding Confidence}"
                                IsVisible="{Binding HasClassification}" />
 
-                    <TextBlock Grid.Row="8" Grid.Column="0" Text="Target:"        FontWeight="SemiBold"
-                               IsVisible="{Binding HasClassification}" />
-                    <TextBlock Grid.Row="8" Grid.Column="2" Text="{Binding SuggestedTarget}"
-                               IsVisible="{Binding HasClassification}" />
 
                     <TextBlock Grid.Row="9" Grid.Column="0" Text="Summary:"       FontWeight="SemiBold"
                                IsVisible="{Binding HasClassification}" />

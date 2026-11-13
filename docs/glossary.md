@@ -162,6 +162,10 @@ a contract and a scanned ID card, stays `uniform` ([architecture.md](architectur
 `file_nodes.analysis_skip` and `directory_nodes.analysis_skip` carry `backed_up` from this list when
 `sfo analyze --against` left the file or folder out because the library holds it; no other value is stored there.
 
+With several libraries (`--against` more than once, https://github.com/crack666/smart_file_organizer/issues/74) the
+states of the single comparisons are joined per file: `backed_up` in any library wins, then `error` (another root
+might hold it), then `differs`, then `new`. `match_library_job_id` names the library that holds the content.
+
 ### Reserved for planned work
 
 These codes are fixed by the decision table but no code uses them yet.
@@ -686,6 +690,33 @@ Recommended by every finding, executed by nothing yet.
 | `complete` | Every step the kind needs has run. |
 | `partial` | Computed, but a step that sharpens it is missing; the note says which. |
 | `not_computed` | Not computed: a step it needs is missing, or there is no library. |
+
+### Permanent storage for targets (`StorageStatus`)
+
+Targets only ever lie in a root scanned with the role `library`
+(https://github.com/crack666/smart_file_organizer/issues/74). `storage.status` of `sfo findings --summary`.
+
+| Code | Meaning |
+|---|---|
+| `known` | At least one library is known; every target lies inside one of its roots. |
+| `no_library` | No library is known: no target path is proposed, never a folder of the user profile or the system drive instead. |
+
+### Room at a target root (`TargetSpace`)
+
+`space` per library root in `sfo findings --summary` (`storage.roots`) and `sfo library match` (`space`).
+
+| Code | Meaning |
+|---|---|
+| `enough` | The free space at the root is at least what the proposals there need. |
+| `not_enough` | The proposals need more than is free at the root; the output warns. |
+| `unknown` | The free space could not be determined (root unreachable, the file system does not tell); `free_bytes` is `null`, never an error. |
+
+### Old free-text target (`suggested_target`)
+
+Deprecated since 13.11.2026. The model is no longer asked for a target per file; older runs stored paths the model
+made up. The key stays in the JSON of `sfo show` and `sfo files` and the column in the CSV export, always empty
+(`null`), and nothing shows it as a target. Targets come only from `sfo library match` and the findings, and lie in a
+library root.
 
 ## Decisions
 

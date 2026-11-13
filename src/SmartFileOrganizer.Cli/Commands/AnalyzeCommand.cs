@@ -17,7 +17,8 @@ public static class AnalyzeCommand
     public sealed record ModelServerLostView(string Phase, DateTime Since, string Cause, double WaitedSeconds);
 
     /// <summary>What <c>--against</c> left out: files and folders the library holds by content (<c>backed_up</c>).</summary>
-    public sealed record BackedUpView(long Against, long ComparisonId, int Files, int Directories);
+    /// <param name="Against">The first library job named; <paramref name="Libraries"/> lists all of them.</param>
+    public sealed record BackedUpView(long Against, long ComparisonId, int Files, int Directories, IReadOnlyList<long> Libraries);
 
     /// <param name="ModelCalls">Calls and tokens of this run per call kind, as the model server counted them.</param>
     /// <param name="BackedUp">Set with <c>--against</c>; null without.</param>
@@ -64,10 +65,11 @@ public static class AnalyzeCommand
             Description = "Try files that failed in an earlier run again (classification phase). Files with a result are not called again."
         };
 
-        var against = new Option<long?>("--against")
+        var against = new Option<long[]>("--against")
         {
             Description = "Library job whose stored comparison (sfo compare) applies: files backed_up there are not judged, " +
-                          "folders fully backed_up get no pre-assessment and no summary. Without it the whole job is analysed.",
+                          "folders fully backed_up get no pre-assessment and no summary. Repeatable: backed_up in any of them counts. " +
+                          "Without it the whole job is analysed.",
             HelpName = "job"
         };
 
@@ -92,12 +94,14 @@ public static class AnalyzeCommand
                     $"Job {jobId} is {scanJob.Status.ToString().ToLowerInvariant()}; finish the scan first (sfo scan --resume {jobId}).");
             }
 
-            var againstJobId = ctx.ParseResult.GetValue(against);
-            if (againstJobId is { } lib
-                && await services.GetRequiredService<BackedUpSkipService>().FindComparisonAsync(jobId, lib, ct) is null)
+            var againstJobIds = (ctx.ParseResult.GetValue(against) ?? []).Distinct().ToList();
+            foreach (var lib in againstJobIds)
             {
-                throw new CliFailureException(ExitCodes.Failure, ErrorCodes.ComparisonNotFound,
-                    $"No comparison of job {jobId} against library job {lib} is stored; run first: sfo compare {jobId} --against {lib}");
+                if (await services.GetRequiredService<BackedUpSkipService>().FindComparisonAsync(jobId, lib, ct) is null)
+                {
+                    throw new CliFailureException(ExitCodes.Failure, ErrorCodes.ComparisonNotFound,
+                        $"No comparison of job {jobId} against library job {lib} is stored; run first: sfo compare {jobId} {string.Join(" ", againstJobIds.Select(l => $"--against {l}"))}");
+                }
             }
 
             // Per-run overrides; OllamaSettingsService is not called, so settings.json stays untouched.
@@ -119,7 +123,7 @@ public static class AnalyzeCommand
                     jobId, phases, progress, ct, ctx.ParseResult.GetValue(retryErrors),
                     (p, wait) => ctx.Progress.ReportWait(PhaseName(p), wait.State.ToCode(), wait.Since, wait.Cause.ToCode(),
                         wait.Waited, WaitText(wait)),
-                    againstJobId);
+                    againstJobIds);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -141,7 +145,7 @@ public static class AnalyzeCommand
                 run.ErrorCount,
                 run.Lost is { } l ? new ModelServerLostView(PhaseName(l.Phase), l.Since, l.Cause.ToCode(), Math.Round(l.Waited.TotalSeconds, 1)) : null,
                 services.GetRequiredService<ModelUsageMeter>().Snapshot(),
-                run.BackedUp is { } b ? new BackedUpView(b.AgainstJobId, b.ComparisonId, b.Files, b.Directories) : null);
+                run.BackedUp is { } b ? new BackedUpView(b.AgainstJobId, b.ComparisonId, b.Files, b.Directories, b.Libraries) : null);
 
             if (run.Lost is { } lost)
             {
@@ -176,7 +180,7 @@ public static class AnalyzeCommand
     {
         var sb = new StringBuilder($"Job {r.JobId}, model {r.Model}, parallel {r.Parallel}");
         if (r.BackedUp is { } b)
-            sb.Append($"{Environment.NewLine}  already in library job {b.Against}: {b.Files} files and {b.Directories} folders left out");
+            sb.Append($"{Environment.NewLine}  already in library job{(b.Libraries.Count > 1 ? "s" : "")} {string.Join(", ", b.Libraries)}: {b.Files} files and {b.Directories} folders left out");
         foreach (var p in r.Phases)
             sb.Append($"{Environment.NewLine}  {PhaseName(p.Phase),-15} {p.Processed}/{p.Total}, {p.Errors} errors  {p.Message}");
         if (r.ModelServerLost is { } lost)

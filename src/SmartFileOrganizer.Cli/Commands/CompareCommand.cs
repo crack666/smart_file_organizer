@@ -30,7 +30,11 @@ public static class CompareCommand
         string? MatchHash,
         DateTime? MatchVerifiedAt,
         int? DuplicateGroup,
-        string? Error);
+        string? Error,
+        long? MatchLibraryJobId = null);
+
+    /// <summary>One library of the run: its job, its stored comparison and the source files it holds by content.</summary>
+    public sealed record LibraryView(JobView Job, long ComparisonId, DateTime ComparedAt, bool Complete, int BackedUp, long BackedUpBytes);
 
     public sealed record CompareResult(
         long ComparisonId,
@@ -46,16 +50,17 @@ public static class CompareCommand
         IReadOnlyList<ErrorView> Errors,
         int FilesTotal,
         IReadOnlyList<FileView> Files,
-        HashingStats Hashing);
+        HashingStats Hashing,
+        IReadOnlyList<LibraryView>? Libraries = null);
 
     private const string AllStates = "all";
 
     public static Command Create(CliHost host, GlobalOptions globals)
     {
         var job = JobArguments.Create("Job id of a completed scan with role source.");
-        var against = new Option<long?>("--against")
+        var against = new Option<long[]>("--against")
         {
-            Description = "Job id of a completed scan with role library. Without it, only duplicates within the source are found.",
+            Description = "Job id of a completed scan with role library. Repeatable: a file is backed_up as soon as one of them holds it. Without it, only duplicates within the source are found.",
             HelpName = "job"
         };
         var files = new Option<string[]>("--files")
@@ -87,7 +92,7 @@ public static class CompareCommand
         {
             var services = await ctx.GetServicesAsync(ct);
             var sourceId = ctx.ParseResult.GetValue(job);
-            var againstId = ctx.ParseResult.GetValue(against);
+            var againstIds = ctx.ParseResult.GetValue(against) ?? [];
             var progress = new SynchronousProgress<ComparisonProgress>(p =>
                 ctx.Progress.Report("compare", p.Processed, p.Total, 0, p.CurrentPath));
 
@@ -95,7 +100,7 @@ public static class CompareCommand
             try
             {
                 report = await services.GetRequiredService<ContentComparisonService>()
-                    .CompareAsync(sourceId, againstId, progress, ct);
+                    .CompareWithLibrariesAsync(sourceId, againstIds, progress, ct);
             }
             catch (ComparisonException ex)
             {
@@ -118,8 +123,8 @@ public static class CompareCommand
             // The full checksum of a short secret file confirms a guess of its content: none for marked files.
             var reads = services.GetRequiredService<JobReadService>();
             var marked = new HashSet<long>(await reads.GetMarkedFileIdsAsync(report.Source.Id, ct));
-            if (report.Against != null)
-                marked.UnionWith(await reads.GetMarkedFileIdsAsync(report.Against.Id, ct));
+            foreach (var library in report.Libraries?.Select(l => l.Library) ?? (report.Against is { } a ? [a] : []))
+                marked.UnionWith(await reads.GetMarkedFileIdsAsync(library.Id, ct));
 
             var result = Map(report, ParseStates(ctx.ParseResult.GetValue(files)), ctx.ParseResult.GetValue(limit), marked);
             if (!result.Complete)
@@ -171,8 +176,11 @@ public static class CompareCommand
             report.Errors.Count,
             Take(report.Errors.Select(e => new ErrorView(e.Role, e.Kind, e.Path, e.Message))),
             listed.Count,
-            Take(listed.Select(f => new FileView(f.FullPath, f.State, f.MatchPath, f.MatchCount, Hash(f), f.MatchVerifiedAt, f.DuplicateGroup, f.Error))),
-            report.Hashing);
+            Take(listed.Select(f => new FileView(f.FullPath, f.State, f.MatchPath, f.MatchCount, Hash(f), f.MatchVerifiedAt, f.DuplicateGroup, f.Error,
+                f.MatchJobId))),
+            report.Hashing,
+            report.Libraries?.Select(l => new LibraryView(JobView.From(l.Library), l.Header.Id, l.Header.ComparedAt, l.Header.Complete,
+                l.BackedUpFiles, l.BackedUpBytes)).ToList() ?? []);
     }
 
     private static string Render(CompareResult r)
@@ -180,7 +188,14 @@ public static class CompareCommand
         var sb = new StringBuilder();
         sb.AppendLine(r.Against == null
             ? $"Job {r.Source.Id} ({r.Source.RootPath}) without library: duplicates only"
-            : $"Job {r.Source.Id} ({r.Source.RootPath}) against library job {r.Against.Id} ({r.Against.RootPath})");
+            : r.Libraries is { Count: > 1 } libraries
+                ? $"Job {r.Source.Id} ({r.Source.RootPath}) against {libraries.Count} library jobs"
+                : $"Job {r.Source.Id} ({r.Source.RootPath}) against library job {r.Against.Id} ({r.Against.RootPath})");
+        if (r.Libraries is { Count: > 1 })
+        {
+            foreach (var l in r.Libraries)
+                sb.AppendLine($"  library job {l.Job.Id} ({l.Job.RootPath}): {l.BackedUp} backed_up ({ReadFormat.Size(l.BackedUpBytes)})");
+        }
         var c = r.Counts;
         if (r.Against != null)
             sb.AppendLine($"  {c.Files} files: {c.BackedUp} backed_up, {c.New} new, {c.Differs} differs, {c.Errors} error");

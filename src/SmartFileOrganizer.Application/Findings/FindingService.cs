@@ -20,7 +20,10 @@ public enum FindingFailure
     NotFound,
 
     /// <summary>Findings are about sources; a library is only read.</summary>
-    WrongRole
+    WrongRole,
+
+    /// <summary>A library was named whose comparison with the job is not stored.</summary>
+    ComparisonNotFound
 }
 
 public sealed class FindingException(FindingFailure failure, string message) : Exception(message)
@@ -44,6 +47,12 @@ public sealed record FindingQuery
 
     /// <summary>Only findings in these states; empty for open and accepted (rejected and wrong ones are not listed again).</summary>
     public IReadOnlyCollection<FindingState> States { get; init; } = [];
+
+    /// <summary>
+    /// The library jobs whose stored comparisons count: a file is backed up as soon as one of them holds it. Empty for
+    /// the libraries of the newest <c>sfo compare</c> of the job.
+    /// </summary>
+    public IReadOnlyList<long> Libraries { get; init; } = [];
 }
 
 /// <summary>Counts of one kind.</summary>
@@ -75,7 +84,9 @@ public sealed record FindingSummary(
     IReadOnlyDictionary<ResultCertainty, long> ByCertainty,
     IReadOnlyDictionary<FindingState, long> ByState,
     IReadOnlyList<FindingBrief> Top,
-    IReadOnlyDictionary<FindingKind, long> BelowThreshold);
+    IReadOnlyDictionary<FindingKind, long> BelowThreshold,
+    FindingOverview? Overview = null,
+    FindingStorage? Storage = null);
 
 /// <summary>
 /// Computes the findings of a source job from what the earlier steps stored (scan, analysis, comparison, bundles,
@@ -105,6 +116,7 @@ public sealed class FindingService
     private readonly FindingOptions _options;
     private readonly BundleOptions _bundleOptions;
     private readonly ILogger<FindingService> _logger;
+    private readonly IFreeSpaceProbe? _freeSpace;
 
     public FindingService(
         IScanJobRepository jobs,
@@ -118,8 +130,10 @@ public sealed class FindingService
         IFileFactRepository facts,
         FindingOptions options,
         BundleOptions bundleOptions,
-        ILogger<FindingService> logger)
+        ILogger<FindingService> logger,
+        IFreeSpaceProbe? freeSpace = null)
     {
+        _freeSpace = freeSpace;
         _jobs = jobs;
         _read = read;
         _bundles = bundles;
@@ -137,13 +151,17 @@ public sealed class FindingService
     // ------------------------------------------------------------------ reading
 
     /// <summary>All findings of the job, ranked, with their stored decisions (rejected and wrong ones included).</summary>
-    public async Task<FindingReport> ComputeAsync(long jobId, CancellationToken ct = default) =>
-        (await ComputeInternalAsync(jobId, ct)).Report;
+    public Task<FindingReport> ComputeAsync(long jobId, CancellationToken ct = default) =>
+        ComputeAsync(jobId, null, ct);
+
+    /// <summary>As <see cref="ComputeAsync(long, CancellationToken)"/>, against these library jobs (null or empty: those of the newest comparison).</summary>
+    public async Task<FindingReport> ComputeAsync(long jobId, IReadOnlyList<long>? libraries, CancellationToken ct = default) =>
+        (await ComputeInternalAsync(jobId, ct, libraries)).Report;
 
     /// <summary>The findings a listing shows: filtered by <paramref name="query"/>, in rank order.</summary>
     public async Task<(FindingReport Report, IReadOnlyList<Finding> Items)> ListAsync(FindingQuery query, CancellationToken ct = default)
     {
-        var report = await ComputeAsync(query.JobId, ct);
+        var report = await ComputeAsync(query.JobId, query.Libraries, ct);
         var job = report.Job;
         var under = query.Under is { Length: > 0 } u ? FullPathOf(job, u) : null;
         var states = query.States.Count > 0 ? query.States : [FindingState.Open, FindingState.Accepted];
@@ -157,9 +175,13 @@ public sealed class FindingService
     }
 
     /// <summary>Counts and the most important findings, small enough for one page however large the job.</summary>
-    public async Task<FindingSummary> SummarizeAsync(long jobId, int top, CancellationToken ct = default)
+    public Task<FindingSummary> SummarizeAsync(long jobId, int top, CancellationToken ct = default) =>
+        SummarizeAsync(jobId, top, null, ct);
+
+    /// <summary>As <see cref="SummarizeAsync(long, int, CancellationToken)"/>, against these library jobs (null or empty: those of the newest comparison).</summary>
+    public async Task<FindingSummary> SummarizeAsync(long jobId, int top, IReadOnlyList<long>? libraries, CancellationToken ct = default)
     {
-        var report = await ComputeAsync(jobId, ct);
+        var report = await ComputeAsync(jobId, libraries, ct);
         return Summarize(report, top);
     }
 
@@ -178,7 +200,7 @@ public sealed class FindingService
             f.Rank, f.Key, f.Kind, f.Certainty, f.State, f.Title, f.RelativePath, f.Files, f.Bytes, f.Action.Kind)).ToList();
         return new FindingSummary(report.Job, report.Inputs, report.Coverage, report.MissingSteps,
             listed.Count, listed.Count(f => !f.Unsure), listed.Count(f => f.Unsure),
-            byKind, byCertainty, byState, briefs, report.BelowThreshold);
+            byKind, byCertainty, byState, briefs, report.BelowThreshold, report.Overview, report.Storage);
     }
 
     /// <summary>
@@ -338,7 +360,7 @@ public sealed class FindingService
     /// system, a program folder, the app data of a device copy); null for a file of its own.</param>
     private sealed record FileFacts(FileNode File, FilePlace Place, FileValue Value, SensitiveMatch Match, FileComparison? Row, Unit Unit, FileTime Time, string? Container);
 
-    private async Task<Computed> ComputeInternalAsync(long jobId, CancellationToken ct)
+    private async Task<Computed> ComputeInternalAsync(long jobId, CancellationToken ct, IReadOnlyList<long>? libraries = null)
     {
         _options.Validate();
         var job = await _jobs.GetByIdAsync(jobId, ct)
@@ -363,14 +385,24 @@ public sealed class FindingService
         var captures = await _captures.GetAsync(jobId, ct);
         var factsByFile = await _facts.GetByJobAsync(jobId, ct);
 
-        var libHeader = await _comparisons.GetLatestWithLibraryAsync(jobId, ct);
-        var libRows = libHeader is null
-            ? null
-            : (await _comparisons.GetFileComparisonsAsync(libHeader.Id, ct)).ToDictionary(r => r.FileNodeId);
+        // The libraries: those named, else those of the newest comparison. A file is backed up as soon as one holds it.
+        var (libSet, missingLibraries) = await LibraryComparisonSet.LoadAsync(_comparisons, jobId, libraries, ct);
+        if (missingLibraries.Count > 0)
+        {
+            throw new FindingException(FindingFailure.ComparisonNotFound,
+                $"Job {jobId} was not compared with library job {string.Join(", ", missingLibraries)}; run first: "
+                + $"sfo compare {jobId} {string.Join(" ", libraries!.Distinct().Select(l => $"--against {l}"))}");
+        }
+        var libHeader = libSet?.First;
+        var libRows = libSet?.Rows;
+        var libraryJobs = new List<ScanJob>();
+        foreach (var id in libSet?.LibraryJobIds ?? [])
+            if (await _jobs.GetByIdAsync(id, ct) is { } libraryJob)
+                libraryJobs.Add(libraryJob);
         var dupHeader = libHeader ?? await _comparisons.GetComparisonAsync(jobId, null, ct);
         var dupRows = dupHeader is null
             ? null
-            : libHeader is not null ? libRows!.Values.ToList() : await _comparisons.GetFileComparisonsAsync(dupHeader.Id, ct);
+            : libSet is not null ? libSet.Files : await _comparisons.GetFileComparisonsAsync(dupHeader.Id, ct);
 
         // ---- where the wholes are: folders judged unit or system, and the folders that hold one of them
         var wholes = new Dictionary<string, (string? Root, bool InUnit)>(StringComparer.Ordinal);
@@ -469,7 +501,7 @@ public sealed class FindingService
                 }
                 findings.Add(noise
                     ? InNoise(job, unit, group, part, sure, unitFiles, libHeader)
-                    : NotBackedUp(job, unit, group, part, sure, unitFiles, libHeader!));
+                    : NotBackedUp(job, unit, group, part, sure, unitFiles, libSet!));
             }
         }
 
@@ -481,7 +513,7 @@ public sealed class FindingService
             findings.AddRange(Duplicates(job, facts, dupRows, libRows is not null, below));
 
         // ---- misplaced
-        findings.AddRange(await MisplacedAsync(job, facts, dirs, patterns, libHeader, libRows, ct));
+        findings.AddRange(await MisplacedAsync(job, facts, dirs, patterns, libHeader, libRows, libraryJobs, ct));
 
         // ---- decisions, order
         var decisions = await _decisions.GetAllAsync(jobId, ct);
@@ -505,9 +537,90 @@ public sealed class FindingService
             build?.BuiltAt,
             libHeader,
             dupHeader,
-            libHeader?.AgainstJobId);
+            libHeader?.AgainstJobId,
+            libSet?.LibraryJobIds ?? []);
         var (coverage, missing) = Coverage(job, inputs);
-        return new Computed(new FindingReport(job, inputs, coverage, missing, ranked, below), fileById, values);
+        var overview = Overview(facts, libSet, libraryJobs);
+        var storage = Storage(ranked, libraryJobs);
+        return new Computed(new FindingReport(job, inputs, coverage, missing, ranked, below, overview, storage), fileById, values);
+    }
+
+    /// <summary>File by file: worth keeping and not safe, safe per library, disposable, sensitive.</summary>
+    private static FindingOverview Overview(IReadOnlyList<FileFacts> facts, LibraryComparisonSet? libSet, IReadOnlyList<ScanJob> libraries)
+    {
+        FileTally all = FileTally.Zero, keep = FileTally.Zero, keepNew = FileTally.Zero, keepSafe = FileTally.Zero, keepUnknown = FileTally.Zero;
+        FileTally backedUp = FileTally.Zero, disposable = FileTally.Zero, sensitive = FileTally.Zero, notCompared = FileTally.Zero;
+        foreach (var x in facts)
+        {
+            var size = x.File.Size;
+            var state = x.Row?.State;
+            all = all.Add(size);
+            if (state == ContentState.BackedUp) backedUp = backedUp.Add(size);
+            if (state is null or ContentState.Error) notCompared = notCompared.Add(size);
+            if (x.Match.IsMatch)
+            {
+                sensitive = sensitive.Add(size);
+                continue;
+            }
+            if (x.Value.Worth == FileWorth.Disposable)
+            {
+                disposable = disposable.Add(size);
+            }
+            else if (x.Value.Worth == FileWorth.Keep)
+            {
+                keep = keep.Add(size);
+                if (state is ContentState.New or ContentState.Differs) keepNew = keepNew.Add(size);
+                else if (state == ContentState.BackedUp) keepSafe = keepSafe.Add(size);
+                else keepUnknown = keepUnknown.Add(size);
+            }
+        }
+
+        var byLibrary = new List<LibraryTally>();
+        if (libSet is not null)
+        {
+            var roots = libraries.ToDictionary(l => l.Id, l => l.RootPath);
+            foreach (var (id, files, bytes) in libSet.BackedUpByLibrary())
+                byLibrary.Add(new LibraryTally(id, roots.GetValueOrDefault(id, string.Empty), files, bytes));
+        }
+        return new FindingOverview(all, keep, keepNew, keepSafe, keepUnknown, backedUp, byLibrary, disposable, sensitive, notCompared);
+    }
+
+    /// <summary>
+    /// Free and needed space per library root. Needed is what the listed findings with a target in that root move there;
+    /// findings that should move but have no target yet are counted apart, since their root is not decided.
+    /// </summary>
+    private FindingStorage Storage(IReadOnlyList<Finding> findings, IReadOnlyList<ScanJob> libraries)
+    {
+        var listed = findings.Where(f => f.State is FindingState.Open or FindingState.Accepted && f.Action.Kind == PlanActionKind.Move).ToList();
+        var unplaced = listed.Where(f => f.Target is null).ToList();
+        var unplacedTally = new FileTally(unplaced.Sum(f => f.Files), unplaced.Sum(f => f.Bytes));
+        if (libraries.Count == 0)
+        {
+            return new FindingStorage(StorageStatus.NoLibrary,
+                "No permanent storage is known: no target is proposed. Scan it with 'sfo scan <path> --role library' and compare with 'sfo compare <job> --against <library>'.",
+                [], unplaced.Count, unplacedTally, []);
+        }
+
+        var roots = new List<RootStorage>();
+        var warnings = new List<string>();
+        foreach (var library in libraries)
+        {
+            var placed = listed.Where(f => f.Target is { } t && t.LibraryJobId == library.Id).ToList();
+            var needed = placed.Sum(f => f.Bytes);
+            var free = _freeSpace?.AvailableBytes(library.RootPath);
+            var space = free is not { } bytes ? TargetSpace.Unknown : needed <= bytes ? TargetSpace.Enough : TargetSpace.NotEnough;
+            if (space == TargetSpace.NotEnough)
+                warnings.Add($"Library job {library.Id} ({library.RootPath}): the proposals need {FindingRules.Size(needed)}, only {FindingRules.Size(free!.Value)} are free.");
+            roots.Add(new RootStorage(library.Id, library.RootPath, free, needed, placed.Count, space));
+        }
+
+        if (unplacedTally.Bytes > 0 && roots.All(r => r.FreeBytes is not null))
+        {
+            var freeTotal = roots.Sum(r => r.FreeBytes!.Value - Math.Min(r.NeededBytes, r.FreeBytes!.Value));
+            if (unplacedTally.Bytes > freeTotal)
+                warnings.Add($"{FindingRules.Count(unplaced.Count, "finding", "findings")} without a target need {FindingRules.Size(unplacedTally.Bytes)}, more than is left free in all library roots ({FindingRules.Size(freeTotal)}).");
+        }
+        return new FindingStorage(StorageStatus.Known, null, roots, unplaced.Count, unplacedTally, warnings);
     }
 
     private static Unit UnitOf(ScanJob job, FileNode f, FilePlace place, DirectoryReadRow? dir, Bundle? part, Bundle? top, bool besidePrograms)
@@ -598,14 +711,14 @@ public sealed class FindingService
         };
     }
 
-    private Finding NotBackedUp(ScanJob job, Unit unit, string group, IReadOnlyList<FileFacts> files, bool sure, int unitFiles, ComparisonHeader lib)
+    private Finding NotBackedUp(ScanJob job, Unit unit, string group, IReadOnlyList<FileFacts> files, bool sure, int unitFiles, LibraryComparisonSet lib)
     {
         var certainty = FindingRules.Weakest(files.Select(x => x.Value.Certainty), ResultCertainty.Uncertain);
         var n = GroupCount(group, files.Count);
         var worth = sure ? "worth keeping" : "possibly worth keeping";
         var title = $"{n} ({FindingRules.Size(files.Sum(x => x.File.Size))}) {worth}, not in the library: {unit.Label}";
         var reason = $"{n} of the {unitFiles} in {unit.Rel} {(files.Count == 1 ? "is" : "are")} {worth} by {Bases(files)}, "
-                     + $"and the comparison with library job {lib.AgainstJobId} on {lib.ComparedAt:yyyy-MM-dd} found no file with the same content.";
+                     + $"and the comparison with {lib.Label} on {lib.ComparedAt:yyyy-MM-dd} found no file with the same content.";
         var finding = NewFinding(job, FindingKind.NotBackedUp, $"|{group}" + (sure ? "|sure" : "|unsure"), unit, files, certainty, title, reason,
             new FindingAction(PlanActionKind.Move,
                 "Worth keeping and not in the library: move it there (copy, verify, then remove the original)."),
@@ -615,7 +728,7 @@ public sealed class FindingService
             finding.Notes.Add($"{FindingRules.Count(differs, "file has", "files have")} a namesake with other content in a folder of the same name in the library; compare before replacing anything.");
         if (!lib.Complete)
             finding.Notes.Add("The comparison did not finish; files it did not reach are not counted.");
-        finding.Notes.Add($"Where in the library: sfo library match {job.Id} --path <folder> --against {lib.AgainstJobId}.");
+        finding.Notes.Add($"Where in the library: sfo library match {job.Id} <folder> {string.Join(" ", lib.LibraryJobIds.Select(id => $"--against {id}"))}.");
         return finding;
     }
 
@@ -872,7 +985,8 @@ public sealed class FindingService
 
     private async Task<IReadOnlyList<Finding>> MisplacedAsync(
         ScanJob job, IReadOnlyList<FileFacts> facts, IReadOnlyList<DirectoryReadRow> dirs, BundlePatterns patterns,
-        ComparisonHeader? lib, IReadOnlyDictionary<long, FileComparison>? libRows, CancellationToken ct)
+        ComparisonHeader? lib, IReadOnlyDictionary<long, FileComparison>? libRows, IReadOnlyList<ScanJob> libraries,
+        CancellationToken ct)
     {
         var uniform = VerdictCodes.ToCode(DirectoryVerdictKind.Uniform);
         var byDir = facts.ToLookup(x => x.File.ParentPath, StringComparer.Ordinal);
@@ -922,11 +1036,11 @@ public sealed class FindingService
         // Places in the library, for at most MaxTargetLookups groups (the largest first).
         IReadOnlyList<FindingTarget?> targets = [];
         var lookups = candidates.OrderByDescending(c => c.Files.Count).Take(lib is null ? 0 : _options.MaxTargetLookups).ToList();
-        if (lib?.AgainstJobId is { } libraryJob && lookups.Count > 0)
+        if (lib is not null && libraries.Count > 0 && lookups.Count > 0)
         {
             try
             {
-                targets = await _advisor.ProposeAsync(job.Id, libraryJob,
+                targets = await _advisor.ProposeAsync(job.Id, libraries.Select(l => l.Id).ToList(),
                     lookups.Select(c => (IReadOnlyList<FileNode>)c.Files.Select(x => x.File).ToList()).ToList(),
                     libRows ?? new Dictionary<long, FileComparison>(), ct);
             }
@@ -951,10 +1065,26 @@ public sealed class FindingService
                 target = null;
             }
 
+            // A target lies in a library root or nowhere: never a folder of the user profile or the system drive.
+            if (target is not null)
+            {
+                var home = libraries.FirstOrDefault(l => IsAtOrBelow(target.Path, Path.TrimEndingDirectorySeparator(l.RootPath)));
+                if (home is null)
+                {
+                    _logger.LogWarning("Dropped a target outside every library root: {Path}", target.Path);
+                    finding.Notes.Add("A proposed place outside every library root was dropped: targets lie only in the permanent storage.");
+                    target = null;
+                }
+                else
+                {
+                    target = target with { LibraryJobId = home.Id, LibraryRoot = home.RootPath };
+                }
+            }
+
             if (target is not null)
             {
                 finding.Target = target;
-                finding.Action = new FindingAction(PlanActionKind.Move, $"Move to {target.RelativePath}: {target.Reason}");
+                finding.Action = new FindingAction(PlanActionKind.Move, $"Move to {target.RelativePath} in library job {target.LibraryJobId}: {target.Reason}");
             }
             else if (lib is not null && index < 0)
             {
@@ -970,7 +1100,7 @@ public sealed class FindingService
             finding.Certainty = FindingRules.MisplacedCertainty(fileCertainty, target);
             if (target is null || target.ContentCheck != TargetContentCheck.Fits)
                 finding.Notes.Add(lib is null
-                    ? "No library: no place is proposed, and the finding stays uncertain."
+                    ? "No permanent storage (library) is known: no place is proposed, and the finding stays uncertain."
                     : "The content of the proposed place was not compared with these files, so the finding stays uncertain at most.");
         }
 

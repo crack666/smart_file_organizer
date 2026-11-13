@@ -211,7 +211,9 @@ public static class SensitiveOutputGuard
             Importance = ai?.Importance.ToString(),
             Confidence = ai?.Confidence,
             Summary = ai?.Summary,
-            SuggestedTarget = ovr?.OverriddenTarget ?? ai?.SuggestedTarget,
+            // Deprecated (https://github.com/crack666/smart_file_organizer/issues/74): the old free-text target per file
+            // was made up by the model; it is never shown as a target again. The key stays, always empty.
+            SuggestedTarget = null,
             ModelUsed = ai?.ModelUsed,
             AnalyzedAt = ai is null || ai.AnalyzedAt == default ? null : ai.AnalyzedAt,
             Error = ai?.Error,

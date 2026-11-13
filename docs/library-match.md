@@ -115,10 +115,45 @@ When no candidate reaches `MinScore`, `new_folder` names a parent and a name:
 ## Without a library
 
 When the source has no comparison and no completed library job exists, `match` returns exit
-code 0 with `status: "no_library"`, a message how to make one (`sfo scan <path> --role library`,
-or `sfo library propose` for a structure from scratch), and no proposals. Which library is used:
-`--against`, else the one of the latest comparison, else the newest completed library job (with
-a note).
+code 0 with `status: "no_library"`, a message that no permanent storage is known and how to make
+one (`sfo scan <path> --role library`, or `sfo library propose` for a structure from scratch), and
+no proposals. There is no fallback target: never a folder of the user profile (Videos, Pictures,
+Documents) or of the system drive, which is often short of room and no safe storage. Which
+libraries are used: `--against` (repeatable), else those of the latest comparison, else the newest
+completed library job (with a note).
+
+## Several libraries
+
+A permanent storage often has several roots: separate shares for photos, videos and documents,
+each scanned as its own library job (https://github.com/crack666/smart_file_organizer/issues/74).
+`sfo compare <source> --against <a> --against <b>` compares with all of them; a file is
+`backed_up` as soon as one holds it, and the result names which. The comparisons of one run are
+read together by the later steps.
+
+`match` with several libraries builds the map of each and matches the unit against each on its
+own, with the joined comparison (the signal `content_neighbours` sees the content in every root).
+The candidates of all libraries are listed by score; on a tie the library named first wins. Each
+proposal carries `library_job_id`, and its `destination` lies inside that library's root. Only
+when no library has a fitting folder is a new folder proposed: the one of the library whose
+proposal is most certain (first named on a tie), named by the model in that library's style if
+the rules cannot complete the name. The `Margin` rule is applied within each library, not across
+them.
+
+## Targets only in the permanent storage
+
+Every target (`match`, and the `misplaced` findings, which use the same rules) is a folder of a
+library map or a new folder below one, so it lies in a root scanned with the role `library`. The
+findings check it once more and drop any place outside every library root, with a note. Without a
+library, no target path exists at all.
+
+## Room at the target
+
+`match` names for each library root how much is free there and what the unit needs (`space`): its
+files that no library holds yet. The free space is asked from the file system that holds the root
+(a local folder, a mounted share or a network path; on Windows `GetDiskFreeSpaceEx`, elsewhere
+`statvfs`). When it cannot be told (root unreachable, a share that does not report it) it is
+`unknown`, never an error. `not_enough` adds a note. `sfo findings --summary` does the same per
+root for all findings with a target there (`storage` in [cli.md](cli.md#sfo-findings-job)).
 
 ## Patterns file
 

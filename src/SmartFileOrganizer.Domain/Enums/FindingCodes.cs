@@ -96,3 +96,29 @@ public enum FindingCoverage
     /// <summary>Not computed: a step it needs is missing, or there is no library.</summary>
     [JsonStringEnumMemberName("not_computed")] NotComputed
 }
+
+/// <summary>
+/// Whether a permanent storage is known for target proposals (https://github.com/crack666/smart_file_organizer/issues/74).
+/// Targets only ever lie in a root scanned with the role <c>library</c>; without one there is no target path at all.
+/// </summary>
+public enum StorageStatus
+{
+    /// <summary>At least one library is known; targets lie in its roots.</summary>
+    [JsonStringEnumMemberName("known")] Known,
+
+    /// <summary>No library is known: no target is proposed, never a folder of the user profile or the system drive instead.</summary>
+    [JsonStringEnumMemberName("no_library")] NoLibrary
+}
+
+/// <summary>Whether a library root has room for what the proposals send there (https://github.com/crack666/smart_file_organizer/issues/74).</summary>
+public enum TargetSpace
+{
+    /// <summary>The free space at the root is at least what the proposals need.</summary>
+    [JsonStringEnumMemberName("enough")] Enough,
+
+    /// <summary>The proposals need more than is free at the root.</summary>
+    [JsonStringEnumMemberName("not_enough")] NotEnough,
+
+    /// <summary>The free space could not be determined (root unreachable, the file system does not tell).</summary>
+    [JsonStringEnumMemberName("unknown")] Unknown
+}

@@ -178,7 +178,7 @@ public static class ShowCommand
             }
             Line(sb, "importance", f.Importance);
             Line(sb, "summary", f.Summary);
-            Line(sb, "target", f.SuggestedTarget);
+
             Line(sb, "sensitive", f.Sensitive.Count == 0 ? null : $"{CodeLabels.Markers(f.Sensitive, language)} ({f.SensitiveRule})");
             Line(sb, "directory", Verdict(f.DirVerdict));
             Line(sb, "error", f.Error);

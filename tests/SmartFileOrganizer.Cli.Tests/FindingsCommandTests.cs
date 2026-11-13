@@ -471,4 +471,144 @@ public class FindingsCommandTests : IDisposable
 
     private const int FindingsCommandTopDefault = Commands.FindingsCommand.DefaultTop;
     private const int FindingsCommandTopMax = Commands.FindingsCommand.MaxTop;
+
+    // ------------------------------------------------------------------ several libraries, targets, space (issue 74)
+
+    private async Task<Run> SfoWithAsync(Action<IServiceCollection> configure, params string[] args)
+    {
+        var stdout = new StringWriter();
+        var stderr = new StringWriter();
+        var exit = await SfoApp.RunAsync([.. args, "--json", "--db", _dbPath],
+            new CliHost { Out = stdout, Error = stderr, ConfigureServices = configure });
+        return new Run(exit, stdout.ToString(), stderr.ToString());
+    }
+
+    /// <summary>Proposes the same place for every group, wherever it lies.</summary>
+    private sealed class FixedAdvisor(string path) : Application.Findings.IFindingTargetAdvisor
+    {
+        public Task<IReadOnlyList<Application.Findings.FindingTarget?>> ProposeAsync(long sourceJobId, IReadOnlyList<long> libraryJobIds,
+            IReadOnlyList<IReadOnlyList<FileNode>> groups, IReadOnlyDictionary<long, FileComparison> comparison, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<Application.Findings.FindingTarget?>>(groups
+                .Select(_ => (Application.Findings.FindingTarget?)new Application.Findings.FindingTarget(
+                    path, Path.GetFileName(path), ResultCertainty.Likely, "a fixed place", 0, TargetContentCheck.NotChecked))
+                .ToList());
+    }
+
+    private sealed class FixedProbe(long? free) : IFreeSpaceProbe
+    {
+        public long? AvailableBytes(string path) => free;
+    }
+
+    private long JobIdOf(JsonElement scan) => scan.GetProperty("job").GetProperty("id").GetInt64();
+
+    /// <summary>Fertig-wenn: files only in the second of two libraries are backed up there; with the first alone they are not.</summary>
+    [Fact]
+    public async Task SecondLibrary_HoldsTheLoosePhotos_SoTheyAreNoLongerNotBackedUp()
+    {
+        var job = await PrepareAsync(withLibrary: true);
+        var first = (await OkAsync("findings", job, "--summary")).GetProperty("inputs").GetProperty("library_job_id").GetInt64();
+
+        // A second root of the library holds the loose photos.
+        var second = Path.Combine(_dir, "library-photos");
+        Directory.CreateDirectory(Path.Combine(second, "Bilder", "2018"));
+        foreach (var file in Directory.GetFiles(Path.Combine(_tree, "Neuer Ordner")))
+            File.Copy(file, Path.Combine(second, "Bilder", "2018", Path.GetFileName(file)));
+        var secondId = JobIdOf(await OkAsync("scan", second, "--role", "library"));
+        await OkAsync("compare", job, "--against", first.ToString(), "--against", secondId.ToString());
+
+        var both = await OkAsync("findings", job, "--limit", "200");
+        Assert.DoesNotContain(Items(both), f => Str(f, "kind") == "not_backed_up" && Str(f, "relative_path") == "Neuer Ordner");
+        Assert.Equal([first, secondId], both.GetProperty("inputs").GetProperty("library_job_ids").EnumerateArray().Select(x => x.GetInt64()));
+
+        var summary = await OkAsync("findings", job, "--summary");
+        var byLibrary = summary.GetProperty("overview").GetProperty("backed_up").GetProperty("by_library").EnumerateArray().ToList();
+        Assert.Equal(2, byLibrary.Count);
+        var inSecond = byLibrary.Single(l => l.GetProperty("library_job_id").GetInt64() == secondId);
+        Assert.True(inSecond.GetProperty("files").GetInt64() >= 300, inSecond.ToString());
+        Assert.Equal(second, Str(inSecond, "root_path"));
+
+        // With the first library alone they are not backed up.
+        var alone = await OkAsync("findings", job, "--against", first.ToString(), "--limit", "200");
+        var loose = Assert.Single(Items(alone), f => Str(f, "kind") == "not_backed_up" && Str(f, "relative_path") == "Neuer Ordner");
+        Assert.Equal(300, loose.GetProperty("comparison").GetProperty("new").GetInt64());
+
+        // A library without a stored comparison is named: an error, not a guess.
+        var missing = await SfoAsync("findings", job, "--against", "9999");
+        Assert.Equal(ExitCodes.Failure, missing.ExitCode);
+        Assert.Equal(ErrorCodes.ComparisonNotFound, missing.ErrorCode());
+    }
+
+    /// <summary>Fertig-wenn: without a library no finding has a target path, and the summary says no permanent storage is known.</summary>
+    [Fact]
+    public async Task WithoutLibrary_NoFindingHasATarget_EvenWhenAnAdvisorProposesOne()
+    {
+        var job = await PrepareAsync(withLibrary: false);
+        var profileVideos = Path.Combine(_dir, "home", "Videos");
+        void Configure(IServiceCollection s) => s.AddSingleton<Application.Findings.IFindingTargetAdvisor>(new FixedAdvisor(profileVideos));
+
+        var run = await SfoWithAsync(Configure, "findings", job, "--limit", "200");
+        Assert.True(run.ExitCode == ExitCodes.Ok, run.Stdout + run.Stderr);
+        var items = Items(run.Result());
+        Assert.NotEmpty(items);
+        Assert.All(items, f => Assert.Equal(JsonValueKind.Null, f.GetProperty("target").ValueKind));
+        Assert.DoesNotContain(profileVideos, run.Stdout);
+
+        var summary = await SfoWithAsync(Configure, "findings", job, "--summary");
+        var storage = summary.Result().GetProperty("storage");
+        Assert.Equal("no_library", Str(storage, "status"));
+        Assert.Empty(storage.GetProperty("roots").EnumerateArray());
+        Assert.Contains("No permanent storage", Str(storage, "message"));
+        var overview = summary.Result().GetProperty("overview");
+        Assert.True(overview.GetProperty("files").GetProperty("files").GetInt64() > 0);
+        Assert.Equal(0, overview.GetProperty("backed_up").GetProperty("files").GetInt64());
+    }
+
+    /// <summary>Fertig-wenn: no target lies outside a library root; the summary names free and needed space per root and warns.</summary>
+    [Fact]
+    public async Task Targets_LieOnlyInLibraryRoots_AndTheSummaryWeighsTheirSpace()
+    {
+        var job = await PrepareAsync(withLibrary: true);
+
+        // A place outside every library root, as a user profile folder would be: dropped, with a note.
+        var outside = Path.Combine(_dir, "home", "Videos");
+        var dropped = await SfoWithAsync(s => s.AddSingleton<Application.Findings.IFindingTargetAdvisor>(new FixedAdvisor(outside)),
+            "findings", job, "--kind", "misplaced");
+        Assert.True(dropped.ExitCode == ExitCodes.Ok, dropped.Stdout + dropped.Stderr);
+        var misplaced = Assert.Single(Items(dropped.Result()));
+        Assert.Equal(JsonValueKind.Null, misplaced.GetProperty("target").ValueKind);
+        Assert.Contains(Strings(misplaced, "notes"), n => n.Contains("outside every library root", StringComparison.Ordinal));
+
+        // A place inside the library: kept, with its library, and weighed against the free space of the root.
+        var inside = Path.Combine(_library, "Fotos", "2023");
+        void Inside(IServiceCollection s, long? free)
+        {
+            s.AddSingleton<Application.Findings.IFindingTargetAdvisor>(new FixedAdvisor(inside));
+            s.AddSingleton<IFreeSpaceProbe>(new FixedProbe(free));
+        }
+
+        var kept = await SfoWithAsync(s => Inside(s, 1), "findings", job, "--kind", "misplaced");
+        var target = Assert.Single(Items(kept.Result())).GetProperty("target");
+        Assert.Equal(inside, Str(target, "path"));
+        Assert.Equal(_library, Str(target, "library_root"));
+        var libraryId = target.GetProperty("library_job_id").GetInt64();
+
+        var tight = (await SfoWithAsync(s => Inside(s, 1), "findings", job, "--summary")).Result().GetProperty("storage");
+        Assert.Equal("known", Str(tight, "status"));
+        var root = Assert.Single(tight.GetProperty("roots").EnumerateArray());
+        Assert.Equal(libraryId, root.GetProperty("library_job_id").GetInt64());
+        Assert.Equal(1, root.GetProperty("free_bytes").GetInt64());
+        Assert.True(root.GetProperty("needed_bytes").GetInt64() > 1);
+        Assert.Equal("not_enough", Str(root, "space"));
+        Assert.Contains(Strings(tight, "warnings"), w => w.Contains($"Library job {libraryId}", StringComparison.Ordinal));
+        Assert.True(tight.GetProperty("unplaced_findings").GetInt32() > 0); // the loose photos still need a place
+
+        var roomy = (await SfoWithAsync(s => Inside(s, long.MaxValue / 2), "findings", job, "--summary")).Result().GetProperty("storage");
+        Assert.Equal("enough", Str(Assert.Single(roomy.GetProperty("roots").EnumerateArray()), "space"));
+        Assert.Empty(roomy.GetProperty("warnings").EnumerateArray());
+
+        var unknown = (await SfoWithAsync(s => Inside(s, null), "findings", job, "--summary")).Result().GetProperty("storage");
+        var unknownRoot = Assert.Single(unknown.GetProperty("roots").EnumerateArray());
+        Assert.Equal("unknown", Str(unknownRoot, "space"));
+        Assert.Equal(JsonValueKind.Null, unknownRoot.GetProperty("free_bytes").ValueKind);
+    }
 }

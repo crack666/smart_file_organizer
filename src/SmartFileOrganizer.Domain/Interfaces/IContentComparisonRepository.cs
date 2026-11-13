@@ -34,7 +34,13 @@ public interface IContentComparisonRepository
     /// <summary>The newest stored comparison of a source job against any library job, or null.</summary>
     Task<ComparisonHeader?> GetLatestWithLibraryAsync(long sourceJobId, CancellationToken ct = default);
 
-    /// <summary>Per-file results of a stored comparison, ordered by path.</summary>
+    /// <summary>
+    /// The comparisons of the newest run of a source job with libraries: the library jobs one <c>sfo compare</c> named
+    /// together (one for a run with one library), ordered by id. Empty when the job was never compared with a library.
+    /// </summary>
+    Task<IReadOnlyList<ComparisonHeader>> GetLatestLibraryRunAsync(long sourceJobId, CancellationToken ct = default);
+
+    /// <summary>Per-file results of a stored comparison, ordered by path, with the library job of the match.</summary>
     Task<IReadOnlyList<FileComparison>> GetFileComparisonsAsync(long comparisonId, CancellationToken ct = default);
 
     /// <summary>

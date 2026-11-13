@@ -306,14 +306,15 @@ public class JobReadService
         c.Second is null ? null : ToAnswerItem(c.Second, isProtected),
         c.CheckedAt);
 
-    /// <summary>For a protected file only the codes stay: no model text, target or raw response.</summary>
+    /// <summary>For a protected file only the codes stay: no model text or raw response. The old free-text target is
+    /// never given (deprecated, https://github.com/crack666/smart_file_organizer/issues/74).</summary>
     private static CheckAnswerItem ToAnswerItem(CheckAnswer a, bool isProtected) => new(
         a.Category.ToString(),
         a.Importance.ToString(),
         a.Confidence,
         a.KeepHint.ToCode(),
         isProtected ? null : a.Summary,
-        isProtected ? null : a.SuggestedTarget,
+        null,
         isProtected ? null : a.KeepReason,
         a.ModelUsed,
         isProtected ? null : a.Error,

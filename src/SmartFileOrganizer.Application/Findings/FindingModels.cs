@@ -11,6 +11,8 @@ public sealed record FindingAction(PlanActionKind Kind, string Reason, bool Sing
 /// <summary>
 /// A proposed place in the library. <see cref="SameContentFiles"/> counts files of the finding whose content already
 /// lies there; <see cref="ContentCheck"/> says whether the content of the unit was compared with what the place holds.
+/// <see cref="LibraryJobId"/> and <see cref="LibraryRoot"/> name the library the place lies in: a target never lies
+/// outside a root scanned with the role <c>library</c> (https://github.com/crack666/smart_file_organizer/issues/74).
 /// </summary>
 public sealed record FindingTarget(
     string Path,
@@ -18,7 +20,9 @@ public sealed record FindingTarget(
     ResultCertainty Certainty,
     string Reason,
     int SameContentFiles,
-    TargetContentCheck ContentCheck);
+    TargetContentCheck ContentCheck,
+    long? LibraryJobId = null,
+    string? LibraryRoot = null);
 
 /// <summary>
 /// Identical files at several places: how many groups, how much is redundant, which copy to keep.
@@ -124,6 +128,8 @@ public sealed class Finding
 public sealed record KindCoverage(FindingCoverage Coverage, string? Note);
 
 /// <summary>What the stored steps of the job offer the findings.</summary>
+/// <param name="LibraryComparison">The comparison with the first library named (it stands for the set).</param>
+/// <param name="LibraryJobId">The first library job; <paramref name="LibraryJobIds"/> lists all of them.</param>
 public sealed record FindingInputsInfo(
     long Files,
     long FilesJudged,
@@ -133,7 +139,57 @@ public sealed record FindingInputsInfo(
     DateTime? BundlesBuiltAt,
     ComparisonHeader? LibraryComparison,
     ComparisonHeader? DuplicateComparison,
-    long? LibraryJobId);
+    long? LibraryJobId,
+    IReadOnlyList<long>? LibraryJobIds = null);
+
+/// <summary>A number of files and their size.</summary>
+public sealed record FileTally(long Files, long Bytes)
+{
+    public static FileTally Zero { get; } = new(0, 0);
+
+    public FileTally Add(long bytes) => new(Files + 1, Bytes + bytes);
+}
+
+/// <summary>Files of the source one library holds by content.</summary>
+public sealed record LibraryTally(long LibraryJobId, string RootPath, long Files, long Bytes);
+
+/// <summary>
+/// What lies on the source at a glance, file by file rather than finding by finding
+/// (https://github.com/crack666/smart_file_organizer/issues/74). A marked file counts under <see cref="Sensitive"/> only,
+/// never under worth; <see cref="BackedUp"/> counts every file the libraries hold, marked ones included.
+/// </summary>
+/// <param name="WorthKeepingUnknown">Worth keeping, but not compared or not readable: nobody knows whether it is safe.</param>
+/// <param name="NotCompared">Files without a comparison state: no library, or the file could not be read.</param>
+public sealed record FindingOverview(
+    FileTally All,
+    FileTally WorthKeeping,
+    FileTally WorthKeepingNotBackedUp,
+    FileTally WorthKeepingBackedUp,
+    FileTally WorthKeepingUnknown,
+    FileTally BackedUp,
+    IReadOnlyList<LibraryTally> BackedUpByLibrary,
+    FileTally Disposable,
+    FileTally Sensitive,
+    FileTally NotCompared);
+
+/// <summary>
+/// One library root as a target: how much is free there, how much the proposed targets in it need together.
+/// <see cref="FreeBytes"/> is null when it cannot be determined; <see cref="Space"/> is then <c>unknown</c>.
+/// </summary>
+public sealed record RootStorage(long LibraryJobId, string RootPath, long? FreeBytes, long NeededBytes, int Findings, TargetSpace Space);
+
+/// <summary>
+/// Where the proposals of the findings go (https://github.com/crack666/smart_file_organizer/issues/74): only into
+/// library roots. <see cref="Unplaced"/> counts files of findings that should move but have no target yet (worth keeping
+/// and not in the library, or among noise); they need room in one of the roots too.
+/// </summary>
+public sealed record FindingStorage(
+    StorageStatus Status,
+    string? Message,
+    IReadOnlyList<RootStorage> Roots,
+    int UnplacedFindings,
+    FileTally Unplaced,
+    IReadOnlyList<string> Warnings);
 
 /// <summary>All findings of a job, ranked, with what they rest on.</summary>
 public sealed record FindingReport(
@@ -142,4 +198,6 @@ public sealed record FindingReport(
     IReadOnlyDictionary<FindingKind, KindCoverage> Coverage,
     IReadOnlyList<string> MissingSteps,
     IReadOnlyList<Finding> Findings,
-    IReadOnlyDictionary<FindingKind, long> BelowThreshold);
+    IReadOnlyDictionary<FindingKind, long> BelowThreshold,
+    FindingOverview? Overview = null,
+    FindingStorage? Storage = null);

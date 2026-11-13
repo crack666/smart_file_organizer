@@ -52,11 +52,98 @@ public sealed class ContentComparisonService
     /// duplicates within the source are determined and file states stay null.
     /// </summary>
     /// <exception cref="ComparisonException">A job is missing, not completed, has the wrong role, or its root is unreachable.</exception>
-    public async Task<ComparisonReport> CompareAsync(
+    public Task<ComparisonReport> CompareAsync(
         long sourceJobId,
         long? againstJobId,
         IProgress<ComparisonProgress>? progress = null,
+        CancellationToken ct = default) =>
+        CompareOneAsync(sourceJobId, againstJobId, null, progress, ct);
+
+    /// <summary>
+    /// Compares <paramref name="sourceJobId"/> with several library jobs, one after the other
+    /// (https://github.com/crack666/smart_file_organizer/issues/74). Each pair is stored as by <see cref="CompareAsync"/>;
+    /// the comparisons share a run id, so later steps read them together (<see cref="LibraryComparisonSet"/>). The
+    /// report joins them: a file is <c>backed_up</c> as soon as one library holds it, and
+    /// <see cref="FileComparison.MatchJobId"/> names that library. With one library the report is the one of
+    /// <see cref="CompareAsync"/>, plus <see cref="ComparisonReport.Libraries"/>.
+    /// </summary>
+    /// <exception cref="ComparisonException">A job is missing, not completed, has the wrong role, or its root is
+    /// unreachable; checked for every library before any file is read.</exception>
+    public async Task<ComparisonReport> CompareWithLibrariesAsync(
+        long sourceJobId,
+        IReadOnlyList<long> againstJobIds,
+        IProgress<ComparisonProgress>? progress = null,
         CancellationToken ct = default)
+    {
+        var ids = againstJobIds.Distinct().ToList();
+        if (ids.Count == 0)
+            return await CompareAsync(sourceJobId, (long?)null, progress, ct);
+
+        // Every job is checked first, so a typo in the third library does not end the run after the first two.
+        await RequireJobAsync(sourceJobId, ScanRole.Source, ct);
+        var libraries = new List<ScanJob>();
+        foreach (var id in ids)
+        {
+            if (id == sourceJobId)
+                throw new ComparisonException(ComparisonFailure.WrongRole, "A job cannot be compared with itself.");
+            libraries.Add(await RequireJobAsync(id, ScanRole.Library, ct));
+        }
+
+        var reports = new List<ComparisonReport>(ids.Count);
+        long? runId = null;
+        foreach (var id in ids)
+        {
+            var report = await CompareOneAsync(sourceJobId, id, runId, progress, ct);
+            runId ??= report.Header.RunId ?? report.Header.Id;
+            reports.Add(report);
+        }
+        return Join(reports);
+    }
+
+    /// <summary>The stored comparisons of a source with several libraries, joined as by the comparison itself; null when one is missing.</summary>
+    public async Task<ComparisonReport?> GetStoredWithLibrariesAsync(long sourceJobId, IReadOnlyList<long> againstJobIds, CancellationToken ct = default)
+    {
+        var reports = new List<ComparisonReport>();
+        foreach (var id in againstJobIds.Distinct())
+        {
+            if (await GetStoredAsync(sourceJobId, id, ct) is not { } report)
+                return null;
+            reports.Add(report);
+        }
+        return reports.Count == 0 ? null : Join(reports);
+    }
+
+    /// <summary>One report from the reports of the single libraries, in the order named.</summary>
+    private static ComparisonReport Join(IReadOnlyList<ComparisonReport> reports)
+    {
+        var first = reports[0];
+        var set = LibraryComparisonSet.From(reports.Select(r => r.Header).ToList(), reports.Select(r => r.Files).ToList());
+        var byLibrary = set.BackedUpByLibrary();
+        var parts = reports.Select((r, i) => new LibraryComparisonPart(r.Against!, r.Header, byLibrary[i].Files, byLibrary[i].Bytes)).ToList();
+        if (reports.Count == 1)
+            return first with { Files = set.Files, Libraries = parts };
+
+        var errors = reports.SelectMany(r => r.Errors)
+            .DistinctBy(e => (e.Role, e.Kind, e.Path))
+            .ToList();
+        var header = first.Header with
+        {
+            ComparedAt = set.ComparedAt,
+            Complete = set.Complete,
+            ErrorCount = errors.Count
+        };
+        var hashing = new HashingStats(
+            reports.Sum(r => r.Hashing.HeadTailComputed), reports.Sum(r => r.Hashing.FullComputed), reports.Sum(r => r.Hashing.Reused));
+        return new ComparisonReport(header, first.Source, first.Against, set.Files, first.DuplicateGroups,
+            SummarizeDirectories(first.Source.RootPath, set.Files), errors, hashing, parts);
+    }
+
+    private async Task<ComparisonReport> CompareOneAsync(
+        long sourceJobId,
+        long? againstJobId,
+        long? runId,
+        IProgress<ComparisonProgress>? progress,
+        CancellationToken ct)
     {
         var source = await RequireJobAsync(sourceJobId, ScanRole.Source, ct);
         ScanJob? against = null;
@@ -97,14 +184,16 @@ public sealed class ContentComparisonService
         var files = sourceFiles.Select(f => ToFileComparison(f, outcomes[f.Id], resolver, against != null)).ToList();
         var matchPaths = sizeCandidates.Concat(nameCandidates)
             .GroupBy(f => f.Id).ToDictionary(g => g.Key, g => g.First().FullPath);
-        files = files.Select(f => f.MatchFileNodeId is { } m && matchPaths.TryGetValue(m, out var p) ? f with { MatchPath = p } : f).ToList();
+        files = files.Select(f => f.MatchFileNodeId is { } m && matchPaths.TryGetValue(m, out var p)
+            ? f with { MatchPath = p, MatchJobId = against!.Id }
+            : f).ToList();
 
         var errors = await CollectErrorsAsync(source, against, files, ct);
         errors.AddRange(candidateIssues.Values.OrderBy(i => i.Path, StringComparer.Ordinal));
 
-        var header = new ComparisonHeader(0, source.Id, against?.Id, DateTime.UtcNow, errors.Count == 0, errors.Count);
+        var header = new ComparisonHeader(0, source.Id, against?.Id, DateTime.UtcNow, errors.Count == 0, errors.Count, runId);
         var id = await _repo.SaveComparisonAsync(header, files, ct);
-        header = header with { Id = id };
+        header = header with { Id = id, RunId = runId ?? id };
 
         _logger.LogInformation(
             "Compared job {Source} with {Against}: {Files} files, {Errors} errors, {HeadTail} head-tail and {Full} full checksums computed, {Reused} reused.",

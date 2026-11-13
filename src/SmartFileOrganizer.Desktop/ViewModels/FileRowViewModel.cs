@@ -124,7 +124,7 @@ public partial class FileRowViewModel : ViewModelBase
         }
         else if (f.Classification is { } c)
         {
-            vm.EditTarget        = c.SuggestedTarget ?? string.Empty;
+            vm.EditTarget        = string.Empty; // the model's old free-text target is no target (deprecated)
             vm.SelectedCategory  = c.Category;
             vm.ReviewStatus      = f.Status == FileNodeStatus.Approved ? "accepted" : "pending";
         }
