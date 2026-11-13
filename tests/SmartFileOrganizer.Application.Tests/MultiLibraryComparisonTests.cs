@@ -117,7 +117,7 @@ public class MultiLibraryComparisonTests : IDisposable
         var videos = await ScanAsync(_videos, ScanRole.Library);
         await Service().CompareAsync(source.Id, videos.Id);
 
-        // As a database written before migration 19 left it: no run id.
+        // As a database written before migration 21 left it: no run id.
         await using (var conn = _db.CreateConnection())
         {
             await conn.OpenAsync();
