@@ -47,6 +47,9 @@ dotnet run --project src/SmartFileOrganizer.Cli -- bundles build <job>
 dotnet run --project src/SmartFileOrganizer.Cli -- bundles list <job> --json
 # worth and target of every file from what the analysis described, by rule, no model call:
 dotnet run --project src/SmartFileOrganizer.Cli -- decide <job> --targets <target-structure.json> --json
+# a plan from the accepted findings, to change and confirm; it executes nothing (docs/cli.md, Planning):
+dotnet run --project src/SmartFileOrganizer.Cli -- plan create <job> --json
+dotnet run --project src/SmartFileOrganizer.Cli -- plan approve <plan> --all
 ```
 
 To judge how an existing library is filed, without opening a file and

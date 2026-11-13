@@ -1361,6 +1361,126 @@ full checksum (shared with `sfo compare`).
 Result: `{ "only_stale": false, "entries_removed": 1250, "corrections_removed": 0, "entries_left": 0, "corrections_left": 12 }`.
 Checksums are not removed. The next analysis asks the model again for every file.
 
+## Planning
+
+https://github.com/crack666/smart_file_organizer/issues/11: the accepted findings of a source become a plan, one
+action per whole folder or per worth-keeping file, which a person or a steering model reads, changes and confirms.
+**A plan executes nothing**: no command here moves, copies or removes a file; that is the execution step (Issue 12),
+which runs the same checks again. Rules: [architecture.md, Plan flow](architecture.md#plan-flow); codes:
+[glossary.md, Plans](glossary.md#plans).
+
+Order of work: overview (`sfo findings --summary`), recommendation (`sfo findings`, `sfo plan create`), decision
+(`sfo findings accept`, `sfo plan approve`).
+
+**Hard rules**, checked when an action is created, set, imported and confirmed (`problems`, see the glossary):
+
+- Every target lies below the root of a library of the plan (a job scanned with `--role library`), never in the
+  source, never in the user profile, on the system drive or in a place of `Plan:ProtectedPlaces`.
+- Content any library holds already gets no move or copy; at most the note that it lies there twice.
+- `leave` is the default: an action without a usable target is `leave` with a `note`; `recommended` keeps what the
+  finding recommended.
+- Sensitive files are `leave`, never `quarantine`, never removed unless a person decides it, and confirmed only by
+  `--action`, never by `--dir` or `--all`.
+- A library is never a source. Nothing in a managed area (`Plan:ManagedAreas`) is moved, renamed or removed; an action
+  whose target lies in one is marked `into_managed_area`: the program that manages it must read it in again.
+
+Settings, section `Plan` of the settings file:
+
+```json
+{ "Plan": { "ManagedAreas": [ "\\\\nas\\photos\\Lightroom" ], "ProtectedPlaces": [ "D:\\Scratch" ] } }
+```
+
+### `sfo plan create <job>`
+
+| Option | Meaning |
+|---|---|
+| `--against <job>` | Library job whose stored comparison counts, as in `sfo findings`; repeatable. Default: the libraries of the newest `sfo compare`. They are the libraries of the plan. |
+| `--library <job>` | Library whose root the targets of `sfo decide --targets` (relative paths) go under. Default: the only library, when there is exactly one; with several and none named, such targets are not used and the action is `leave` with a note. |
+
+How actions arise from accepted findings:
+
+- A folder judged `unit` or `uniform` whose files all go (worth keeping, not in a library, not marked, no misplaced
+  file among them) is one action with `source_kind` `folder`; the target keeps the folder name. The topmost such
+  folder wins.
+- Everything else of a finding to move is one action per worth-keeping file; the rest of a `mixed` folder stays.
+- The target is the place the finding proposes in a library, else the target of `sfo decide` below the root of the
+  `--library`. Without one: `leave`.
+- `sensitive`: one `leave` per file (`sensitive`, `single_decision` true). `duplicate`: `delete_source` for each copy
+  outside the kept folder whose content a library holds (the target is the place in the library); else one `leave`.
+  Any other finding that recommends nothing to move is one `leave`.
+- An action that fails a check is stored as `leave` with the problems in its note.
+
+Result: the summary of the new plan, as `sfo plan summary`. Changes no file.
+
+Errors: `job_not_found` (1), `wrong_role` (1, the job is a library), `comparison_not_found` (1), `library_invalid` (1,
+`--library` is no library job), `usage` (2).
+
+### `sfo plan show <plan>`
+
+The actions, one page at a time (`--limit`, `--offset`), filtered by `--kind`, `--state`, `--finding <key>`,
+`--under <folder>` (full, or relative to the job root) and `--problems` (only actions with problems). The problems
+are computed when read, so a file that appeared at a target since shows up here.
+
+```json
+{ "plan_id": 1, "job_id": 1, "total": 5, "limit": 200, "offset": 0, "next_offset": null,
+  "items": [
+    { "id": 1, "finding_key": "not_backed_up-0a1b2c3d4e", "finding_kind": "not_backed_up",
+      "unit": "4 photos not in the library in Urlaub Kroatien 2021", "source_kind": "folder",
+      "source_path": "/media/stick/Urlaub Kroatien 2021", "relative_path": "Urlaub Kroatien 2021",
+      "files": 4, "bytes": 8123456, "kind": "move", "recommended": "move",
+      "target": "/nas/photos/Fotos/Urlaub Kroatien 2021", "library_job_id": 2,
+      "reason": "The folder is one whole (uniform): it moves as it is, its name stays. ...", "note": null,
+      "origin": "rule", "state": "proposed", "sensitive": false, "single_decision": false,
+      "into_managed_area": false, "problems": [], "decided_by": null, "decided_at": null } ] }
+```
+
+Errors: `plan_not_found` (1), `usage` (2).
+
+### `sfo plan summary <plan>`
+
+One page: `actions`, `by_kind` (actions, files, bytes), `by_state`, `changed_from_recommendation`,
+`with_problems`, `sensitive`, `into_managed_area`, per library of the plan the bytes the writing actions need
+there against its free space (`space`: `enough`, `not_enough`, `unknown`), the units (one per finding) with the
+largest first (`--top`, default 10, at most 50), and the notes of the creation (files left out because a library
+holds them, no library, no accepted finding). Errors: `plan_not_found` (1).
+
+### `sfo plan set <plan> <action>`
+
+| Option | Meaning |
+|---|---|
+| `--kind <code>` | `move`, `copy`, `quarantine`, `delete_source` or `leave`. |
+| `--target <path>` | Full path of the file or folder at the target; a relative path lies below the only library of the plan. |
+| `--clear-target` | Remove the target. |
+| `--reason <text>` | Why; replaces the reason. |
+| `--by human\|agent` | Who changes it (`origin`); default `human`. |
+
+The change is checked at once; a refused change changes nothing and ends with `plan_change_refused` (1) and
+`{ "plan_id", "refused": [ { "action_id", "problems", "message" } ] }` as result. A changed action is `proposed`
+again. Executed, failed and undone actions are not changed. Result: `{ "plan_id", "items": [ action ] }`.
+
+### `sfo plan import <plan> <file>`
+
+Many changes at once, as a steering model writes them; all or none, checked as `set`:
+
+```json
+{ "actions": [ { "id": 3, "target": "/nas/docs/Papiere/Strom/Rechnung_Strom.pdf" },
+               { "id": 7, "kind": "leave", "reason": "keep it on the stick" },
+               { "id": 9, "target": null } ] }
+```
+
+A missing field stays as it is; `"target": null` removes the target. `--by human|agent` as in `set`. Errors:
+`path_not_found` (1, the file), `import_invalid` (1, not JSON, no `actions` list, an entry without `id` or with an
+unknown kind), `plan_change_refused` (1, as in `set`), `plan_not_found` (1).
+
+### `sfo plan approve|reject <plan>`
+
+`--action <id>` (repeatable), `--dir <folder>` (every action whose source lies at or below it) or `--all`; one of
+them is needed (else `usage`, 2). `--by human|agent`, default `human`. `approve` confirms only actions without
+problems, and a sensitive action only when named by `--action`; `reject` marks them not to be executed. Executed,
+failed and undone actions are skipped. Result: `{ "plan_id", "state", "changed": [ ids ], "skipped": [ { "action_id",
+"reasons" } ], "by_state" }`; a reason is a problem code, `single_decision` or the state of the action. Errors:
+`plan_not_found` (1), `action_not_found` (1).
+
 ## Machine contract
 
 Applies to every command, including the ones added later.
@@ -1402,7 +1522,7 @@ lines when it starts or stops waiting for the model server (see `sfo analyze`); 
 | Code | Meaning | `error.code` |
 |---|---|---|
 | 0 | Done | |
-| 1 | The command ran but could not do its job | `job_not_found`, `path_not_found`, `scan_failed`, `scan_not_completed`, `wrong_role`, `compare_incomplete`, `comparison_not_found`, `database_error`, `model_missing`, `rules_invalid`, `words_invalid`, `output_inside_job`, `export_failed`, `truth_invalid`, `run_not_found`, `output_not_empty`, `bundle_not_found`, `patterns_invalid`, `library_patterns_invalid`, `settings_invalid`, `finding_not_found`, `targets_invalid`, `internal_error` |
+| 1 | The command ran but could not do its job | `job_not_found`, `path_not_found`, `scan_failed`, `scan_not_completed`, `wrong_role`, `compare_incomplete`, `comparison_not_found`, `database_error`, `model_missing`, `rules_invalid`, `words_invalid`, `output_inside_job`, `export_failed`, `truth_invalid`, `run_not_found`, `output_not_empty`, `bundle_not_found`, `patterns_invalid`, `library_patterns_invalid`, `settings_invalid`, `finding_not_found`, `targets_invalid`, `plan_not_found`, `action_not_found`, `plan_change_refused`, `library_invalid`, `import_invalid`, `internal_error` |
 | 2 | Wrong invocation: unknown command or option, missing or invalid value | `usage` |
 | 3 | Ollama not reachable | `ollama_unavailable` |
 | 4 | The model server went away during `sfo analyze` and did not come back within `ModelServer.MaxWaitMinutes`; open items stay open, run the command again | `model_server_lost` |

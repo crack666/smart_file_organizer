@@ -107,6 +107,11 @@ public class ScanJobRepository : IScanJobRepository
             UPDATE eval_runs  SET job_id = NULL WHERE job_id = @id;
             DELETE FROM library_advice      WHERE job_id = @id;
             DELETE FROM finding_decisions   WHERE job_id = @id;
+            DELETE FROM plan_actions        WHERE plan_id IN (SELECT id FROM plans WHERE job_id = @id);
+            DELETE FROM plans               WHERE job_id = @id;
+            UPDATE plan_actions SET library_job_id = NULL WHERE library_job_id = @id;
+            UPDATE plan_actions SET file_node_id = NULL WHERE file_node_id IN (SELECT id FROM file_nodes WHERE job_id = @id);
+            UPDATE plan_actions SET directory_node_id = NULL WHERE directory_node_id IN (SELECT id FROM directory_nodes WHERE job_id = @id);
             DELETE FROM model_server_waits  WHERE job_id = @id;
             DELETE FROM file_nodes          WHERE job_id = @id;
             DELETE FROM file_links          WHERE job_id = @id;

@@ -207,9 +207,14 @@ public sealed class FindingService
     /// The worth of every file of the job as the findings see it, with its place and its stored facts: the input of
     /// stage 2 (<c>sfo decide</c>, https://github.com/crack666/smart_file_organizer/issues/37), and the findings beside it.
     /// </summary>
-    public async Task<(FindingReport Report, IReadOnlyList<FileValueRow> Files)> ComputeValuesAsync(long jobId, CancellationToken ct = default)
+    public Task<(FindingReport Report, IReadOnlyList<FileValueRow> Files)> ComputeValuesAsync(long jobId, CancellationToken ct = default) =>
+        ComputeValuesAsync(jobId, null, ct);
+
+    /// <summary>As <see cref="ComputeValuesAsync(long, CancellationToken)"/>, against these library jobs (null or empty: those of the newest comparison).</summary>
+    public async Task<(FindingReport Report, IReadOnlyList<FileValueRow> Files)> ComputeValuesAsync(
+        long jobId, IReadOnlyList<long>? libraries, CancellationToken ct = default)
     {
-        var computed = await ComputeInternalAsync(jobId, ct);
+        var computed = await ComputeInternalAsync(jobId, ct, libraries);
         return (computed.Report, computed.Values);
     }
 

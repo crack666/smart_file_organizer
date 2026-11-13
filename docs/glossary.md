@@ -167,14 +167,6 @@ With several libraries (`--against` more than once, https://github.com/crack666/
 states of the single comparisons are joined per file: `backed_up` in any library wins, then `error` (another root
 might hold it), then `differs`, then `new`. `match_library_job_id` names the library that holds the content.
 
-### Reserved for planned work
-
-These codes are fixed by the decision table but no code uses them yet.
-
-| Group | Codes |
-|---|---|
-| State of a plan action | `proposed`, `approved`, `rejected`, `executed`, `failed`, `undone` |
-
 ## Scan
 
 Links and read errors: https://github.com/crack666/smart_file_organizer/issues/57 and
@@ -665,7 +657,8 @@ folder can be decided kind by kind.
 
 ### Kind of a plan action (`PlanActionKind`)
 
-Recommended by every finding, executed by nothing yet.
+Recommended by every finding and stored per plan action (`kind`, `recommended`, see [Plans](#plans)); executed by
+nothing yet.
 
 | Code | Meaning |
 |---|---|
@@ -759,6 +752,57 @@ say nothing; `certainty` is a certainty code.
 | Code | Meaning |
 |---|---|
 | `target_structure` | The first target of the target structure whose `holds` names the file type; its pattern filled from the facts. |
+
+## Plans
+
+https://github.com/crack666/smart_file_organizer/issues/11, written by `sfo plan` ([cli.md](cli.md#planning)) and
+stored in `plans` and `plan_actions`. The kind of an action is a `PlanActionKind` code. A plan executes nothing.
+
+### State of a plan action (`PlanActionState`)
+
+| Code | Meaning |
+|---|---|
+| `proposed` | Proposed, not confirmed; also after every change of kind, target or reason. |
+| `approved` | Confirmed by a person or a steering agent; only an action without problems is confirmed. |
+| `rejected` | Not wanted; it is not executed. |
+| `executed` | Carried out by the execution step (Issue 12); never set by the plan. |
+| `failed` | The execution step tried and stopped; the original stays. Never set by the plan. |
+| `undone` | Carried out and taken back. Never set by the plan. |
+
+### Who set an action (`PlanActionOrigin`)
+
+`origin` of an action; `decided_by` (who confirmed or rejected it) is `human` or `agent`.
+
+| Code | Meaning |
+|---|---|
+| `rule` | The rules of `sfo plan create`, from accepted findings and stored decisions. |
+| `model` | A model answer taken over as it was. |
+| `agent` | A steering agent, through `sfo plan set` or `sfo plan import` with `--by agent`. |
+| `human` | A person. |
+
+### Source of an action (`PlanSourceKind`)
+
+| Code | Meaning |
+|---|---|
+| `file` | One file. |
+| `folder` | A whole folder with everything below it; its name stays. |
+
+### Why an action cannot be confirmed (`PlanProblem`)
+
+`problems` of an action in `sfo plan show`; the same checks refuse a change in `sfo plan set` and `sfo plan import`
+and skip an action in `sfo plan approve`. `leave` has none.
+
+| Code | Meaning |
+|---|---|
+| `no_target` | The kind needs a target and there is none. |
+| `target_outside_library` | The target does not lie below the root of a library of the plan. |
+| `target_in_source` | The target lies in the scanned source, or inside the source of the action. |
+| `target_protected` | The target lies in the user profile, on the system drive, or in a place of `Plan:ProtectedPlaces`. |
+| `source_in_library` | The source lies in a library; a library is never a source. |
+| `source_in_managed_area` | A move, quarantine or removal of something in a managed area (`Plan:ManagedAreas`), where nothing is moved, renamed or removed. |
+| `already_in_library` | A move or copy of content some library holds already. |
+| `sensitive_kind` | A sensitive file to quarantine, or removed (`delete_source`) without a person deciding it. |
+| `name_collision` | Another action writes to the same target, or something exists there already. |
 
 ## Model server
 

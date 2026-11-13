@@ -7,6 +7,7 @@ using SmartFileOrganizer.Application.Bundles;
 using SmartFileOrganizer.Application.Evaluation;
 using SmartFileOrganizer.Application.Decisions;
 using SmartFileOrganizer.Application.Findings;
+using SmartFileOrganizer.Application.Plans;
 using SmartFileOrganizer.Application.Services;
 using SmartFileOrganizer.Domain.Interfaces;
 using SmartFileOrganizer.Infrastructure;
@@ -229,6 +230,14 @@ public static class ServiceCollectionExtensions
         // results; no model service is injected.
         services.AddSingleton<IFileDecisionRepository, FileDecisionRepository>();
         services.AddSingleton<DecisionService>();
+
+        // Plans (https://github.com/crack666/smart_file_organizer/issues/11): actions from accepted findings, changed and
+        // confirmed; nothing is executed. Section "Plan": managed areas and further protected places.
+        services.AddSingleton<IPlanRepository, PlanRepository>();
+        services.TryAddSingleton<IProtectedPlaces, ProtectedPlaces>();
+        services.AddSingleton(sp =>
+            sp.GetRequiredService<IConfiguration>().GetSection("Plan").Get<PlanOptions>() ?? new PlanOptions());
+        services.AddSingleton<PlanService>();
 
         return services;
     }
