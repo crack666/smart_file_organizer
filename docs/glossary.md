@@ -66,6 +66,11 @@ A file can carry several markers; they are stored as a comma-separated list in t
 | `finance` | Papers that show the money, income or debts of the person: bank and credit card statements, tax returns and tax certificates, payslips, depot and loan papers, card numbers. Not an ordinary invoice or receipt, a rental or other contract, or a table of amounts without account, income or debt. |
 | `health` | Medical findings, doctor letters, health insurance documents. |
 
+Rule ids (`sensitive_rule`) name the rule that set a marker, never the content: `name:<file name>`, `ext:<extension>`,
+`path:<fragment>`, `word:<keyword>`, `header:<kind>`, `dir:<folder rule>`. The prefix `entry:` (`entry:word:kontoauszug`)
+means the rule fired on the name of an entry inside an archive, read from its listing without unpacking
+(https://github.com/crack666/smart_file_organizer/issues/67); the archive carries the marker with origin rule.
+
 #### Where `finance` and `private_message` end
 
 A marker withholds the content of a file from everything that leaves the machine and sends the file to
@@ -242,7 +247,7 @@ Links and read errors: https://github.com/crack666/smart_file_organizer/issues/5
 | `low_confidence` | The confidence of the model is below the configured limit. |
 | `unclear_category` | The model answered ReviewNeeded or Unknown. |
 | `kind_mismatch` | The category does not fit the kind of file the first bytes or the extension name. |
-| `rule_disagrees` | An unambiguous metadata rule contradicts the category; the rule wins without a second call. |
+| `rule_disagrees` | An unambiguous metadata rule contradicts the category, or the kind of file does not allow it (a video, audio or code file given another category: rule note `type_limit`); the rule wins without a second call. |
 | `verdict_disagrees` | The file contradicts the retention value of its directory. |
 
 ### Outcome of a second check (`CheckOutcome`)

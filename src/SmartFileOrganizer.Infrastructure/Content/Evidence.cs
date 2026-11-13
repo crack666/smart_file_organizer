@@ -25,6 +25,11 @@ public sealed class Evidence
     /// <summary>Set when a rule decides the file without the model.</summary>
     public FileClassification? RuleResult { get; set; }
 
+    /// <summary>Markers the name rules found in the content (archive entry names), with their rule ids.</summary>
+    public SensitiveMarker ContentMarkers { get; set; }
+
+    public string? ContentMarkerRule { get; set; }
+
     /// <summary>How much evidence to gather; set by the preparer.</summary>
     public EvidenceDepth Depth { get; init; }
 
@@ -79,6 +84,8 @@ public sealed class Evidence
         Contains = _contains.ToList(),
         Missing = _missing.ToList(),
         RuleResult = RuleResult,
+        ContentMarkers = ContentMarkers,
+        ContentMarkerRule = ContentMarkerRule,
         Depth = Depth
     };
 }

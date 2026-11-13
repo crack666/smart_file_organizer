@@ -16,10 +16,11 @@ public static class ResultCheckRules
 {
     /// <summary>What speaks against a first answer. <see cref="RuleCategory"/> is set when an unambiguous rule
     /// sets the category instead of the model.</summary>
-    public sealed record Findings(IReadOnlyList<CheckReason> Reasons, FileCategory? RuleCategory, string? RuleNote)
+    public sealed record Findings(IReadOnlyList<CheckReason> Reasons, FileCategory? RuleCategory, string? RuleNote, bool KindDecides = false)
     {
-        /// <summary>A second model call is due: any reason except a rule that already decided.</summary>
-        public bool NeedsSecondCall => Reasons.Any(r => r != CheckReason.RuleDisagrees);
+        /// <summary>A second model call is due: any reason except a rule that already decided. When the kind of file
+        /// set the category (<see cref="TypeLimit"/>), no second call is made.</summary>
+        public bool NeedsSecondCall => !KindDecides && Reasons.Any(r => r != CheckReason.RuleDisagrees);
     }
 
     /// <summary>Confidence standing in for a missing one when two answers are combined: no statement, a coin flip.</summary>
@@ -46,14 +47,23 @@ public static class ResultCheckRules
         if (options.CheckUnclearCategory && IsUnclear(answer.Category))
             reasons.Add(CheckReason.UnclearCategory);
 
-        if (KindMismatch(file, facts, answer.Category) is { } kindNote)
+        FileCategory? ruleCategory = null;
+        var kindDecides = false;
+        if (TypeLimit(file, facts, answer.Category) is { } limit)
+        {
+            kindDecides = true;
+            // The kind of file decides, no second call: the contradiction is stored with the check.
+            reasons.Add(CheckReason.RuleDisagrees);
+            ruleCategory = limit.Category;
+            notes.Add(limit.Note);
+        }
+        else if (KindMismatch(file, facts, answer.Category) is { } kindNote)
         {
             reasons.Add(CheckReason.KindMismatch);
             notes.Add(kindNote);
         }
 
-        FileCategory? ruleCategory = null;
-        if (RuleOverride(facts, answer.Category) is { } rule)
+        if (ruleCategory is null && RuleOverride(facts, answer.Category) is { } rule)
         {
             reasons.Add(CheckReason.RuleDisagrees);
             ruleCategory = rule.Category;
@@ -66,7 +76,7 @@ public static class ResultCheckRules
             notes.Add(verdictNote);
         }
 
-        return new Findings(reasons, ruleCategory, notes.Count == 0 ? null : string.Join(" ", notes));
+        return new Findings(reasons, ruleCategory, notes.Count == 0 ? null : string.Join(" ", notes), kindDecides);
     }
 
     public static bool IsUnclear(FileCategory c) => c is FileCategory.ReviewNeeded or FileCategory.Unknown;
@@ -120,6 +130,35 @@ public static class ResultCheckRules
         if (kind == required) return null;
         var what = kind is null ? $"not {Article(required.Value)} file" : $"{Article(kind.Value)} file";
         return $"Category {category} does not fit: first bytes and extension say {what}.";
+    }
+
+    /// <summary>
+    /// The categories the model may choose for a kind of file. Besides the kind itself, only judgements of worth
+    /// (trash, review) are open; for code also a system file (configuration shipped with a program).
+    /// </summary>
+    private static readonly IReadOnlyDictionary<FileCategory, FileCategory[]> AllowedByKind = new Dictionary<FileCategory, FileCategory[]>
+    {
+        [FileCategory.Video] = [FileCategory.Video, FileCategory.TrashCandidate, FileCategory.ReviewNeeded],
+        [FileCategory.Audio] = [FileCategory.Audio, FileCategory.TrashCandidate, FileCategory.ReviewNeeded],
+        [FileCategory.Code] = [FileCategory.Code, FileCategory.SystemFile, FileCategory.TrashCandidate, FileCategory.ReviewNeeded]
+    };
+
+    /// <summary>
+    /// The kind of file limits the category (https://github.com/crack666/smart_file_organizer/issues/67): a video stays a
+    /// video, audio stays audio, code stays code. A category outside what fits the kind is set to the kind. The kind of a
+    /// video or audio file comes from the first bytes and the extension, code from the scan type.
+    /// </summary>
+    public static (FileCategory Category, string Note)? TypeLimit(FileNode file, IReadOnlyList<FileFact> facts, FileCategory category)
+    {
+        FileCategory? kind = KindOf(file, facts) switch
+        {
+            ContentKind.Video => FileCategory.Video,
+            ContentKind.Audio => FileCategory.Audio,
+            ContentKind.Image => null,
+            _ => file.FileType == FileType.Code ? FileCategory.Code : null
+        };
+        if (kind is not { } k || AllowedByKind[k].Contains(category)) return null;
+        return (k, $"Rule type_limit sets {k} instead of {category}: the file is {(k == FileCategory.Code ? "source code" : Article(k == FileCategory.Video ? ContentKind.Video : ContentKind.Audio) + " file")}.");
     }
 
     private static string Article(ContentKind k) => k switch

@@ -1,4 +1,5 @@
 using System.Globalization;
+using SmartFileOrganizer.Application.Sensitivity;
 using SmartFileOrganizer.Domain.Enums;
 using SmartFileOrganizer.Domain.Interfaces;
 using SmartFileOrganizer.Domain.Models;
@@ -56,6 +57,25 @@ public class AiClassificationInputPreparer : IClassificationInputPreparer
     public async Task<OllamaClassificationInput> PrepareAsync(FileNode file, EvidenceDepth depth, CancellationToken ct = default)
     {
         var ev = new Evidence { Depth = depth };
+
+        // Files the operating system or an office program writes into a profile: the name decides, the content is
+        // never read (a lock file is often still locked, a registry hive is binary).
+        if (SystemFileRule(file.Name) is { } system)
+        {
+            ev.Lacks("file content: not read; a file the system or a program writes, decided by its name");
+            ev.RuleResult = new FileClassification
+            {
+                FileNodeId = file.Id,
+                Category = FileCategory.SystemFile,
+                Importance = Importance.Low,
+                Confidence = 0.95,
+                Summary = system.Summary,
+                ModelUsed = $"rule:{system.Rule}",
+                AnalyzedAt = DateTime.UtcNow,
+                IsAiResult = false
+            };
+            return ev.ToInput(file);
+        }
 
         if (string.IsNullOrWhiteSpace(file.FullPath) || !File.Exists(file.FullPath))
         {
@@ -287,6 +307,15 @@ public class AiClassificationInputPreparer : IClassificationInputPreparer
         if (ArchiveListingReader.DecideContent(listing.Entries) is { } content)
             ev.Fact(FileFactKey.ArchiveContent, content);
 
+        // The entry names run through the same name rules as file names: a bank statement stays finance inside a
+        // zip with a number for a name.
+        var byEntries = SensitiveFileRules.MatchArchiveEntries(listing.Entries.Select(e => e.Name));
+        if (byEntries.IsMatch)
+        {
+            ev.ContentMarkers = byEntries.Markers;
+            ev.ContentMarkerRule = byEntries.Rule;
+        }
+
         var maxListed = ev.Extended ? MaxListedArchiveEntriesExtended : MaxListedArchiveEntries;
         var shown = listing.Entries.Take(maxListed).Select(e => $"{e.Name} | {e.Size}");
         ev.Section(
@@ -420,6 +449,37 @@ public class AiClassificationInputPreparer : IClassificationInputPreparer
 
     private static readonly HashSet<string> InstallerExtensions =
         new(StringComparer.OrdinalIgnoreCase) { ".exe", ".msi", ".dmg", ".deb", ".rpm", ".apk", ".pkg", ".appimage" };
+
+    /// <summary>Registry hives of a Windows profile and the folder settings files of Windows and macOS (exact names).</summary>
+    private static readonly HashSet<string> SystemFileNames = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "NTUSER.DAT", "ntuser.ini", "ntuser.pol", "UsrClass.dat", "desktop.ini", ".DS_Store", "IconCache.db"
+    };
+
+    /// <summary>Transaction logs of the registry hives: <c>NTUSER.DAT.LOG1</c>, <c>ntuser.dat{guid}.TM.blf</c>, ...</summary>
+    private static readonly string[] HiveLogPrefixes = ["ntuser.dat.", "ntuser.dat{", "usrclass.dat.", "usrclass.dat{"];
+
+    private static readonly HashSet<string> OfficeExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".doc", ".docx", ".docm", ".dot", ".dotx", ".xls", ".xlsx", ".xlsm", ".ppt", ".pptx", ".rtf", ".odt", ".ods", ".odp"
+    };
+
+    /// <summary>
+    /// System files of a profile, by name only (https://github.com/crack666/smart_file_organizer/issues/67): registry
+    /// hives and their logs, <c>desktop.ini</c>, and the lock files Office (<c>~$Brief.docx</c>) and LibreOffice
+    /// (<c>.~lock.Brief.odt#</c>) leave next to an open document. Null for any other name.
+    /// </summary>
+    public static (string Rule, string Summary)? SystemFileRule(string? name)
+    {
+        if (string.IsNullOrEmpty(name)) return null;
+        if (SystemFileNames.Contains(name) || HiveLogPrefixes.Any(p => name.StartsWith(p, StringComparison.OrdinalIgnoreCase)))
+            return ("system-file", "Settings or registry file the operating system writes into a profile; not own content.");
+        if (name.StartsWith("~$", StringComparison.Ordinal) && OfficeExtensions.Contains(Path.GetExtension(name)))
+            return ("office-lock", "Lock file an office program leaves next to an open document; the document itself is elsewhere.");
+        if (name.StartsWith(".~lock.", StringComparison.Ordinal) && name.EndsWith('#'))
+            return ("office-lock", "Lock file an office program leaves next to an open document; the document itself is elsewhere.");
+        return null;
+    }
 
     private static readonly HashSet<string> ThumbnailCaches =
         new(StringComparer.OrdinalIgnoreCase) { "Thumbs.db", "ehthumbs.db", "ehthumbs_vista.db" };

@@ -17,6 +17,10 @@ public static class DirectoryVerdictRules
     public const string DumpNoise = "dump-noise";
     public const string Empty = "empty";
     public const string Container = "container";
+    public const string Link = "link";
+    public const string ScanError = "scan-error";
+    public const string SystemPlace = "system-place";
+    public const string SingleFile = "single-file";
 
     /// <summary>Dominant type key for a collection of units in <see cref="DirectoryProfile.SubdirectoryDominantType"/>.</summary>
     public const string UnitDominantType = "unit";
@@ -50,9 +54,11 @@ public static class DirectoryVerdictRules
     /// one recognition the bundles and the library review use as well; null when it is none. Unpacked software
     /// is a <c>unit</c>; a copy of a phone, computer, user profile or removable drive is a <c>dump</c>.</param>
     /// <param name="inDump">Where the directory lies inside the nearest dump above it; null outside every dump.</param>
+    /// <param name="systemPlace">The <c>system_places</c> entry of the shared patterns the directory lies at or below
+    /// (<see cref="Bundles.BundlePatterns.SystemPlaceOf"/>), or null.</param>
     public static (Next Next, DirectoryVerdict? Verdict) Evaluate(
         DirectoryNode dir, DirectoryProfile profile, DirectoryVerdict? unitAncestor, string? unitAncestorPath,
-        Bundles.DumpRecognition? dump = null, DumpPlace? inDump = null)
+        Bundles.DumpRecognition? dump = null, DumpPlace? inDump = null, Bundles.SystemPlace? systemPlace = null)
     {
         if (unitAncestor is not null)
         {
@@ -69,6 +75,27 @@ public static class DirectoryVerdictRules
                 RetentionValue.Keep, null);
         }
 
+        if (dir.DirStatus == DirectoryStatus.Link)
+        {
+            return Decide(dir, profile, DirectoryVerdictKind.System, Link,
+                "A link to another place (junction, symbolic link); the scan did not enter it, and its target is judged where it lies.",
+                RetentionValue.Keep, null);
+        }
+
+        if (dir.DirStatus == DirectoryStatus.Error)
+        {
+            // No verdict: nothing was read. The error says why, and a parent counts the folder as not judgeable.
+            return (Next.Decided, new DirectoryVerdict
+            {
+                DirectoryNodeId = dir.Id,
+                Source = VerdictSource.Rule,
+                Rule = ScanError,
+                Profile = profile,
+                JudgedAt = DateTime.UtcNow,
+                Error = $"The scan could not read this folder ({dir.ScanErrorCause ?? "unknown cause"}); no verdict without its content."
+            });
+        }
+
         if (dir.Name.StartsWith('.'))
         {
             return Decide(dir, profile, DirectoryVerdictKind.System, Hidden,
@@ -81,6 +108,14 @@ public static class DirectoryVerdictRules
             return Decide(dir, profile, DirectoryVerdictKind.System, DumpNoise,
                 $"Noise of the dump '{inDump.DumpPath}': at or below '{noisePath}' (app data, caches, system); "
                 + "its files are not analysed one by one.",
+                RetentionValue.Review, null);
+        }
+
+        if (systemPlace is not null)
+        {
+            return Decide(dir, profile, DirectoryVerdictKind.System, SystemPlace,
+                $"Place '{systemPlace.Path}' of the system_places pattern '{systemPlace.Rule}' (content of programs or of "
+                + "the operating system, not of the person); its files are not analysed one by one.",
                 RetentionValue.Review, null);
         }
 
@@ -117,6 +152,14 @@ public static class DirectoryVerdictRules
             return (Next.FromSubdirectories, null);
         }
 
+        if (profile.FileCount == 1 && profile.SubdirectoryCount == 0 && dir.DirStatus == DirectoryStatus.Scanned)
+        {
+            return Decide(dir, profile, DirectoryVerdictKind.Uniform, SingleFile,
+                "One file and no subdirectory: the folder has no purpose beyond its file, so the file is judged and "
+                + "the folder follows it.",
+                null, null);
+        }
+
         return (Next.AskModel, null);
     }
 
@@ -127,6 +170,8 @@ public static class DirectoryVerdictRules
     public static DirectoryVerdict EvaluateFromSubdirectories(
         DirectoryNode dir, DirectoryProfile profile, IReadOnlyList<DirectoryVerdict?> children)
     {
+        // A folder the scan could not read has no verdict and never gets one from a rerun of the rules: it is left out.
+        children = children.Where(c => c?.Rule != ScanError).ToList();
         var missing = children.Count(c => c is null || c.Verdict is null);
         if (missing > 0)
         {
@@ -143,6 +188,18 @@ public static class DirectoryVerdictRules
 
         var judged = children.Select(c => c!).ToList();
         var content = judged.Where(c => c.Verdict != DirectoryVerdictKind.Empty).ToList();
+        if (judged.Count == 0)
+        {
+            return new DirectoryVerdict
+            {
+                DirectoryNodeId = dir.Id,
+                Source = VerdictSource.Rule,
+                Rule = ScanError,
+                Profile = profile,
+                JudgedAt = DateTime.UtcNow,
+                Error = "No direct files, and the scan could read none of the subdirectories; no verdict without content."
+            };
+        }
         if (content.Count == 0)
         {
             return Decide(dir, profile, DirectoryVerdictKind.Empty, Container,

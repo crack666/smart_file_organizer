@@ -151,6 +151,7 @@ trailing commas are allowed; unknown fields and every other problem are reported
 | `signatures[].markers[]` | Exactly one of `dir`, `dir_regex`, `file`, `file_regex` (names are compared case-insensitively), `weight` (default 1), `max_count` (how many matches of a regex count, default 1), `key`, `label` (shown for regex matches). |
 | `keep_parts[]` | `part` (a `DumpPart` code) and `paths` (runs of folder names, either separator). |
 | `noise_paths` | Paths below which a dump is noise. |
+| `system_places[]` | `rule` (a name, shown in the reason) and `paths`: places anywhere in a scan where programs or the operating system put their own content (learning material and samples of applications in the public documents, `AccountPictures`, the public desktop, `scoop`/`chocolatey`/`WinGet` packages). A directory at or below one is `system` by the directory verdict rule `system-place`, without the model; the bundles do not use them. In a path `*` is one folder of any name and `a\|b` one folder named a or b. Optional (Issue 67, 13.11.2026). |
 | `generic_folder_names`, `generic_folder_regexes` | Folder names that say nothing about an occasion. |
 
 ## Storage

@@ -123,6 +123,63 @@ public class Phase2EvidenceTests : IDisposable
     }
 
     [Fact]
+    public async Task ArchiveWithBankStatementsInside_IsFinanceByRule_AndWorthKeeping()
+    {
+        // A zip with a number for a name: only the entries tell what it holds.
+        GeneratedFiles.Zip(Path.Combine(_dir, "4711.zip"),
+            ("Kontoauszug_2019_03.pdf", 100), ("Kreditkartenabrechnung_2019_03.pdf", 100));
+        GeneratedFiles.Zip(Path.Combine(_dir, "0815.zip"), ("a.jpg", 10), ("b.jpg", 10));
+        var jobId = await InsertAsync(
+            ("4711.zip", FileType.Archive, SensitiveMarker.None),
+            ("0815.zip", FileType.Archive, SensitiveMarker.None));
+        _ollama.Answer = FileCategory.TrashCandidate;
+
+        await Service().RunAsync(jobId);
+
+        await using var conn = _db.CreateConnection();
+        var rows = (await conn.QueryAsync<(string Name, string? Markers, string? Rule, string? Category, string? KeepHint)>(
+            """
+            SELECT f.name, f.sensitive_markers, f.sensitive_rule, r.category, r.keep_hint
+            FROM file_nodes f JOIN ai_results r ON r.file_node_id = f.id WHERE f.job_id = @jobId
+            """, new { jobId })).ToDictionary(r => r.Name);
+
+        var statements = rows["4711.zip"];
+        Assert.Equal("finance", statements.Markers);
+        Assert.Equal("entry:word:kontoauszug;entry:word:kreditkarte", statements.Rule);
+        Assert.Equal(((int)FileCategory.ReviewNeeded).ToString(), statements.Category);
+        Assert.Equal("worth_keeping", statements.KeepHint);
+        Assert.DoesNotContain("Kontoauszug", statements.Rule!, StringComparison.Ordinal);
+
+        var photos = rows["0815.zip"];
+        Assert.Null(photos.Markers);
+        Assert.Equal(((int)FileCategory.Archive).ToString(), photos.Category);
+        Assert.Equal("worth_keeping", photos.KeepHint);
+    }
+
+    [Fact]
+    public async Task SystemFilesOfAProfile_AreDecidedByName_WithoutTheModel()
+    {
+        var names = new[] { "NTUSER.DAT", "ntuser.dat.LOG1", "ntuser.ini", "desktop.ini", "~$Brief.docx", ".~lock.Brief.odt#", "Brief.docx" };
+        foreach (var name in names)
+            await File.WriteAllBytesAsync(Path.Combine(_dir, name), [0x72, 0x65, 0x67, 0x66, 0x00]);
+        var jobId = await InsertAsync(names.Select(n => (n, n.EndsWith(".docx", StringComparison.Ordinal) ? FileType.Document : FileType.Other, SensitiveMarker.None)).ToArray());
+
+        await Service().RunAsync(jobId);
+
+        Assert.Equal(["Brief.docx"], _ollama.Names);
+        await using var conn = _db.CreateConnection();
+        var rows = (await conn.QueryAsync<(string Name, string? Model, long Category)>(
+            "SELECT f.name, r.model_used, r.category FROM file_nodes f JOIN ai_results r ON r.file_node_id = f.id WHERE f.job_id = @jobId",
+            new { jobId })).ToDictionary(r => r.Name);
+        Assert.Equal("rule:system-file", rows["NTUSER.DAT"].Model);
+        Assert.Equal("rule:system-file", rows["ntuser.dat.LOG1"].Model);
+        Assert.Equal("rule:system-file", rows["desktop.ini"].Model);
+        Assert.Equal("rule:office-lock", rows["~$Brief.docx"].Model);
+        Assert.Equal("rule:office-lock", rows[".~lock.Brief.odt#"].Model);
+        Assert.All(rows.Values.Where(r => r.Name != "Brief.docx"), r => Assert.Equal((long)FileCategory.SystemFile, r.Category));
+    }
+
+    [Fact]
     public async Task Facts_AreStoredWithCodesAndSource()
     {
         await File.WriteAllBytesAsync(Path.Combine(_dir, "song.mp3"), GeneratedFiles.Mp3WithTags("Song", "Band", "Album"));
@@ -178,6 +235,7 @@ public class Phase2EvidenceTests : IDisposable
     {
         private readonly ConcurrentBag<string> _names = [];
         public IReadOnlyList<string> Names => _names.ToList();
+        public FileCategory Answer { get; set; } = FileCategory.Document;
 
         public Task<FileClassification> ClassifyAsync(OllamaClassificationInput input, CancellationToken ct = default)
         {
@@ -185,7 +243,7 @@ public class Phase2EvidenceTests : IDisposable
             _names.Add(input.File.Name);
             return Task.FromResult(new FileClassification
             {
-                Category = FileCategory.Document,
+                Category = Answer,
                 Importance = Importance.Medium,
                 Confidence = 0.8,
                 Summary = "scripted",

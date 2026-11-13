@@ -132,6 +132,25 @@ public class SensitiveFileRulesTests
     }
 
     [Fact]
+    public void ArchiveEntries_RunThroughTheNameRules_WithEntryRuleIds()
+    {
+        var match = SensitiveFileRules.MatchArchiveEntries(
+            ["2019/Kontoauszug_2019_03.pdf", "2019\\Kontoauszug_2019_04.pdf", "Kreditkartenabrechnung.pdf", "backup/.ssh/id_rsa", "IMG_0001.jpg"]);
+
+        Assert.Equal(SensitiveMarker.Finance | SensitiveMarker.Keys, match.Markers);
+        Assert.Equal("entry:word:kontoauszug;entry:word:kreditkarte;entry:name:id_rsa;entry:path:ssh", match.Rule);
+    }
+
+    [Fact]
+    public void ArchiveEntries_WithoutSensitiveNames_MatchNothing()
+    {
+        var match = SensitiveFileRules.MatchArchiveEntries(["IMG_0001.jpg", "Urlaub/IMG_0002.jpg", "readme.txt", ""]);
+
+        Assert.False(match.IsMatch);
+        Assert.Null(match.Rule);
+    }
+
+    [Fact]
     public void EveryExtensionRule_IsCoveredByATest()
     {
         var tested = typeof(SensitiveFileRulesTests).GetMethod(nameof(Extension_SetsMarker))!

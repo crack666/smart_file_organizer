@@ -263,9 +263,14 @@ call) or `model`.
    `game:exe+_Data`, backup images, …) and a hint (`uniform` from 80 % of one file type or naming
    series, `mixed` from three or more types with none above 50 %).
 3. `DirectoryVerdictRules` decide the clear cases without the model, in this order: below a directory
-   judged `unit` (`inside-unit`), skipped by the scan (`scan-skip`), name starting with a dot
-   (`hidden`), inside a dump at or below one of its noise paths (`dump-noise`), unit markers
-   (`marker`), a dump (`dump`), no files and no subdirectories (`empty`).
+   judged `unit` (`inside-unit`), skipped by the scan (`scan-skip`), a link the scan did not enter
+   (`link`, `system`), a folder the scan could not read (`scan-error`: no verdict, the error names the cause, and a
+   parent judged from its subdirectories leaves it out), name starting with a dot
+   (`hidden`), inside a dump at or below one of its noise paths (`dump-noise`), at or below a `system_places` path of
+   the patterns (`system-place`, `system`; [bundles.md](bundles.md#pattern-file)), unit markers
+   (`marker`), a dump (`dump`), no files and no subdirectories (`empty`), exactly one file and no subdirectory
+   (`single-file`: `uniform` without retention, the file is judged and the folder follows it). The rules `link`, `scan-error`,
+   `system-place` and `single-file` were added on 13.11.2026 (https://github.com/crack666/smart_file_organizer/issues/67).
    `dump` uses the one recognition the bundles and the library review use (`BundlePatterns.Recognise`,
    `bundle-patterns.json`, or `Bundles:PatternsFile` when set). Unpacked software is a `unit`, so
    everything inside it is `inside-unit` and none of its files is judged one by one. A copy of a phone,
@@ -353,9 +358,18 @@ and sets the other eligible files from `Discovered` to `Deferred` in one transac
    | Code, text, text-like `Other` | — | text excerpt | — |
    | Program, library, font, database, unknown binary | `detected_format` | none: a **rule result** (`RuleResult`), no model call | file content |
 
+   Archive entries: their names run through the name rules for sensitive files (`SensitiveFileRules.MatchArchiveEntries`);
+   a hit marks the archive itself with origin rule and rule ids `entry:<rule>` before the model sees it, so a zip with a
+   number for a name that holds bank statements is `finance`. An archive whose `archive_content` is `documents` or `photos`
+   is stored as worth keeping and never as a trash candidate (`ApplyArchiveContentRule`).
+
    Rule results: installers and programs → `SoftwareInstaller`, libraries and fonts → `SystemFile`, `Thumbs.db` →
    `TrashCandidate`, other databases → `ReviewNeeded`, unknown binaries → `Unknown`. They are stored with
    `is_ai_result = 0` and `model_used = rule:<id>` (`rule:program`, `rule:unknown-binary`, ...).
+   Before any file is read, the name decides system files of a profile (since 13.11.2026, Issue 67): registry hives
+   and their logs (`NTUSER.DAT`, `ntuser.dat.LOG1`, `UsrClass.dat`), `ntuser.ini`, `desktop.ini`, `.DS_Store` and
+   `IconCache.db` → `SystemFile` by `rule:system-file`; the lock files of Office (`~$Brief.docx`) and LibreOffice
+   (`.~lock.Brief.odt#`) → `SystemFile` by `rule:office-lock`.
 3. Otherwise `ClassifyAsync` sends a structured `/api/chat` request with `think: false`. Every phase (pre-assessment,
    classification, second check, summary) sends its fixed task as the system message, character for character the same
    for all calls of the phase (classification: system prompt, guidance, markers, language, then the keep hint block when
@@ -388,7 +402,7 @@ signals. `ResultCheckRules.Find` lists what speaks against a first answer (codes
 | `low_confidence` | confidence below `BelowConfidence` (0.7) |
 | `unclear_category` | `ReviewNeeded` or `Unknown` |
 | `kind_mismatch` | `Photo`/`Screenshot` for a file that is no image, `Video` for no video, `Audio` for no audio; header bytes (`detected_format`) decide, the extension where the header is ambiguous (`mp4` is also HEIC and MOV, `mp3` a weak test) |
-| `rule_disagrees` | an unambiguous metadata rule: `image_origin = screenshot` against `Photo`, `image_origin = camera` with a device against `Screenshot`. The rule sets the category, no second call. A scan is not forced: a scanned print may be a photo |
+| `rule_disagrees` | an unambiguous metadata rule: `image_origin = screenshot` against `Photo`, `image_origin = camera` with a device against `Screenshot`. The rule sets the category, no second call. A scan is not forced: a scanned print may be a photo. Also the type limit (rule note `type_limit`, since 13.11.2026, https://github.com/crack666/smart_file_organizer/issues/67): a video stays `Video`, audio `Audio`, a code file `Code`; besides its kind the model may only choose `TrashCandidate` or `ReviewNeeded` (code also `SystemFile`). Any other answer is set to the kind and no second call is made, even when other reasons are present; the type limit is checked before `kind_mismatch` and also after a second call |
 | `verdict_disagrees` | retention of the directory verdict `disposable` and importance High or Critical, or `keep` and `TrashCandidate` or keep hint `temporary` |
 
 Any reason except `rule_disagrees` leads to a second call, made right after the first in the same worker: the

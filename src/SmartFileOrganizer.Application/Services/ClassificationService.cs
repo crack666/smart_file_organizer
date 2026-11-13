@@ -344,6 +344,10 @@ public class ClassificationService
         FileNode file, OllamaClassificationInput input, DirectorySamplingService.Context context, RunCounters counters,
         ModelServerGate? gate, CancellationToken ct)
     {
+        // Markers the rules found in the content (archive entry names) belong to the file before anything else
+        // happens to it: the model traffic log withholds a marked file, and the output guard reads the node.
+        await ApplyContentMarkersAsync(file, input, ct);
+
         FileClassification result;
         ResultCheck? check = null;
         if (input.RuleResult is { } rule)
@@ -389,6 +393,7 @@ public class ClassificationService
         }
         result.FileNodeId = file.Id;
         result.InheritedFromDirectoryNodeId = null;
+        ApplyArchiveContentRule(input.Facts, result);
         ApplySensitiveReviewRule(file, result);
 
         // An answer the model already gave is kept even when the run is being stopped; otherwise the file
@@ -471,7 +476,7 @@ public class ClassificationService
         check.Second = CheckAnswer.From(second);
 
         var (result, outcome) = ResultCheckRules.Combine(file, input.Facts, first, second);
-        if (ResultCheckRules.RuleOverride(input.Facts, result.Category) is { } rule)
+        if ((ResultCheckRules.TypeLimit(file, input.Facts, result.Category) ?? ResultCheckRules.RuleOverride(input.Facts, result.Category)) is { } rule)
         {
             result.Category = rule.Category;
             if (result.Certainty == ResultCertainty.Certain) result.Certainty = ResultCertainty.Likely;
@@ -479,6 +484,45 @@ public class ClassificationService
         }
         check.Outcome = outcome;
         return (result, check);
+    }
+
+    /// <summary>
+    /// Adds the markers of <see cref="OllamaClassificationInput.ContentMarkers"/> to the file's rule markers and
+    /// stores them; markers are only ever added. The rule ids name the rule, never an entry.
+    /// </summary>
+    private async Task ApplyContentMarkersAsync(FileNode file, OllamaClassificationInput input, CancellationToken ct)
+    {
+        if (input.ContentMarkers == SensitiveMarker.None) return;
+        var added = input.ContentMarkers & ~file.SensitiveMarkers;
+        if (added == SensitiveMarker.None) return;
+
+        var before = file.SensitiveMarkers;
+        file.SensitiveMarkers = before | input.ContentMarkers;
+        file.SensitiveRule = before == SensitiveMarker.None || string.IsNullOrEmpty(file.SensitiveRule)
+            ? input.ContentMarkerRule
+            : file.SensitiveRule + ";" + input.ContentMarkerRule;
+        if (file.SensitiveRulesVersion is null or 0) file.SensitiveRulesVersion = SensitiveFileRules.Version;
+        await _fileRepo.UpdateSensitiveAsync([file], ct);
+    }
+
+    /// <summary>
+    /// An archive whose entries are mostly documents or pictures (rule fact <c>archive_content</c>) holds what a
+    /// person keeps: it is worth keeping and never a trash candidate, whatever the model said.
+    /// </summary>
+    public static void ApplyArchiveContentRule(IReadOnlyList<FileFact> facts, FileClassification result)
+    {
+        var content = facts.FirstOrDefault(f => f.Key == FileFactKey.ArchiveContent)?.Value;
+        if (!VerdictCodes.TryParse<ArchiveContent>(content, out var kind) || kind is not (ArchiveContent.Documents or ArchiveContent.Photos))
+            return;
+        if (result.Error is not null) return;
+
+        if (result.Category is FileCategory.TrashCandidate or FileCategory.SoftwareInstaller or FileCategory.SystemFile or FileCategory.Unknown)
+            result.Category = FileCategory.Archive;
+        if (result.KeepHint != KeepHint.WorthKeeping)
+        {
+            result.KeepHint = KeepHint.WorthKeeping;
+            result.KeepReason = $"Rule archive_content={kind.ToCode()}: the entries are mostly {(kind == ArchiveContent.Photos ? "pictures" : "documents")}.";
+        }
     }
 
     private async Task<bool> HasOverrideAsync(FileNode file, CancellationToken ct) =>

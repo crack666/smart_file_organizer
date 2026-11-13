@@ -136,8 +136,9 @@ public class HostingTests : IDisposable
         Assert.Single(ollama.FileInputs.Single(i => i.File.Name == "pic.png").Base64Images);
         Assert.Contains("Shopping list", ollama.FileInputs.Single(i => i.File.Name == "notes.txt").ExtractedText);
 
-        // Phase 1 and phase 3 reached every directory
-        Assert.Equal(3, ollama.PreAssessedDirectories.Count);
+        // Phase 1 reached every directory; docs and photos hold one file each, so their verdict follows the file
+        // (rule single-file) and only the root asks the model
+        Assert.Single(ollama.PreAssessedDirectories);
         var dirResults = provider.GetRequiredService<IDirectoryClassificationRepository>();
         Assert.NotNull(await dirResults.GetByDirectoryPathAsync(job.Id, root));
 

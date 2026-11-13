@@ -39,8 +39,11 @@ public static class SmallCorpusGenerator
     /// <remarks>Version 2 (https://github.com/crack666/smart_file_organizer/issues/50): counter-samples for the
     /// finance and private_message boundaries, categories of money, medical and scanned papers; see docs/evaluation.md.
     /// Version 3 (https://github.com/crack666/smart_file_organizer/issues/59): a dump is no unit any more (the phone
-    /// backup's camera is judged), and a folder with two user profiles full of noise.</remarks>
-    public const int GeneratorVersion = 3;
+    /// backup's camera is judged), and a folder with two user profiles full of noise.
+    /// Version 4 (https://github.com/crack666/smart_file_organizer/issues/67): what rules decide without the model (the
+    /// public profile with learning material, account pictures and shortcuts, a package manager, system files, a folder
+    /// with one file) and an archive of bank statements under a number.</remarks>
+    public const int GeneratorVersion = 4;
 
     public const int DefaultSeed = 36;
     public const string RootFolder = "tree";
@@ -370,6 +373,28 @@ public static class SmallCorpusGenerator
             b.File($"{max}/Pictures/IMG_2015071{i + 1}_1{i}3000.jpg", PhotoOf(b, i == 1 ? Scene.Lake : Scene.Garden),
                 D(2015, 7, 11 + i, 10 + i), Photo, None);
 
+        // Version 4 (issue 67): what the rules decide without the model, and an archive known only by its entries.
+        b.File($"{max}/Documents/desktop.ini", Text("[.ShellClassInfo]\nLocalizedResourceName=@%SystemRoot%\\system32\\shell32.dll,-21770\n"),
+            D(2013, 1, 5), null, None, "Folder settings of Windows: a system file by name, no model call; no document type.");
+        b.File($"{max}/Documents/~$etvertrag_Wohnung.docx", Binary(b, [0x0B, 0x4D, 0x61, 0x78], 162), D(2015, 9, 29), null, None,
+            "Lock file Office leaves next to an open document: a system file by name, no model call.");
+        b.File($"{max}/Documents/20190312.zip", ZipOf(D(2019, 3, 12),
+                ("Kontoauszug_2019_01.pdf", 2400), ("Kontoauszug_2019_02.pdf", 2300), ("Kreditkartenabrechnung_2019_02.pdf", 1900)),
+            D(2019, 3, 12), null, [Finance],
+            "Bank and card statements packed under a number: the entry names mark it finance by rule. Category open "
+            + "(archive or personal_document); the archive is worth keeping.");
+        b.Dir($"{max}/Documents/Garantie", Uniform, "One file only: the folder follows its file, no model call for the folder.");
+        b.File($"{max}/Documents/Garantie/Garantie_Waschmaschine.pdf", MiniPdf.Text("Garantiekarte", [
+            "Waschmaschine WM 7, Seriennummer 7781-22",
+            "Kaufdatum: 03.05.2014, Garantie 2 Jahre",
+            "Elektro Beispiel, Marktplatz 3, 12345 Beispielstadt"]), D(2014, 5, 3), Document, None);
+        b.Dir($"{max}/scoop", SystemDir, "Package manager in the profile: only system folders below.");
+        b.Dir($"{max}/scoop/apps", SystemDir, "Programs installed by scoop: rule system-place, no model call.");
+        b.Dir($"{max}/scoop/apps/7zip", SystemDir, "One package: below a system place.");
+        b.File($"{max}/scoop/apps/7zip/install.json", Text("{\"bucket\":\"main\",\"architecture\":\"64bit\"}\n"), D(2015, 2, 1), null, None,
+            "Package file: skipped, no category.");
+        b.File($"{max}/scoop/apps/7zip/7z.exe", Exe(b), D(2015, 2, 1), null, None, "Program of a package: skipped, no category.");
+
         // ── lisa: older German profile, most of the noise ──
         const string lisa = "Profile alter PC/lisa";
         b.Dir(lisa, Dump, "Copy of an older user profile (NTUSER.DAT, Anwendungsdaten, Lokale Einstellungen).");
@@ -419,6 +444,29 @@ public static class SmallCorpusGenerator
         b.Dir($"{lisa}/Eigene Dateien/Eigene Bilder", Uniform, "Photos of the old profile (part pictures inside part documents).");
         for (var i = 0; i < 3; i++)
             b.File($"{lisa}/Eigene Dateien/Eigene Bilder/DSC0{1201 + i}.JPG", PhotoOf(b, Scene.Portrait), D(2008, 12, 24, 17, i * 7), Photo, None);
+
+        // ── Public: the profile of all users (version 4, issue 67), only what programs and Windows put there ──
+        const string pub = "Profile alter PC/Public";
+        b.Dir(pub, SystemDir, "Profile of all users without own content: only system places below. No dump (no NTUSER.DAT, no AppData).");
+        b.Dir($"{pub}/Documents", SystemDir, "Public documents holding only what an application installed.");
+        b.Dir($"{pub}/Documents/Fotostudio Pro", SystemDir, "Folder of an application: only its learning material and samples.");
+        b.Dir($"{pub}/Documents/Fotostudio Pro/Tutorials", SystemDir,
+            "Learning videos of the application: rule system-place, no model call (they were what two models disagreed on).");
+        for (var i = 0; i < 2; i++)
+            b.File($"{pub}/Documents/Fotostudio Pro/Tutorials/Lektion_0{i + 1}_Ebenen.mp4", Mp4(b, 6000 + i * 500), D(2012, 4, 2), null, None,
+                "Learning video of an application: skipped, no category.");
+        b.Dir($"{pub}/Documents/Fotostudio Pro/Samples", SystemDir, "Sample pictures of the application: rule system-place.");
+        for (var i = 0; i < 2; i++)
+            b.File($"{pub}/Documents/Fotostudio Pro/Samples/Beispiel_{i + 1}.jpg", PhotoOf(b, i == 0 ? Scene.Lake : Scene.Garden), D(2012, 4, 2),
+                null, None, "Sample picture of an application: skipped, no category. Not a photo of the person.");
+        b.Dir($"{pub}/AccountPictures", SystemDir, "Account pictures of Windows: rule system-place; not worth keeping.");
+        foreach (var size in new[] { 40, 192 })
+            b.File($"{pub}/AccountPictures/user-{size}.png", Screen(b, size == 40 ? 1 : 2), D(2012, 3, 1), null, None,
+                "Account picture: skipped, no category.");
+        b.Dir($"{pub}/Desktop", SystemDir, "Desktop of all users: shortcuts the installers put there; rule system-place.");
+        foreach (var name in new[] { "Fotostudio Pro.lnk", "Browser.lnk" })
+            b.File($"{pub}/Desktop/{name}", Binary(b, [0x4C, 0x00, 0x00, 0x00], 420), D(2012, 4, 2), null, None,
+                "Shortcut of an installer: skipped, no category.");
     }
 
     // ── File contents ────────────────────────────────────────────────────
@@ -446,6 +494,23 @@ public static class SmallCorpusGenerator
     private static byte[] Mp3(Builder b) => Binary(b, Encoding.ASCII.GetBytes("ID3\u0004\0\0\0\0\0\0"), 8000);
 
     private static byte[] Mp4(Builder b, int size) => Binary(b, [0, 0, 0, 0x18, (byte)'f', (byte)'t', (byte)'y', (byte)'p', (byte)'m', (byte)'p', (byte)'4', (byte)'2'], size);
+
+    /// <summary>A ZIP archive with the given entries (zero filler, fixed time), so the same seed gives the same bytes.</summary>
+    private static byte[] ZipOf(DateTime modified, params (string Name, int Bytes)[] entries)
+    {
+        using var stream = new MemoryStream();
+        using (var zip = new System.IO.Compression.ZipArchive(stream, System.IO.Compression.ZipArchiveMode.Create, leaveOpen: true))
+        {
+            foreach (var (name, bytes) in entries)
+            {
+                var entry = zip.CreateEntry(name, System.IO.Compression.CompressionLevel.NoCompression);
+                entry.LastWriteTime = new DateTimeOffset(modified, TimeSpan.Zero);
+                using var s = entry.Open();
+                s.Write(new byte[bytes]);
+            }
+        }
+        return stream.ToArray();
+    }
 
     /// <summary>An empty but valid ZIP archive (end-of-central-directory record only).</summary>
     private static byte[] EmptyZip() => [0x50, 0x4B, 0x05, 0x06, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];

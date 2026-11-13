@@ -254,7 +254,9 @@ public class DirectoryVerdictTests : IDisposable
     {
         var root = MakeTree("Mix");
         WriteFile(Path.Combine(root, "a", "x.pdf"));
+        WriteFile(Path.Combine(root, "a", "x2.pdf"));
         WriteFile(Path.Combine(root, "b", "y.pdf"));
+        WriteFile(Path.Combine(root, "b", "y2.pdf"));
 
         var jobId = await ScanAsync(root);
         _ollama.Answer = input => input.Directory.Name == "b" ? null : DirectoryVerdictKind.Uniform;
@@ -323,6 +325,7 @@ public class DirectoryVerdictTests : IDisposable
         var phone = Path.Combine(root, "Handy-Backup 2021");
         WritePhone(phone);
         WriteFile(Path.Combine(root, "Fotos", "IMG_0001.jpg"));
+        WriteFile(Path.Combine(root, "Fotos", "IMG_0002.jpg"));
 
         var jobId = await ScanAsync(root);
         _ollama.Answer = _ => DirectoryVerdictKind.Uniform;
@@ -417,10 +420,12 @@ public class DirectoryVerdictTests : IDisposable
             Assert.True((a.Verdict, a.Rule) == (b.Verdict, b.Rule), $"{part}: {a.Verdict}/{a.Rule} at the root, {b.Verdict}/{b.Rule} below");
         }
 
-        // The model saw the same folders in both scans, and none of the noise.
+        // The model saw the same folders in both scans, and none of the noise. Desktop and Steuer 2014 hold one file
+        // each: their verdict follows the file (rule single-file), without the model.
         var calls = _ollama.CalledDirectoryNames.ToList();
-        Assert.Equal(new[] { "Desktop", "Desktop", "Documents", "Documents", "Steuer 2014", "Steuer 2014" },
+        Assert.Equal(new[] { "Documents", "Documents" },
             calls.Where(n => n is not ("max" or "Users")).Order(StringComparer.Ordinal));
+        Assert.Equal(DirectoryVerdictRules.SingleFile, (await VerdictAsync(aloneJob, Sub(alone, "Desktop"))).Rule);
     }
 
     /// <summary>A <c>Users</c> folder with two profiles holds two dumps, not one; it is a collection of them.</summary>
@@ -523,6 +528,7 @@ public class DirectoryVerdictTests : IDisposable
     {
         var root = MakeTree("Stabil");
         WriteFile(Path.Combine(root, "a.pdf"));
+        WriteFile(Path.Combine(root, "b.pdf"));
 
         var jobId = await ScanAsync(root);
         await NewService().RunAsync(jobId);
@@ -531,6 +537,80 @@ public class DirectoryVerdictTests : IDisposable
         var again = await NewService().RunAsync(jobId);
         Assert.Single(_ollama.PreAssessInputs);
         Assert.Equal("All directories already judged.", again.StatusText);
+    }
+
+    /// <summary>
+    /// Program content and system places of a profile, links, unreadable folders and folders with one file are
+    /// decided by rule: the model is never asked about them (https://github.com/crack666/smart_file_organizer/issues/67).
+    /// </summary>
+    [Fact]
+    public async Task SystemPlacesLinksErrorsAndSingleFiles_AreDecidedWithoutTheModel()
+    {
+        var root = MakeTree("Altplatte");
+        var publicDocs = Path.Combine(root, "Users", "Public", "Documents");
+        WriteFile(Path.Combine(publicDocs, "Fotostudio Pro", "Tutorials", "Lektion_01.mp4"));
+        WriteFile(Path.Combine(publicDocs, "Fotostudio Pro", "Tutorials", "Lektion_02.mp4"));
+        WriteFile(Path.Combine(publicDocs, "Fotostudio Pro", "Tutorials", "Kapitel 2", "Lektion_03.mp4"));
+        WriteFile(Path.Combine(publicDocs, "Fotostudio Pro", "Tutorials", "Kapitel 2", "Lektion_04.mp4"));
+        WriteFile(Path.Combine(publicDocs, "Familie", "Rezepte.docx"));      // the person's own folder there stays judged
+        WriteFile(Path.Combine(publicDocs, "Familie", "Einkauf.docx"));
+        WriteFile(Path.Combine(root, "Users", "Public", "AccountPictures", "user.png"));
+        WriteFile(Path.Combine(root, "Users", "Public", "AccountPictures", "user-40.png"));
+        WriteFile(Path.Combine(root, "Users", "Public", "Desktop", "Fotostudio Pro.lnk"));
+        WriteFile(Path.Combine(root, "Users", "Public", "Desktop", "Browser.lnk"));
+        WriteFile(Path.Combine(root, "Users", "max", "scoop", "apps", "7zip", "7z.txt"));
+        WriteFile(Path.Combine(root, "Users", "max", "scoop", "apps", "7zip", "readme.txt"));
+        WriteFile(Path.Combine(root, "Einzeln", "Brief.pdf"));
+        WriteFile(Path.Combine(root, "Verknuepft", "a.txt"));
+        WriteFile(Path.Combine(root, "Verknuepft", "b.txt"));
+        WriteFile(Path.Combine(root, "Kaputt", "a.txt"));
+        WriteFile(Path.Combine(root, "Kaputt", "b.txt"));
+        var jobId = await ScanAsync(root);
+        await using (var conn = _db.CreateConnection())
+        {
+            // What the scan stores for a junction and for a folder it could not list.
+            await conn.ExecuteAsync("UPDATE directory_nodes SET dir_status = @link WHERE name = 'Verknuepft'", new { link = (int)DirectoryStatus.Link });
+            await conn.ExecuteAsync("UPDATE directory_nodes SET dir_status = @error, scan_error_cause = 'access_denied' WHERE name = 'Kaputt'",
+                new { error = (int)DirectoryStatus.Error });
+        }
+        _ollama.Answer = _ => DirectoryVerdictKind.Mixed;
+
+        await NewService().RunAsync(jobId);
+
+        var calls = _ollama.CalledDirectoryNames;
+        foreach (var name in new[] { "Tutorials", "Kapitel 2", "Fotostudio Pro", "AccountPictures", "Desktop", "apps", "7zip", "scoop", "Einzeln", "Verknuepft", "Kaputt" })
+            Assert.DoesNotContain(name, calls);
+        Assert.Contains("Familie", calls);
+
+        foreach (var (path, rule) in new[]
+                 {
+                     ("Users/Public/Documents/Fotostudio Pro/Tutorials", DirectoryVerdictRules.SystemPlace),
+                     ("Users/Public/Documents/Fotostudio Pro/Tutorials/Kapitel 2", DirectoryVerdictRules.SystemPlace),
+                     ("Users/Public/Documents/Fotostudio Pro", DirectoryVerdictRules.Container),
+                     ("Users/Public/AccountPictures", DirectoryVerdictRules.SystemPlace),
+                     ("Users/Public/Desktop", DirectoryVerdictRules.SystemPlace),
+                     ("Users/max/scoop/apps/7zip", DirectoryVerdictRules.SystemPlace),
+                     ("Verknuepft", DirectoryVerdictRules.Link)
+                 })
+        {
+            var v = await VerdictAsync(jobId, Sub(root, path));
+            Assert.True(v.Verdict == DirectoryVerdictKind.System && v.Rule == rule, $"{path}: {v.Verdict}/{v.Rule}");
+        }
+        Assert.Contains("account-pictures", (await VerdictAsync(jobId, Sub(root, "Users/Public/AccountPictures"))).Reason);
+        Assert.All(await _fileRepo.GetByDirectoryAsync(jobId, Sub(root, "Users/Public/Documents/Fotostudio Pro/Tutorials")),
+            f => Assert.Equal(FileNodeStatus.Skipped, f.Status));
+
+        var single = await VerdictAsync(jobId, Sub(root, "Einzeln"));
+        Assert.Equal((DirectoryVerdictKind?)DirectoryVerdictKind.Uniform, single.Verdict);
+        Assert.Equal(DirectoryVerdictRules.SingleFile, single.Rule);
+        Assert.All(await _fileRepo.GetByDirectoryAsync(jobId, Sub(root, "Einzeln")), f => Assert.Equal(FileNodeStatus.Discovered, f.Status));
+
+        var broken = await VerdictAsync(jobId, Sub(root, "Kaputt"));
+        Assert.Null(broken.Verdict);
+        Assert.Equal(DirectoryVerdictRules.ScanError, broken.Rule);
+        Assert.Contains("access_denied", broken.Error);
+        // The unreadable folder does not hold up its parent.
+        Assert.Null((await VerdictAsync(jobId, root)).Error);
     }
 
     [Fact]

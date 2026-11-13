@@ -172,6 +172,32 @@
     "Windows", "Program Files", "Program Files (x86)", "Programme", "ProgramData"
   ],
 
+  // Places where programs or the operating system put their own content next to the person's, anywhere
+  // in a scan, not only inside a dump. A directory at or below one of these paths is "system" by rule,
+  // without the model. A path is a run of folder names; "*" is one folder of any name, "a|b" one folder
+  // named a or b. Keep them narrow: a person's file judged system is the most expensive mistake.
+  "system_places": [
+    // Learning material, templates and sample projects that applications install into the public
+    // documents (Users/Public/Documents on Vista and later, All Users/Documents or Dokumente on XP).
+    {
+      "rule": "application-content",
+      "paths": [
+        "Public/Documents/*/Tutorials|Tutorial|Samples|Sample Projects|Examples|Templates|Lessons|Training|Lernvideos|Beispiele|Vorlagen",
+        "Public/Documents/*/*/Tutorials|Tutorial|Samples|Sample Projects|Examples|Templates|Lessons|Training|Lernvideos|Beispiele|Vorlagen",
+        "All Users/Documents|Dokumente/*/Tutorials|Tutorial|Samples|Sample Projects|Examples|Templates|Lessons|Training|Lernvideos|Beispiele|Vorlagen"
+      ]
+    },
+    // Pictures Windows keeps for the user accounts.
+    { "rule": "account-pictures", "paths": ["AccountPictures", "User Account Pictures"] },
+    // Shortcuts installers put on the desktop of all users.
+    { "rule": "public-desktop", "paths": ["Public/Desktop", "All Users/Desktop"] },
+    // Packages of package managers (scoop in the profile, chocolatey, winget).
+    {
+      "rule": "package-manager",
+      "paths": ["scoop/apps|buckets|cache|persist|shims", "chocolatey/lib|lib-bkp|bin|tools|.chocolatey", "WinGet/Packages"]
+    }
+  ],
+
   // Folder names that say nothing about an occasion. Files in such folders are loose and grouped
   // by time; a folder with any other name is a bundle of its own. Compared case-insensitively.
   "generic_folder_names": [

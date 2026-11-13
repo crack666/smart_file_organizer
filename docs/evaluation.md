@@ -31,8 +31,8 @@ reference and JSON shapes: [cli.md](cli.md#sfo-eval-corpus).
 
 `sfo eval generate <dir> [--seed n]` writes `<dir>/tree/` (the folder that is scanned) and
 `<dir>/truth.json`. The generator is `SmallCorpusGenerator` (Infrastructure/Evaluation); the same
-seed gives the same bytes and timestamps. Version 3 has 62 folders and 160 files (version 2: 42
-and 100, version 1: 41 and 97; the changes are listed under [Truth changes](#truth-changes)):
+seed gives the same bytes and timestamps. Version 4 has 73 folders and 174 files (version 3: 62 and
+160, version 2: 42 and 100, version 1: 41 and 97; the changes are listed under [Truth changes](#truth-changes)):
 
 | Kind | Example | Truth |
 |---|---|---|
@@ -43,6 +43,8 @@ and 100, version 1: 41 and 97; the changes are listed under [Truth changes](#tru
 | Program and game | exe next to dll, exe next to `_Data` | `unit` |
 | Phone dump | `DCIM/Camera`, `Android/data/<package>`, empty `LOST.DIR` | `dump`; camera `uniform`, app data `system`, `LOST.DIR` `empty` |
 | User profiles of an old computer (version 3) | `Profile alter PC/max` (`AppData`, `Documents`, `Desktop`, `Downloads`, `Pictures`, `NTUSER.DAT`), `Profile alter PC/lisa` (old style: `Anwendungsdaten`, `Lokale Einstellungen/Temp`, `Cookies`, `Eigene Dateien`) | each `dump`; documents, desktop, pictures judged like any folder, app data, caches and cookies `system`; the folder of both `uniform` |
+| Places of programs and Windows (version 4) | `Profile alter PC/Public` with `Documents/Fotostudio Pro/Tutorials` and `Samples`, `AccountPictures`, `Desktop` with shortcuts; `max/scoop/apps/7zip` | `system` by rule, no model call; the files have no category |
+| Archive known by its entries (version 4) | `max/Documents/20190312.zip` with bank and card statements | `finance`, category open |
 | Media | `Musik`, `Videos`, `Screenshots` | `uniform` |
 | Placeholder | `Neuer Ordner` (empty) | `empty` |
 | Hidden tool folder | `.ssh` | `system` |
@@ -131,6 +133,22 @@ log file, a settings file and an archive superfluous findings.
 
 Every change of the truth is listed here with its reason. The truth follows what is right for the
 user, never what the program happens to answer.
+
+### Version 4 (13.11.2026, https://github.com/crack666/smart_file_organizer/issues/67)
+
+Nothing of version 3 changed. New are the cases the first real run of an old profile showed, where the model was
+asked about what a rule should decide, or missed what mattered most:
+
+| Path | Verdict or category | Markers | Why |
+|---|---|---|---|
+| `Profile alter PC/Public` and every folder below | `system` | - | The profile of all users holds only what an application and Windows put there: learning videos and sample pictures of an application in `Documents/Fotostudio Pro`, account pictures, installer shortcuts on the desktop. No dump: it has no `NTUSER.DAT` and no `AppData`. |
+| `Profile alter PC/max/scoop` and below | `system` | - | Programs of a package manager. |
+| `Profile alter PC/max/Documents/Garantie` | `uniform` | - | A folder with one file (a warranty card, `document`). |
+| `Profile alter PC/max/Documents/desktop.ini`, `~$etvertrag_Wohnung.docx` | no category | none | Folder settings of Windows and an Office lock file. |
+| `Profile alter PC/max/Documents/20190312.zip` | no category (`archive` or `personal_document`) | `finance` | Bank and card statements packed under a number; only the entry names tell. |
+
+The files of the system places have no category, like other noise. A folder linked by a junction and a folder the
+scan cannot read are not in the corpus (the generator creates neither); `DirectoryVerdictTests` covers them.
 
 ### Version 3 (13.11.2026, https://github.com/crack666/smart_file_organizer/issues/59)
 
@@ -300,6 +318,33 @@ what changed (model, prompts, version, each setting), the score per kind before 
 items fixed and the new failures.
 
 ## Measured
+
+### Scripted answers after issue 67 (13.11.2026)
+
+_Scripted answers (`--stub truth.json`), on the branch of https://github.com/crack666/smart_file_organizer/issues/67
+rebased on master `0630264`, prompt fingerprint `d2f30ce0d015d9d5`, sampling 15 / 10 % / small folders up to 3 files.
+After the rebase on master `b88e089` (new prompt fingerprint `07982d6fb2feeae6`) the v4 run gave the same scores and
+the same 26 + 92 model calls.
+Model calls are the directory verdicts with source `model` plus the file results with origin `model` (summaries not
+counted):_
+
+| Corpus | Build | `directory_verdict` | `file_category` | `sensitive` | Model calls |
+|---|---|---|---|---|---|
+| small v3 seed 36 | before (master `f58d2c9`) | 60/60 | 78/78 | 159/160 | 27 + 91 = 118 |
+| small v3 seed 36 | after | 60/60 | 78/78 | 159/160 | 26 + 90 = 116 |
+| small v4 seed 36 | before (master `0630264`) | 71/71 | 79/79 | 173/174 (20 marked, 20 found, 1 false alarm) | 33 + 95 = 128 |
+| small v4 seed 36 | after | 71/71 | 79/79 | 173/174 (20 marked, 20 found, 1 false alarm) | 26 + 92 = 118 |
+
+`sfo eval --compare` of the two v4 runs lists no fixed and no new failure; the remaining one is the deliberate false
+alarm of `.ssh/id_ed25519.pub`. The perfect stub cannot show what the rules fix, because it answers the truth wherever
+it is asked (it calls the public folders `system` and marks the zip `finance` itself). What the runs show is that the
+rules decide the new cases without a failure and with ten model calls fewer on version 4: seven directory verdicts
+(the public profile and its places, `scoop`, the folder with one file) and three files (`desktop.ini`, `ntuser.ini`,
+the lock file). The zip carries `finance` from the rules `entry:word:kontoauszug;entry:word:kreditkarte` and is stored
+as worth keeping. Tests show the same without the stub: an archive with bank statements inside is `finance` by rule
+(`Phase2EvidenceTests`), and the model is not called for system places, links, unreadable folders, folders with one
+file and system files (`DirectoryVerdictTests`, `Phase2EvidenceTests`). A run with real models on version 4 has not
+been made (no GPU in this package).
 
 ### Scripted answers after issue 59 (13.11.2026)
 
