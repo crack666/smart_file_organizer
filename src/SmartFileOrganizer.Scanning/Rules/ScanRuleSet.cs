@@ -2,7 +2,7 @@ using SmartFileOrganizer.Domain.Enums;
 
 namespace SmartFileOrganizer.Scanning.Rules;
 
-/// <summary>What a matching rule does with a folder. File format: <c>skip</c>, <c>shallow</c>, <c>user_data</c>.</summary>
+/// <summary>What a matching rule does with a folder. File format: <c>skip</c>, <c>shallow</c>, <c>user_data</c>, <c>follow_link</c>.</summary>
 public enum ScanRuleAction
 {
     /// <summary>Do not enter the folder and do not list its files.</summary>
@@ -13,7 +13,12 @@ public enum ScanRuleAction
     Shallow,
 
     /// <summary>Always scan in full: no depth limit and no content check (only the safety limit applies).</summary>
-    UserData
+    UserData,
+
+    /// <summary>Enter a link (junction, symbolic link, mount point) whose own path ends with the match. Links are
+    /// never followed without such a rule, and not even with one when the target lies inside the scan root, is a
+    /// folder above the link, or was already entered through another link. Has no effect on folders that are no links.</summary>
+    FollowLink
 }
 
 /// <summary>One rule of a rule file.</summary>

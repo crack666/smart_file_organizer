@@ -85,8 +85,63 @@ public class JobStatisticsRepository : IJobStatisticsRepository
                 """,
                 new { jobId, maxErrors })).Select(e => new JobErrorEntry(e.Phase, e.Path, e.Message)).ToList();
 
+        // Every read error is counted; only the first few of each cause are listed, so a profile with hundreds
+        // of locked folders reads as one line per cause instead of hundreds of lines.
+        var scanErrors = (await conn.QueryAsync<ScanErrorRow>(
+            """
+            WITH errors AS (
+                SELECT COALESCE(scan_error_cause, 'io_error') AS cause, full_path AS path, dir_reason AS message, 1 AS is_directory
+                FROM directory_nodes WHERE job_id = @jobId AND dir_status = @error
+                UNION ALL
+                SELECT scan_error_cause, full_path, scan_error, 0
+                FROM file_nodes WHERE job_id = @jobId AND scan_error_cause IS NOT NULL
+            ),
+            ranked AS (
+                SELECT *, ROW_NUMBER() OVER (PARTITION BY cause ORDER BY path) AS n,
+                       SUM(is_directory) OVER (PARTITION BY cause) AS directories,
+                       SUM(1 - is_directory) OVER (PARTITION BY cause) AS files
+                FROM errors
+            )
+            SELECT cause, path, message, directories, files FROM ranked
+            WHERE n <= @examples
+            ORDER BY directories + files DESC, cause, n
+            """,
+            new { jobId, error = (int)DirectoryStatus.Error, examples = ExamplesPerGroup }))
+            .GroupBy(r => r.Cause)
+            .Select(g => new ScanErrorGroup(g.Key, g.First().Directories, g.First().Files,
+                g.Select(r => new ScanErrorExample(r.Path, r.Message)).ToList()))
+            .ToList();
+
+        var links = (await conn.QueryAsync<LinkRow>(
+            """
+            WITH links AS (
+                SELECT link_kind AS kind, full_path AS path, link_target AS target,
+                       CASE WHEN dir_status = @link THEN 0 ELSE 1 END AS followed, 1 AS is_directory
+                FROM directory_nodes WHERE job_id = @jobId AND link_kind IS NOT NULL
+                UNION ALL
+                SELECT link_kind, full_path, link_target, 0, 0 FROM file_links WHERE job_id = @jobId
+            ),
+            ranked AS (
+                SELECT *, ROW_NUMBER() OVER (PARTITION BY kind ORDER BY is_directory DESC, path) AS n,
+                       SUM(CASE WHEN is_directory = 1 AND followed = 0 THEN 1 ELSE 0 END) OVER (PARTITION BY kind) AS not_followed,
+                       SUM(followed) OVER (PARTITION BY kind) AS followed_count,
+                       SUM(1 - is_directory) OVER (PARTITION BY kind) AS files
+                FROM links
+            )
+            SELECT kind, path, target, followed, not_followed, followed_count, files FROM ranked
+            WHERE n <= @examples
+            ORDER BY kind, n
+            """,
+            new { jobId, link = (int)DirectoryStatus.Link, examples = ExamplesPerGroup }))
+            .GroupBy(r => r.Kind)
+            .Select(g => new LinkGroup(g.Key, g.First().NotFollowed, g.First().FollowedCount, g.First().Files,
+                g.Select(r => new LinkExample(r.Path, r.Target, r.Followed != 0)).ToList()))
+            .ToList();
+
         return new JobStatistics
         {
+            ScanErrors = scanErrors,
+            Links = links,
             DirectoriesTotal = dirs.Total,
             DirectoriesAiRelevant = dirs.AiRelevant,
             DirectoriesPreAssessed = dirs.PreAssessed,
@@ -125,6 +180,29 @@ public class JobStatisticsRepository : IJobStatisticsRepository
         public long Skipped { get; set; }
         public long Inherited { get; set; }
         public long Deferred { get; set; }
+    }
+
+    /// <summary>Paths listed per error cause and per link kind in <c>sfo status</c>.</summary>
+    public const int ExamplesPerGroup = 3;
+
+    private sealed class ScanErrorRow
+    {
+        public string Cause { get; set; } = string.Empty;
+        public string Path { get; set; } = string.Empty;
+        public string? Message { get; set; }
+        public long Directories { get; set; }
+        public long Files { get; set; }
+    }
+
+    private sealed class LinkRow
+    {
+        public string Kind { get; set; } = string.Empty;
+        public string Path { get; set; } = string.Empty;
+        public string? Target { get; set; }
+        public long Followed { get; set; }
+        public long NotFollowed { get; set; }
+        public long FollowedCount { get; set; }
+        public long Files { get; set; }
     }
 
     private sealed class ErrorRow

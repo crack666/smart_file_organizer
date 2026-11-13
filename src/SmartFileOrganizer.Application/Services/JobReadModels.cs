@@ -130,6 +130,17 @@ public sealed record DirectoryItem
     public long DirectFiles { get; init; }
     public int Subdirs { get; init; }
 
+    /// <summary>Why the scan treated the folder as it did: rule, link, read error.</summary>
+    public string? ScanReason { get; init; }
+
+    /// <summary>Code of the link kind when the folder is a link (followed or not); null otherwise.</summary>
+    public string? LinkKind { get; init; }
+
+    public string? LinkTarget { get; init; }
+
+    /// <summary>Code of the read error cause when the scan could not read the folder.</summary>
+    public string? ErrorCause { get; init; }
+
     /// <summary>Verdict code, null when there is none (see <see cref="VerdictError"/>).</summary>
     public string? Verdict { get; init; }
 

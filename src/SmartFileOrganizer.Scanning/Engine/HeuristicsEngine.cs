@@ -1,5 +1,6 @@
 using SmartFileOrganizer.Domain.Enums;
 using SmartFileOrganizer.Domain.Interfaces;
+using SmartFileOrganizer.Domain.Models;
 using SmartFileOrganizer.Scanning.Rules;
 
 namespace SmartFileOrganizer.Scanning.Engine;
@@ -24,7 +25,9 @@ public enum DecisionBasis
     /// <summary>Beyond the shallow depth, the folder holds neither user nor program files.</summary>
     NoProgramContent,
     /// <summary>Beyond the shallow depth, the content could not be looked at.</summary>
-    ContentUnknown
+    ContentUnknown,
+    /// <summary>The folder is a link and no <c>follow_link</c> rule lets the scan enter it.</summary>
+    Link
 }
 
 /// <summary>A decision with everything it rests on: what <see cref="DirectoryEvaluation"/> stores, plus
@@ -93,7 +96,8 @@ public class HeuristicsEngine : IHeuristicsEngine
     /// Nothing is scanned; <paramref name="probe"/> lists a folder's files when a decision depends on them.
     /// </summary>
     /// <exception cref="ArgumentException"><paramref name="path"/> does not lie under <paramref name="rootPath"/>.</exception>
-    public RuleCheck Check(string rootPath, string path, Func<string, DirectoryContent?> probe)
+    /// <param name="link">Tells whether a folder is a link; a link the rules do not follow blocks everything below it.</param>
+    public RuleCheck Check(string rootPath, string path, Func<string, DirectoryContent?> probe, Func<string, FileSystemLink?>? link = null)
     {
         var chain = new List<string>();
         for (var current = path; !SamePath(current, rootPath); current = Path.GetDirectoryName(current)!)
@@ -109,7 +113,7 @@ public class HeuristicsEngine : IHeuristicsEngine
         for (var i = 0; i < chain.Count; i++)
         {
             var folder = chain[i];
-            evaluation = Explain(rootPath, folder, i + 1, () => probe(folder));
+            evaluation = ExplainFolder(rootPath, folder, i + 1, link?.Invoke(folder), () => probe(folder));
             if (i < chain.Count - 1 && blockedBy == null && evaluation.Decision != ScanDecision.Descend)
             {
                 blockedAt = folder;
@@ -121,6 +125,53 @@ public class HeuristicsEngine : IHeuristicsEngine
 
     private static bool SamePath(string a, string b) => string.Equals(
         Path.TrimEndingDirectorySeparator(a), Path.TrimEndingDirectorySeparator(b), StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// <see cref="Explain"/> for a folder that may be a link: a link the rules do not follow is decided
+    /// <see cref="ScanDecision.Link"/>; a followed one is then decided like any folder, its reason naming the link.
+    /// </summary>
+    public RuleEvaluation ExplainFolder(string rootPath, string fullPath, int depth, FileSystemLink? link, Func<DirectoryContent?>? content = null)
+    {
+        if (link == null)
+            return Explain(rootPath, fullPath, depth, content);
+        var linkDecision = ExplainLink(rootPath, fullPath, depth, link);
+        if (linkDecision.Decision == ScanDecision.Link)
+            return linkDecision;
+        var folder = Explain(rootPath, fullPath, depth, content);
+        return folder with { Reason = $"{folder.Reason} (followed link: {linkDecision.Reason})" };
+    }
+
+    /// <summary>
+    /// Whether the scan enters a link. Never by default: only a <c>follow_link</c> rule whose match ends at the
+    /// link itself lets it in. The scan root is entered even if it is a link, because the user chose it.
+    /// Whether the target is inside the scan root or above the link (a loop) is checked by the scan, which can
+    /// resolve the target; this decision only reads the rules.
+    /// </summary>
+    public RuleEvaluation ExplainLink(string rootPath, string fullPath, int depth, FileSystemLink link)
+    {
+        var what = DescribeLink(link);
+        if (depth == 0)
+            return Result(ScanDecision.Descend, $"Descend: scan root ({what})", DecisionBasis.ScanRoot, depth);
+
+        var segments = PathSegments.Split(fullPath);
+        var belowRoot = BelowRootStart(PathSegments.Split(rootPath), segments);
+        Match? follow = null;
+        for (var i = 0; i < _rules.Rules.Count && follow == null; i++)
+        {
+            var rule = _rules.Rules[i];
+            if (rule.Action == ScanRuleAction.FollowLink && LastRunEnd(segments, belowRoot, rule.Segments) == segments.Length - 1)
+                follow = new Match(rule, i, segments.Length - 1);
+        }
+
+        return follow is { } m
+            ? RuleResult(ScanDecision.Descend, m, depth, $", {what}")
+            : Result(ScanDecision.Link, $"Link: {what}; not followed (no follow_link rule of rules '{_rules.Name}' matches)",
+                DecisionBasis.Link, depth);
+    }
+
+    /// <summary>For reasons: <c>junction to 'C:/ProgramData'</c>.</summary>
+    public static string DescribeLink(FileSystemLink link) =>
+        $"{link.Kind.ToCode()} to {(link.Target is { } t ? $"'{t}'" : "an unreadable target")}";
 
     public RuleEvaluation Explain(string rootPath, string fullPath, int depth, Func<DirectoryContent?>? content = null)
     {
@@ -221,6 +272,8 @@ public class HeuristicsEngine : IHeuristicsEngine
         for (var i = 0; i < _rules.Rules.Count; i++)
         {
             var rule = _rules.Rules[i];
+            if (rule.Action == ScanRuleAction.FollowLink)
+                continue;   // only decides links (ExplainLink)
             var from = rule.Action == ScanRuleAction.UserData ? 0 : belowRoot;
             var end = LastRunEnd(segments, from, rule.Segments);
             if (end >= 0 && (best == null || end > best.Value.End))

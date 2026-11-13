@@ -62,7 +62,7 @@ file are reported at once (`rules_invalid`, exit code 1).
 | `user_types` | File types that make a folder user data when found among its own files. |
 | `program_types` | File types that mark a program folder, as long as no user file sits next to them. |
 | `rules[].match` | One or more whole folder names, compared case-insensitively. `bin` matches `App/bin`, not `Robin`. `ProgramData/Microsoft` (either separator) matches the two names in a row. |
-| `rules[].action` | `skip`: not entered, files not listed. `shallow`: files listed, subfolders counted but not entered. `user_data`: always scanned in full, no depth limit and no content check. |
+| `rules[].action` | `skip`: not entered, files not listed. `shallow`: files listed, subfolders counted but not entered. `user_data`: always scanned in full, no depth limit and no content check. `follow_link`: enter a link whose own path ends with the match ([below](#links-and-read-errors)); no effect on folders that are no links. |
 | `rules[].max_depth` | Only with `shallow`: how many levels below the matched folder are still scanned in full; the folders at that level are recorded shallow. 0 (default) records the matched folder itself shallow. |
 | `rules[].why` | Free text, copied into the reason stored at every folder the rule decides. |
 
@@ -104,6 +104,39 @@ The depth limit only applies to folders recognised as program folders. Until
 https://github.com/crack666/smart_file_organizer/issues/21 the shipped rules recorded every folder from depth 6 shallow unless its path
 contained a user-data name, and skipped everything from depth 12. A photo folder
 such as `Urlaubsfotos` at depth 7 was therefore only recorded flat.
+
+## Links and read errors
+
+Issue: https://github.com/crack666/smart_file_organizer/issues/57
+
+An old Windows profile is full of compatibility links: `All Users` and `Default User` point to folders of
+the system, `Documents and Settings`, `Eigene Dateien`, `Anwendungsdaten` and `Application Data` point back
+into the profile or to itself. On a disk from another computer the absolute targets resolve on the machine
+that scans. Following them counts foreign files or the same files twice, and loops run into the safety
+limit. Until this was changed, the scan followed every link.
+
+- A folder that is a link (Windows: junction, symbolic link, volume mount point, told apart by the reparse
+  tag; Unix: symbolic link) is not entered. It is stored as a row with status `link`, its kind and its
+  target, and a reason such as `Link: junction to 'C:\ProgramData'; not followed (no follow_link rule of
+  rules 'default' matches)`. Nothing behind it is counted.
+- A file that is a link is stored in `file_links` with kind and target, not in the file list: it counts
+  neither as a file nor by size, and no comparison or analysis sees it. A hard link is no link in this
+  sense: it is a second name of the same file and listed under both names; the execution of a plan tells
+  them apart by file identity.
+- Reparse points with their own content (OneDrive placeholders, deduplicated files) are no links and are
+  scanned as usual.
+- The scan root is entered even if it is a link: the user chose it.
+- `{ "match": "All Users", "action": "follow_link" }` lets the scan enter that link. Even then it is not
+  entered when its target lies inside the scan root (counted there already), holds the link or the root (a
+  loop), cannot be resolved, or was already entered through another link; the reason says which. There is
+  no setting to follow every link.
+- A folder that cannot be read is stored with status `error` and the cause of the error
+  (`access_denied`, `not_found`, `path_too_long`, `io_error`), never as an empty folder. A file whose size
+  cannot be read stays in the list with `scan_error_cause` and `scan_error`. `sfo status` groups both by
+  cause.
+
+`sfo rules check` treats a link on the way like the scan: a link no rule follows blocks everything below it.
+Jobs scanned before 13.11.2026 may have followed links; resuming them does not undo that, a new scan does.
 
 ## Reasons
 

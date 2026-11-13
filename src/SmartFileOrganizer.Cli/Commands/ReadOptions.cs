@@ -233,18 +233,25 @@ public sealed record DirectoryView(
     long SensitiveDirs,
     string? Purpose,
     string? Summary,
-    bool TextWithheld)
+    bool TextWithheld,
+    string? ScanReason,
+    string? LinkKind,
+    string? LinkTarget,
+    string? ErrorCause)
 {
     public static DirectoryView From(DirectoryItem d) => new(
         d.FullPath, d.RelativePath, d.Depth, d.Status, d.SizeBytes, d.Files, d.DirectFiles, d.Subdirs,
         d.Verdict ?? (d.VerdictError is not null ? ReadFilterCodes.Error : null), d.VerdictSource, d.Retention,
-        d.SensitiveFiles, d.Sensitive, d.SensitiveRule, d.SensitiveDirs, d.Purpose, d.Summary, d.TextWithheld);
+        d.SensitiveFiles, d.Sensitive, d.SensitiveRule, d.SensitiveDirs, d.Purpose, d.Summary, d.TextWithheld,
+        d.ScanReason, d.LinkKind, d.LinkTarget, d.ErrorCause);
 
     public string ToLine(DisplayLanguage language) =>
         $"{ReadFormat.Size(SizeBytes),10}  {Files,7} files  {CodeLabels.LabelOfCode<DirectoryVerdictKind>(Verdict, language) ?? "-",-11} "
         + $"{CodeLabels.LabelOfCode<RetentionValue>(Retention, language) ?? "-",-11}"
         + (SensitiveFiles > 0 ? $" [{SensitiveFiles} sensitive]" : string.Empty)
         + (Sensitive.Count > 0 ? $" [{ReadFormat.Markers(Sensitive, language)}]" : string.Empty)
+        + (Status == DirectoryStatus.Link ? $" [link {LinkKind} -> {LinkTarget ?? "?"}, not entered]" : string.Empty)
+        + (Status == DirectoryStatus.Error ? $" [read error: {ErrorCause ?? "unknown"}]" : string.Empty)
         + $"  {Path}";
 }
 

@@ -31,4 +31,6 @@ public interface IFileRepository
     Task<IReadOnlyList<FileNode>> GetBelowRulesVersionAsync(long jobId, int version, CancellationToken ct = default);
     /// <summary>Writes markers, rule id and rule version of the given files; nothing else.</summary>
     Task UpdateSensitiveAsync(IReadOnlyList<FileNode> nodes, CancellationToken ct = default);
+    /// <summary>Records files that are themselves links (<c>file_links</c>); a path already recorded is kept.</summary>
+    Task InsertLinksAsync(IEnumerable<FileLinkNode> links, CancellationToken ct = default);
 }

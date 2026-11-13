@@ -10,4 +10,10 @@ public interface IDirectoryRepository
     Task<IReadOnlyList<DirectoryNode>> GetRootsAsync(long jobId, CancellationToken ct = default);
     Task UpdateAsync(DirectoryNode node, CancellationToken ct = default);
     Task<IReadOnlyList<DirectoryNode>> GetAllForJobOrderedByDepthAsync(long jobId, CancellationToken ct = default);
+
+    /// <summary>What a job's scan stored, counted from the rows: the counters a finished scan reports.</summary>
+    Task<ScanTotals> GetScanTotalsAsync(long jobId, CancellationToken ct = default);
 }
+
+/// <summary>Stored rows of a scan: folders (every decision, links and errors included), files, and read errors.</summary>
+public sealed record ScanTotals(long Directories, long Files, long DirectoryErrors, long FileErrors);
