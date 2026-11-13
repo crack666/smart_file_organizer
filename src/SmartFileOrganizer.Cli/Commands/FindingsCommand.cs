@@ -20,7 +20,8 @@ public static class FindingsCommand
     public sealed record ActionView(string Kind, string Reason, bool SingleDecision);
 
     public sealed record TargetView(
-        string Path, string RelativePath, string Certainty, string Reason, int SameContentFiles, string ContentCheck);
+        string Path, string RelativePath, string Certainty, string Reason, int SameContentFiles, string ContentCheck,
+        long? LibraryJobId = null, string? LibraryRoot = null);
 
     public sealed record PeriodView(string? From, string? To, string? TimeSource);
 
@@ -61,7 +62,8 @@ public static class FindingsCommand
             f.Comparison, f.Markers, f.SensitiveRules,
             new ActionView(f.Action.Kind.ToCode(), f.Action.Reason, f.Action.SingleDecision),
             f.Target is { } t
-                ? new TargetView(t.Path, t.RelativePath, t.Certainty.ToCode(), t.Reason, t.SameContentFiles, t.ContentCheck.ToCode())
+                ? new TargetView(t.Path, t.RelativePath, t.Certainty.ToCode(), t.Reason, t.SameContentFiles, t.ContentCheck.ToCode(),
+                    t.LibraryJobId, t.LibraryRoot)
                 : null,
             f.Duplicates, f.Examples, f.Notes, f.DecidedBy.ToCode(), f.DecidedAt, f.DecisionNote);
 
@@ -80,11 +82,48 @@ public static class FindingsCommand
         DateTime? BundlesBuiltAt,
         long? LibraryJobId,
         DateTime? LibraryComparedAt,
-        DateTime? DuplicatesComparedAt)
+        DateTime? DuplicatesComparedAt,
+        IReadOnlyList<long> LibraryJobIds)
     {
         public static InputsView From(FindingInputsInfo i) => new(
             i.Files, i.FilesJudged, i.FilesPending, i.Directories, i.DirectoriesJudged, i.BundlesBuiltAt,
-            i.LibraryJobId, i.LibraryComparison?.ComparedAt, i.DuplicateComparison?.ComparedAt);
+            i.LibraryJobId, i.LibraryComparison?.ComparedAt, i.DuplicateComparison?.ComparedAt, i.LibraryJobIds ?? []);
+    }
+
+    public sealed record TallyView(long Files, long Bytes)
+    {
+        public static TallyView From(FileTally t) => new(t.Files, t.Bytes);
+    }
+
+    public sealed record LibraryTallyView(long LibraryJobId, string RootPath, long Files, long Bytes);
+
+    public sealed record WorthKeepingView(long Files, long Bytes, TallyView NotBackedUp, TallyView BackedUp, TallyView Unknown);
+
+    public sealed record BackedUpView(long Files, long Bytes, IReadOnlyList<LibraryTallyView> ByLibrary);
+
+    /// <summary>The first answer of the summary: what lies on the source, file by file.</summary>
+    public sealed record OverviewView(
+        TallyView Files, WorthKeepingView WorthKeeping, BackedUpView BackedUp, TallyView Disposable, TallyView Sensitive, TallyView NotCompared)
+    {
+        public static OverviewView From(FindingOverview o) => new(
+            TallyView.From(o.All),
+            new WorthKeepingView(o.WorthKeeping.Files, o.WorthKeeping.Bytes, TallyView.From(o.WorthKeepingNotBackedUp),
+                TallyView.From(o.WorthKeepingBackedUp), TallyView.From(o.WorthKeepingUnknown)),
+            new BackedUpView(o.BackedUp.Files, o.BackedUp.Bytes,
+                o.BackedUpByLibrary.Select(l => new LibraryTallyView(l.LibraryJobId, l.RootPath, l.Files, l.Bytes)).ToList()),
+            TallyView.From(o.Disposable), TallyView.From(o.Sensitive), TallyView.From(o.NotCompared));
+    }
+
+    public sealed record RootStorageView(long LibraryJobId, string RootPath, long? FreeBytes, long NeededBytes, int Findings, string Space);
+
+    /// <summary>Where the proposals go: library roots only, with free and needed space.</summary>
+    public sealed record StorageView(string Status, string? Message, IReadOnlyList<RootStorageView> Roots, int UnplacedFindings,
+        TallyView Unplaced, IReadOnlyList<string> Warnings)
+    {
+        public static StorageView From(FindingStorage s) => new(
+            s.Status.ToCode(), s.Message,
+            s.Roots.Select(r => new RootStorageView(r.LibraryJobId, r.RootPath, r.FreeBytes, r.NeededBytes, r.Findings, r.Space.ToCode())).ToList(),
+            s.UnplacedFindings, TallyView.From(s.Unplaced), s.Warnings);
     }
 
     public sealed record CoverageView(string Coverage, string? Note);
@@ -119,7 +158,9 @@ public static class FindingsCommand
         IReadOnlyDictionary<string, long> ByCertainty,
         IReadOnlyDictionary<string, long> ByState,
         IReadOnlyDictionary<string, long> BelowThreshold,
-        IReadOnlyList<BriefView> Top);
+        IReadOnlyList<BriefView> Top,
+        OverviewView? Overview = null,
+        StorageView? Storage = null);
 
     public sealed record ShowResult(
         long JobId, FindingView Finding, long Total, int Limit, int Offset, int? NextOffset, IReadOnlyList<FileOutputRecord> Files);
@@ -172,12 +213,17 @@ public static class FindingsCommand
             HelpName = "code"
         };
         state.AcceptOnlyFromAmong([.. VerdictCodes.All<FindingState>()]);
+        var against = new Option<long[]>("--against")
+        {
+            Description = "Library job whose stored comparison counts. Repeatable: a file is backed up as soon as one of them holds it. Default: the libraries of the newest sfo compare.",
+            HelpName = "job"
+        };
         var read = new ReadOptions();
 
         var command = new Command("findings",
             "The findings of a source: worth keeping and not backed up, worth keeping among noise, misplaced, sensitive, duplicate. Ranked; unsure ones last. No model call.")
         {
-            job, summary, top, kind, under, minCertainty, state
+            job, summary, top, kind, under, minCertainty, state, against
         };
         foreach (var option in read.Paging)
             command.Options.Add(option);
@@ -188,10 +234,11 @@ public static class FindingsCommand
             var service = services.GetRequiredService<FindingService>();
             var p = ctx.ParseResult;
             var jobId = p.GetValue(job);
+            var libraries = (p.GetValue(against) ?? []).Distinct().ToList();
 
             if (p.GetValue(summary))
             {
-                var s = await Run(() => service.SummarizeAsync(jobId, p.GetValue(top), ct));
+                var s = await Run(() => service.SummarizeAsync(jobId, p.GetValue(top), libraries, ct));
                 var view = Summary(s);
                 return CommandOutcome.Success(view, () => RenderSummary(view));
             }
@@ -202,7 +249,8 @@ public static class FindingsCommand
                 Kinds = (p.GetValue(kind) ?? []).Select(k => VerdictCodes.ParseNullable<FindingKind>(k)!.Value).ToList(),
                 Under = p.GetValue(under),
                 MinCertainty = VerdictCodes.ParseNullable<ResultCertainty>(p.GetValue(minCertainty)),
-                States = (p.GetValue(state) ?? []).Select(k => VerdictCodes.ParseNullable<FindingState>(k)!.Value).ToList()
+                States = (p.GetValue(state) ?? []).Select(k => VerdictCodes.ParseNullable<FindingState>(k)!.Value).ToList(),
+                Libraries = libraries
             };
             var (report, items) = await Run(() => service.ListAsync(query, ct));
             var limit = p.GetValue(read.Limit);
@@ -345,6 +393,7 @@ public static class FindingsCommand
             throw ex.Failure switch
             {
                 FindingFailure.WrongRole => new CliFailureException(ExitCodes.Failure, ErrorCodes.WrongRole, ex.Message),
+                FindingFailure.ComparisonNotFound => new CliFailureException(ExitCodes.Failure, ErrorCodes.ComparisonNotFound, ex.Message),
                 _ => new CliFailureException(ExitCodes.Failure, ErrorCodes.FindingNotFound, ex.Message)
             };
         }
@@ -372,11 +421,35 @@ public static class FindingsCommand
         s.ByState.ToDictionary(k => k.Key.ToCode(), k => k.Value),
         s.BelowThreshold.ToDictionary(k => k.Key.ToCode(), k => k.Value),
         s.Top.Select(b => new BriefView(b.Rank, b.Key, b.Kind.ToCode(), b.Certainty.ToCode(), b.State.ToCode(), b.Title,
-            b.RelativePath, b.Files, b.Bytes, b.Action.ToCode())).ToList());
+            b.RelativePath, b.Files, b.Bytes, b.Action.ToCode())).ToList(),
+        s.Overview is { } o ? OverviewView.From(o) : null,
+        s.Storage is { } st ? StorageView.From(st) : null);
 
     private static string RenderSummary(SummaryResult r)
     {
         var sb = new StringBuilder();
+        if (r.Overview is { } o)
+        {
+            sb.AppendLine($"Job {r.JobId}: {o.Files.Files} files ({ReadFormat.Size(o.Files.Bytes)})");
+            sb.AppendLine($"  worth keeping, not backed up {o.WorthKeeping.NotBackedUp.Files,7} files {ReadFormat.Size(o.WorthKeeping.NotBackedUp.Bytes),10}");
+            sb.AppendLine($"  worth keeping, unknown       {o.WorthKeeping.Unknown.Files,7} files {ReadFormat.Size(o.WorthKeeping.Unknown.Bytes),10}");
+            sb.AppendLine($"  backed up                    {o.BackedUp.Files,7} files {ReadFormat.Size(o.BackedUp.Bytes),10}");
+            foreach (var l in o.BackedUp.ByLibrary)
+                sb.AppendLine($"    in library job {l.LibraryJobId,-10} {l.Files,7} files {ReadFormat.Size(l.Bytes),10}  {l.RootPath}");
+            sb.AppendLine($"  disposable                   {o.Disposable.Files,7} files {ReadFormat.Size(o.Disposable.Bytes),10}");
+            sb.AppendLine($"  sensitive                    {o.Sensitive.Files,7} files {ReadFormat.Size(o.Sensitive.Bytes),10}");
+        }
+        if (r.Storage is { } st)
+        {
+            if (st.Message is { } message)
+                sb.AppendLine("  " + message);
+            foreach (var root in st.Roots)
+                sb.AppendLine($"  target {root.RootPath}: {(root.FreeBytes is { } free ? ReadFormat.Size(free) : "unknown")} free, {ReadFormat.Size(root.NeededBytes)} needed ({root.Space})");
+            if (st.UnplacedFindings > 0)
+                sb.AppendLine($"  without target yet: {st.UnplacedFindings} findings, {ReadFormat.Size(st.Unplaced.Bytes)}");
+            foreach (var warning in st.Warnings)
+                sb.AppendLine("  warning: " + warning);
+        }
         sb.AppendLine($"Job {r.JobId}: {r.Listed} findings ({r.Sure} sure, {r.Unsure} unsure)");
         foreach (var (kind, t) in r.ByKind)
         {

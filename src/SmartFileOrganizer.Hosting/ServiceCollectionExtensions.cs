@@ -83,6 +83,7 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<OllamaOptions>(),
             sp.GetRequiredService<VideoFrameExtractor>()));
         services.AddSingleton<IContentHasher, ContentHasher>();
+        services.TryAddSingleton<IFreeSpaceProbe, FreeSpaceProbe>();
 
         // Ollama
         services.AddSingleton(sp =>

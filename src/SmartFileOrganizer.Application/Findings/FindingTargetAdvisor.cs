@@ -12,11 +12,15 @@ namespace SmartFileOrganizer.Application.Findings;
 /// </summary>
 public interface IFindingTargetAdvisor
 {
-    /// <summary>One answer per group, in order; null where no existing folder fits. Writes nothing.</summary>
-    /// <param name="comparison">Comparison rows of the source against this library by file id (may be empty).</param>
+    /// <summary>
+    /// One answer per group, in order; null where no existing folder of any of the libraries fits. Writes nothing. A
+    /// target lies inside one of the library roots (<see cref="FindingTarget.LibraryJobId"/>); findings drop any other.
+    /// </summary>
+    /// <param name="libraryJobIds">The libraries to look in; the best place of all of them wins.</param>
+    /// <param name="comparison">Comparison rows of the source against these libraries by file id (may be empty).</param>
     Task<IReadOnlyList<FindingTarget?>> ProposeAsync(
         long sourceJobId,
-        long libraryJobId,
+        IReadOnlyList<long> libraryJobIds,
         IReadOnlyList<IReadOnlyList<FileNode>> groups,
         IReadOnlyDictionary<long, FileComparison> comparison,
         CancellationToken ct = default);
@@ -30,21 +34,22 @@ public sealed class LibraryFindingTargetAdvisor(LibraryTargetService targets) : 
 {
     public async Task<IReadOnlyList<FindingTarget?>> ProposeAsync(
         long sourceJobId,
-        long libraryJobId,
+        IReadOnlyList<long> libraryJobIds,
         IReadOnlyList<IReadOnlyList<FileNode>> groups,
         IReadOnlyDictionary<long, FileComparison> comparison,
         CancellationToken ct = default)
     {
-        var best = await targets.BestPlacesAsync(sourceJobId, libraryJobId, groups, ct);
+        var best = await targets.BestPlacesAsync(sourceJobId, libraryJobIds, groups, ct);
         var result = new List<FindingTarget?>(best.Count);
         for (var i = 0; i < best.Count; i++)
         {
-            if (best[i] is not { } candidate)
+            if (best[i] is not { } place)
             {
                 result.Add(null);
                 continue;
             }
 
+            var (candidate, library) = place;
             var root = candidate.Target.FullPath;
             var same = groups[i].Count(f =>
                 comparison.TryGetValue(f.Id, out var row)
@@ -52,7 +57,7 @@ public sealed class LibraryFindingTargetAdvisor(LibraryTargetService targets) : 
                 && row.MatchPath is { } match
                 && IsBelow(match, root));
             result.Add(new FindingTarget(root, candidate.Destination, candidate.Certainty, candidate.Reason, same,
-                TargetContentCheck.NotChecked));
+                TargetContentCheck.NotChecked, library.Id, library.RootPath));
         }
         return result;
     }

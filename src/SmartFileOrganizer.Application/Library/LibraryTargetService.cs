@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
 using SmartFileOrganizer.Application.Bundles;
+using SmartFileOrganizer.Application.Findings;
 using SmartFileOrganizer.Application.Services;
 using SmartFileOrganizer.Domain.Enums;
 using SmartFileOrganizer.Domain.Interfaces;
@@ -75,6 +76,12 @@ public sealed record LibraryMatchQuery
     /// <summary>The library job; null for the library of the latest comparison, else the newest library job.</summary>
     public long? Against { get; init; }
 
+    /// <summary>
+    /// Several library jobs (https://github.com/crack666/smart_file_organizer/issues/74): each is matched, and the best
+    /// places of all of them are listed by score. Wins over <see cref="Against"/> when not empty.
+    /// </summary>
+    public IReadOnlyList<long> Libraries { get; init; } = [];
+
     public LibraryWords Words { get; init; } = LibraryWords.Default;
     public int? Limit { get; init; }
     public bool UseModel { get; init; } = true;
@@ -83,6 +90,11 @@ public sealed record LibraryMatchQuery
 }
 
 /// <summary>The answer of <c>sfo library match</c>.</summary>
+/// <param name="Library">The library of the best proposal (or of the new folder); the first one named when there is none.</param>
+/// <param name="Libraries">Every library matched, in the order named.</param>
+/// <param name="CandidateLibraries">The library of each of <see cref="MatchResult.Candidates"/>, in the same order.</param>
+/// <param name="NewFolderLibrary">The library the new folder would lie in.</param>
+/// <param name="Space">Per library root: free space and what the unit needs there (its files not yet backed up).</param>
 public sealed record LibraryMatchAnswer(
     ScanJob Source,
     ScanJob? Library,
@@ -94,7 +106,11 @@ public sealed record LibraryMatchAnswer(
     MatchResult? Result,
     LibraryPatternsInfo? Patterns,
     LibraryModelPart Advice,
-    IReadOnlyList<string> Notes);
+    IReadOnlyList<string> Notes,
+    IReadOnlyList<ScanJob>? Libraries = null,
+    IReadOnlyList<ScanJob>? CandidateLibraries = null,
+    ScanJob? NewFolderLibrary = null,
+    IReadOnlyList<RootStorage>? Space = null);
 
 /// <summary>
 /// <c>sfo library show</c> and <c>sfo library match</c> (https://github.com/crack666/smart_file_organizer/issues/25):
@@ -115,6 +131,7 @@ public sealed partial class LibraryTargetService
     private readonly IContentComparisonRepository _comparisons;
     private readonly LibraryMatchOptions _options;
     private readonly ILogger<LibraryTargetService> _logger;
+    private readonly IFreeSpaceProbe? _freeSpace;
 
     public LibraryTargetService(
         LibraryService library,
@@ -124,8 +141,10 @@ public sealed partial class LibraryTargetService
         ICaptureInfoSource captures,
         IContentComparisonRepository comparisons,
         LibraryMatchOptions options,
-        ILogger<LibraryTargetService> logger)
+        ILogger<LibraryTargetService> logger,
+        IFreeSpaceProbe? freeSpace = null)
     {
+        _freeSpace = freeSpace;
         _library = library;
         _jobs = jobs;
         _reads = reads;
@@ -200,43 +219,65 @@ public sealed partial class LibraryTargetService
             throw new LibraryServiceException(LibraryFailure.ScanNotCompleted,
                 $"The scan of job {source.Id} is {source.Status.ToString().ToLowerInvariant()}; finish it first (sfo scan --resume {source.Id}).");
 
-        var (library, choice) = await ChooseLibraryAsync(source, query.Against, ct);
+        var (libraries, choice) = await ChooseLibrariesAsync(source, query, ct);
         var (files, unitBase) = await LoadUnitAsync(source, query, ct);
         var notes = new List<string>();
 
-        if (library is null)
+        if (libraries.Count == 0)
         {
             var nothing = await BuildUnitAsync(source, files, unitBase, null, query.Words, ct);
             return new LibraryMatchAnswer(source, null, null, MatchStatus.NoLibrary,
-                "No library has been scanned, so there is no existing order to fit into, and nothing is proposed. "
+                "No library has been scanned, so no permanent storage is known: there is no existing order to fit into, and no target is proposed. "
                 + "Scan your organised archive with 'sfo scan <path> --role library'; without one, 'sfo library propose' suggests a structure.",
-                nothing.Unit, null, null, null, LibraryModelPart.Skipped, notes);
+                nothing.Unit, null, null, null, LibraryModelPart.Skipped, notes, []);
         }
 
-        var comparison = await _comparisons.GetComparisonAsync(source.Id, library.Id, ct);
-        if (comparison is null)
-            notes.Add($"Job {source.Id} was not compared with library {library.Id}; the signal 'same content already there' is missing (sfo compare {source.Id} --against {library.Id}).");
-        else if (!comparison.Complete)
-            notes.Add($"The comparison with library {library.Id} is incomplete ({comparison.ErrorCount} errors); some files may lie in the library without being counted.");
+        var (set, missing) = await LibraryComparisonSet.LoadAsync(_comparisons, source.Id, libraries.Select(l => l.Id).ToList(), ct);
+        foreach (var id in missing)
+            notes.Add($"Job {source.Id} was not compared with library {id}; the signal 'same content already there' is missing (sfo compare {source.Id} --against {id}).");
+        foreach (var header in set?.Headers.Where(h => !h.Complete) ?? [])
+            notes.Add($"The comparison with library {header.AgainstJobId} is incomplete ({header.ErrorCount} errors); some files may lie in the library without being counted.");
         if (choice == LibraryChoice.Latest)
-            notes.Add($"Library {library.Id} is the newest library job; choose another with --against.");
+            notes.Add($"Library {libraries[0].Id} is the newest library job; choose another with --against.");
 
-        var built = await BuildUnitAsync(source, files, unitBase, comparison, query.Words, ct);
+        var built = await BuildUnitAsync(source, files, unitBase, set?.Files, query.Words, ct);
         var unit = built.Unit;
         if (unit.Files == 0)
             notes.Add("The unit holds no files; places are judged by its name alone.");
         if (unit.States is { } states && states.GetValueOrDefault(ContentStateValues.BackedUp) == unit.Files && unit.Files > 0)
             notes.Add($"All {unit.Files} files are already in the library; nothing of it needs a new place.");
 
-        var (_, map) = await LoadMapAsync(library.Id, query.Words, ct);
-        var patterns = await PatternsAsync(library, map, reset: false, ct);
+        // Each library on its own; the best places of all of them by score, the first library named on a tie.
         var limit = Math.Clamp(query.Limit ?? _options.MaxCandidates, 1, 50);
-        var result = LibraryMatcher.Match(map, unit, _options, limit, query.Words);
+        var matched = new List<(ScanJob Library, LibraryMap Map, LibraryPatternsInfo Patterns, MatchResult Result)>();
+        foreach (var library in libraries)
+        {
+            var (_, map) = await LoadMapAsync(library.Id, query.Words, ct);
+            var patternsOf = await PatternsAsync(library, map, reset: false, ct);
+            matched.Add((library, map, patternsOf, LibraryMatcher.Match(map, unit, _options, limit, query.Words)));
+        }
+
+        var ranked = matched
+            .SelectMany((m, order) => m.Result.Candidates.Select(c => (Candidate: c, m.Library, Order: order)))
+            .OrderByDescending(x => x.Candidate.Score).ThenBy(x => x.Order)
+            .Take(limit)
+            .ToList();
+        var withNewFolder = ranked.Count > 0
+            ? null
+            : matched.Select((m, order) => (m, order)).Where(x => x.m.Result.NewFolder is not null)
+                .OrderBy(x => (int)x.m.Result.NewFolder!.Certainty).ThenBy(x => x.order)
+                .Select(x => ((ScanJob Library, LibraryMap Map, LibraryPatternsInfo Patterns, MatchResult Result)?)x.m).FirstOrDefault();
+        var result = new MatchResult(ranked.Select(x => x.Candidate).ToList(), matched.Sum(m => m.Result.Considered),
+            withNewFolder?.Result.NewFolder);
+        var home = ranked.Count > 0 ? ranked[0].Library : withNewFolder?.Library ?? libraries[0];
+        var homeMatch = matched.First(m => m.Library.Id == home.Id);
+        var homeMap = homeMatch.Map;
+        var patterns = homeMatch.Patterns;
 
         var advice = LibraryModelPart.Skipped;
         if (result.NewFolder is { NameComplete: false } proposal && query.UseModel)
         {
-            var (named, part) = await NameAsync(source, map, unit, proposal, query.Model, query.Refresh, ct);
+            var (named, part) = await NameAsync(source, homeMap, unit, proposal, query.Model, query.Refresh, ct);
             advice = part;
             result = result with { NewFolder = named };
         }
@@ -245,32 +286,61 @@ public sealed partial class LibraryTargetService
             advice = new LibraryModelPart(AdviceStatus.Skipped, null, null, 0);
         }
 
-        return new LibraryMatchAnswer(source, library, choice, MatchStatus.Ok, null, unit, comparison, result, patterns, advice, notes);
+        // Room at each root for what of the unit is not in the library yet.
+        var needed = files.Where(f => set?.Rows.GetValueOrDefault(f.Id)?.State != ContentState.BackedUp).Sum(f => f.Size);
+        var space = libraries.Select(l =>
+        {
+            var free = _freeSpace?.AvailableBytes(l.RootPath);
+            var state = free is not { } bytes ? TargetSpace.Unknown : needed <= bytes ? TargetSpace.Enough : TargetSpace.NotEnough;
+            return new RootStorage(l.Id, l.RootPath, free, needed, 0, state);
+        }).ToList();
+        foreach (var s in space.Where(s => s.Space == TargetSpace.NotEnough))
+            notes.Add($"Library {s.LibraryJobId} ({s.RootPath}) has {FindingRules.Size(s.FreeBytes!.Value)} free; the files not yet backed up need {FindingRules.Size(s.NeededBytes)}.");
+
+        return new LibraryMatchAnswer(source, home, choice, MatchStatus.Ok, null, unit, set?.Headers.FirstOrDefault(h => h.AgainstJobId == home.Id) ?? set?.First,
+            result, patterns, advice, notes, libraries, ranked.Select(x => x.Library).ToList(), withNewFolder?.Library, space);
     }
 
     // ------------------------------------------------------------------ library and map
 
-    private async Task<(ScanJob? Library, LibraryChoice? Choice)> ChooseLibraryAsync(ScanJob source, long? against, CancellationToken ct)
+    /// <summary>
+    /// The libraries to match against: those named; else those of the newest comparison of the source; else the newest
+    /// library job. Empty when no library exists.
+    /// </summary>
+    private async Task<(IReadOnlyList<ScanJob> Libraries, LibraryChoice? Choice)> ChooseLibrariesAsync(
+        ScanJob source, LibraryMatchQuery query, CancellationToken ct)
     {
-        if (against is { } id)
+        var ids = query.Libraries.Count > 0 ? query.Libraries.Distinct().ToList() : query.Against is { } one ? [one] : [];
+        if (ids.Count > 0)
         {
-            var job = await _jobs.GetByIdAsync(id, ct)
-                      ?? throw new LibraryServiceException(LibraryFailure.JobNotFound, $"Job {id} not found.");
-            if (job.Role != ScanRole.Library)
-                throw new LibraryServiceException(LibraryFailure.WrongRole,
-                    $"Job {id} is a {job.Role.ToValue()}, not a library (sfo scan <path> --role library).");
-            return (job, LibraryChoice.Option);
+            var named = new List<ScanJob>();
+            foreach (var id in ids)
+            {
+                var job = await _jobs.GetByIdAsync(id, ct)
+                          ?? throw new LibraryServiceException(LibraryFailure.JobNotFound, $"Job {id} not found.");
+                if (job.Role != ScanRole.Library)
+                    throw new LibraryServiceException(LibraryFailure.WrongRole,
+                        $"Job {id} is a {job.Role.ToValue()}, not a library (sfo scan <path> --role library).");
+                named.Add(job);
+            }
+            return (named, LibraryChoice.Option);
         }
 
-        if (await _comparisons.GetLatestWithLibraryAsync(source.Id, ct) is { AgainstJobId: { } compared }
-            && await _jobs.GetByIdAsync(compared, ct) is { Role: ScanRole.Library, Status: JobStatus.Completed } byComparison)
+        var byComparison = new List<ScanJob>();
+        foreach (var header in await _comparisons.GetLatestLibraryRunAsync(source.Id, ct))
+        {
+            if (header.AgainstJobId is { } compared
+                && await _jobs.GetByIdAsync(compared, ct) is { Role: ScanRole.Library, Status: JobStatus.Completed } job)
+                byComparison.Add(job);
+        }
+        if (byComparison.Count > 0)
             return (byComparison, LibraryChoice.Comparison);
 
         var newest = (await _jobs.GetAllAsync(ct))
             .Where(j => j.Role == ScanRole.Library && j.Status == JobStatus.Completed)
             .OrderByDescending(j => j.CreatedAt).ThenByDescending(j => j.Id)
             .FirstOrDefault();
-        return newest is null ? (null, null) : (newest, LibraryChoice.Latest);
+        return newest is null ? ([], null) : ([newest], LibraryChoice.Latest);
     }
 
     private async Task<(ScanJob Job, LibraryMap Map)> LoadMapAsync(long jobId, LibraryWords words, CancellationToken ct)
@@ -388,10 +458,9 @@ public sealed partial class LibraryTargetService
     private sealed record BuiltUnit(MatchUnit Unit);
 
     private async Task<BuiltUnit> BuildUnitAsync(
-        ScanJob source, IReadOnlyList<FileNode> files, UnitBase b, ComparisonHeader? comparison, LibraryWords words, CancellationToken ct)
+        ScanJob source, IReadOnlyList<FileNode> files, UnitBase b, IReadOnlyList<FileComparison>? rows, LibraryWords words, CancellationToken ct)
     {
         var captures = files.Count > 0 ? await _captures.GetAsync(source.Id, ct) : new Dictionary<long, CaptureInfo>();
-        var rows = comparison is null ? null : await _comparisons.GetFileComparisonsAsync(comparison.Id, ct);
         return BuildUnit(source, files, b, captures, rows, words);
     }
 
@@ -404,14 +473,39 @@ public sealed partial class LibraryTargetService
     /// the patterns file. Null for a group no existing folder fits.
     /// </summary>
     public async Task<IReadOnlyList<MatchCandidate?>> BestPlacesAsync(
-        long sourceJobId, long libraryJobId, IReadOnlyList<IReadOnlyList<FileNode>> groups, CancellationToken ct = default)
+        long sourceJobId, long libraryJobId, IReadOnlyList<IReadOnlyList<FileNode>> groups, CancellationToken ct = default) =>
+        (await BestPlacesAsync(sourceJobId, [libraryJobId], groups, ct)).Select(p => p?.Candidate).ToList();
+
+    /// <summary>
+    /// As <see cref="BestPlacesAsync(long, long, IReadOnlyList{IReadOnlyList{FileNode}}, CancellationToken)"/> over
+    /// several libraries (https://github.com/crack666/smart_file_organizer/issues/74): per group the best place of all
+    /// of them by score, the first library named on a tie, with the library it lies in.
+    /// </summary>
+    public async Task<IReadOnlyList<(MatchCandidate Candidate, ScanJob Library)?>> BestPlacesAsync(
+        long sourceJobId, IReadOnlyList<long> libraryJobIds, IReadOnlyList<IReadOnlyList<FileNode>> groups, CancellationToken ct = default)
+    {
+        var best = new (MatchCandidate Candidate, ScanJob Library)?[groups.Count];
+        foreach (var libraryJobId in libraryJobIds.Distinct())
+        {
+            var (library, places) = await BestPlacesInAsync(sourceJobId, libraryJobId, groups, ct);
+            for (var i = 0; i < places.Count; i++)
+            {
+                if (places[i] is { } candidate && (best[i] is not { } current || candidate.Score > current.Candidate.Score))
+                    best[i] = (candidate, library);
+            }
+        }
+        return best;
+    }
+
+    private async Task<(ScanJob Library, IReadOnlyList<MatchCandidate?> Places)> BestPlacesInAsync(
+        long sourceJobId, long libraryJobId, IReadOnlyList<IReadOnlyList<FileNode>> groups, CancellationToken ct)
     {
         ValidateOptions();
         var source = await _jobs.GetByIdAsync(sourceJobId, ct)
                      ?? throw new LibraryServiceException(LibraryFailure.JobNotFound, $"Job {sourceJobId} not found.");
         var library = await _jobs.GetByIdAsync(libraryJobId, ct)
                       ?? throw new LibraryServiceException(LibraryFailure.JobNotFound, $"Job {libraryJobId} not found.");
-        if (groups.Count == 0) return [];
+        if (groups.Count == 0) return (library, []);
 
         var words = LibraryWords.Default;
         var comparison = await _comparisons.GetComparisonAsync(source.Id, library.Id, ct);
@@ -427,7 +521,7 @@ public sealed partial class LibraryTargetService
             var unit = BuildUnit(source, files, new UnitBase(MatchUnitKind.File, first, null, null), captures, rows, words).Unit;
             result.Add(LibraryMatcher.Match(map, unit, _options, 1, words).Candidates.FirstOrDefault());
         }
-        return result;
+        return (library, result);
     }
 
     private BuiltUnit BuildUnit(

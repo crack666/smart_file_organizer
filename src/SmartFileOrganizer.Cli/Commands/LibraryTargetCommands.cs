@@ -108,7 +108,8 @@ public static class LibraryTargetCommands
         string Certainty,
         string Reason,
         IReadOnlyList<SignalView> Signals,
-        WeakPlaceView? WeakPlace);
+        WeakPlaceView? WeakPlace,
+        long? LibraryJobId = null);
 
     public sealed record NewFolderView(
         string Placement,
@@ -122,7 +123,11 @@ public static class LibraryTargetCommands
         string DestinationRelative,
         string Certainty,
         string Reason,
-        WeakPlaceView? WeakPlace);
+        WeakPlaceView? WeakPlace,
+        long? LibraryJobId = null);
+
+    /// <summary>One library root: free space and what the unit needs there; <c>free_bytes</c> null and <c>space</c> unknown when it cannot be told.</summary>
+    public sealed record SpaceView(long LibraryJobId, string RootPath, long? FreeBytes, long NeededBytes, string Space);
 
     public sealed record UnitView(
         string Kind,
@@ -154,7 +159,9 @@ public static class LibraryTargetCommands
         NewFolderView? NewFolder,
         PatternsView? Patterns,
         ModelView Advice,
-        IReadOnlyList<string> Notes);
+        IReadOnlyList<string> Notes,
+        IReadOnlyList<JobView>? Libraries = null,
+        IReadOnlyList<SpaceView>? Space = null);
 
     // ------------------------------------------------------------------ show
 
@@ -284,9 +291,9 @@ public static class LibraryTargetCommands
             Description = "Match a bundle as a whole (see sfo bundles list) instead of a path.",
             HelpName = "id"
         };
-        var against = new Option<long?>("--against")
+        var against = new Option<long[]>("--against")
         {
-            Description = "Library job. Default: the library of the latest sfo compare, else the newest library job.",
+            Description = "Library job. Repeatable: each is matched and the best places of all are listed. Default: the libraries of the latest sfo compare, else the newest library job.",
             HelpName = "job"
         };
         var limit = new Option<int?>("--limit")
@@ -325,7 +332,7 @@ public static class LibraryTargetCommands
                 SourceJobId = p.GetValue(job),
                 Path = p.GetValue(path),
                 BundleId = p.GetValue(bundle),
-                Against = p.GetValue(against),
+                Libraries = (p.GetValue(against) ?? []).Distinct().ToList(),
                 Words = LibraryCommand.LoadWordsFile(p.GetValue(words)),
                 Limit = p.GetValue(limit),
                 UseModel = !p.GetValue(noModel),
@@ -360,10 +367,11 @@ public static class LibraryTargetCommands
 
     private static MatchView ToView(LibraryMatchAnswer a)
     {
-        var root = a.Library?.RootPath;
-        string Full(string relative) => root is null ? relative
+        static string Full(string? root, string relative) => root is null ? relative
             : relative == "." ? root
             : Path.Combine(root, relative.Replace('/', Path.DirectorySeparatorChar));
+        ScanJob? LibraryOf(int candidate) =>
+            a.CandidateLibraries is { } libs && candidate < libs.Count ? libs[candidate] : a.Library;
 
         var u = a.Unit;
         var unit = new UnitView(u.Kind.ToCode(), u.FullPath, u.BundleId, u.BundleKind.ToCode(), u.Name, u.KeepWhole, u.KeepReason,
@@ -373,16 +381,17 @@ public static class LibraryTargetCommands
 
         var candidates = (a.Result?.Candidates ?? []).Select((c, i) => new CandidateView(
             i + 1, c.Placement.ToCode(), c.Target.FullPath, c.Target.RelativePath, c.Target.Role.ToCode(), c.Target.Purpose,
-            Full(c.Destination), c.Destination, u.KeepWhole, c.Score, c.Certainty.ToCode(), c.Reason,
+            Full(LibraryOf(i)?.RootPath, c.Destination), c.Destination, u.KeepWhole, c.Score, c.Certainty.ToCode(), c.Reason,
             c.Signals.Select(s => new SignalView(s.Signal.ToCode(), Math.Round(s.Value, 3), s.Weight, s.Agrees, s.Contradicts, s.Detail)).ToList(),
-            Weak(c.Weak))).ToList();
+            Weak(c.Weak), LibraryOf(i)?.Id)).ToList();
 
         NewFolderView? newFolder = null;
         if (a.Result?.NewFolder is { } n)
         {
+            var library = a.NewFolderLibrary ?? a.Library;
             newFolder = new NewFolderView(MatchPlacement.NewFolder.ToCode(), n.Parent.FullPath, n.Parent.RelativePath, n.Name,
-                n.NameSource.ToCode(), n.NameComplete, n.Pattern, Full(n.Destination), n.Destination, n.Certainty.ToCode(), n.Reason,
-                Weak(n.Weak));
+                n.NameSource.ToCode(), n.NameComplete, n.Pattern, Full(library?.RootPath, n.Destination), n.Destination, n.Certainty.ToCode(), n.Reason,
+                Weak(n.Weak), library?.Id);
         }
 
         return new MatchView(
@@ -398,7 +407,9 @@ public static class LibraryTargetCommands
             newFolder,
             a.Patterns is null ? null : PatternsView.From(a.Patterns),
             ModelView.From(a.Advice),
-            a.Notes);
+            a.Notes,
+            (a.Libraries ?? []).Select(JobView.From).ToList(),
+            (a.Space ?? []).Select(s => new SpaceView(s.LibraryJobId, s.RootPath, s.FreeBytes, s.NeededBytes, s.Space.ToCode())).ToList());
     }
 
     private static WeakPlaceView? Weak(WeakPlace? w) => w is null ? null : new WeakPlaceView(Refs(w.Findings), w.Note);
@@ -467,19 +478,23 @@ public static class LibraryTargetCommands
         }
         var u = r.Unit;
         sb.AppendLine($"{u.Kind} '{u.Name}': {u.Files} files" + (u.KeepWhole ? ", kept whole under its own name" : string.Empty));
-        sb.AppendLine($"Library job {r.Library!.Id} ({r.LibraryFrom})");
+        sb.AppendLine(r.Libraries is { Count: > 1 } libraries
+            ? $"Library jobs {string.Join(", ", libraries.Select(l => l.Id))} ({r.LibraryFrom})"
+            : $"Library job {r.Library!.Id} ({r.LibraryFrom})");
         foreach (var c in r.Candidates)
         {
-            sb.AppendLine($"{c.Rank}. {c.Placement,-13} {c.DestinationRelative}  [{c.Certainty}, {c.Score.ToString("0.00", CultureInfo.InvariantCulture)}]");
+            sb.AppendLine($"{c.Rank}. {c.Placement,-13} {c.Destination}  [{c.Certainty}, {c.Score.ToString("0.00", CultureInfo.InvariantCulture)}]");
             sb.AppendLine($"   {c.Reason}");
             if (c.WeakPlace is { } w) sb.AppendLine($"   {w.Note}");
         }
         if (r.NewFolder is { } n)
         {
-            sb.AppendLine($"new_folder    {n.DestinationRelative}  [{n.Certainty}, name by {n.NameSource}]");
+            sb.AppendLine($"new_folder    {n.Destination}  [{n.Certainty}, name by {n.NameSource}]");
             sb.AppendLine($"   {n.Reason}");
             if (n.WeakPlace is { } w) sb.AppendLine($"   {w.Note}");
         }
+        foreach (var s in r.Space ?? [])
+            sb.AppendLine($"Space at {s.RootPath}: {(s.FreeBytes is { } free ? ReadFormat.Size(free) : "unknown")} free, {ReadFormat.Size(s.NeededBytes)} needed ({s.Space})");
         foreach (var note in r.Notes)
             sb.AppendLine($"Note: {note}");
         return sb.ToString();
