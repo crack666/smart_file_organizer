@@ -122,11 +122,26 @@ sfo analyze 7 --phase classification --parallel 2 --json
         "message": "AI classification finished with 3 error(s). 41 result(s) checked a second time.",
         "retried": 0, "second_checks": 41 }
     ],
-    "error_count": 3
+    "error_count": 3,
+    "model_server_lost": null,
+    "model_calls": [
+      { "kind": "classification", "calls": 899, "prompt_tokens": 2037963, "cached_prompt_tokens": 1650000,
+        "answer_tokens": 54000, "mean_seconds": 0.95, "cut_off": 0 },
+      { "kind": "second_check", "calls": 41, "prompt_tokens": 98000, "cached_prompt_tokens": 70000,
+        "answer_tokens": 2500, "mean_seconds": 1.02, "cut_off": 0 }
+    ]
   },
   "error": null
 }
 ```
+
+`model_calls` has one entry per kind of call made in this run (`pre_assessment`, `classification`,
+`second_check`, `summary`, see [glossary.md](glossary.md#kind-of-a-model-call-modelcallkinds)), with the
+counts the model server returns with every answer: `prompt_tokens` (`prompt_eval_count`), of them
+`cached_prompt_tokens` taken from the server prompt cache (`prompt_eval_cached_count`), `answer_tokens`
+(`eval_count`), `mean_seconds` (prompt and answer time per call as the server measured it) and `cut_off`
+(answers that stopped at the token limit and were asked again). A repeated call counts again. The numbers
+in the example are illustrative. The text output prints the same as one line per kind.
 
 `retried` is the number of failed files `--retry-errors` released, `second_checks` the number of
 second calls made for unsure or contradicted results (see
@@ -459,11 +474,15 @@ sfo eval ~/sfo-eval --db ~/sfo-eval.db --json
     ],
     "untracked_count": 0,
     "untracked": [],
-    "cases": null
+    "cases": null,
+    "model_calls": []
   },
   "error": null
 }
 ```
+
+`model_calls` counts the calls and tokens of this run as for
+[`sfo analyze`](#sfo-analyze-job); it is empty with `--stub`, which makes no model call.
 
 (Numbers illustrative.) `kind` is `directory_verdict`, `file_category` or `sensitive`; `outcome`
 is `wrong` or `missing` (`hit` appears only in `cases`). `expected` and `actual` are codes; markers

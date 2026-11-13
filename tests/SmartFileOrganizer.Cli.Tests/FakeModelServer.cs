@@ -103,7 +103,13 @@ public sealed class FakeModelServer : HttpMessageHandler
 
     /// <summary>An <c>/api/chat</c> answer whose message content is <paramref name="content"/>.</summary>
     private static string Chat(string content) =>
-        JsonSerializer.Serialize(new { model = ModelName, done = true, message = new { role = "assistant", content } });
+        JsonSerializer.Serialize(new
+        {
+            model = ModelName, done = true, done_reason = "stop", message = new { role = "assistant", content },
+            // The counts a real server adds to every answer: 100 prompt tokens, 60 of them cached, 20 answer tokens, 0.3 s.
+            prompt_eval_count = 100, prompt_eval_cached_count = 60, eval_count = 20,
+            prompt_eval_duration = 100_000_000L, eval_duration = 200_000_000L
+        });
 
     private static async Task<(string Kind, string? Name)> ReadAsync(HttpRequestMessage request, CancellationToken ct)
     {

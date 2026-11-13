@@ -150,6 +150,26 @@ public class ModelServerOutageTests : IDisposable
     // ── further cases of the issue ───────────────────────────────────────
 
     [Fact]
+    public async Task AnalyzeJson_ReportsCallsAndTokensPerKind()
+    {
+        var jobId = await ScanAsync();
+        var run = await SfoAsync("analyze", jobId.ToString(), "--json");
+
+        Assert.True(run.ExitCode == ExitCodes.Ok, run.Stdout + run.Stderr);
+        var calls = run.Json().GetProperty("result").GetProperty("model_calls").EnumerateArray()
+            .ToDictionary(c => c.GetProperty("kind").GetString()!);
+        var classification = calls["classification"];
+        var n = _server.Answered("classification");
+        Assert.True(n > 0);
+        Assert.Equal(n, classification.GetProperty("calls").GetInt32());
+        Assert.Equal(100L * n, classification.GetProperty("prompt_tokens").GetInt64());
+        Assert.Equal(60L * n, classification.GetProperty("cached_prompt_tokens").GetInt64());
+        Assert.Equal(20L * n, classification.GetProperty("answer_tokens").GetInt64());
+        Assert.Equal(0.3, classification.GetProperty("mean_seconds").GetDouble(), 3);
+        Assert.Equal(_server.Answered("pre_assessment"), calls["pre_assessment"].GetProperty("calls").GetInt32());
+    }
+
+    [Fact]
     public async Task Busy503WithRetryAfter_IsWaitedOut_NotStoredAsError()
     {
         var jobId = await ScanAsync();

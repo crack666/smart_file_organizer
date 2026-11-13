@@ -259,8 +259,12 @@ summary language, scan rules with hash, and for corpus runs since 12.11.2026 the
 full report.
 
 The prompt fingerprint (`OllamaService.PromptFingerprint`) is a hash over the system prompt, the
-summary language, the prompt templates built for a fixed sample (classification with and without
+summary language, the messages built for a fixed sample (system and user message of classification with and without
 the keep hint, pre-assessment, summary) and their answer schemas. Two runs with the same fingerprint asked the model the same way.
+On 13.11.2026 it changed from `d2f30ce0d015d9d5` to `07982d6fb2feeae6`: the fixed part of each phase moved to the
+system message, the answer lost `suggested_target`, `keep_reason` is asked for `temporary` only and `summary` is capped.
+`sfo eval` with `--stub` scored the same before and after (small v3 seed 36: verdicts 60/60, categories 78/78,
+sensitive 159/160).
 
 `sfo eval --compare` without ids compares the newest run with the newest earlier run of the same
 mode and subject; with one id, that run with the one before it; with two ids, those two. It lists
