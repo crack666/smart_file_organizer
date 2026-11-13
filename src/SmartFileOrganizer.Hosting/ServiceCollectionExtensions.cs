@@ -5,6 +5,7 @@ using Microsoft.Extensions.Logging;
 using SmartFileOrganizer.Application.Library;
 using SmartFileOrganizer.Application.Bundles;
 using SmartFileOrganizer.Application.Evaluation;
+using SmartFileOrganizer.Application.Decisions;
 using SmartFileOrganizer.Application.Findings;
 using SmartFileOrganizer.Application.Services;
 using SmartFileOrganizer.Domain.Interfaces;
@@ -212,6 +213,11 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<IConfiguration>().GetSection("Findings").Get<FindingOptions>() ?? new FindingOptions());
         services.AddSingleton<IFindingTargetAdvisor, LibraryFindingTargetAdvisor>();
         services.AddSingleton<FindingService>();
+
+        // Stage 2, deciding (https://github.com/crack666/smart_file_organizer/issues/37): rules over stored facts and
+        // results; no model service is injected.
+        services.AddSingleton<IFileDecisionRepository, FileDecisionRepository>();
+        services.AddSingleton<DecisionService>();
 
         return services;
     }
