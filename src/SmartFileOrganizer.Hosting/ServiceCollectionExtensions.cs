@@ -73,6 +73,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ILibraryRepository, LibraryRepository>();
         services.AddSingleton<IEvalCaseRepository, EvalCaseRepository>();
         services.AddSingleton<IEvalRunRepository, EvalRunRepository>();
+        services.AddSingleton<IContentStoreRepository, ContentStoreRepository>();
 
         // Infrastructure
         services.AddSingleton<IFileSystemAccessor, FileSystemAccessor>();
@@ -142,7 +143,16 @@ public static class ServiceCollectionExtensions
             () => sp.GetRequiredService<OllamaOptions>().MaxParallelRequests,
             sp.GetRequiredService<ILogger<ClassificationService>>(),
             sp.GetRequiredService<SecondCheckOptions>(),
-            sp.GetRequiredService<IUserOverrideRepository>()));
+            sp.GetRequiredService<IUserOverrideRepository>(),
+            sp.GetRequiredService<ContentStoreService>()));
+        // Assessments by content across jobs (https://github.com/crack666/smart_file_organizer/issues/38).
+        services.AddSingleton<ContentStoreService>(sp => new ContentStoreService(
+            sp.GetRequiredService<IContentStoreRepository>(),
+            sp.GetRequiredService<IContentComparisonRepository>(),
+            sp.GetRequiredService<IContentHasher>(),
+            sp.GetRequiredService<IUserOverrideRepository>(),
+            sp.GetRequiredService<IFileRepository>(),
+            sp.GetRequiredService<ILogger<ContentStoreService>>()));
         // Section "SecondCheck": when an uncertain or contradicted result is checked again.
         services.AddSingleton(sp =>
             sp.GetRequiredService<IConfiguration>().GetSection("SecondCheck").Get<SecondCheckOptions>() ?? new SecondCheckOptions());

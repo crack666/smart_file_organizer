@@ -71,7 +71,12 @@ public class JobStatisticsRepository : IJobStatisticsRepository
                 COALESCE(SUM(CASE WHEN status = @skipped THEN 1 ELSE 0 END), 0) AS skipped,
                 COALESCE(SUM(CASE WHEN status = @skipped AND analysis_skip IS NOT NULL THEN 1 ELSE 0 END), 0) AS backed_up,
                 COALESCE(SUM(CASE WHEN status = @inherited THEN 1 ELSE 0 END), 0) AS inherited,
-                COALESCE(SUM(CASE WHEN status = @deferred THEN 1 ELSE 0 END), 0) AS deferred
+                COALESCE(SUM(CASE WHEN status = @deferred THEN 1 ELSE 0 END), 0) AS deferred,
+                (SELECT COUNT(*) FROM ai_results r JOIN file_nodes n ON n.id = r.file_node_id
+                    WHERE n.job_id = @jobId AND n.status = @analyzed AND r.error IS NULL
+                      AND (r.origin = 'model' OR (r.origin IS NULL AND r.is_ai_result = 1))) AS bymodel,
+                (SELECT COUNT(*) FROM ai_results r JOIN file_nodes n ON n.id = r.file_node_id
+                    WHERE n.job_id = @jobId AND n.status = @analyzed AND r.origin = 'reused') AS reused
             FROM file_nodes
             WHERE job_id = @jobId
             """,
@@ -114,6 +119,7 @@ public class JobStatisticsRepository : IJobStatisticsRepository
                 """
                 SELECT r.analyzed_at FROM ai_results r JOIN file_nodes f ON f.id = r.file_node_id
                 WHERE f.job_id = @jobId AND r.is_ai_result = 1 AND r.model_used IS NOT NULL AND r.error IS NULL
+                  AND (r.origin IS NULL OR r.origin <> 'reused')
                 ORDER BY r.id DESC LIMIT @window
                 """,
                 new { jobId, window = RateWindow }, cancellationToken: ct))).Select(AsUtc).ToList();
@@ -201,6 +207,8 @@ public class JobStatisticsRepository : IJobStatisticsRepository
             FilesAiSkipped = files.Skipped,
             FilesAiInherited = files.Inherited,
             FilesAiDeferred = files.Deferred,
+            FilesAiByModel = files.ByModel,
+            FilesAiReused = files.Reused,
             FilesAiRatePerMinute = ratePerMinute,
             RecentErrors = errors
         };
@@ -243,6 +251,8 @@ public class JobStatisticsRepository : IJobStatisticsRepository
         public long BackedUp { get; set; }
         public long Inherited { get; set; }
         public long Deferred { get; set; }
+        public long ByModel { get; set; }
+        public long Reused { get; set; }
     }
 
     /// <summary>Paths listed per error cause and per link kind in <c>sfo status</c>.</summary>

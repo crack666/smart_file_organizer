@@ -23,10 +23,12 @@ public static class StatusCommand
     /// Counters of an AI phase. <c>total = done + errors + pending + skipped</c>. For the file classification, while a
     /// run goes on: files per minute the model judged lately and the estimated seconds left for the pending files
     /// (skipped and inherited files are not counted); null otherwise. <c>BackedUp</c>: of <c>Skipped</c>, those
-    /// <c>sfo analyze --against</c> left out because the library holds them.
+    /// <c>sfo analyze --against</c> left out because the library holds them. For the file classification, of
+    /// <c>Done</c>: <c>ByModel</c> files the model judged in a call of their own, <c>Reused</c> files whose result came
+    /// from the content store without a call (Issue 38); null for the folder phases.
     /// </summary>
     public sealed record AiPhaseView(long Total, long Done, long Errors, long Pending, long Skipped,
-        double? RatePerMinute = null, long? RemainingSeconds = null, long BackedUp = 0);
+        double? RatePerMinute = null, long? RemainingSeconds = null, long BackedUp = 0, long? ByModel = null, long? Reused = null);
 
     public sealed record PhasesView(
         ScanPhaseView Scan,
@@ -105,7 +107,7 @@ public static class StatusCommand
             new AiPhaseView(s.FilesAiEligible, s.FilesAiAnalyzed + s.FilesAiInherited, s.FilesAiErrors,
                 s.FilesAiPending + s.FilesAiDeferred, s.FilesAiSkipped,
                 s.FilesAiRatePerMinute is { } rate ? Math.Round(rate, 1) : null,
-                RemainingSeconds(s.FilesAiPending, s.FilesAiRatePerMinute), s.FilesAiBackedUp),
+                RemainingSeconds(s.FilesAiPending, s.FilesAiRatePerMinute), s.FilesAiBackedUp, s.FilesAiByModel, s.FilesAiReused),
             // Folders that need no summary (judged by rule without a pre-assessment, or without files, or left out as
             // backed_up) are skipped, not pending.
             new AiPhaseView(s.DirectoriesAiRelevant, sumDone, s.SummaryErrors,
@@ -176,7 +178,8 @@ public static class StatusCommand
         var rate = p.RatePerMinute is { } r && p.RemainingSeconds is { } left
             ? $", {r.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)} {unit}/min, about {Duration(left)} left"
             : string.Empty;
-        sb.AppendLine($"  {name,-15} {p.Done}/{p.Total} {unit} done, {p.Errors} errors, {p.Pending} pending{skipped}{rate}");
+        var reused = p.Reused is > 0 ? $" ({p.ByModel ?? 0} by the model, {p.Reused} taken over from the content store)" : string.Empty;
+        sb.AppendLine($"  {name,-15} {p.Done}/{p.Total} {unit} done{reused}, {p.Errors} errors, {p.Pending} pending{skipped}{rate}");
     }
 
     /// <summary>Seconds left for <paramref name="pending"/> files at <paramref name="ratePerMinute"/>; null without a rate.</summary>

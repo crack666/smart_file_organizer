@@ -140,6 +140,8 @@ public class AiClassificationCoordinator
     /// <param name="againstJobIds">Library jobs whose stored comparisons decide what is left out: files <c>backed_up</c>
     /// in any of them are not classified, folders fully <c>backed_up</c> get no pre-assessment and no summary. Null or
     /// empty: the whole job is analysed, and the marks of an earlier run with a library job are released.</param>
+    /// <param name="reuse">Phase 2 takes over what the content store holds for the same content and keeps new answers
+    /// there (Issue 38); false for a run that has to ask the model for every file, such as an evaluation.</param>
     public Task<AiPipelineRunResult> RunAsync(
         long jobId,
         AiPhases phases = AiPhases.All,
@@ -147,7 +149,8 @@ public class AiClassificationCoordinator
         CancellationToken ct = default,
         bool retryErrors = false,
         Action<AiPhases, ModelServerWaitEvent>? onWait = null,
-        IReadOnlyList<long>? againstJobIds = null)
+        IReadOnlyList<long>? againstJobIds = null,
+        bool reuse = true)
     {
         return RunPhasesAsync(
             jobId,
@@ -160,7 +163,8 @@ public class AiClassificationCoordinator
             onWait,
             ct,
             retryErrors,
-            againstJobIds);
+            againstJobIds,
+            reuse);
     }
 
     private async Task<AiPipelineRunResult> RunPhasesAsync(
@@ -172,7 +176,8 @@ public class AiClassificationCoordinator
         Action<AiPhases, ModelServerWaitEvent>? onWait,
         CancellationToken ct,
         bool retryErrors = false,
-        IReadOnlyList<long>? againstJobIds = null)
+        IReadOnlyList<long>? againstJobIds = null,
+        bool reuse = true)
     {
         // Single availability check — avoids 3x /api/tags calls. A server that is away when the run starts is
         // reported at once; waiting is for a server that goes away during the run.
@@ -209,7 +214,7 @@ public class AiClassificationCoordinator
             {
                 current = AiPhases.Classification;
                 onPhaseStarting?.Invoke(AiPhases.Classification);
-                var r = await _classificationService.RunAsync(jobId, progressFor(AiPhases.Classification), waitIfPausedAsync, ct, retryErrors, gate);
+                var r = await _classificationService.RunAsync(jobId, progressFor(AiPhases.Classification), waitIfPausedAsync, ct, retryErrors, gate, reuse);
                 results.Add(new AiPhaseRunResult(AiPhases.Classification, r));
             }
 

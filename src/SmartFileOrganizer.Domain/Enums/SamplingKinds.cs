@@ -24,7 +24,15 @@ public enum ResultOrigin
     [JsonStringEnumMemberName("agent")] Agent,
 
     /// <summary>Imported from another tool.</summary>
-    [JsonStringEnumMemberName("external")] External
+    [JsonStringEnumMemberName("external")] External,
+
+    /// <summary>
+    /// Taken over from the content store: the same content (full SHA-256 and size) was judged before, in this or another
+    /// job, by the same model with the same prompt version; no model call was made for this file
+    /// (https://github.com/crack666/smart_file_organizer/issues/38). Also the origin of a person's correction carried
+    /// over to another file with the same content (<c>user_overrides.origin</c>).
+    /// </summary>
+    [JsonStringEnumMemberName("reused")] Reused
 }
 
 /// <summary>Whether a file in a mixed directory is worth keeping. Stored in <c>ai_results.keep_hint</c>.</summary>

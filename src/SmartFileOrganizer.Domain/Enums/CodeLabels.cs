@@ -46,6 +46,7 @@ public static class CodeLabels
         Verdict(ResultOrigin.Human, "human", "Mensch"),
         Verdict(ResultOrigin.Agent, "agent", "Agent"),
         Verdict(ResultOrigin.External, "external", "extern"),
+        Verdict(ResultOrigin.Reused, "reused", "übernommen"),
 
         Verdict(KeepHint.Temporary, "temporary", "vorübergehend"),
         Verdict(KeepHint.WorthKeeping, "worth keeping", "aufhebenswert"),

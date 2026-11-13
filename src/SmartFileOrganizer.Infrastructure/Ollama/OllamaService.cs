@@ -295,6 +295,41 @@ public class OllamaService : IOllamaService
         return result;
     }
 
+    /// <summary>The configured model and the version of the classification prompt (content store, Issue 38).</summary>
+    public AssessmentIdentity? AssessmentIdentity => new(_options.Model, ClassificationPromptVersion(_options));
+
+    /// <summary>
+    /// Short hash over everything that shapes a classification call (also the second check): system prompt, summary
+    /// language, the classification messages built for a fixed sample input with and without keep hint and with a
+    /// context section, and the answer schemas of every description kind. Answers in the content store
+    /// (https://github.com/crack666/smart_file_organizer/issues/38) are taken over only under the same version, so a
+    /// changed prompt never reuses old entries; it is derived from the prompt text rather than kept as a number that
+    /// someone would have to raise. Pre-assessment and summary prompts are left out: they do not shape a file's answer.
+    /// </summary>
+    public static string ClassificationPromptVersion(OllamaOptions options)
+    {
+        var file = new FileNode
+        {
+            Name = "sample.pdf", Extension = ".pdf", FileType = FileType.Document, Size = 1,
+            LastWriteTime = new DateTime(2000, 1, 1, 0, 0, 0, DateTimeKind.Utc), RelativeDir = "sample"
+        };
+        var parts = new List<string> { "classification", options.SystemPrompt, options.SummaryLanguage };
+        foreach (var keepHint in new[] { false, true })
+        {
+            var m = BuildClassificationMessages(new OllamaClassificationInput
+            {
+                File = file, ExtractedText = "sample", AskKeepHint = keepHint,
+                Facts = [new FileFact(FileFactKey.PageCount, "1")], Contains = ["sample"], Missing = ["sample"],
+                Context = keepHint ? new ClassificationContext("mixed", "sample", "keep", [new NeighbourFile("other.pdf", "Document")], 2) : null
+            }, options);
+            parts.AddRange([m.System, m.User]);
+            foreach (var kind in Enum.GetValues<DescriptionKind>())
+                parts.Add(JsonSerializer.Serialize(BuildClassificationSchema(keepHint, kind)));
+        }
+        var hash = System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(string.Join("\u0000", parts)));
+        return Convert.ToHexString(hash, 0, 8).ToLowerInvariant();
+    }
+
     /// <summary>
     /// Short hash over everything that shapes what the model is asked: system prompt, summary
     /// language, the prompt templates (built for a fixed sample input) and their answer
