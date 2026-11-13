@@ -138,7 +138,7 @@ public class HostingTests : IDisposable
 
         // Phase 1 reached every directory; docs and photos hold one file each, so their verdict follows the file
         // (rule single-file) and only the root asks the model
-        Assert.Equal(1, ollama.PreAssessedDirectories.Count);
+        Assert.Single(ollama.PreAssessedDirectories);
         var dirResults = provider.GetRequiredService<IDirectoryClassificationRepository>();
         Assert.NotNull(await dirResults.GetByDirectoryPathAsync(job.Id, root));
 
