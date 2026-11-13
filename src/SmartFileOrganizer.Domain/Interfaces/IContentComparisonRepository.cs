@@ -14,6 +14,9 @@ public interface IContentComparisonRepository
     /// <summary>Files of <paramref name="againstJobId"/> whose name (ASCII case-insensitive) occurs among the files of <paramref name="sourceJobId"/>.</summary>
     Task<IReadOnlyList<ComparableFile>> GetFilesWithSourceNamesAsync(long againstJobId, long sourceJobId, CancellationToken ct = default);
 
+    /// <summary>Full paths of the directories of a job the scan skipped by rule (<c>dir_status</c> skip).</summary>
+    Task<IReadOnlyList<string>> GetSkippedDirectoriesAsync(long jobId, CancellationToken ct = default);
+
     /// <summary>Directories of a job that the scan could not read.</summary>
     Task<IReadOnlyList<ScanDirectoryError>> GetDirectoryErrorsAsync(long jobId, CancellationToken ct = default);
 

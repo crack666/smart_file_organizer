@@ -278,6 +278,8 @@ where those agree, SHA-256 over the whole file. Files up to 128 KiB are read who
 Checksums are stored per path and reused while size and modification time are unchanged, so a
 second run without changes reads no file content (`hashing` shows the counts). A file never
 matches itself, even when the source lies inside the library.
+Folders a scan skipped by rule (`dir_status` skip) are not part of the comparison, on either side: no file
+below them is compared and no read error below them is reported, even when the folder is gone by now.
 
 `duplicates` groups source files with identical content (empty files excluded); a file's
 `duplicate_group` points to its group. `directories` counts each source directory including its

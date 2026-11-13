@@ -173,6 +173,32 @@ public class FindingsProfileTests : IDisposable
         Assert.All(duplicates, f => Assert.Equal("leave", f.GetProperty("action").GetProperty("kind").GetString()));
     }
 
+    /// <summary>Finding 10: a folder skipped by rule is not part of the comparison, even when it is gone by now.</summary>
+    [Fact]
+    public async Task SkippedFolder_IsNotPartOfTheComparison()
+    {
+        var job = (await OkAsync("scan", _tree)).GetProperty("job").GetProperty("id").GetInt64();
+        var documents = Path.Combine(_tree, "Profil", "max", "Documents");
+        await using (var conn = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={_dbPath}"))
+        {
+            await conn.OpenAsync();
+            var cmd = conn.CreateCommand();
+            cmd.CommandText = "UPDATE directory_nodes SET dir_status = @skip WHERE job_id = @job AND full_path = @path";
+            cmd.Parameters.AddWithValue("@skip", (int)SmartFileOrganizer.Domain.Enums.DirectoryStatus.Skip);
+            cmd.Parameters.AddWithValue("@job", job);
+            cmd.Parameters.AddWithValue("@path", documents);
+            Assert.Equal(1, await cmd.ExecuteNonQueryAsync());
+        }
+        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+        Directory.Delete(documents, recursive: true);
+
+        var compared = await OkAsync("compare", job.ToString(), "--limit", "0");
+        Assert.Equal(0, compared.GetProperty("errors_total").GetInt64());
+        Assert.Equal(0, compared.GetProperty("counts").GetProperty("errors").GetInt64());
+        // Neither the five cache files of AppData (skipped by the scan rules) nor the three letters count.
+        Assert.Equal(_files.Count - 5 - 3, compared.GetProperty("counts").GetProperty("files").GetInt64());
+    }
+
     /// <summary>Finding 4: a mixed download folder falls into one finding per kind, each with examples; installers and archives are none.</summary>
     [Fact]
     public async Task MixedDownloads_FallIntoOneFindingPerKind()

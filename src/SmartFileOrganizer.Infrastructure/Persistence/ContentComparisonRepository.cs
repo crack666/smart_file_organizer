@@ -56,6 +56,16 @@ public class ContentComparisonRepository : IContentComparisonRepository
         return rows.Select(r => r.ToModel()).ToList();
     }
 
+    public async Task<IReadOnlyList<string>> GetSkippedDirectoriesAsync(long jobId, CancellationToken ct = default)
+    {
+        await using var conn = _db.CreateConnection();
+        await conn.OpenAsync(ct);
+        var rows = await conn.QueryAsync<string>(new CommandDefinition(
+            "SELECT full_path FROM directory_nodes WHERE job_id = @jobId AND dir_status = @skip ORDER BY full_path",
+            new { jobId, skip = (int)DirectoryStatus.Skip }, cancellationToken: ct));
+        return rows.ToList();
+    }
+
     public async Task<IReadOnlyList<ScanDirectoryError>> GetDirectoryErrorsAsync(long jobId, CancellationToken ct = default)
     {
         await using var conn = _db.CreateConnection();
