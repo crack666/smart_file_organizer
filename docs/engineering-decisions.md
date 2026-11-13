@@ -75,6 +75,13 @@ Archives are never unpacked: only the archive directory is read, at most 10,000 
 (`ArchiveListingReader.MaxEntries`), so an archive bomb costs nothing. Compressed tarballs (`.tar.gz`, `.gz`, `.bz2`,
 `.xz`) are therefore not listed; the evidence says so.
 
+Office and OpenDocument files are ZIP packages whose parts must be unpacked to read their text, so they get limits
+instead (`OfficePackage`): at most 10,000 entries, counted from the end record before the directory is loaded; at most
+16 MiB unpacked per part and 32 MiB for all parts read from one file, counted while unpacking so a lying directory
+does not help; no document type definitions, so entity expansion cannot multiply the text. A file over a limit is not
+read and the evidence names the limit (`document text: not read, ...`). The limits are far above what a document needs
+for the 12,000 characters the model sees; a spreadsheet whose single sheet unpacks to more than 16 MiB is the price.
+
 ### Optional external tool: ffmpeg
 
 Video still frames come from `ffmpeg` if it is found on the `PATH` (`VideoFrameExtractor`). It is not a dependency
