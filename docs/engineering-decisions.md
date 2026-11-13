@@ -373,6 +373,26 @@ Trade-off: the description costs a few dozen answer tokens per picture and docum
 still asked in stage 1; moving them into stage 2 needs the measurement of the corpus first. A model call over facts
 for what no rule can judge is left for later.
 
+## 12. Assessments belong to the content
+
+Decided 13.11.2026 in https://github.com/crack666/smart_file_organizer/issues/38. Stage 1 is the expensive part, and
+it was paid per path: the same file on the next old disk, renamed, or in a new scan went to the model again.
+
+- What the model said about a content is kept under its full SHA-256 and size, across jobs, and taken over before a
+  model call. Only a full checksum says "the same content"; head-and-tail and names never do.
+- Taken over only with the same model and the same prompt version. The version is a hash of the classification prompt
+  itself, not a number in code: a number would be forgotten once, and then a changed prompt would silently reuse old
+  answers. Old entries stay (`stale`) until cleared, so switching back costs nothing.
+- Only what belongs to the content is kept. Folder verdict, findings, target and decision depend on the place and are
+  made anew in every job; an answer shaped by a second call, which sees the folder, is not kept. A person's correction
+  of a category belongs to the content and follows it.
+- A taken-over result says so (`reused`), and `sfo status` counts it apart from model calls, so a fast run is not
+  mistaken for a fast model. An evaluation never takes over.
+
+Trade-off: every file the model would judge is read once more for its checksum (stored, so only once per state of the
+file). The evidence preparation is not part of the prompt version: a change there (more PDF text, more frames) needs
+`sfo cache clear` to take effect on content judged before.
+
 ## Design stance going forward
 
 Prefer:
