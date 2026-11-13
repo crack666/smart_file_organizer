@@ -82,8 +82,10 @@ public sealed class ScriptedAnswerOllamaService : IOllamaService
         if (_answers.Files.TryGetValue(path, out var answer))
         {
             // The truth leaves a category open where it is ambiguous (not scored). The stub still has to commit
-            // to one, like a model would; unknown would make every sample of such a folder unusable.
-            result.Category = answer.Category ?? FileCategory.Document;
+            // to one, like a model would; unknown would make every sample of such a folder unusable. It commits to
+            // what the file type allows: a log or settings file is no document a person keeps, an archive stays an
+            // archive (otherwise the perfect stub itself would fill the findings with them).
+            result.Category = answer.Category ?? OpenCategory(input.File.FileType);
             result.SensitiveMarkers = answer.Sensitive;
             result.Summary = "scripted answer";
         }
@@ -93,6 +95,14 @@ public sealed class ScriptedAnswerOllamaService : IOllamaService
         }
         return Task.FromResult(result);
     }
+
+    private static FileCategory OpenCategory(FileType type) => type switch
+    {
+        FileType.Archive => FileCategory.Archive,
+        FileType.Code => FileCategory.Code,
+        FileType.Other or FileType.Database => FileCategory.TrashCandidate,
+        _ => FileCategory.Document
+    };
 
     public Task<DirectoryClassificationResult> SummarizeDirectoryAsync(DirectorySummaryInput input, CancellationToken ct = default) =>
         Task.FromResult(new DirectoryClassificationResult

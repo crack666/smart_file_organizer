@@ -103,6 +103,8 @@ public class EvalCliTests : IDisposable
     {
         await GenerateAsync();
         var truthPath = Path.Combine(_corpus, "truth.json");
+        // Verdicts, categories and markers only: wrong answers change the findings too, which has its own test.
+        File.Delete(Path.Combine(_corpus, EvalFindingTruth.FileName));
 
         var perfect = (await OkAsync("eval", _corpus, "--stub", truthPath, "--json")).Result;
         Assert.Equal("corpus", perfect.GetProperty("mode").GetString());
@@ -154,6 +156,44 @@ public class EvalCliTests : IDisposable
     /// both sides: the private key counts as found, and the public key next to it as a false alarm, because the
     /// folder marker withholds it as well (issue 50; docs/evaluation.md).
     /// </summary>
+    /// <summary>
+    /// The findings are measured against findings.json: the perfect stub lists exactly the expected ones, a finding
+    /// nobody expects counts as superfluous (apart from total), an expectation nothing meets as missing.
+    /// </summary>
+    [Fact]
+    public async Task Eval_Findings_PerfectStubHasNoSuperfluous_AndEveryDeviationIsNamed()
+    {
+        await GenerateAsync();
+        var truthPath = Path.Combine(_corpus, "truth.json");
+        var findingsPath = Path.Combine(_corpus, EvalFindingTruth.FileName);
+        Assert.True(File.Exists(findingsPath));
+
+        static JsonElement FindingScore(JsonElement result) =>
+            result.GetProperty("scores").EnumerateArray().Single(s => s.GetProperty("kind").GetString() == "finding");
+
+        var perfect = FindingScore((await OkAsync("eval", _corpus, "--stub", truthPath, "--json")).Result);
+        Assert.Equal(SmallCorpusFindings.Expected.Count, perfect.GetProperty("hits").GetInt32());
+        Assert.Equal(perfect.GetProperty("total").GetInt32(), perfect.GetProperty("hits").GetInt32());
+        Assert.Equal(0, perfect.GetProperty("findings").GetProperty("superfluous").GetInt32());
+
+        // One expectation dropped (its finding becomes superfluous), one that nothing meets (missing).
+        var doc = JsonNode.Parse(File.ReadAllText(findingsPath))!;
+        var list = doc["findings"]!.AsArray();
+        list.Remove(list.First(e => e!["path"]!.GetValue<string>() == "alt" && e["group"]?.GetValue<string>() == "images"));
+        list.Add(new JsonObject { ["kind"] = "duplicate", ["path"] = "Programme/PortableTool", ["scope"] = "folders" });
+        File.WriteAllText(findingsPath, doc.ToJsonString());
+
+        var run = (await OkAsync("eval", _corpus, "--stub", truthPath, "--json")).Result;
+        var score = FindingScore(run);
+        Assert.Equal(1, score.GetProperty("missing").GetInt32());
+        Assert.Equal(1, score.GetProperty("findings").GetProperty("superfluous").GetInt32());
+        var failures = run.GetProperty("failures").EnumerateArray().Where(f => f.GetProperty("kind").GetString() == "finding").ToList();
+        Assert.Contains(failures, f => f.GetProperty("outcome").GetString() == "superfluous" && f.GetProperty("path").GetString() == "alt"
+                                       && f.GetProperty("actual").GetString() == "in_noise/images");
+        Assert.Contains(failures, f => f.GetProperty("outcome").GetString() == "missing"
+                                       && f.GetProperty("path").GetString() == "Programme/PortableTool");
+    }
+
     [Fact]
     public async Task Eval_FilesInASkippedMarkedFolder_CarryTheMarkerOfTheFolder()
     {

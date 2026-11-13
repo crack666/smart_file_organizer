@@ -41,7 +41,10 @@ public enum EvalKind
 {
     [JsonStringEnumMemberName("directory_verdict")] DirectoryVerdict,
     [JsonStringEnumMemberName("file_category")] FileCategory,
-    [JsonStringEnumMemberName("sensitive")] Sensitive
+    [JsonStringEnumMemberName("sensitive")] Sensitive,
+
+    /// <summary>The findings of the job against the expected findings of the corpus (<c>findings.json</c>).</summary>
+    [JsonStringEnumMemberName("finding")] Finding
 }
 
 /// <summary>How one measured item turned out.</summary>
@@ -54,5 +57,11 @@ public enum EvalOutcome
     [JsonStringEnumMemberName("wrong")] Wrong,
 
     /// <summary>No result: not scanned, not analysed, or the model call failed.</summary>
-    [JsonStringEnumMemberName("missing")] Missing
+    [JsonStringEnumMemberName("missing")] Missing,
+
+    /// <summary>
+    /// A finding no expectation asks for: noise in the list. Not part of <c>total</c>; counted on its own
+    /// (<see cref="EvalKind.Finding"/> only).
+    /// </summary>
+    [JsonStringEnumMemberName("superfluous")] Superfluous
 }

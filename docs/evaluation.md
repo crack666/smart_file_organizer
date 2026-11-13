@@ -100,6 +100,33 @@ The same file shape serves as an answer sheet for `--stub`: the truth itself ans
 a copy with changed entries answers wrong on purpose. Where the truth leaves a category open, the
 stub answers `document`, because a model has to commit to one as well.
 
+## Expected findings
+
+`sfo eval generate` also writes `<dir>/findings.json` (`SmallCorpusFindings`, Infrastructure/Evaluation): every
+finding the corpus should give, and no other. It is kept apart from `truth.json`, so the truth of verdicts and
+categories and the truth of findings change on their own. When the file is there, `sfo eval` also runs the steps
+the findings need and that call no model (`sfo compare` without a library, `sfo bundles build`) and measures the kind
+`finding`; without it, findings are not measured. No library is compared, so `not_backed_up` is never expected.
+
+```json
+{ "schema_version": 1,
+  "findings": [
+    { "kind": "in_noise", "path": "Downloads", "group": "images", "note": "A camera photo in the download folder." },
+    { "kind": "sensitive", "path": "Dokumente/Bank", "markers": ["finance"] },
+    { "kind": "duplicate", "path": "Programme/Tool", "scope": "folders" }
+  ] }
+```
+
+`path` is the `relative_path` of the finding; `group`, `scope` and `markers` narrow it when given. An expectation
+is a `hit` when a listed finding (open or accepted) has its kind, path and narrowing, `wrong` when a finding lies
+at its path with another kind or narrowing, and `missing` otherwise. Every listed finding no expectation takes is
+`superfluous`: it is named as a failure and counted on its own (`findings.superfluous`), not in `total`, because
+many wrong hints are worse than a missing one. With the scripted answers the small corpus gives 20 of 20 and no
+superfluous finding (13.11.2026, https://github.com/crack666/smart_file_organizer/issues/64). Where the truth leaves
+a category open, the stub answers by file type since then (`document` for documents, `archive`, `code`, and
+`trash_candidate` for logs and settings files); before, it answered `document` for every such file, which made a
+log file, a settings file and an archive superfluous findings.
+
 ## Truth changes
 
 Every change of the truth is listed here with its reason. The truth follows what is right for the
@@ -176,6 +203,7 @@ prompt, which was wrong. `.ssh/id_ed25519.pub` keeps `sensitive: []`, see the ne
 |---|---|---|
 | `directory_verdict` | every truth folder with a verdict | stored verdict, whether a rule, the model or the sample check decided |
 | `file_category` | every truth file with a category | the model's category, or the one inherited from a confirmed sample (a human override is ignored) |
+| `finding` | every expected finding of `findings.json` | the listed findings of the job; findings nobody expects count as `superfluous`, see [Expected findings](#expected-findings) |
 | `sensitive` | every truth file | markers of the rules and of the model together; a hit needs exactly the expected set. A file inside a folder the scan skipped and marked (`.ssh`) carries the markers of that folder, see [below](#files-in-a-skipped-marked-folder) |
 
 Each item is a `hit`, `wrong` (a different result) or `missing` (not scanned, not analysed, or a

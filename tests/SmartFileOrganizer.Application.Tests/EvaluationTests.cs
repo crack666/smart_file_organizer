@@ -367,8 +367,8 @@ public class EvaluationTests : IDisposable
         {
             sb.Append(Path.GetRelativePath(directory, file)).Append('|')
               .Append(Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(file)))).Append('|')
-              // Corpus files carry fixed dates; truth.json is written now.
-              .Append(Path.GetFileName(file) == EvalTruth.FileName ? 0 : File.GetLastWriteTimeUtc(file).Ticks).Append('\n');
+              // Corpus files carry fixed dates; truth.json and findings.json are written now.
+              .Append(Path.GetFileName(file) is EvalTruth.FileName or EvalFindingTruth.FileName ? 0 : File.GetLastWriteTimeUtc(file).Ticks).Append('\n');
         }
         return sb.ToString();
     }

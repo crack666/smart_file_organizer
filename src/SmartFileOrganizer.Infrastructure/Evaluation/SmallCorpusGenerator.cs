@@ -61,6 +61,7 @@ public static class SmallCorpusGenerator
         var doc = new EvalTruthDocument(EvalTruth.SchemaVersion, corpus, RootFolder, b.Directories, b.Files);
         var truthPath = Path.Combine(dir, EvalTruth.FileName);
         File.WriteAllText(truthPath, JsonSerializer.Serialize(doc, EvalJson.Options) + "\n", new UTF8Encoding(false));
+        SmallCorpusFindings.Write(dir);
 
         b.ApplyDirectoryTimes();
         return new GeneratedCorpus(dir, truthPath, root, corpus, b.Directories.Count, b.Files.Count);

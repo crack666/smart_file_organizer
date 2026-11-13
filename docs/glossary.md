@@ -505,6 +505,7 @@ Counted per run in `model_calls` of `sfo analyze --json` and `sfo eval --json`.
 | `directory_verdict` | The verdict of a directory. |
 | `file_category` | The category of a file. |
 | `sensitive` | The sensitive markers of a file. |
+| `finding` | The findings of the job against the expected findings of the corpus (`findings.json`). |
 
 ### Outcome of a measured item (`EvalOutcome`)
 
@@ -513,6 +514,7 @@ Counted per run in `model_calls` of `sfo analyze --json` and `sfo eval --json`.
 | `hit` | The result equals the truth. |
 | `wrong` | There is a result and it differs from the truth. |
 | `missing` | No result: not scanned, not analysed, or the model call failed. |
+| `superfluous` | A finding no expectation asks for: noise in the list. Counted apart from `total`. |
 
 ### Mode of an evaluation run (`EvalRunMode`)
 
