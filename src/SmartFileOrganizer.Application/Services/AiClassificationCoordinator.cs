@@ -137,9 +137,9 @@ public class AiClassificationCoordinator
     /// <param name="retryErrors">Phase 2 first sets failed files back to Discovered and tries them again; Phase 3
     /// then writes again the summaries that failed or that predate a new result in their directory.</param>
     /// <param name="onWait">Called when the run starts or stops waiting for the model server, with the phase.</param>
-    /// <param name="againstJobId">Library job whose stored comparison decides what is left out: files <c>backed_up</c>
-    /// there are not classified, folders fully <c>backed_up</c> get no pre-assessment and no summary. Null: the whole
-    /// job is analysed, and the marks of an earlier run with a library job are released.</param>
+    /// <param name="againstJobIds">Library jobs whose stored comparisons decide what is left out: files <c>backed_up</c>
+    /// in any of them are not classified, folders fully <c>backed_up</c> get no pre-assessment and no summary. Null or
+    /// empty: the whole job is analysed, and the marks of an earlier run with a library job are released.</param>
     public Task<AiPipelineRunResult> RunAsync(
         long jobId,
         AiPhases phases = AiPhases.All,
@@ -147,7 +147,7 @@ public class AiClassificationCoordinator
         CancellationToken ct = default,
         bool retryErrors = false,
         Action<AiPhases, ModelServerWaitEvent>? onWait = null,
-        long? againstJobId = null)
+        IReadOnlyList<long>? againstJobIds = null)
     {
         return RunPhasesAsync(
             jobId,
@@ -160,7 +160,7 @@ public class AiClassificationCoordinator
             onWait,
             ct,
             retryErrors,
-            againstJobId);
+            againstJobIds);
     }
 
     private async Task<AiPipelineRunResult> RunPhasesAsync(
@@ -172,7 +172,7 @@ public class AiClassificationCoordinator
         Action<AiPhases, ModelServerWaitEvent>? onWait,
         CancellationToken ct,
         bool retryErrors = false,
-        long? againstJobId = null)
+        IReadOnlyList<long>? againstJobIds = null)
     {
         // Single availability check — avoids 3x /api/tags calls. A server that is away when the run starts is
         // reported at once; waiting is for a server that goes away during the run.
@@ -184,7 +184,7 @@ public class AiClassificationCoordinator
             await _rulesBackfill.RunAsync(jobId, ct);
 
         // What the library already holds by content is left out; without a library job, earlier marks are released.
-        var backedUp = _backedUpSkip is null ? null : await _backedUpSkip.ApplyAsync(jobId, againstJobId, ct);
+        var backedUp = _backedUpSkip is null ? null : await _backedUpSkip.ApplyAsync(jobId, againstJobIds, ct);
 
         var results = new List<AiPhaseRunResult>();
         var current = AiPhases.None;

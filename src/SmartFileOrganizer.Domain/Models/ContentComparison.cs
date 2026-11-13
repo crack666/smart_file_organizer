@@ -31,14 +31,17 @@ public sealed record ComparableFile(long Id, string FullPath, string Name, strin
 /// <summary>A directory the scan could not read (<c>directory_nodes.dir_status = Error</c>).</summary>
 public sealed record ScanDirectoryError(string FullPath, string? Reason);
 
-/// <summary>One stored comparison run (<c>comparisons</c>).</summary>
+/// <summary>One stored comparison of a source with one library (<c>comparisons</c>).</summary>
+/// <param name="RunId">The comparisons stored by one <c>sfo compare</c> with several libraries share it (the id of the
+/// first of them); a comparison with one library has its own id. Null before it is stored.</param>
 public sealed record ComparisonHeader(
     long Id,
     long SourceJobId,
     long? AgainstJobId,
     DateTime ComparedAt,
     bool Complete,
-    int ErrorCount);
+    int ErrorCount,
+    long? RunId = null);
 
 /// <summary>
 /// Outcome for one source file (<c>comparison_files</c>). <see cref="State"/> is null only when
@@ -50,6 +53,7 @@ public sealed record ComparisonHeader(
 /// checksum was computed from the files (it may come from the cache of an earlier run). Anything
 /// that deletes the source file must read both files again and compare with <see cref="MatchHash"/>
 /// first; this record is evidence of a past state, not a guarantee.
+/// <see cref="MatchJobId"/> is the library job <see cref="MatchPath"/> belongs to (set when read back).
 /// </remarks>
 public sealed record FileComparison(
     long FileNodeId,
@@ -62,4 +66,5 @@ public sealed record FileComparison(
     int? DuplicateGroup,
     string? Error,
     string? MatchHash = null,
-    DateTime? MatchVerifiedAt = null);
+    DateTime? MatchVerifiedAt = null,
+    long? MatchJobId = null);

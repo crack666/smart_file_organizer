@@ -6,10 +6,11 @@ using SmartFileOrganizer.Domain.Models;
 namespace SmartFileOrganizer.Application.Services;
 
 /// <summary>What <see cref="BackedUpSkipService.ApplyAsync"/> left out of the analysis.</summary>
-/// <param name="AgainstJobId">The library job of the comparison.</param>
-/// <param name="Files">Files waiting for the analysis that are <c>backed_up</c> and now Skipped.</param>
+/// <param name="AgainstJobId">The first library job named (its comparison is <paramref name="ComparisonId"/>).</param>
+/// <param name="Files">Files waiting for the analysis that are <c>backed_up</c> in any of the libraries and now Skipped.</param>
 /// <param name="Directories">Folders whose every file below is <c>backed_up</c>: no pre-assessment, no summary.</param>
-public sealed record BackedUpSkip(long AgainstJobId, long ComparisonId, int Files, int Directories);
+/// <param name="Libraries">Every library job named, in order.</param>
+public sealed record BackedUpSkip(long AgainstJobId, long ComparisonId, int Files, int Directories, IReadOnlyList<long> Libraries);
 
 /// <summary>
 /// Leaves out of the analysis what the library already holds by content
@@ -37,21 +38,29 @@ public class BackedUpSkipService
     public Task<ComparisonHeader?> FindComparisonAsync(long jobId, long againstJobId, CancellationToken ct = default) =>
         _comparisons.GetComparisonAsync(jobId, againstJobId, ct);
 
+    /// <summary>As <see cref="ApplyAsync(long, IReadOnlyList{long}?, CancellationToken)"/> with one library job or none.</summary>
+    public Task<BackedUpSkip?> ApplyAsync(long jobId, long? againstJobId, CancellationToken ct = default) =>
+        ApplyAsync(jobId, againstJobId is { } id ? [id] : [], ct);
+
     /// <summary>
-    /// Marks the files and folders of <paramref name="jobId"/> that the comparison against
-    /// <paramref name="againstJobId"/> found <c>backed_up</c>. Without a library job, or when no comparison is
+    /// Marks the files and folders of <paramref name="jobId"/> that the comparisons against
+    /// <paramref name="againstJobIds"/> found <c>backed_up</c> in any of the libraries
+    /// (https://github.com/crack666/smart_file_organizer/issues/74). Without a library job, or when no comparison is
     /// stored, every earlier mark is released and the whole job is analysed as before; then null is returned.
     /// </summary>
-    public async Task<BackedUpSkip?> ApplyAsync(long jobId, long? againstJobId, CancellationToken ct = default)
+    public async Task<BackedUpSkip?> ApplyAsync(long jobId, IReadOnlyList<long>? againstJobIds, CancellationToken ct = default)
     {
-        var header = againstJobId is { } against ? await _comparisons.GetComparisonAsync(jobId, against, ct) : null;
-        if (header is null)
+        var set = againstJobIds is { Count: > 0 }
+            ? (await LibraryComparisonSet.LoadAsync(_comparisons, jobId, againstJobIds, ct)).Set
+            : null;
+        if (set is null)
         {
             await _comparisons.SetAnalysisSkipAsync(jobId, [], [], ct);
             return null;
         }
 
-        var rows = await _comparisons.GetFileComparisonsAsync(header.Id, ct);
+        var header = set.First;
+        var rows = set.Files;
         var backedUp = rows.Where(r => r.State == ContentState.BackedUp).Select(r => r.FileNodeId).ToList();
 
         // A folder is left out only when every file of the job below it is backed_up. That needs the comparison
@@ -63,9 +72,9 @@ public class BackedUpSkipService
             _logger.LogWarning("The comparison {Id} does not cover every file of job {JobId}; no folder is left out.", header.Id, jobId);
 
         var (files, directories) = await _comparisons.SetAnalysisSkipAsync(jobId, backedUp, directoryIds, ct);
-        _logger.LogInformation("Job {JobId} against library job {Against}: {Files} file(s) and {Dirs} folder(s) left out as backed_up.",
-            jobId, header.AgainstJobId, files, directories);
-        return new BackedUpSkip(header.AgainstJobId ?? 0, header.Id, files, directories);
+        _logger.LogInformation("Job {JobId} against {Libraries}: {Files} file(s) and {Dirs} folder(s) left out as backed_up.",
+            jobId, set.Label, files, directories);
+        return new BackedUpSkip(header.AgainstJobId ?? 0, header.Id, files, directories, set.LibraryJobIds);
     }
 
     /// <summary>Folders with at least one file below them, every one of them <c>backed_up</c>.</summary>

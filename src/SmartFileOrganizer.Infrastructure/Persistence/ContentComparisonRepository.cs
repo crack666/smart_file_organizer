@@ -142,11 +142,12 @@ public class ContentComparisonRepository : IContentComparisonRepository
 
         var id = await conn.ExecuteScalarAsync<long>(new CommandDefinition(
             """
-            INSERT INTO comparisons (source_job_id, against_job_id, compared_at, complete, error_count)
-            VALUES (@SourceJobId, @AgainstJobId, @ComparedAt, @Complete, @ErrorCount);
-            SELECT last_insert_rowid();
+            INSERT INTO comparisons (source_job_id, against_job_id, compared_at, complete, error_count, run_id)
+            VALUES (@SourceJobId, @AgainstJobId, @ComparedAt, @Complete, @ErrorCount, @RunId);
+            UPDATE comparisons SET run_id = id WHERE id = last_insert_rowid() AND run_id IS NULL;
+            SELECT id FROM comparisons WHERE rowid = last_insert_rowid();
             """,
-            new { header.SourceJobId, header.AgainstJobId, header.ComparedAt, Complete = header.Complete ? 1 : 0, header.ErrorCount },
+            new { header.SourceJobId, header.AgainstJobId, header.ComparedAt, Complete = header.Complete ? 1 : 0, header.ErrorCount, header.RunId },
             transaction: tx, cancellationToken: ct));
 
         await conn.ExecuteAsync(new CommandDefinition(
@@ -182,13 +183,13 @@ public class ContentComparisonRepository : IContentComparisonRepository
         await conn.OpenAsync(ct);
         var row = await conn.QuerySingleOrDefaultAsync<HeaderRow>(new CommandDefinition(
             """
-            SELECT id, source_job_id, against_job_id, compared_at, complete, error_count
+            SELECT id, source_job_id, against_job_id, compared_at, complete, error_count, run_id
             FROM comparisons WHERE source_job_id = @sourceJobId AND against_job_id IS @againstJobId
             """,
             new { sourceJobId, againstJobId }, cancellationToken: ct));
         return row == null
             ? null
-            : new ComparisonHeader(row.Id, row.SourceJobId, row.AgainstJobId, row.ComparedAt, row.Complete != 0, (int)row.ErrorCount);
+            : row.ToModel();
     }
 
     public async Task<ComparisonHeader?> GetLatestWithLibraryAsync(long sourceJobId, CancellationToken ct = default)
@@ -197,14 +198,33 @@ public class ContentComparisonRepository : IContentComparisonRepository
         await conn.OpenAsync(ct);
         var row = await conn.QueryFirstOrDefaultAsync<HeaderRow>(new CommandDefinition(
             """
-            SELECT id, source_job_id, against_job_id, compared_at, complete, error_count
+            SELECT id, source_job_id, against_job_id, compared_at, complete, error_count, run_id
             FROM comparisons WHERE source_job_id = @sourceJobId AND against_job_id IS NOT NULL
             ORDER BY compared_at DESC, id DESC LIMIT 1
             """,
             new { sourceJobId }, cancellationToken: ct));
         return row == null
             ? null
-            : new ComparisonHeader(row.Id, row.SourceJobId, row.AgainstJobId, row.ComparedAt, row.Complete != 0, (int)row.ErrorCount);
+            : row.ToModel();
+    }
+
+    public async Task<IReadOnlyList<ComparisonHeader>> GetLatestLibraryRunAsync(long sourceJobId, CancellationToken ct = default)
+    {
+        var latest = await GetLatestWithLibraryAsync(sourceJobId, ct);
+        if (latest is null)
+            return [];
+
+        await using var conn = _db.CreateConnection();
+        await conn.OpenAsync(ct);
+        var rows = await conn.QueryAsync<HeaderRow>(new CommandDefinition(
+            """
+            SELECT id, source_job_id, against_job_id, compared_at, complete, error_count, run_id
+            FROM comparisons
+            WHERE source_job_id = @sourceJobId AND against_job_id IS NOT NULL AND COALESCE(run_id, id) = @run
+            ORDER BY id
+            """,
+            new { sourceJobId, run = latest.RunId ?? latest.Id }, cancellationToken: ct));
+        return rows.Select(r => r.ToModel()).ToList();
     }
 
     public async Task<IReadOnlyList<FileComparison>> GetFileComparisonsAsync(long comparisonId, CancellationToken ct = default)
@@ -215,7 +235,7 @@ public class ContentComparisonRepository : IContentComparisonRepository
             """
             SELECT cf.file_node_id, f.full_path, f.size, cf.state, cf.match_file_node_id,
                    m.full_path AS match_path, cf.match_count, cf.duplicate_group, cf.error,
-                   cf.match_hash, cf.match_verified_at
+                   cf.match_hash, cf.match_verified_at, m.job_id AS match_job_id
             FROM comparison_files cf
             JOIN file_nodes f ON f.id = cf.file_node_id
             LEFT JOIN file_nodes m ON m.id = cf.match_file_node_id
@@ -228,7 +248,7 @@ public class ContentComparisonRepository : IContentComparisonRepository
             r.State == null ? null : ContentStateValues.Parse(r.State),
             r.MatchFileNodeId, r.MatchPath, (int)r.MatchCount,
             r.DuplicateGroup == null ? null : (int)r.DuplicateGroup.Value,
-            r.Error, r.MatchHash, r.MatchVerifiedAt)).ToList();
+            r.Error, r.MatchHash, r.MatchVerifiedAt, r.MatchJobId)).ToList();
     }
 
     public async Task<(int Files, int Directories)> SetAnalysisSkipAsync(long jobId, IReadOnlyCollection<long> fileIds,
@@ -309,6 +329,10 @@ public class ContentComparisonRepository : IContentComparisonRepository
         public DateTime ComparedAt { get; set; }
         public long Complete { get; set; }
         public long ErrorCount { get; set; }
+        public long? RunId { get; set; }
+
+        public ComparisonHeader ToModel() =>
+            new(Id, SourceJobId, AgainstJobId, ComparedAt, Complete != 0, (int)ErrorCount, RunId ?? Id);
     }
 
     private sealed class FileComparisonRow
@@ -324,5 +348,6 @@ public class ContentComparisonRepository : IContentComparisonRepository
         public string? Error { get; set; }
         public string? MatchHash { get; set; }
         public DateTime? MatchVerifiedAt { get; set; }
+        public long? MatchJobId { get; set; }
     }
 }

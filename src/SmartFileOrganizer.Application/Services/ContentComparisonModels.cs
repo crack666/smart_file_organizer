@@ -58,7 +58,15 @@ public sealed record ComparisonReport(
     IReadOnlyList<DuplicateGroup> DuplicateGroups,
     IReadOnlyList<DirectoryComparison> Directories,
     IReadOnlyList<ComparisonIssue> Errors,
-    HashingStats Hashing)
+    HashingStats Hashing,
+    IReadOnlyList<LibraryComparisonPart>? Libraries = null)
 {
     public int Count(ContentState state) => Files.Count(f => f.State == state);
 }
+
+/// <summary>
+/// One library of a comparison with several (https://github.com/crack666/smart_file_organizer/issues/74): its job, its
+/// stored comparison, and how many source files it holds by content. A file held by several libraries counts at the
+/// first one named, as in the joined result.
+/// </summary>
+public sealed record LibraryComparisonPart(ScanJob Library, ComparisonHeader Header, int BackedUpFiles, long BackedUpBytes);
