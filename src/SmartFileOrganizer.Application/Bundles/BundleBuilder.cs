@@ -241,57 +241,8 @@ public sealed class BundleBuilder
 
     private readonly Dictionary<Bundle, List<DirectoryReadRow>> _partDirectories = new(ReferenceEqualityComparer.Instance);
 
-    /// <summary>
-    /// The part of a directory inside a dump, by its path below the dump root: noise below a noise path;
-    /// otherwise the keep path that ends deepest (the longest on a tie); otherwise noise.
-    /// </summary>
-    public DumpPart? Classify(IReadOnlyList<string> segments)
-    {
-        foreach (var noise in _patterns.NoisePaths)
-        {
-            if (IndexOfRun(segments, noise, segments.Count) >= 0)
-                return null;
-        }
-
-        for (var end = segments.Count; end >= 1; end--)
-        {
-            DumpPart? best = null;
-            var bestLength = 0;
-            foreach (var (path, part) in _patterns.KeepParts)
-            {
-                if (path.Length > end || path.Length <= bestLength) continue;
-                if (RunEndsAt(segments, path, end))
-                {
-                    best = part;
-                    bestLength = path.Length;
-                }
-            }
-            if (best is not null)
-                return best;
-        }
-        return null;
-    }
-
-    private static bool RunEndsAt(IReadOnlyList<string> segments, string[] run, int end)
-    {
-        var start = end - run.Length;
-        for (var i = 0; i < run.Length; i++)
-        {
-            if (!string.Equals(segments[start + i], run[i], StringComparison.OrdinalIgnoreCase))
-                return false;
-        }
-        return true;
-    }
-
-    private static int IndexOfRun(IReadOnlyList<string> segments, string[] run, int count)
-    {
-        for (var end = run.Length; end <= count; end++)
-        {
-            if (RunEndsAt(segments, run, end))
-                return end - run.Length;
-        }
-        return -1;
-    }
+    /// <summary>The part of a directory inside a dump by its path below the dump root; see <see cref="BundlePatterns.PartOf"/>.</summary>
+    public DumpPart? Classify(IReadOnlyList<string> segments) => _patterns.PartOf(segments);
 
     // ---------------------------------------------------------------- folders and loose files
 

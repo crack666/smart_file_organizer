@@ -24,10 +24,12 @@ public sealed record GeneratedCorpus(string Directory, string TruthPath, string 
 /// <para>The output depends only on the seed: same seed, same bytes, same timestamps.</para>
 /// <para>The truth is meant to be unambiguous. Where the categories of the prompt allow two
 /// answers (a password list or a shopping list is <c>document</c>, <c>review_needed</c> or
-/// <c>trash_candidate</c>), the category is <c>null</c> and only the markers are measured. Files inside a unit (project, program, game,
-/// dump) have no category, because units are not classified file by file. Verdict codes follow
+/// <c>trash_candidate</c>), the category is <c>null</c> and only the markers are measured. Files inside a unit (project, program,
+/// game) have no category, because units are not classified file by file. Verdict codes follow
 /// the rules of docs/architecture.md: a folder of uniform collections of one file type is
-/// <c>uniform</c>, a folder of units is <c>uniform</c>, everything inside a unit is <c>unit</c>.</para>
+/// <c>uniform</c>, a folder of units or of dumps is <c>uniform</c>, everything inside a unit is <c>unit</c>.
+/// A dump (phone backup, user profile) is <c>dump</c>; its worth-keeping folders have verdicts of their own and its
+/// noise (app data, caches) is <c>system</c>, with no category for the files there.</para>
 /// </remarks>
 public static class SmallCorpusGenerator
 {
@@ -35,8 +37,10 @@ public static class SmallCorpusGenerator
 
     /// <summary>Raise when the content or the truth changes, so stored runs of different corpora are not compared as equal.</summary>
     /// <remarks>Version 2 (https://github.com/crack666/smart_file_organizer/issues/50): counter-samples for the
-    /// finance and private_message boundaries, categories of money, medical and scanned papers; see docs/evaluation.md.</remarks>
-    public const int GeneratorVersion = 2;
+    /// finance and private_message boundaries, categories of money, medical and scanned papers; see docs/evaluation.md.
+    /// Version 3 (https://github.com/crack666/smart_file_organizer/issues/59): a dump is no unit any more (the phone
+    /// backup's camera is judged), and a folder with two user profiles full of noise.</remarks>
+    public const int GeneratorVersion = 3;
 
     public const int DefaultSeed = 36;
     public const string RootFolder = "tree";
@@ -53,7 +57,7 @@ public static class SmallCorpusGenerator
 
         var corpus = new EvalCorpusInfo(Name, GeneratorVersion, seed,
             "Small invented corpus: mixed downloads and desktop, photo folders per occasion, documents by topic, " +
-            "projects, programs, a phone dump, media and sensitive dummies.");
+            "projects, programs, a phone dump, two user profiles with noise, media and sensitive dummies.");
         var doc = new EvalTruthDocument(EvalTruth.SchemaVersion, corpus, RootFolder, b.Directories, b.Files);
         var truthPath = Path.Combine(dir, EvalTruth.FileName);
         File.WriteAllText(truthPath, JsonSerializer.Serialize(doc, EvalJson.Options) + "\n", new UTF8Encoding(false));
@@ -63,7 +67,7 @@ public static class SmallCorpusGenerator
     }
 
     // Codes of issue 35 (English). Compared through EvalCodes, never as strings.
-    private const string Unit = "unit", Uniform = "uniform", Mixed = "mixed", Empty = "empty", SystemDir = "system";
+    private const string Unit = "unit", Uniform = "uniform", Mixed = "mixed", Empty = "empty", SystemDir = "system", Dump = "dump";
     private const string Photo = "photo", Screenshot = "screenshot", Video = "video", Invoice = "invoice", Document = "document",
         DocumentScan = "document_scan", PersonalDocument = "personal_document", Letter = "letter";
     private const string Credentials = "credentials", Keys = "keys", PrivateMessage = "private_message", Identity = "identity",
@@ -245,22 +249,24 @@ public static class SmallCorpusGenerator
         b.Dir("Projekte/vereinswebsite/.git", Unit, "Version control inside a unit; skipped by the scan.");
         b.File("Projekte/vereinswebsite/.git/HEAD", Text("ref: refs/heads/main\n"), D(2023, 4, 9), null, None);
 
-        // ── A phone dump: a unit as a whole (#29: "Geraeteabzuege ... als Einheit melden") ──
-        b.Dir("Handy-Backup 2021", Unit, "Copy of a phone; belongs together and is handled as one backup.");
-        b.Dir("Handy-Backup 2021/DCIM", Unit, "Inside the phone dump.");
-        b.Dir("Handy-Backup 2021/DCIM/Camera", Unit, "Inside the phone dump.");
+        // ── A phone dump: recognised as a whole, its camera judged, its app data skipped (version 3) ──
+        b.Dir("Handy-Backup 2021", Dump, "Copy of a phone. Recognised as a whole, but not a unit: its camera roll is judged.");
+        b.Dir("Handy-Backup 2021/DCIM", Uniform, "Worth-keeping part of the dump (camera); only a photo collection below.");
+        b.Dir("Handy-Backup 2021/DCIM/Camera", Uniform, "Camera roll of the phone: the photos the dump is kept for.");
         for (var i = 0; i < 5; i++)
             b.File($"Handy-Backup 2021/DCIM/Camera/IMG_20210{3 + i}14_{120000 + i * 1111}.jpg", PhotoOf(b, Scene.Garden),
-                D(2021, 3 + i, 14, 12, i), null, None, "Inside a unit: no category.");
-        b.Dir("Handy-Backup 2021/LOST.DIR", Unit, "Empty system folder of the phone, still part of the dump.");
-        b.Dir("Handy-Backup 2021/Android", Unit, "Inside the phone dump.");
-        b.Dir("Handy-Backup 2021/Android/data", Unit, "Inside the phone dump.");
-        b.Dir("Handy-Backup 2021/Android/data/com.example.notes", Unit, "App data folder named after an app package.");
-        b.Dir("Handy-Backup 2021/Android/data/com.example.notes/files", Unit, "Inside the phone dump.");
+                D(2021, 3 + i, 14, 12, i), Photo, None, "Camera photo inside a dump: judged like any photo (version 3; was inside a unit).");
+        b.Dir("Handy-Backup 2021/LOST.DIR", Empty, "Empty system folder of the phone.");
+        b.Dir("Handy-Backup 2021/Android", SystemDir, "Only app data below.");
+        b.Dir("Handy-Backup 2021/Android/data", SystemDir, "Noise of the dump (app data); skipped without a model call.");
+        b.Dir("Handy-Backup 2021/Android/data/com.example.notes", SystemDir, "App data folder named after an app package; noise.");
+        b.Dir("Handy-Backup 2021/Android/data/com.example.notes/files", SystemDir, "Noise of the dump.");
         b.File("Handy-Backup 2021/Android/data/com.example.notes/files/notes.db", Binary(b, Encoding.ASCII.GetBytes("SQLite format 3\0"), 4096),
-            D(2021, 7, 30), null, None);
+            D(2021, 7, 30), null, None, "App data: skipped, no category.");
         b.File("Handy-Backup 2021/Android/data/com.example.notes/files/settings.xml", Text("<settings><theme>dark</theme></settings>\n"),
-            D(2021, 7, 30), null, None);
+            D(2021, 7, 30), null, None, "App data: skipped, no category.");
+
+        UserProfiles(b);
 
         // ── Programs and a game ──
         b.Dir("Programme", Uniform, "Only units below: a collection of programs.");
@@ -299,6 +305,119 @@ public static class SmallCorpusGenerator
         b.File(".ssh/id_ed25519", PrivateKey(b), D(2022, 1, 9), null, [Keys], "Private key dummy (header and random filler).");
         b.File(".ssh/id_ed25519.pub", Text("ssh-ed25519 " + Convert.ToBase64String(Bytes(b, 32)) + " max@laptop\n"), D(2022, 1, 9), null, None,
             "A public key is not secret.");
+    }
+
+    /// <summary>
+    /// Version 3 (https://github.com/crack666/smart_file_organizer/issues/59): the profiles folder of an old
+    /// computer with two profiles. Each profile is a dump of its own; its worth-keeping parts (desktop,
+    /// documents, downloads, pictures) are judged like any folder, its app data and caches are skipped.
+    /// <c>max</c> is a newer profile whose <c>AppData</c> the default scan rules skip; <c>lisa</c> is an older
+    /// German one whose <c>Anwendungsdaten</c> and <c>Lokale Einstellungen</c> the scan lists, with most of
+    /// the files of the two profiles.
+    /// </summary>
+    private static void UserProfiles(Builder b)
+    {
+        b.Dir("Profile alter PC", Uniform, "Only dumps below: the copies of two user profiles.");
+
+        // ── max: newer profile ──
+        const string max = "Profile alter PC/max";
+        b.Dir(max, Dump, "Copy of a user profile (NTUSER.DAT, AppData). Recognised as a whole; its parts are judged on their own.");
+        b.File($"{max}/NTUSER.DAT", Binary(b, Encoding.ASCII.GetBytes("regf"), 8192), D(2015, 9, 30), null, None,
+            "Registry hive in the profile root. Files directly in a dump are judged one by one; no document type.");
+        b.File($"{max}/ntuser.ini", Text("[.ShellClassInfo]\nLocalizedResourceName=@%SystemRoot%\\system32\\shell32.dll,-21813\n"),
+            D(2015, 9, 30), null, None, "Settings file in the profile root; no document type.");
+        b.Dir($"{max}/AppData", SystemDir, "App data: skipped by the default scan rules before any verdict; noise of the dump.");
+        b.Dir($"{max}/AppData/Local", null, "Inside a folder the scan skips: never listed.");
+        b.Dir($"{max}/AppData/Local/Temp", null, "Inside a folder the scan skips: never listed.");
+
+        b.Dir($"{max}/Desktop", Mixed, "Desktop of the profile: worth-keeping part, things put down for later.");
+        b.File($"{max}/Desktop/Zugangsdaten_WLAN.txt", Text("WLAN: Beispielnetz\n" + Filler(b, "Schluessel ", 2)), D(2014, 5, 3), null, [Credentials],
+            "The sensitive file of the profile; protected inside a dump like everywhere. Category ambiguous.");
+        b.File($"{max}/Desktop/Notizen.txt", Text("Reifenwechsel im Oktober\nGeschenk fuer Oma besorgen\n"), D(2015, 9, 2), null, None,
+            "Category ambiguous (document, review_needed, trash_candidate).");
+        b.File($"{max}/Desktop/Screenshot_2015-08-21_193012.png", Screen(b, 6), D(2015, 8, 21), Screenshot, None);
+
+        b.Dir($"{max}/Documents", Mixed, "Documents of the profile: a contract and a letter without a common purpose.");
+        b.File($"{max}/Documents/Mietvertrag_Wohnung.pdf", MiniPdf.Text("Mietvertrag", [
+            "Zwischen Vermieterin Erika Beispiel und Mieter Max Beispiel",
+            "Wohnung: Musterweg 2, 12345 Beispielstadt, 2. OG links",
+            "Mietbeginn: 01.04.2013",
+            "Kaltmiete: 520,00 EUR, Nebenkosten: 140,00 EUR",
+            "Kaution: drei Kaltmieten"]), D(2013, 3, 20), PersonalDocument, None,
+            "A rental contract is a personal document, not finance.");
+        b.File($"{max}/Documents/Kuendigung_Zeitung.txt", Text(
+            "Max Beispiel\nMusterweg 2\n12345 Beispielstadt\n\nBeispielstadt Kurier, Leserservice\n\nKuendigung meines Abonnements\n\n" +
+            "Sehr geehrte Damen und Herren,\nhiermit kuendige ich mein Abonnement (Nr. 77821) zum Monatsende.\n\n" +
+            "Mit freundlichen Gruessen\nMax Beispiel\n"), D(2014, 11, 5), Letter, None, "Formal letter to a company.");
+        b.Dir($"{max}/Documents/Steuer 2014", Uniform, "Tax papers of one year inside the profile.");
+        b.File($"{max}/Documents/Steuer 2014/Bescheid_Finanzamt_2014.pdf", MiniPdf.Text("Bescheid fuer 2014 ueber Einkommensteuer", [
+            "Finanzamt Beispielstadt, Steuernummer 12/345/67890",
+            "Festgesetzte Einkommensteuer: 4.212,00 EUR",
+            "Bereits gezahlt: 4.530,00 EUR",
+            "Erstattung: 318,00 EUR"]), D(2015, 6, 18), PersonalDocument, [Finance],
+            "Tax assessment; no name rule knows it, the model must mark it.");
+
+        b.Dir($"{max}/Downloads", Mixed, "Downloads of the profile.");
+        b.File($"{max}/Downloads/setup_druckertreiber.exe", Exe(b), D(2014, 1, 9), null, None, "Installer; not classified (executable).");
+        b.File($"{max}/Downloads/Fahrplan_Linie_7.pdf", MiniPdf.Text("Fahrplan Linie 7", [
+            "Bahnhof ab 06:12, 06:42, 07:12",
+            "Rathaus ab 06:20, 06:50, 07:20",
+            "Gueltig ab 14.12.2014"]), D(2014, 12, 10), Document, None);
+
+        b.Dir($"{max}/Pictures", Uniform, "Photos of the profile.");
+        for (var i = 0; i < 3; i++)
+            b.File($"{max}/Pictures/IMG_2015071{i + 1}_1{i}3000.jpg", PhotoOf(b, i == 1 ? Scene.Lake : Scene.Garden),
+                D(2015, 7, 11 + i, 10 + i), Photo, None);
+
+        // ── lisa: older German profile, most of the noise ──
+        const string lisa = "Profile alter PC/lisa";
+        b.Dir(lisa, Dump, "Copy of an older user profile (NTUSER.DAT, Anwendungsdaten, Lokale Einstellungen).");
+        b.File($"{lisa}/NTUSER.DAT", Binary(b, Encoding.ASCII.GetBytes("regf"), 8192), D(2009, 12, 1), null, None,
+            "Registry hive in the profile root; no document type.");
+
+        b.Dir($"{lisa}/Anwendungsdaten", SystemDir, "App data of the old profile: noise, skipped without a model call.");
+        b.Dir($"{lisa}/Anwendungsdaten/Mozilla", SystemDir, "Browser data: noise.");
+        foreach (var name in new[] { "prefs.js", "places.sqlite", "formhistory.sqlite" })
+            b.File($"{lisa}/Anwendungsdaten/Mozilla/{name}", Binary(b, Encoding.ASCII.GetBytes("SQLite format 3\0"), 2048),
+                D(2009, 11, 28), null, None, "Browser data: skipped, no category.");
+        b.File($"{lisa}/Anwendungsdaten/Mozilla/logins.json", Text("{\"logins\":[{\"hostname\":\"https://example.org\",\"encryptedPassword\":\""
+            + Hex(b, 32) + "\"}]}\n"), D(2009, 11, 28), null, [Credentials],
+            "Saved logins in the noise: skipped, but the name rule still marks them, so the output guard withholds them.");
+
+        b.Dir($"{lisa}/Lokale Einstellungen", SystemDir, "Local settings and caches of the old profile: noise.");
+        b.Dir($"{lisa}/Lokale Einstellungen/Temp", SystemDir, "Temporary files: noise.");
+        for (var i = 0; i < 15; i++)
+            b.File($"{lisa}/Lokale Einstellungen/Temp/~DF{4100 + i * 37:X4}.tmp", Bytes(b, 512 + i * 64), D(2009, 10, 1 + i), null, None,
+                "Temporary file: skipped, no category.");
+        b.Dir($"{lisa}/Lokale Einstellungen/Temporary Internet Files", SystemDir, "Browser cache: noise.");
+        for (var i = 0; i < 15; i++)
+        {
+            var name = i % 3 == 0 ? $"logo[{i}].gif" : i % 3 == 1 ? $"style[{i}].css" : $"index[{i}].htm";
+            var content = i % 3 == 0 ? Binary(b, Encoding.ASCII.GetBytes("GIF89a"), 300) : Text($"/* cached {i} */\n");
+            b.File($"{lisa}/Lokale Einstellungen/Temporary Internet Files/{name}", content, D(2009, 11, 1 + i), null, None,
+                "Browser cache: skipped, no category.");
+        }
+
+        b.Dir($"{lisa}/Cookies", SystemDir,
+            "Browser cookies. No noise path names it, so the model judges it (one call) instead of a rule skipping it.");
+        for (var i = 0; i < 5; i++)
+            b.File($"{lisa}/Cookies/lisa@example{i + 1}[1].txt", Text($"session\n{Hex(b, 16)}\nexample{i + 1}.org/\n"), D(2009, 11, 2 + i),
+                null, None, "Cookie file; no category.");
+
+        b.Dir($"{lisa}/Desktop", Mixed, "Desktop of the old profile.");
+        b.File($"{lisa}/Desktop/Einladung_Sommerfest.txt", Text("Einladung zum Sommerfest am 18. Juli 2009 im Garten.\nBitte Salat mitbringen.\n"),
+            D(2009, 6, 30), Document, None);
+        b.File($"{lisa}/Desktop/Urlaubsfoto_Ostsee.jpg", PhotoOf(b, Scene.Lake), D(2009, 8, 14), Photo, None);
+
+        b.Dir($"{lisa}/Eigene Dateien", Mixed, "Documents of the old profile: a CV and a recipe.");
+        b.File($"{lisa}/Eigene Dateien/Lebenslauf_2009.txt", Text(
+            "Lebenslauf\n\nLisa Muster\nAm Bach 7, 54321 Nachbarort\n\n2001-2004 Ausbildung zur Buchhaendlerin\n" +
+            "2004-2009 Buchhandlung am Markt, Nachbarort\n"), D(2009, 3, 2), PersonalDocument, None, "A CV is a personal document.");
+        b.File($"{lisa}/Eigene Dateien/Rezept_Apfelkuchen.txt", Text("Apfelkuchen\n\n4 Aepfel\n200 g Mehl\n150 g Butter\n100 g Zucker\n"),
+            D(2008, 10, 4), Document, None);
+        b.Dir($"{lisa}/Eigene Dateien/Eigene Bilder", Uniform, "Photos of the old profile (part pictures inside part documents).");
+        for (var i = 0; i < 3; i++)
+            b.File($"{lisa}/Eigene Dateien/Eigene Bilder/DSC0{1201 + i}.JPG", PhotoOf(b, Scene.Portrait), D(2008, 12, 24, 17, i * 7), Photo, None);
     }
 
     // ── File contents ────────────────────────────────────────────────────

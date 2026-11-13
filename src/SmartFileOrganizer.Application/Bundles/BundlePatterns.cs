@@ -118,6 +118,65 @@ public sealed class BundlePatterns
         return best;
     }
 
+    /// <summary>
+    /// The part of a directory inside a dump, by its path below the dump root (<paramref name="segments"/>, empty
+    /// for the root itself): noise (null) below a noise path; otherwise the keep path that ends deepest (the
+    /// longest on a tie); otherwise noise. The bundles split a dump by this; the directory verdict asks
+    /// <see cref="NoisePathOf"/>, which is the first of these steps alone.
+    /// </summary>
+    public DumpPart? PartOf(IReadOnlyList<string> segments)
+    {
+        if (NoisePathOf(segments) is not null)
+            return null;
+
+        for (var end = segments.Count; end >= 1; end--)
+        {
+            DumpPart? best = null;
+            var bestLength = 0;
+            foreach (var (path, part) in KeepParts)
+            {
+                if (path.Length > end || path.Length <= bestLength) continue;
+                if (RunEndsAt(segments, path, end))
+                {
+                    best = part;
+                    bestLength = path.Length;
+                }
+            }
+            if (best is not null)
+                return best;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// The entry of <c>noise_paths</c> a directory lies at or below (path below the dump root, either separator),
+    /// joined with <c>/</c>; null when it lies below none. Such a directory is app data, cache or system whatever
+    /// deeper names say.
+    /// </summary>
+    public string? NoisePathOf(IReadOnlyList<string> segments)
+    {
+        foreach (var noise in NoisePaths)
+        {
+            for (var end = noise.Length; end <= segments.Count; end++)
+            {
+                if (RunEndsAt(segments, noise, end))
+                    return string.Join('/', noise);
+            }
+        }
+        return null;
+    }
+
+    private static bool RunEndsAt(IReadOnlyList<string> segments, string[] run, int end)
+    {
+        var start = end - run.Length;
+        for (var i = 0; i < run.Length; i++)
+        {
+            if (!string.Equals(segments[start + i], run[i], StringComparison.OrdinalIgnoreCase))
+                return false;
+        }
+        return true;
+    }
+
     /// <summary>A folder name that says nothing about an occasion (<c>Neuer Ordner</c>, <c>100CANON</c>, <c>2015</c>).</summary>
     public bool IsGenericName(string name)
     {

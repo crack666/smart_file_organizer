@@ -720,7 +720,8 @@ public class OllamaService : IOllamaService
         type = "object",
         properties = new
         {
-            verdict = new { type = "string", @enum = VerdictCodes.All<DirectoryVerdictKind>().ToArray() },
+            // "dump" is decided by a rule only (DirectoryVerdictKinds.IsRuleOnly); the model is not offered it.
+            verdict = new { type = "string", @enum = DirectoryVerdictKinds.ModelCodes.ToArray() },
             purpose = new { type = "string" },
             retention = new { type = "string", @enum = VerdictCodes.All<RetentionValue>().ToArray() },
             reason = new { type = "string" },

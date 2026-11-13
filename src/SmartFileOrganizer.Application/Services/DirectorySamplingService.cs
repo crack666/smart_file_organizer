@@ -48,7 +48,7 @@ public class DirectorySamplingService
 
     /// <summary>What the classification needs to know per file.</summary>
     /// <param name="KeepHintDirectories">Full paths of directories whose files get a keep hint from the model:
-    /// mixed ones, and uniform ones, so that the hint is already there if the sample escalates.</param>
+    /// mixed ones, the roots of dumps, and uniform ones, so that the hint is already there if the sample escalates.</param>
     /// <param name="Verdicts">Valid verdicts by directory full path, for the second check of a file against its directory.</param>
     public sealed record Context(IReadOnlySet<string> KeepHintDirectories, IReadOnlyDictionary<string, DirectoryVerdict> Verdicts)
     {
@@ -164,7 +164,7 @@ public class DirectorySamplingService
     {
         var verdicts = await _verdictRepo.GetForJobAsync(jobId, ct);
         var keepDirs = verdicts
-            .Where(v => v.Verdict is DirectoryVerdictKind.Mixed or DirectoryVerdictKind.Uniform && v.DirectoryFullPath != null)
+            .Where(v => v.Verdict is DirectoryVerdictKind.Mixed or DirectoryVerdictKind.Uniform or DirectoryVerdictKind.Dump && v.DirectoryFullPath != null)
             .Select(v => v.DirectoryFullPath!)
             .ToHashSet(StringComparer.Ordinal);
         var byPath = new Dictionary<string, DirectoryVerdict>(StringComparer.Ordinal);

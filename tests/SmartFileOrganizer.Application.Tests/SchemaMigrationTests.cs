@@ -155,6 +155,44 @@ public class SchemaMigrationTests : IDisposable
         Assert.Contains("999", ex.Message);
     }
 
+    /// <summary>
+    /// The step of the verdict <c>dump</c> rebuilds <c>directory_verdicts</c> so that the CHECK constraint allows
+    /// it; rows stored before keep their id and values.
+    /// </summary>
+    [Fact]
+    public async Task DumpVerdictStep_AllowsTheVerdictDump_AndKeepsExistingVerdicts()
+    {
+        var step = SchemaMigrator.BuiltIn.Single(m => m.Description == "Directory verdict dump").Version;
+        await using var conn = Open();
+        await new SchemaMigrator(SchemaMigrator.BuiltIn.Where(m => m.Version < step), NullLogger.Instance).MigrateAsync(conn);
+        await conn.ExecuteAsync("""
+            INSERT INTO scan_jobs (root_path, status, created_at) VALUES ('/old', 3, '2026-11-12T00:00:00Z');
+            INSERT INTO directory_nodes (job_id, full_path, name, parent_path, root_path, relative_path, scanned_at)
+            VALUES (1, '/old/Handy', 'Handy', '/old', '/old', 'Handy', '2026-11-12T00:00:00Z'),
+                   (1, '/old/Profil', 'Profil', '/old', '/old', 'Profil', '2026-11-12T00:00:00Z');
+            INSERT INTO directory_verdicts (directory_node_id, verdict, source, rule, retention, reason, unit_directory_node_id, profile_json, judged_at)
+            VALUES (1, 'unit', 'rule', 'dump', 'review', 'Recognised as a phone dump', 1, '{}', '2026-11-12T00:00:00Z');
+            """);
+        await Assert.ThrowsAsync<SqliteException>(() => conn.ExecuteAsync("""
+            INSERT INTO directory_verdicts (directory_node_id, verdict, source, profile_json, judged_at)
+            VALUES (2, 'dump', 'rule', '{}', '2026-11-12T00:00:00Z')
+            """));
+
+        await new SchemaMigrator(SchemaMigrator.BuiltIn, NullLogger.Instance).MigrateAsync(conn);
+
+        var kept = await conn.QuerySingleAsync<(long Id, string Verdict, string Rule, long Unit)>(
+            "SELECT id, verdict, rule, unit_directory_node_id FROM directory_verdicts WHERE directory_node_id = 1");
+        Assert.Equal((1L, "unit", "dump", 1L), kept);
+        await conn.ExecuteAsync("""
+            INSERT INTO directory_verdicts (directory_node_id, verdict, source, rule, profile_json, judged_at)
+            VALUES (2, 'dump', 'rule', 'dump', '{}', '2026-11-12T00:00:00Z')
+            """);
+        await Assert.ThrowsAsync<SqliteException>(() => conn.ExecuteAsync(
+            "UPDATE directory_verdicts SET verdict = 'abzug' WHERE directory_node_id = 2"));
+        Assert.Equal(1, await conn.ExecuteScalarAsync<long>(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_dir_verdicts_unit'"));
+    }
+
     [Fact]
     public void DuplicateVersions_AreRejected()
     {

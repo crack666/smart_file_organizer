@@ -87,6 +87,23 @@ public class PreAssessmentResponseParserTests
         Assert.DoesNotContain(verdictText, VerdictCodes.All<DirectoryVerdictKind>(), StringComparer.OrdinalIgnoreCase);
     }
 
+    /// <summary>
+    /// <c>dump</c> is decided by the shared dump recognition only: the schema does not offer it, and an answer
+    /// with it (or its German word) is stored as an error, so the directory is asked again.
+    /// </summary>
+    [Theory]
+    [InlineData("dump")]
+    [InlineData("Abzug")]
+    public void DumpAnswer_IsRefused_BecauseOnlyARuleDecidesIt(string verdictText)
+    {
+        var json = Chat($$"""{"verdict":"{{verdictText}}","retention":"review","purpose":"p","reason":"r"}""");
+
+        var (_, verdict) = PreAssessmentResponseParser.Parse(json, "m");
+
+        Assert.Null(verdict.Verdict);
+        Assert.Contains("unknown verdict", verdict.Error);
+    }
+
     [Fact]
     public void OldGermanMarkerWords_AreAcceptedInModelAnswers_ButNotInStoredValues()
     {

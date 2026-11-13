@@ -31,6 +31,7 @@ public static class CodeLabels
         Verdict(DirectoryVerdictKind.Mixed, "mixed", "gemischt"),
         Verdict(DirectoryVerdictKind.Empty, "empty", "leer"),
         Verdict(DirectoryVerdictKind.System, "system", "System"),
+        Verdict(DirectoryVerdictKind.Dump, "dump", "Abzug"),
 
         Verdict(RetentionValue.Keep, "keep", "behalten"),
         Verdict(RetentionValue.Review, "review", "prüfen"),

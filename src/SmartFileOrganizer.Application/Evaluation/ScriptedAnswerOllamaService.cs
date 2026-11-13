@@ -33,6 +33,12 @@ public sealed class ScriptedAnswerOllamaService : IOllamaService
         var path = EvalTruth.NormalizePath(input.Directory.RelativePath);
         var verdict = _answers.Directories.TryGetValue(path, out var answer) ? answer.Verdict : null;
         var error = verdict is null ? $"no scripted verdict for '{path}'" : null;
+        if (verdict is { } kind && kind.IsRuleOnly())
+        {
+            // A real model is not offered this verdict; the stub must not hide a dump the rules missed.
+            error = $"scripted verdict '{kind.ToCode()}' for '{path}' is decided by a rule only, never by the model";
+            verdict = null;
+        }
         var now = DateTime.UtcNow;
 
         var assessment = new DirectoryClassificationResult

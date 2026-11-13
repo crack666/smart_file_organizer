@@ -7,6 +7,7 @@ using SmartFileOrganizer.Cli.Contract;
 using SmartFileOrganizer.Domain.Enums;
 using SmartFileOrganizer.Domain.Interfaces;
 using SmartFileOrganizer.Hosting;
+using SmartFileOrganizer.Infrastructure.Evaluation;
 
 namespace SmartFileOrganizer.Cli.Tests;
 
@@ -105,7 +106,7 @@ public class EvalCliTests : IDisposable
 
         var perfect = (await OkAsync("eval", _corpus, "--stub", truthPath, "--json")).Result;
         Assert.Equal("corpus", perfect.GetProperty("mode").GetString());
-        Assert.Equal("small v2 seed 36", perfect.GetProperty("subject").GetString());
+        Assert.Equal($"small v{SmallCorpusGenerator.GeneratorVersion} seed 36", perfect.GetProperty("subject").GetString());
         Assert.Equal("stub:truth.json", perfect.GetProperty("model").GetString());
         Assert.False(string.IsNullOrEmpty(perfect.GetProperty("prompt_fingerprint").GetString()));
         Assert.Equal(0, perfect.GetProperty("untracked_count").GetInt32());

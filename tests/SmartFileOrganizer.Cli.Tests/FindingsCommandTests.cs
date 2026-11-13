@@ -73,24 +73,24 @@ public class FindingsCommandTests : IDisposable
         Write("Privat/einkauf.txt", "document", "milk, bread");
 
         // An old user profile: app data with a browser profile and photos of a messenger among caches.
-        Folder("Benutzer alt", "mixed");
-        Folder("Benutzer alt/Max", "mixed");
+        Folder("Benutzer alt", "uniform");
+        Folder("Benutzer alt/Max", "dump");
         Write("Benutzer alt/Max/NTUSER.DAT", "system_file", "regf");
-        Folder("Benutzer alt/Max/Anwendungsdaten", "mixed");
-        Folder("Benutzer alt/Max/Anwendungsdaten/Google", "mixed");
-        Folder("Benutzer alt/Max/Anwendungsdaten/Google/Chrome", "mixed");
-        Folder("Benutzer alt/Max/Anwendungsdaten/Google/Chrome/User Data", "mixed");
+        Folder("Benutzer alt/Max/Anwendungsdaten", "system");
+        Folder("Benutzer alt/Max/Anwendungsdaten/Google", "system");
+        Folder("Benutzer alt/Max/Anwendungsdaten/Google/Chrome", "system");
+        Folder("Benutzer alt/Max/Anwendungsdaten/Google/Chrome/User Data", "system");
         foreach (var profile in new[] { "Default", "Profile 1" })
         {
-            Folder($"Benutzer alt/Max/Anwendungsdaten/Google/Chrome/User Data/{profile}", "mixed");
+            Folder($"Benutzer alt/Max/Anwendungsdaten/Google/Chrome/User Data/{profile}", "system");
             for (var i = 0; i < 15; i++)
                 Write($"Benutzer alt/Max/Anwendungsdaten/Google/Chrome/User Data/{profile}/f_{i:000}.dat", "trash_candidate", $"cache {profile} {i}", ["credentials"]);
         }
-        Folder("Benutzer alt/Max/Anwendungsdaten/Messenger", "mixed");
-        Folder("Benutzer alt/Max/Anwendungsdaten/Messenger/media", "mixed");
+        Folder("Benutzer alt/Max/Anwendungsdaten/Messenger", "system");
+        Folder("Benutzer alt/Max/Anwendungsdaten/Messenger/media", "system");
         for (var i = 0; i < 3; i++)
             Write($"Benutzer alt/Max/Anwendungsdaten/Messenger/media/IMG_20190704_12{i}000.jpg", "photo", $"messenger photo {i}");
-        Folder("Benutzer alt/Max/Anwendungsdaten/Updater", "mixed");
+        Folder("Benutzer alt/Max/Anwendungsdaten/Updater", "system");
         for (var i = 0; i < 40; i++)
             Write($"Benutzer alt/Max/Anwendungsdaten/Updater/u_{i:000}.tmp", "trash_candidate", $"update {i}");
         Folder("Benutzer alt/Max/Desktop", "mixed");
@@ -218,6 +218,12 @@ public class FindingsCommandTests : IDisposable
         // ... and the messenger photos in the app data of the old profile, as one finding.
         var appData = Assert.Single(items, f => Str(f, "kind") == "in_noise" && Str(f, "bundle_kind") == "dump_noise");
         Assert.Equal(3, appData.GetProperty("files").GetInt64());
+        // The profile is a dump, not a unit (issue 59): its documents were judged by the model and are a sure
+        // finding of their part of the dump, not a guess from the file type.
+        var profileDocs = Assert.Single(items, f => Str(f, "kind") == "not_backed_up" && Str(f, "bundle_kind") == "dump_keep"
+                                                    && (Str(f, "relative_path") ?? "").EndsWith("Dokumente", StringComparison.Ordinal));
+        Assert.Equal(3, profileDocs.GetProperty("files").GetInt64());
+        Assert.Equal("sure", Str(profileDocs, "section"));
 
         // misplaced: the photo among invoices, uncertain because no target content was checked.
         var misplaced = Assert.Single(items, f => Str(f, "kind") == "misplaced");

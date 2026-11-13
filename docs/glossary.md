@@ -25,6 +25,7 @@ decided in https://github.com/crack666/smart_file_organizer/issues/35.
 | `mixed` | Storage without a common purpose (desktop, downloads, misc); its files are handled one by one. |
 | `empty` | Contains no files, neither directly nor in subdirectories. |
 | `system` | An operating system, tool or cache directory that is not user content. |
+| `dump` | A copy of a phone, a computer, a user profile or a removable drive. Recognised as a whole, but not a unit: its worth-keeping parts get verdicts of their own and are analysed, only its noise is skipped. Decided by a rule only; the model is never offered it (https://github.com/crack666/smart_file_organizer/issues/59). |
 
 ### Retention value (`RetentionValue`)
 
