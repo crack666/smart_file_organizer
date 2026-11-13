@@ -204,7 +204,20 @@ public static class EvalCommand
             return CommandOutcome.Fail(ExitCodes.OllamaUnavailable, ErrorCodes.OllamaUnavailable,
                 $"Ollama is not reachable at {ollama.BaseUrl}. Check with: sfo doctor, or use --stub for a run without a model.");
 
-        var report = await services.GetRequiredService<CorpusEvaluator>().EvaluateAsync(truth, job.Id, ct);
+        // With findings.json next to the truth, the findings are measured too: they need the duplicates and the
+        // bundles, which cost no model call. Without a library, not_backed_up is not computed.
+        var expectedFindings = EvalFindingTruth.LoadBeside(truthPath);
+        IReadOnlyList<SmartFileOrganizer.Application.Findings.Finding>? listed = null;
+        if (expectedFindings is not null)
+        {
+            await services.GetRequiredService<ContentComparisonService>().CompareAsync(job.Id, null,
+                new SynchronousProgress<ComparisonProgress>(pr => ctx.Progress.Report("compare", pr.Processed, pr.Total, 0)), ct);
+            await services.GetRequiredService<BundleService>().BuildAsync(job.Id, null, ct);
+            (_, listed) = await services.GetRequiredService<SmartFileOrganizer.Application.Findings.FindingService>()
+                .ListAsync(new SmartFileOrganizer.Application.Findings.FindingQuery { JobId = job.Id }, ct);
+        }
+
+        var report = await services.GetRequiredService<CorpusEvaluator>().EvaluateAsync(truth, job.Id, expectedFindings, listed, ct);
         var context = Context(ollama, services.GetRequiredService<DirectoryAnalysisOptions>(), stub, rules);
         var stored = await services.GetRequiredService<EvalRunService>().RecordAsync(
             EvalRunMode.Corpus, truth.Subject, job.Id, context, report, started, ct);
@@ -377,6 +390,8 @@ public static class EvalCommand
             sb.Append(CultureInfo.InvariantCulture, $"  {s.Kind.ToCode(),-18} {s.Total,6} {s.Hits,5} {s.Wrong,6} {s.Missing,8} {Pct(s.Accuracy),9}");
             if (s.Sensitive is { } x)
                 sb.Append(CultureInfo.InvariantCulture, $"   marked {x.ExpectedMarked}: {x.FullyFound} found, {x.Missed} missed; {x.FalseAlarms} false alarm(s)");
+            if (s.Findings is { } fc)
+                sb.Append(CultureInfo.InvariantCulture, $"   expected {fc.Expected}, listed {fc.Listed}; {fc.Superfluous} superfluous");
             sb.AppendLine();
         }
     }

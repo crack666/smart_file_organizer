@@ -505,6 +505,7 @@ Counted per run in `model_calls` of `sfo analyze --json` and `sfo eval --json`.
 | `directory_verdict` | The verdict of a directory. |
 | `file_category` | The category of a file. |
 | `sensitive` | The sensitive markers of a file. |
+| `finding` | The findings of the job against the expected findings of the corpus (`findings.json`). |
 
 ### Outcome of a measured item (`EvalOutcome`)
 
@@ -513,6 +514,7 @@ Counted per run in `model_calls` of `sfo analyze --json` and `sfo eval --json`.
 | `hit` | The result equals the truth. |
 | `wrong` | There is a result and it differs from the truth. |
 | `missing` | No result: not scanned, not analysed, or the model call failed. |
+| `superfluous` | A finding no expectation asks for: noise in the list. Counted apart from `total`. |
 
 ### Mode of an evaluation run (`EvalRunMode`)
 
@@ -548,6 +550,28 @@ The short list of hints a job ends in (see [findings.md](findings.md)).
 | `misplaced` | Files whose kind does not fit the purpose of their folder; uncertain at most until targets are checked by content. |
 | `sensitive` | Files or skipped folders marked sensitive. Path and marker only, never content; always decided one by one. |
 | `duplicate` | Files with identical content (same full SHA-256) at several places of the source. |
+
+### Kind of files of a finding (`group`)
+
+`not_backed_up` and `in_noise` give one finding per place and kind of file (`FindingRules.GroupOf`), so a mixed
+folder can be decided kind by kind.
+
+| Code | Meaning |
+|---|---|
+| `documents` | Office files, PDFs, text. |
+| `images` | Pictures and photos. |
+| `videos` | Videos. |
+| `audio` | Sound files. |
+| `archives` | ZIP and other archives. Counted only when a result says they are worth keeping. |
+| `installers` | Programs and installers. Counted only when a result says they are worth keeping. |
+| `other` | Every other file type. |
+
+### Scope of a duplicate (`duplicates.scope`)
+
+| Code | Meaning |
+|---|---|
+| `files` | Single files worth keeping, outside every program, project and system folder, exist more than once. |
+| `folders` | A whole program, project, system folder or app data exists more than once; one finding for the copied folders. |
 
 ### State of a finding (`FindingState`)
 

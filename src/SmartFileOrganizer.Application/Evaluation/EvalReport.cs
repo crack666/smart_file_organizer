@@ -18,6 +18,7 @@ public sealed record EvalReport(
 
 /// <summary>Counts for one kind. <c>Total = Hits + Wrong + Missing</c>; <c>Accuracy = Hits / Total</c> (null without items).</summary>
 /// <param name="Sensitive">Extra counts for the kind <c>sensitive</c>; null for the others.</param>
+/// <param name="Findings">Extra counts for the kind <c>finding</c>; null for the others.</param>
 public sealed record EvalKindScore(
     EvalKind Kind,
     int Total,
@@ -25,7 +26,13 @@ public sealed record EvalKindScore(
     int Wrong,
     int Missing,
     double? Accuracy,
-    SensitiveCounts? Sensitive = null);
+    SensitiveCounts? Sensitive = null,
+    FindingCounts? Findings = null);
+
+/// <param name="Expected">Findings the corpus expects (<c>findings.json</c>).</param>
+/// <param name="Listed">Findings the job lists.</param>
+/// <param name="Superfluous">Listed findings no expectation asks for: noise a person would have to read.</param>
+public sealed record FindingCounts(int Expected, int Listed, int Superfluous);
 
 /// <param name="ExpectedMarked">Files the truth marks as sensitive.</param>
 /// <param name="FullyFound">Of those, files that carry every expected marker.</param>
@@ -73,6 +80,7 @@ public sealed class EvalReportBuilder
     private readonly List<string> _untracked = [];
     private int _untrackedCount;
     private int _expectedMarked, _fullyFound, _missed, _falseAlarms;
+    private int _findingsExpected, _findingsListed, _findingsSuperfluous;
 
     public void Hit(EvalKind kind) => _counts[kind][(int)EvalOutcome.Hit]++;
 
@@ -98,6 +106,20 @@ public sealed class EvalReportBuilder
 
     public void Case(EvalCaseResult result) => _cases.Add(result);
 
+    /// <summary>How many findings were expected and listed; superfluous ones come through <see cref="Superfluous"/>.</summary>
+    public void Findings(int expected, int listed)
+    {
+        _findingsExpected = expected;
+        _findingsListed = listed;
+    }
+
+    /// <summary>A finding no expectation asks for: listed as a failure, counted apart from <c>total</c>.</summary>
+    public void Superfluous(EvalFailure failure)
+    {
+        _findingsSuperfluous++;
+        _failures.Add(failure);
+    }
+
     public void Untracked(string path)
     {
         _untrackedCount++;
@@ -112,7 +134,8 @@ public sealed class EvalReportBuilder
             var total = c.Sum();
             return new EvalKindScore(kind, total, c[0], c[1], c[2],
                 total == 0 ? null : Math.Round((double)c[0] / total, 4),
-                kind == EvalKind.Sensitive ? new SensitiveCounts(_expectedMarked, _fullyFound, _missed, _falseAlarms) : null);
+                kind == EvalKind.Sensitive ? new SensitiveCounts(_expectedMarked, _fullyFound, _missed, _falseAlarms) : null,
+                kind == EvalKind.Finding ? new FindingCounts(_findingsExpected, _findingsListed, _findingsSuperfluous) : null);
         }).ToList();
         var failures = _failures
             .OrderBy(f => f.Kind)

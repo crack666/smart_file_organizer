@@ -20,14 +20,23 @@ public sealed record FindingTarget(
     int SameContentFiles,
     TargetContentCheck ContentCheck);
 
-/// <summary>Identical files at several places: how many groups, how much is redundant, which copy to keep.</summary>
+/// <summary>
+/// Identical files at several places: how many groups, how much is redundant, which copy to keep.
+/// <see cref="Scope"/> is <c>files</c> for copies of single files, <c>folders</c> for a whole program or system folder
+/// that exists twice (the directories are then the copied folders, not the folders of the files).
+/// </summary>
 public sealed record FindingDuplicates(
     int Groups,
     long RedundantFiles,
     long RedundantBytes,
     IReadOnlyList<string> Directories,
     int DirectoriesTotal,
-    string Keep);
+    string Keep,
+    string Scope = FindingDuplicates.FilesScope)
+{
+    public const string FilesScope = "files";
+    public const string FoldersScope = "folders";
+}
 
 /// <summary>Earliest and latest time of the files, as the bundles record it (local wall-clock time).</summary>
 public sealed record FindingPeriod(DateTime? From, DateTime? To, TimeSource? Source);
@@ -64,6 +73,13 @@ public sealed class Finding
 
     public long Files { get; init; }
     public long Bytes { get; set; }
+
+    /// <summary>
+    /// For <c>not_backed_up</c> and <c>in_noise</c>: the kind of files (<see cref="FindingRules.GroupOf"/>), so a mixed
+    /// folder falls into one decision per kind. Null for the other kinds.
+    /// </summary>
+    public string? Group { get; init; }
+
     public IReadOnlyDictionary<string, long> ByFileType { get; init; } = new Dictionary<string, long>();
     public FindingPeriod? Period { get; init; }
 

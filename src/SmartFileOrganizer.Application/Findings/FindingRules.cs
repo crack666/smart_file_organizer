@@ -278,6 +278,42 @@ public static class FindingRules
         _ => null
     };
 
+    /// <summary>
+    /// The kind of files a <c>not_backed_up</c> or <c>in_noise</c> finding is about: <c>documents</c>, <c>images</c>,
+    /// <c>videos</c>, <c>audio</c>, <c>archives</c>, <c>installers</c> or <c>other</c>. A mixed folder gives one finding per
+    /// kind, because "132 of 648 files" cannot be accepted or rejected as a whole.
+    /// </summary>
+    public static string GroupOf(FileType type) => type switch
+    {
+        FileType.Document => "documents",
+        FileType.Image => "images",
+        FileType.Video => "videos",
+        FileType.Audio => "audio",
+        FileType.Archive => "archives",
+        FileType.Executable => "installers",
+        _ => "other"
+    };
+
+    /// <summary>Order of the groups within one place, as a person goes through a download folder.</summary>
+    public static int GroupIndex(string group) => group switch
+    {
+        "documents" => 0,
+        "images" => 1,
+        "videos" => 2,
+        "audio" => 3,
+        "archives" => 4,
+        "installers" => 5,
+        _ => 6
+    };
+
+    /// <summary>A folder verdict whose files belong to a whole (a program, a project) or to the system: <c>unit</c> or <c>system</c>.</summary>
+    public static bool IsWholeVerdict(string? verdict) =>
+        verdict == VerdictCodes.ToCode(DirectoryVerdictKind.Unit) || verdict == VerdictCodes.ToCode(DirectoryVerdictKind.System);
+
+    /// <summary>Whether the worth of a file rests on a judgement of the file itself (person, agent, model, rule, a confirmed sample).</summary>
+    public static bool RestsOnFile(FileValue value) =>
+        value.Basis is "human" or "agent" or "model" or "rule" or "inherited";
+
     /// <summary>Relative path with <c>/</c>; <c>.</c> for the root.</summary>
     public static string Rel(string? relative)
     {

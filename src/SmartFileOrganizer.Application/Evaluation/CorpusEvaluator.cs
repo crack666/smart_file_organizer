@@ -36,9 +36,20 @@ public sealed class CorpusEvaluator
         _verdicts = verdicts;
     }
 
-    public async Task<EvalReport> EvaluateAsync(EvalTruth truth, long jobId, CancellationToken ct = default)
+    public Task<EvalReport> EvaluateAsync(EvalTruth truth, long jobId, CancellationToken ct = default) =>
+        EvaluateAsync(truth, jobId, null, null, ct);
+
+    /// <summary>
+    /// As <see cref="EvaluateAsync(EvalTruth, long, CancellationToken)"/>, and with <paramref name="expectedFindings"/>
+    /// also the kind <c>finding</c>: the listed findings of the job against the expected ones.
+    /// </summary>
+    public async Task<EvalReport> EvaluateAsync(
+        EvalTruth truth, long jobId, IReadOnlyList<ExpectedFinding>? expectedFindings,
+        IReadOnlyList<Findings.Finding>? listedFindings, CancellationToken ct = default)
     {
         var report = new EvalReportBuilder();
+        if (expectedFindings is not null)
+            EvalFindingTruth.Score(report, expectedFindings, listedFindings ?? []);
 
         var dirs = await _directories.GetAllForJobOrderedByDepthAsync(jobId, ct);
         var verdicts = (await _verdicts.GetForJobAsync(jobId, ct)).ToDictionary(v => v.DirectoryNodeId);
@@ -72,7 +83,7 @@ public sealed class CorpusEvaluator
                 node is null ? SkippedMarkedFolder(expected.Path, dirByPath) : null);
         }
 
-        return report.Build(Kinds);
+        return report.Build(expectedFindings is null ? Kinds : [.. Kinds, EvalKind.Finding]);
     }
 
     private static void ScoreVerdict(EvalReportBuilder report, TruthDirectory expected, DirectoryNode? node, DirectoryVerdict? verdict)

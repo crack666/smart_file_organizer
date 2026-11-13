@@ -39,6 +39,7 @@ public static class FindingsCommand
         string? BundleKind,
         long Files,
         long Bytes,
+        string? Group,
         IReadOnlyDictionary<string, long> ByFileType,
         PeriodView? Period,
         IReadOnlyDictionary<string, long>? Comparison,
@@ -55,7 +56,7 @@ public static class FindingsCommand
     {
         public static FindingView From(Finding f) => new(
             f.Rank, f.Key, f.Kind.ToCode(), f.Certainty.ToCode(), f.Unsure ? "unsure" : "sure", f.State.ToCode(),
-            f.Title, f.Reason, f.Path, f.RelativePath, f.BundleId, f.BundleKind.ToCode(), f.Files, f.Bytes, f.ByFileType,
+            f.Title, f.Reason, f.Path, f.RelativePath, f.BundleId, f.BundleKind.ToCode(), f.Files, f.Bytes, f.Group, f.ByFileType,
             f.Period is { } p ? new PeriodView(BundlesCommand.Local(p.From), BundlesCommand.Local(p.To), p.Source.ToCode()) : null,
             f.Comparison, f.Markers, f.SensitiveRules,
             new ActionView(f.Action.Kind.ToCode(), f.Action.Reason, f.Action.SingleDecision),

@@ -35,7 +35,15 @@ public class JobStatisticsRepository : IJobStatisticsRepository
                 (SELECT COUNT(*) FROM ai_directory_results r JOIN directory_nodes n ON n.id = r.directory_node_id
                     WHERE n.job_id = @jobId AND r.phase = 'summary') AS summarized,
                 (SELECT COUNT(*) FROM ai_directory_results r JOIN directory_nodes n ON n.id = r.directory_node_id
-                    WHERE n.job_id = @jobId AND r.phase = 'summary' AND r.error IS NOT NULL) AS summary_errors
+                    WHERE n.job_id = @jobId AND r.phase = 'summary' AND r.error IS NOT NULL) AS summary_errors,
+                (SELECT COUNT(*) FROM directory_nodes n
+                    WHERE n.job_id = @jobId AND n.dir_status <> @skip AND n.name <> '' AND substr(n.name, 1, 1) <> '.'
+                      AND NOT EXISTS (SELECT 1 FROM ai_directory_results r WHERE r.directory_node_id = n.id AND r.phase = 'summary')
+                      AND CASE WHEN EXISTS (SELECT 1 FROM ai_directory_results r WHERE r.directory_node_id = n.id AND r.phase = 'pre_assessment')
+                               THEN NOT EXISTS (SELECT 1 FROM file_nodes f WHERE f.job_id = @jobId AND f.parent_path = n.full_path)
+                               ELSE EXISTS (SELECT 1 FROM directory_verdicts v
+                                            WHERE v.directory_node_id = n.id AND v.verdict IS NOT NULL AND v.error IS NULL)
+                          END) AS summaries_not_needed
             FROM directory_nodes d
             WHERE d.job_id = @jobId
             """,
@@ -84,6 +92,27 @@ public class JobStatisticsRepository : IJobStatisticsRepository
                 LIMIT @maxErrors
                 """,
                 new { jobId, maxErrors })).Select(e => new JobErrorEntry(e.Phase, e.Path, e.Message)).ToList();
+
+        // Rate of the files that really went to the model: the newest model results of the job, when the newest of
+        // them is recent (a run that stopped long ago has no rate).
+        double? ratePerMinute = null;
+        if (files.Pending > 0)
+        {
+            var times = (await conn.QueryAsync<DateTime>(new CommandDefinition(
+                """
+                SELECT r.analyzed_at FROM ai_results r JOIN file_nodes f ON f.id = r.file_node_id
+                WHERE f.job_id = @jobId AND r.is_ai_result = 1 AND r.model_used IS NOT NULL AND r.error IS NULL
+                ORDER BY r.id DESC LIMIT @window
+                """,
+                new { jobId, window = RateWindow }, cancellationToken: ct))).Select(AsUtc).ToList();
+            if (times.Count >= 2)
+            {
+                var newest = times.Max();
+                var span = newest - times.Min();
+                if (DateTime.UtcNow - newest < RateStale && span > TimeSpan.Zero)
+                    ratePerMinute = (times.Count - 1) / span.TotalMinutes;
+            }
+        }
 
         // Every read error is counted; only the first few of each cause are listed, so a profile with hundreds
         // of locked folders reads as one line per cause instead of hundreds of lines.
@@ -148,6 +177,7 @@ public class JobStatisticsRepository : IJobStatisticsRepository
             PreAssessmentErrors = dirs.PreAssessmentErrors,
             DirectoriesSummarized = dirs.Summarized,
             SummaryErrors = dirs.SummaryErrors,
+            SummariesNotNeeded = dirs.SummariesNotNeeded,
             FilesTotal = files.Total,
             FilesAiEligible = files.Eligible,
             FilesAiPending = files.Pending,
@@ -156,9 +186,23 @@ public class JobStatisticsRepository : IJobStatisticsRepository
             FilesAiSkipped = files.Skipped,
             FilesAiInherited = files.Inherited,
             FilesAiDeferred = files.Deferred,
+            FilesAiRatePerMinute = ratePerMinute,
             RecentErrors = errors
         };
     }
+
+    /// <summary>How many of the newest model results the rate rests on.</summary>
+    private const int RateWindow = 50;
+
+    /// <summary>A newest model result older than this means no run is going on.</summary>
+    private static readonly TimeSpan RateStale = TimeSpan.FromMinutes(10);
+
+    private static DateTime AsUtc(DateTime t) => t.Kind switch
+    {
+        DateTimeKind.Utc => t,
+        DateTimeKind.Local => t.ToUniversalTime(),
+        _ => DateTime.SpecifyKind(t, DateTimeKind.Utc)
+    };
 
     private sealed class DirectoryCounts
     {
@@ -168,6 +212,7 @@ public class JobStatisticsRepository : IJobStatisticsRepository
         public long PreAssessmentErrors { get; set; }
         public long Summarized { get; set; }
         public long SummaryErrors { get; set; }
+        public long SummariesNotNeeded { get; set; }
     }
 
     private sealed class FileCounts

@@ -67,9 +67,13 @@ public sealed class ContentComparisonService
             against = await RequireJobAsync(aid, ScanRole.Library, ct);
         }
 
-        var sourceFiles = await _repo.GetFilesAsync(source.Id, ct);
-        var sizeCandidates = against == null ? [] : await _repo.GetFilesWithSourceSizesAsync(against.Id, source.Id, ct);
-        var nameCandidates = against == null ? [] : await _repo.GetFilesWithSourceNamesAsync(against.Id, source.Id, ct);
+        // A folder the scan skipped by rule is not part of the comparison, even if rows of it are left from an
+        // earlier scan: the person decided not to look there, and it may be gone by now.
+        var skippedSource = await _repo.GetSkippedDirectoriesAsync(source.Id, ct);
+        var skippedLibrary = against == null ? [] : await _repo.GetSkippedDirectoriesAsync(against.Id, ct);
+        var sourceFiles = Outside(await _repo.GetFilesAsync(source.Id, ct), skippedSource);
+        var sizeCandidates = against == null ? [] : Outside(await _repo.GetFilesWithSourceSizesAsync(against.Id, source.Id, ct), skippedLibrary);
+        var nameCandidates = against == null ? [] : Outside(await _repo.GetFilesWithSourceNamesAsync(against.Id, source.Id, ct), skippedLibrary);
 
         var cache = await _repo.GetFingerprintsAsync(
             sourceFiles.Select(f => f.FullPath).Concat(sizeCandidates.Select(f => f.FullPath)).ToList(), ct);
@@ -382,16 +386,36 @@ public sealed class ContentComparisonService
         }
     }
 
+    private static IReadOnlyList<ComparableFile> Outside(IReadOnlyList<ComparableFile> files, IReadOnlyList<string> skipped) =>
+        skipped.Count == 0 ? files : files.Where(f => !IsAtOrBelowAny(f.FullPath, skipped)).ToList();
+
+    private static bool IsAtOrBelowAny(string path, IReadOnlyList<string> dirs)
+    {
+        foreach (var dir in dirs)
+        {
+            var d = Path.TrimEndingDirectorySeparator(dir);
+            if (string.Equals(path, d, StringComparison.OrdinalIgnoreCase)) return true;
+            if (path.Length > d.Length && path.StartsWith(d, StringComparison.OrdinalIgnoreCase)
+                && (path[d.Length] == '/' || path[d.Length] == '\\'))
+                return true;
+        }
+        return false;
+    }
+
     private async Task<List<ComparisonIssue>> CollectErrorsAsync(
         ScanJob source, ScanJob? against, IEnumerable<FileComparison> files, CancellationToken ct)
     {
         var errors = new List<ComparisonIssue>();
+        var skippedSource = await _repo.GetSkippedDirectoriesAsync(source.Id, ct);
         foreach (var dir in await _repo.GetDirectoryErrorsAsync(source.Id, ct))
-            errors.Add(new ComparisonIssue(ScanRole.Source, ComparisonIssueKind.Scan, dir.FullPath, dir.Reason ?? "Directory could not be read."));
+            if (!IsAtOrBelowAny(dir.FullPath, skippedSource))
+                errors.Add(new ComparisonIssue(ScanRole.Source, ComparisonIssueKind.Scan, dir.FullPath, dir.Reason ?? "Directory could not be read."));
         if (against != null)
         {
+            var skippedLibrary = await _repo.GetSkippedDirectoriesAsync(against.Id, ct);
             foreach (var dir in await _repo.GetDirectoryErrorsAsync(against.Id, ct))
-                errors.Add(new ComparisonIssue(ScanRole.Library, ComparisonIssueKind.Scan, dir.FullPath, dir.Reason ?? "Directory could not be read."));
+                if (!IsAtOrBelowAny(dir.FullPath, skippedLibrary))
+                    errors.Add(new ComparisonIssue(ScanRole.Library, ComparisonIssueKind.Scan, dir.FullPath, dir.Reason ?? "Directory could not be read."));
         }
         foreach (var file in files.Where(f => f.State == ContentState.Error))
             errors.Add(new ComparisonIssue(ScanRole.Source, ComparisonIssueKind.Read, file.FullPath, file.Error ?? "Unknown error."));

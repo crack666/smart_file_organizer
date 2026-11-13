@@ -207,7 +207,8 @@ sfo status 7 --json
       "scan": { "status": "completed", "files_total": 1830, "files_processed": 1830,
                 "directories_total": 112, "directories_processed": 112, "errors": 0 },
       "pre_assessment": { "total": 104, "done": 104, "errors": 0, "pending": 0, "skipped": 0 },
-      "classification": { "total": 940, "done": 610, "errors": 3, "pending": 0, "skipped": 327 },
+      "classification": { "total": 940, "done": 610, "errors": 3, "pending": 0, "skipped": 327,
+                          "rate_per_minute": null, "remaining_seconds": null },
       "summary": { "total": 104, "done": 0, "errors": 0, "pending": 104, "skipped": 0 }
     },
     "errors": [
@@ -248,7 +249,13 @@ For each AI phase, `total = done + errors + pending + skipped`.
   Files a rule decides (programs, fonts, unknown binaries) count as `done` without a model call. `done`
   includes files that inherited the result of their directory's confirmed sample; `pending`
   includes files waiting for that sample. `skipped` are files of units and system directories,
-  which are not analysed one by one.
+  which are not analysed one by one. While a run goes on (the newest model result is less than 10 minutes old),
+  `rate_per_minute` is how many files the model judged per minute over the last 50 results and
+  `remaining_seconds` the time left for the files still waiting for the model (`pending` without those waiting for
+  a sample); both are `null` otherwise. Every phase carries the two fields; only `classification` fills them.
+- `summary`: folders that need no summary count as `skipped`, not `pending`: folders judged with their unit or by
+  rule without a pre-assessment, and pre-assessed folders without a file of their own. After a complete
+  `sfo analyze` nothing is `pending` (before 13.11.2026 they stayed `pending` for ever).
 
 ### `sfo compare <job> --against <job>`
 
@@ -278,6 +285,8 @@ where those agree, SHA-256 over the whole file. Files up to 128 KiB are read who
 Checksums are stored per path and reused while size and modification time are unchanged, so a
 second run without changes reads no file content (`hashing` shows the counts). A file never
 matches itself, even when the source lies inside the library.
+Folders a scan skipped by rule (`dir_status` skip) are not part of the comparison, on either side: no file
+below them is compared and no read error below them is reported, even when the folder is gone by now.
 
 `duplicates` groups source files with identical content (empty files excluded); a file's
 `duplicate_group` points to its group. `directories` counts each source directory including its
@@ -1092,10 +1101,10 @@ scanned file opened; decisions change only their row.
   "items": [
     { "rank": 1, "key": "not_backed_up-880444df56", "kind": "not_backed_up", "certainty": "likely",
       "section": "sure", "state": "open",
-      "title": "300 files worth keeping, not in the library: loose files in Neuer Ordner",
-      "reason": "300 files of the 300 in Neuer Ordner are worth keeping by the model, and the comparison with library job 2 on 2026-11-12 found no file with the same content.",
+      "title": "300 images (60 KB) worth keeping, not in the library: loose files in Neuer Ordner",
+      "reason": "300 images of the 300 in Neuer Ordner are worth keeping by the model, and the comparison with library job 2 on 2026-11-12 found no file with the same content.",
       "path": "...", "relative_path": "Neuer Ordner", "bundle_id": null, "bundle_kind": null,
-      "files": 300, "bytes": 61200, "by_file_type": { "image": 300 },
+      "files": 300, "bytes": 61200, "group": "images", "by_file_type": { "image": 300 },
       "period": { "from": "2018-08-05T10:00:00", "to": "2018-08-05T14:59:00", "time_source": "file_name" },
       "comparison": { "new": 300 }, "markers": [], "sensitive_rules": [],
       "action": { "kind": "move", "reason": "...", "single_decision": false },
@@ -1113,7 +1122,11 @@ scanned file opened; decisions change only their row.
 - `section` is `sure` (certainty `certain` or `likely`) or `unsure`; unsure findings come last.
 - `key` is stable across `sfo bundles build` and a rescan of the same tree.
 - `bytes` of a `duplicate` is what removing the redundant copies frees; `duplicates` gives `groups`,
-  `redundant_files`, `redundant_bytes`, `directories` (at most 10), `directories_total` and `keep`.
+  `redundant_files`, `redundant_bytes`, `directories` (at most 10), `directories_total`, `keep` and `scope`
+  (`files`, or `folders` when a whole program or system folder exists twice; `directories` are then the copied
+  folders). The action keeps the copy in `keep`: `delete_source` for the others with a library, `leave` without.
+- `group` (for `not_backed_up` and `in_noise`): the kind of files, one finding per place and kind
+  ([glossary](glossary.md#kind-of-files-of-a-finding-group)); `null` for the other kinds.
 - `target` (for `misplaced`): `path`, `relative_path`, `certainty`, `reason`, `same_content_files`,
   `content_check` (`not_checked` until targets are checked by content).
 - `sensitive` findings name path, marker and rule ids, never content.
@@ -1164,12 +1177,15 @@ UTC with a trailing `Z`.
 one JSON object with `schema_version` and `type`:
 
 ```json
-{"schema_version":1,"type":"progress","phase":"scan","processed":120,"total":480,"errors":0,"current_path":"/media/usb-stick/photos","message":null}
+{"schema_version":1,"type":"progress","phase":"scan","processed":120,"total":480,"errors":0,"current_path":"/media/usb-stick/photos","message":null,"rate_per_minute":null,"remaining_seconds":null}
 {"schema_version":1,"type":"log","level":"warning","category":"ClassificationService","message":"...","exception":null}
 ```
 
 `phase` is `scan`, `pre_assessment`, `classification`, `summary`, `compare` or `eval_cases`. Progress is throttled to
-one line per phase every 500 ms, plus the final line of a phase. `sfo analyze` also writes `"type":"wait"`
+one line per phase every 500 ms, plus the final line of a phase. `rate_per_minute` and `remaining_seconds` are
+filled after the first 5 seconds of a phase: the rate counts only what this run got through since its first line
+(files counted as done before, such as those skipped by rule, are left out), the time left rests on the open rest.
+Text lines then end in `, 277 open, 12.5/min, about 23 min left`. `sfo analyze` also writes `"type":"wait"`
 lines when it starts or stops waiting for the model server (see `sfo analyze`); they are never throttled.
 
 **Exit codes.**
