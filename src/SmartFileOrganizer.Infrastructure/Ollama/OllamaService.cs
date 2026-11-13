@@ -394,6 +394,7 @@ public class OllamaService : IOllamaService
         sb.AppendLine("If any marker applies: never use TrashCandidate, and keep the summary neutral (what kind of document it is),");
         sb.AppendLine("without quoting passwords, keys, numbers, names or message text.");
         sb.AppendLine();
+        sb.AppendLine("summary: one short sentence saying what the file is.");
         if (!string.IsNullOrWhiteSpace(summaryLanguage) &&
             !string.Equals(summaryLanguage, "English", StringComparison.OrdinalIgnoreCase))
         {
@@ -404,7 +405,7 @@ public class OllamaService : IOllamaService
         if (askKeepHint)
         {
             sb.AppendLine();
-            sb.AppendLine("Keep hint (field keep_hint, with a short keep_reason):");
+            sb.AppendLine("Keep hint (field keep_hint; only for temporary also a short keep_reason, for worth_keeping leave keep_reason out):");
             sb.AppendLine("- temporary: installer, setup or update package, download remainder, partial download, duplicate or copy of another file, cache or log");
             sb.AppendLine("- worth_keeping: personal, created by the user, or hard to get again");
             sb.AppendLine("If unsure, use worth_keeping. Never temporary for a file with a sensitive marker.");
@@ -435,7 +436,16 @@ public class OllamaService : IOllamaService
         sb.AppendLine();
     }
 
-    /// <summary>JSON schema of the classification answer; with <paramref name="askKeepHint"/> also keep hint and reason.</summary>
+    /// <summary>Upper bound of the <c>summary</c> field in characters; the instructions ask for one short sentence.</summary>
+    public const int SummaryMaxLength = 200;
+
+    /// <summary>Upper bound of the <c>keep_reason</c> field in characters.</summary>
+    public const int KeepReasonMaxLength = 120;
+
+    /// <summary>
+    /// JSON schema of the classification answer; with <paramref name="askKeepHint"/> also the keep hint and,
+    /// optional, the reason (asked for <c>temporary</c> only). No target: targets come from the library match.
+    /// </summary>
     public static object BuildClassificationSchema(bool askKeepHint)
     {
         var properties = new Dictionary<string, object>
@@ -456,21 +466,21 @@ public class OllamaService : IOllamaService
                 @enum = new[] { "Low", "Medium", "High", "Critical", "Unknown" }
             },
             ["confidence"] = new { type = "number" },
-            ["summary"] = new { type = "string" },
-            ["suggested_target"] = new { type = "string" },
+            ["summary"] = new { type = "string", maxLength = SummaryMaxLength },
             ["sensitive"] = new
             {
                 type = "array",
                 items = new { type = "string", @enum = SensitiveMarkerNames.AllTokens }
             }
         };
-        var required = new List<string> { "category", "importance", "confidence", "summary", "suggested_target", "sensitive" };
+        var required = new List<string> { "category", "importance", "confidence", "summary", "sensitive" };
 
         if (askKeepHint)
         {
             properties["keep_hint"] = new { type = "string", @enum = VerdictCodes.All<KeepHint>().ToArray() };
-            properties["keep_reason"] = new { type = "string" };
-            required.AddRange(["keep_hint", "keep_reason"]);
+            // Not required: the instructions ask for it only with temporary.
+            properties["keep_reason"] = new { type = "string", maxLength = KeepReasonMaxLength };
+            required.Add("keep_hint");
         }
 
         return new { type = "object", properties, required };
@@ -541,6 +551,7 @@ public class OllamaService : IOllamaService
             if (inner.TryGetProperty("summary", out var summary))
                 result.Summary = summary.GetString();
 
+            // No longer asked for since 13.11.2026; still read so that stored older answers keep their target.
             if (inner.TryGetProperty("suggested_target", out var target))
                 result.SuggestedTarget = target.GetString();
 

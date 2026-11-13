@@ -115,6 +115,44 @@ public class ModelCallTests
     }
 
     [Fact]
+    public void The_answer_asks_no_target_and_a_keep_reason_only_for_temporary()
+    {
+        foreach (var askKeepHint in new[] { false, true })
+        {
+            using var schema = JsonDocument.Parse(JsonSerializer.Serialize(OllamaService.BuildClassificationSchema(askKeepHint)));
+            var properties = schema.RootElement.GetProperty("properties");
+            var required = schema.RootElement.GetProperty("required").EnumerateArray().Select(e => e.GetString()).ToList();
+            Assert.False(properties.TryGetProperty("suggested_target", out _));
+            Assert.DoesNotContain("suggested_target", required);
+            Assert.DoesNotContain("keep_reason", required);
+            Assert.Equal(OllamaService.SummaryMaxLength, properties.GetProperty("summary").GetProperty("maxLength").GetInt32());
+            Assert.Equal(askKeepHint, properties.TryGetProperty("keep_reason", out _));
+        }
+
+        var instructions = OllamaService.BuildClassificationInstructions(askKeepHint: true);
+        Assert.Contains("only for temporary also a short keep_reason", instructions);
+        Assert.Contains("summary: one short sentence", instructions);
+        Assert.DoesNotContain("suggested_target", instructions);
+        Assert.DoesNotContain("keep_reason", OllamaService.BuildClassificationInstructions(askKeepHint: false));
+    }
+
+    [Fact]
+    public void Stored_older_answers_with_target_and_reason_stay_readable()
+    {
+        var result = new FileClassification();
+        OllamaService.ParseResponse(Chat("""{"category":"Photo","importance":"High","confidence":0.8,"summary":"s","suggested_target":"Photos/2020","sensitive":[],"keep_hint":"worth_keeping","keep_reason":"family"}"""), result);
+        Assert.Equal("Photos/2020", result.SuggestedTarget);
+        Assert.Equal(KeepHint.WorthKeeping, result.KeepHint);
+        Assert.Equal("family", result.KeepReason);
+
+        var newer = new FileClassification();
+        OllamaService.ParseResponse(Chat("""{"category":"SoftwareInstaller","importance":"Low","confidence":0.9,"summary":"An installer.","sensitive":[],"keep_hint":"temporary","keep_reason":"setup package"}"""), newer);
+        Assert.Null(newer.SuggestedTarget);
+        Assert.Equal(KeepHint.Temporary, newer.KeepHint);
+        Assert.Equal("setup package", newer.KeepReason);
+    }
+
+    [Fact]
     public async Task Directory_calls_share_their_fixed_task()
     {
         var (service, handler) = Service(_ => Chat("""{"verdict":"mixed","purpose":"p","retention":"review","reason":"r"}"""));
