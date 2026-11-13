@@ -64,15 +64,21 @@ public class LibraryMatcherTests
         Assert.Equal(new DateTime(2015, 1, 1), ski.NamePeriod!.From);
     }
 
+    /// <summary>
+    /// Period and file type choose the folder but no longer decide (https://github.com/crack666/smart_file_organizer/issues/56):
+    /// without the content they give <c>uncertain</c> (until then <c>likely</c>); the same files at the target still give
+    /// <c>certain</c>.
+    /// </summary>
     [Fact]
-    public async Task SameContentAndPeriod_IsCertain_PeriodAndTypeAlone_IsLikely()
+    public async Task SameContentAndPeriod_IsCertain_PeriodAndTypeAlone_IsUncertain()
     {
         var map = await MapAsync(Occasions());
         var unit = Loose(new DateTime(2015, 2, 7, 18, 0, 0), new DateTime(2015, 2, 8, 9, 0, 0));
 
-        var likely = LibraryMatcher.Match(map, unit, Options, 3, LibraryWords.Default);
-        Assert.Equal("Fotos/Skifahrt 2015", likely.Candidates[0].Target.RelativePath);
-        Assert.Equal(ResultCertainty.Likely, likely.Candidates[0].Certainty);
+        var byTime = LibraryMatcher.Match(map, unit, Options, 3, LibraryWords.Default);
+        Assert.Equal("Fotos/Skifahrt 2015", byTime.Candidates[0].Target.RelativePath);
+        Assert.Equal(ResultCertainty.Uncertain, byTime.Candidates[0].Certainty);
+        Assert.Contains("the content was not checked (no model)", byTime.Candidates[0].Reason);
 
         var withContent = unit with { MatchDirectories = [LibraryTreeFixture.Full("Fotos/Skifahrt 2015"), LibraryTreeFixture.Full("Fotos/Skifahrt 2015")] };
         var certain = LibraryMatcher.Match(map, withContent, Options, 3, LibraryWords.Default);
@@ -175,4 +181,131 @@ public class LibraryMatcherTests
     [InlineData("2015", "2015", false)]
     public void SameFolderName_IgnoresCaseAndSeparators_ButNotTheYear(string a, string b, bool same) =>
         Assert.Equal(same, LibraryMatcher.SameFolderName(a, b));
+
+    // ------------------------------------------------------------------ content (issue 56)
+
+    private static ContentDescription Describe(params (FileFactKey Key, string Value)[] facts) =>
+        ContentDescription.From([facts.Select(f => new SmartFileOrganizer.Domain.Models.FileFact(f.Key, f.Value, FactSource.Model)).ToList()]);
+
+    private static readonly ContentDescription SkiTrip = Describe(
+        (FileFactKey.Occasion, "holiday"), (FileFactKey.Scene, "snowy slope"), (FileFactKey.Activity, "skiing"), (FileFactKey.Season, "winter"));
+
+    private static readonly ContentDescription BirthdayParty = Describe(
+        (FileFactKey.Occasion, "celebration"), (FileFactKey.Scene, "table with cake"), (FileFactKey.Activity, "singing"));
+
+    private static ContentCheck Check(ContentDescription unit, string folder, ContentFit fit, string reason = "scripted") =>
+        new(ContentCheckStatus.Checked, unit,
+            new Dictionary<string, CandidateContent> { [ContentCheck.KeyOf(MatchPlacement.IntoExisting, folder)] = new(fit, reason, SkiTrip) }, "scripted");
+
+    [Fact]
+    public async Task FittingContentAndPeriod_IsCertain_AndTheReasonSaysWhatWasSeen()
+    {
+        var map = await MapAsync(Occasions());
+        var unit = Loose(new DateTime(2015, 2, 7, 18, 0, 0), new DateTime(2015, 2, 8, 9, 0, 0));
+
+        var result = LibraryMatcher.Match(map, unit, Options, 3, LibraryWords.Default, Check(SkiTrip, "Fotos/Skifahrt 2015", ContentFit.Fits));
+
+        var first = result.Candidates[0];
+        Assert.Equal(ResultCertainty.Certain, first.Certainty);
+        Assert.StartsWith("Into Fotos/Skifahrt 2015: the content fits: snowy slope, skiing", first.Reason);
+        Assert.Equal(MatchSignal.ContentFit, first.Signals[0].Signal);
+    }
+
+    /// <summary>Contradicting content drops the folder, however well the period fits; then a new folder is proposed.</summary>
+    [Fact]
+    public async Task ContradictingContent_DropsTheFolder_EvenWhenThePeriodFits()
+    {
+        var map = await MapAsync(Occasions());
+        var unit = Loose(new DateTime(2015, 2, 7, 18, 0, 0), new DateTime(2015, 2, 8, 9, 0, 0));
+
+        var result = LibraryMatcher.Match(map, unit, Options, 3, LibraryWords.Default,
+            Check(BirthdayParty, "Fotos/Skifahrt 2015", ContentFit.Contradicts, "a birthday, not a ski trip"));
+
+        Assert.Empty(result.Candidates);
+        Assert.Equal("Fotos/Skifahrt 2015", Assert.Single(result.Rejected!).Target.RelativePath);
+        Assert.NotNull(result.NewFolder);
+        Assert.Contains("a birthday, not a ski trip", result.NewFolder!.Reason);
+
+        // The same files already at the target win over a description: kept, but for a person to look at.
+        var withFiles = unit with { MatchDirectories = [LibraryTreeFixture.Full("Fotos/Skifahrt 2015"), LibraryTreeFixture.Full("Fotos/Skifahrt 2015")] };
+        var kept = LibraryMatcher.Match(map, withFiles, Options, 3, LibraryWords.Default,
+            Check(BirthdayParty, "Fotos/Skifahrt 2015", ContentFit.Contradicts));
+        Assert.Equal(ResultCertainty.Review, kept.Candidates[0].Certainty);
+    }
+
+    /// <summary>Without fitting content (unclear, not checked, not described) nothing is better than uncertain.</summary>
+    [Theory]
+    [InlineData(ContentCheckStatus.Checked)]
+    [InlineData(ContentCheckStatus.NoModel)]
+    [InlineData(ContentCheckStatus.Unavailable)]
+    [InlineData(ContentCheckStatus.NoDescription)]
+    public async Task WithoutFittingContent_NothingIsBetterThanUncertain(ContentCheckStatus status)
+    {
+        var map = await MapAsync(Occasions());
+        // Period and name agree as strongly as they can: the unit is named like the folder and taken on its days.
+        var unit = Loose(new DateTime(2015, 2, 7, 10, 0, 0), new DateTime(2015, 2, 7, 12, 0, 0)) with { Words = ["skifahrt"] };
+        var check = status == ContentCheckStatus.Checked
+            ? Check(SkiTrip, "Fotos/Skifahrt 2015", ContentFit.Unclear, "too few pictures described")
+            : ContentCheck.NotChecked(status, "test");
+
+        var result = LibraryMatcher.Match(map, unit, Options, 3, LibraryWords.Default, check);
+
+        Assert.NotEmpty(result.Candidates);
+        Assert.All(result.Candidates, c => Assert.True(c.Certainty >= ResultCertainty.Uncertain, $"{c.Target.RelativePath}: {c.Certainty}"));
+        Assert.Contains("the content", result.Candidates[0].Reason);
+    }
+
+    [Fact]
+    public void Description_CountsWhatMostFilesShow()
+    {
+        var facts = new List<IReadOnlyList<SmartFileOrganizer.Domain.Models.FileFact>>();
+        for (var i = 0; i < 3; i++)
+            facts.Add([new(FileFactKey.Occasion, "holiday", FactSource.Model), new(FileFactKey.Scene, "Snowy slope", FactSource.Model)]);
+        facts.Add([new(FileFactKey.Occasion, "celebration", FactSource.Model), new(FileFactKey.Scene, "snowy slope", FactSource.Model)]);
+        facts.Add([new(FileFactKey.Width, "100", FactSource.Metadata)]);
+
+        var d = ContentDescription.From(facts);
+
+        Assert.Equal(5, d.Sampled);
+        Assert.Equal(4, d.Described);
+        Assert.Equal("holiday", d.Top(FileFactKey.Occasion));
+        Assert.Equal(new DescriptionValue("Snowy slope", 4), d.Of(FileFactKey.Scene).Single());
+        Assert.StartsWith("occasion: holiday 3, celebration 1; scene: Snowy slope 4", d.Text());
+        Assert.Equal(d.Text(), ContentDescription.FromJson(d.ToJson()).Text());
+    }
+
+    [Fact]
+    public void RulesJudge_SeparatesOccasionsAndIssuers()
+    {
+        Assert.Equal(ContentFit.Fits, DescriptionRulesFitJudge.Judge(SkiTrip, SkiTrip).Fit);
+        Assert.Equal(ContentFit.Contradicts, DescriptionRulesFitJudge.Judge(BirthdayParty, SkiTrip).Fit);
+        var stadtwerke = Describe((FileFactKey.DocumentKind, "invoice"), (FileFactKey.Issuer, "Stadtwerke Musterstadt"));
+        var phone = Describe((FileFactKey.DocumentKind, "invoice"), (FileFactKey.Issuer, "Fonnet GmbH"));
+        Assert.Equal(ContentFit.Fits, DescriptionRulesFitJudge.Judge(stadtwerke, stadtwerke).Fit);
+        Assert.Equal(ContentFit.Contradicts, DescriptionRulesFitJudge.Judge(stadtwerke, phone).Fit);
+        Assert.Equal(ContentFit.Contradicts, DescriptionRulesFitJudge.Judge(stadtwerke, SkiTrip).Fit);
+        Assert.Equal(ContentFit.Unclear, DescriptionRulesFitJudge.Judge(ContentDescription.Empty, SkiTrip).Fit);
+    }
+
+    [Fact]
+    public void ModelJudge_SeesDescriptionsOnly_AndReadsOnlyKnownIdsAndCodes()
+    {
+        var candidates = new[]
+        {
+            new FitCandidate("c1", "k1", MatchPlacement.IntoExisting, "Fotos/Skifahrt 2015", "2015-02-07..2015-02-07", SkiTrip),
+            new FitCandidate("c2", "k2", MatchPlacement.IntoExisting, "Fotos/Grillen 2016", null, BirthdayParty)
+        };
+        var facts = ModelContentFitJudge.Facts(BirthdayParty, candidates);
+        Assert.StartsWith("Files to place: occasion: celebration 1", facts);
+        Assert.Contains("c1 | into_existing | Fotos/Skifahrt 2015 | 2015-02-07..2015-02-07 | occasion: holiday 1", facts);
+
+        var (verdicts, error) = ModelContentFitJudge.Parse("""
+            { "verdicts": [ { "id": "c1", "fit": "contradicts", "reason": "a party, not skiing" },
+                            { "id": "c9", "fit": "fits", "reason": "unknown id" },
+                            { "id": "c2", "fit": "maybe", "reason": "unknown code" } ] }
+            """, new HashSet<string> { "c1", "c2" });
+        Assert.Null(error);
+        Assert.Equal(new FitVerdict(ContentFit.Contradicts, "a party, not skiing"), Assert.Single(verdicts).Value);
+        Assert.NotNull(ModelContentFitJudge.Parse("no json", new HashSet<string>()).Error);
+    }
 }

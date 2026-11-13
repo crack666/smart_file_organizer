@@ -132,6 +132,10 @@ public sealed partial class LibraryTargetService
     private readonly LibraryMatchOptions _options;
     private readonly ILogger<LibraryTargetService> _logger;
     private readonly IFreeSpaceProbe? _freeSpace;
+    private readonly IFileFactRepository? _facts;
+    private readonly IContentFitJudge? _judge;
+    private readonly IReadOnlyList<IFolderDescriptionSource> _descriptionSources;
+    private readonly IOllamaService? _ollama;
 
     public LibraryTargetService(
         LibraryService library,
@@ -142,9 +146,18 @@ public sealed partial class LibraryTargetService
         IContentComparisonRepository comparisons,
         LibraryMatchOptions options,
         ILogger<LibraryTargetService> logger,
-        IFreeSpaceProbe? freeSpace = null)
+        IFreeSpaceProbe? freeSpace = null,
+        IFileFactRepository? facts = null,
+        IContentFitJudge? judge = null,
+        IEnumerable<IFolderDescriptionSource>? descriptionSources = null,
+        IOllamaService? ollama = null)
     {
         _freeSpace = freeSpace;
+        _facts = facts;
+        _judge = judge;
+        // The own sample is the default; other sources (descriptions another program holds) are asked first.
+        _descriptionSources = (descriptionSources ?? []).OrderBy(s => s.Kind == FolderDescriptionSource.Sample ? 1 : 0).ToList();
+        _ollama = ollama;
         _library = library;
         _jobs = jobs;
         _reads = reads;
@@ -247,6 +260,10 @@ public sealed partial class LibraryTargetService
         if (unit.States is { } states && states.GetValueOrDefault(ContentStateValues.BackedUp) == unit.Files && unit.Files > 0)
             notes.Add($"All {unit.Files} files are already in the library; nothing of it needs a new place.");
 
+        // What the unit shows, from the description facts of its analysed files.
+        var unitDescription = await DescribeUnitAsync(source, files, ct);
+        var modelReady = new Lazy<Task<bool>>(() => _ollama is null ? Task.FromResult(true) : _ollama.IsAvailableAsync(ct));
+
         // Each library on its own; the best places of all of them by score, the first library named on a tie.
         var limit = Math.Clamp(query.Limit ?? _options.MaxCandidates, 1, 50);
         var matched = new List<(ScanJob Library, LibraryMap Map, LibraryPatternsInfo Patterns, MatchResult Result)>();
@@ -254,8 +271,15 @@ public sealed partial class LibraryTargetService
         {
             var (_, map) = await LoadMapAsync(library.Id, query.Words, ct);
             var patternsOf = await PatternsAsync(library, map, reset: false, ct);
-            matched.Add((library, map, patternsOf, LibraryMatcher.Match(map, unit, _options, limit, query.Words)));
+            var check = await CheckContentAsync(source, library, map, unit, unitDescription, query, modelReady, ct);
+            matched.Add((library, map, patternsOf, LibraryMatcher.Match(map, unit, _options, limit, query.Words, check)));
         }
+        var content = matched.Select(m => m.Result.Content).FirstOrDefault(c => c?.Status == ContentCheckStatus.Checked)
+                      ?? matched.Select(m => m.Result.Content).FirstOrDefault()
+                      ?? ContentCheck.NoModel;
+        var rejected = matched.SelectMany(m => m.Result.Rejected ?? []).ToList();
+        if (content.Status is not (ContentCheckStatus.Checked or ContentCheckStatus.NoCandidates))
+            notes.Add($"The content was not checked ({ContentNote(content)}); no proposal without the same files at the target is better than uncertain.");
 
         var ranked = matched
             .SelectMany((m, order) => m.Result.Candidates.Select(c => (Candidate: c, m.Library, Order: order)))
@@ -268,7 +292,7 @@ public sealed partial class LibraryTargetService
                 .OrderBy(x => (int)x.m.Result.NewFolder!.Certainty).ThenBy(x => x.order)
                 .Select(x => ((ScanJob Library, LibraryMap Map, LibraryPatternsInfo Patterns, MatchResult Result)?)x.m).FirstOrDefault();
         var result = new MatchResult(ranked.Select(x => x.Candidate).ToList(), matched.Sum(m => m.Result.Considered),
-            withNewFolder?.Result.NewFolder);
+            withNewFolder?.Result.NewFolder, rejected, content);
         var home = ranked.Count > 0 ? ranked[0].Library : withNewFolder?.Library ?? libraries[0];
         var homeMatch = matched.First(m => m.Library.Id == home.Id);
         var homeMap = homeMatch.Map;
@@ -675,6 +699,92 @@ public sealed partial class LibraryTargetService
     /// <summary>A name without its dates and years: <c>Skifahrt 2015</c> → <c>Skifahrt</c>.</summary>
     private static string StripDates(string name) =>
         SpacesRegex().Replace(DatesRegex().Replace(name, " "), " ").Trim(' ', '-', '_', '.', '(', ')');
+
+    // ------------------------------------------------------------------ content (https://github.com/crack666/smart_file_organizer/issues/56)
+
+    /// <summary>
+    /// What the unit shows: the description facts its analysed files carry (scene, occasion, document kind, issuer,
+    /// ...), from a sample of at most <c>UnitSampleSize</c> described files spread over its period. Empty when no file
+    /// of it was described.
+    /// </summary>
+    private async Task<ContentDescription> DescribeUnitAsync(ScanJob source, IReadOnlyList<FileNode> files, CancellationToken ct)
+    {
+        if (_facts is null || files.Count == 0) return ContentDescription.Empty;
+        var all = await _facts.GetByJobAsync(source.Id, ct);
+        var described = files
+            .Where(f => all.TryGetValue(f.Id, out var facts) && facts.Any(x => x.Key.IsDescription()))
+            .ToList();
+        var sample = SampleFolderDescriptionSource.Spread(described, _options.UnitSampleSize);
+        return ContentDescription.From(sample.Select(f => all[f.Id]).ToList());
+    }
+
+    /// <summary>
+    /// Describes the best candidates of one library (at most <c>MaxContentCandidates</c>) and lets the judge compare
+    /// them with the unit. Without a model, without a description of the unit, or when the model is not reachable,
+    /// nothing is checked and the match says why.
+    /// </summary>
+    private async Task<ContentCheck> CheckContentAsync(
+        ScanJob source, ScanJob library, LibraryMap map, MatchUnit unit, ContentDescription unitDescription, LibraryMatchQuery query,
+        Lazy<Task<bool>> modelReady, CancellationToken ct)
+    {
+        if (!query.UseModel || _judge is null || _descriptionSources.Count == 0)
+            return ContentCheck.NotChecked(ContentCheckStatus.NoModel, "no model", unitDescription);
+        if (unitDescription.IsEmpty)
+            return ContentCheck.NotChecked(ContentCheckStatus.NoDescription,
+                "the files of it are not described yet; sfo analyze describes them", unitDescription);
+        var chosen = LibraryMatcher.Preselect(map, unit, _options, query.Words).Take(_options.MaxContentCandidates).ToList();
+        if (chosen.Count == 0)
+            return ContentCheck.NotChecked(ContentCheckStatus.NoCandidates, "no candidate folder", unitDescription);
+        if (!await modelReady.Value)
+            return ContentCheck.NotChecked(ContentCheckStatus.Unavailable, "the local model is not reachable", unitDescription);
+
+        var byKey = new Dictionary<string, CandidateContent>(StringComparer.Ordinal);
+        var asked = new List<(FitCandidate Fit, MatchCandidate Candidate)>();
+        var request = new FolderDescribeRequest(UseModel: true, query.Refresh, _options.FolderSampleSize);
+        foreach (var c in chosen)
+        {
+            FolderDescription? described = null;
+            foreach (var s in _descriptionSources)
+            {
+                described = await s.DescribeAsync(library, c.Target, request, ct);
+                if (described is { Description.IsEmpty: false }) break;
+            }
+            var key = ContentCheck.KeyOf(c.Placement, c.Target.RelativePath);
+            if (described is not { Description.IsEmpty: false })
+            {
+                byKey[key] = new CandidateContent(ContentFit.Unclear, "the folder's files could not be described", described?.Description);
+                continue;
+            }
+            asked.Add((new FitCandidate($"c{asked.Count + 1}", key, c.Placement, c.Target.RelativePath, PeriodText(c.Target),
+                described.Description), c));
+        }
+        if (asked.Count == 0)
+            return new ContentCheck(ContentCheckStatus.Checked, unitDescription, byKey, null);
+
+        var answer = await _judge.JudgeAsync(source.Id, unitDescription, asked.Select(a => a.Fit).ToList(), query.Model, query.Refresh, ct);
+        if (answer.Status != ContentCheckStatus.Checked)
+            return ContentCheck.NotChecked(answer.Status, answer.Error ?? "the model gave no usable answer", unitDescription);
+        foreach (var (fit, _) in asked)
+        {
+            var verdict = answer.Verdicts.GetValueOrDefault(fit.Id) ?? new FitVerdict(ContentFit.Unclear, "the model said nothing about this folder");
+            byKey[fit.Key] = new CandidateContent(verdict.Fit, verdict.Reason, fit.Description);
+        }
+        return new ContentCheck(ContentCheckStatus.Checked, unitDescription, byKey, answer.Model);
+    }
+
+    private static string? PeriodText(LibraryMapEntry e) =>
+        e.NamePeriod is { } np ? $"{LibraryMap.Day(np.From)}..{LibraryMap.Day(np.To)} (name)"
+        : e.From is { } f && e.To is { } t ? $"{LibraryMap.Day(f)}..{LibraryMap.Day(t)}"
+        : null;
+
+    private static string ContentNote(ContentCheck c) => c.Status switch
+    {
+        ContentCheckStatus.NoModel => "no model",
+        ContentCheckStatus.Unavailable => "the local model is not reachable",
+        ContentCheckStatus.NoDescription => "the files of it are not described yet; sfo analyze describes them",
+        ContentCheckStatus.NoCandidates => "no candidate folder",
+        _ => c.Note ?? "the model gave no usable answer"
+    };
 
     // ------------------------------------------------------------------ the model
 

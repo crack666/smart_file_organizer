@@ -193,9 +193,14 @@ public class LibraryMatchCommandTests : IDisposable
 
     // ------------------------------------------------------------------ done when
 
-    /// <summary>Loose photos from the days of an occasion find the occasion folder first.</summary>
+    /// <summary>
+    /// Loose photos from the days of an occasion find the occasion folder first, but without a look at the content only
+    /// as <c>uncertain</c>. Until https://github.com/crack666/smart_file_organizer/issues/56 this test asked for
+    /// <c>likely</c> from the period and file type alone, which made any photo of those days the trip's; the acceptance
+    /// test is now ContentMatchCommandTests (a birthday of the same days does not get the trip's folder).
+    /// </summary>
     [Fact]
-    public async Task LoosePhotos_OfTheSameDays_FindTheOccasionFolderFirst()
+    public async Task LoosePhotos_OfTheSameDays_FindTheOccasionFolderFirst_OnlyUncertainWithoutContent()
     {
         var (library, source) = await PrepareAsync();
 
@@ -208,8 +213,9 @@ public class LibraryMatchCommandTests : IDisposable
         var first = Candidates(byPath)[0];
         Assert.Equal("into_existing", Str(first, "placement"));
         Assert.Equal("Fotos/Skifahrt 2015", Str(first, "target_relative"));
-        Assert.Equal("likely", Str(first, "certainty"));
+        Assert.Equal("uncertain", Str(first, "certainty"));
         Assert.Contains("2015-02-08", Str(first, "reason"));
+        Assert.Contains("the content was not checked", Str(first, "reason"));
         Assert.Contains(first.GetProperty("signals").EnumerateArray(), s => Str(s, "signal") == "period" && s.GetProperty("agrees").GetBoolean());
         Assert.Equal(JsonValueKind.Null, byPath.GetProperty("new_folder").ValueKind);
 

@@ -30,6 +30,8 @@ public sealed class OllamaLibraryAdvisor : ILibraryAdvisor
     {
         var model = string.IsNullOrWhiteSpace(request.Model) ? _options.Model : request.Model;
         var language = request.Language ?? _options.SummaryLanguage;
+        if (request.Task == LibraryAdviceTask.Fit)
+            return await SendAsync(request.Task, FitBody(model, request.Facts, language), model, ct);
         var prompt = request.Task switch
         {
             LibraryAdviceTask.Review => BuildReviewPrompt(request.Facts, language),
@@ -52,7 +54,11 @@ public sealed class OllamaLibraryAdvisor : ILibraryAdvisor
             },
             messages = new object[] { new { role = "user", content = prompt } }
         };
+        return await SendAsync(request.Task, body, model, ct);
+    }
 
+    private async Task<LibraryAdviceReply> SendAsync(LibraryAdviceTask task, object body, string model, CancellationToken ct)
+    {
         try
         {
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
@@ -67,7 +73,7 @@ public sealed class OllamaLibraryAdvisor : ILibraryAdvisor
             var content = doc.RootElement.TryGetProperty("message", out var message) && message.TryGetProperty("content", out var c)
                 ? c.GetString()
                 : doc.RootElement.TryGetProperty("response", out var r) ? r.GetString() : null;
-            _logger.LogInformation("[Library] {Task} answered with {Chars} characters", request.Task, content?.Length ?? 0);
+            _logger.LogInformation("[Library] {Task} answered with {Chars} characters", task, content?.Length ?? 0);
             return string.IsNullOrWhiteSpace(content)
                 ? new LibraryAdviceReply(null, model, raw, "The model returned no content.")
                 : new LibraryAdviceReply(content, model, raw, null);
@@ -78,7 +84,7 @@ public sealed class OllamaLibraryAdvisor : ILibraryAdvisor
         }
         catch (Exception ex) when (ex is HttpRequestException or JsonException)
         {
-            _logger.LogWarning(ex, "[Library] {Task} failed", request.Task);
+            _logger.LogWarning(ex, "[Library] {Task} failed", task);
             return new LibraryAdviceReply(null, model, null, ex.Message);
         }
     }
@@ -176,6 +182,71 @@ public sealed class OllamaLibraryAdvisor : ILibraryAdvisor
         sb.Append(facts);
         return sb.ToString();
     }
+
+    /// <summary>Answer tokens for a content check: a code and one short sentence per candidate.</summary>
+    public const int FitMaxAnswerTokens = 400;
+
+    /// <summary>
+    /// <c>sfo library match</c>, task <c>fit</c> (https://github.com/crack666/smart_file_organizer/issues/56): whether what
+    /// a group of files shows fits each candidate folder. The fixed task is the system message, the same text for every
+    /// call, so the server can keep it in its prompt cache; the descriptions are the user message. The answer is capped.
+    /// </summary>
+    public static string BuildFitSystemPrompt(string language)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("You decide where files belong in a person's own archive. You get a description of a group of files (what pictures");
+        sb.AppendLine("show, or kind and issuer of documents, with how many files show each value) and, per candidate folder, its name,");
+        sb.AppendLine("its period and the same kind of description made from a few of its files. You never see the files themselves.");
+        sb.AppendLine();
+        sb.AppendLine("For each candidate answer one code:");
+        sb.AppendLine("- fits: the same occasion or activity (the same trip, the same party), or the same kind of document from the same issuer.");
+        sb.AppendLine("- contradicts: clearly something else: another occasion or activity, another kind of document or another issuer.");
+        sb.AppendLine("  A matching period or year never makes a fit: a birthday in the week of a ski trip contradicts the ski trip folder.");
+        sb.AppendLine("- unclear: the descriptions are too thin or too mixed to tell.");
+        sb.AppendLine("Judge by what most files show; one odd picture does not change it. Do not invent what the descriptions do not say.");
+        sb.AppendLine($"Give a reason of one short sentence in {language} that names what was seen on both sides.");
+        sb.AppendLine("Answer with JSON only: verdicts, each with id (as listed), fit, reason.");
+        return sb.ToString();
+    }
+
+    private object FitBody(string model, string facts, string language) => new
+    {
+        model,
+        stream = false,
+        think = false,
+        keep_alive = _options.KeepAlive,
+        format = FitSchema(),
+        options = new { num_predict = FitMaxAnswerTokens },
+        messages = new object[]
+        {
+            new { role = "system", content = BuildFitSystemPrompt(language) },
+            new { role = "user", content = facts }
+        }
+    };
+
+    private static object FitSchema() => new
+    {
+        type = "object",
+        properties = new
+        {
+            verdicts = new
+            {
+                type = "array",
+                items = new
+                {
+                    type = "object",
+                    properties = new
+                    {
+                        id = Str(),
+                        fit = new { type = "string", @enum = VerdictCodes.All<ContentFit>() },
+                        reason = Str()
+                    },
+                    required = new[] { "id", "fit", "reason" }
+                }
+            }
+        },
+        required = new[] { "verdicts" }
+    };
 
     private static object MapSchema() => new
     {

@@ -67,6 +67,7 @@ public sealed record WeakPlace(IReadOnlyList<LibraryFinding> Findings, string No
 
 /// <summary>An existing folder proposed as the place for a unit.</summary>
 /// <param name="Destination">Where the unit ends up, relative to the library root with <c>/</c>.</param>
+/// <param name="Content">The content check of this candidate; null when it was not checked.</param>
 public sealed record MatchCandidate(
     MatchPlacement Placement,
     LibraryMapEntry Target,
@@ -75,7 +76,28 @@ public sealed record MatchCandidate(
     ResultCertainty Certainty,
     IReadOnlyList<SignalResult> Signals,
     string Reason,
-    WeakPlace? Weak);
+    WeakPlace? Weak,
+    CandidateContent? Content = null);
+
+/// <summary>What the content check said about one candidate, and what the folder shows.</summary>
+public sealed record CandidateContent(ContentFit Fit, string Reason, ContentDescription? Folder);
+
+/// <summary>
+/// The content check of a match (https://github.com/crack666/smart_file_organizer/issues/56): per candidate whether
+/// what the unit shows fits what the folder shows. <see cref="Status"/> says whether it ran; when it did not, every
+/// proposal without the same files at the target is at most <c>uncertain</c> and says so.
+/// </summary>
+/// <param name="ByKey">Per <see cref="KeyOf"/> of a candidate its verdict; candidates not listed were not checked.</param>
+public sealed record ContentCheck(ContentCheckStatus Status, ContentDescription? Unit, IReadOnlyDictionary<string, CandidateContent> ByKey, string? Note)
+{
+    public static string KeyOf(MatchPlacement placement, string relativePath) => $"{placement.ToCode()}:{relativePath}";
+
+    public static ContentCheck NotChecked(ContentCheckStatus status, string note, ContentDescription? unit = null) =>
+        new(status, unit, new Dictionary<string, CandidateContent>(), note);
+
+    /// <summary>Without a model: places come from time, names and kinds of files only.</summary>
+    public static ContentCheck NoModel { get; } = NotChecked(ContentCheckStatus.NoModel, "no model");
+}
 
 /// <summary>A new folder, proposed when no existing folder fits. Data only; nothing is created.</summary>
 /// <param name="NameComplete">False when a part of the pattern could not be filled (the occasion is unknown): the name keeps <c>{occasion}</c>.</param>
@@ -92,7 +114,10 @@ public sealed record NewFolderProposal(
 
 /// <summary>The answer of the rules: the best existing folders, or a new one.</summary>
 /// <param name="Considered">Folders that were scored.</param>
-public sealed record MatchResult(IReadOnlyList<MatchCandidate> Candidates, int Considered, NewFolderProposal? NewFolder);
+/// <param name="Rejected">Candidates the period or names chose but whose content contradicts the unit; never proposed.</param>
+public sealed record MatchResult(
+    IReadOnlyList<MatchCandidate> Candidates, int Considered, NewFolderProposal? NewFolder,
+    IReadOnlyList<MatchCandidate>? Rejected = null, ContentCheck? Content = null);
 
 /// <summary>
 /// Finds the folders of a library a unit of a source belongs in (https://github.com/crack666/smart_file_organizer/issues/25).
@@ -112,7 +137,58 @@ public static partial class LibraryMatcher
     /// <summary>Taken off the score of a parent for a new folder when its subfolders are named in several ways.</summary>
     private const double NamingPenalty = 0.10;
 
-    public static MatchResult Match(LibraryMap map, MatchUnit unit, LibraryMatchOptions o, int limit, LibraryWords words)
+    /// <summary>
+    /// The candidates time, names and kinds of files choose (score at least <c>MinScore</c>), best first, before any
+    /// content check: the folders worth describing.
+    /// </summary>
+    public static IReadOnlyList<MatchCandidate> Preselect(LibraryMap map, MatchUnit unit, LibraryMatchOptions o, LibraryWords words) =>
+        Scored(map, unit, o, words).Candidates
+            .Where(c => c.Score >= o.MinScore)
+            .OrderByDescending(c => c.Score)
+            .ThenBy(c => c.Target.RelativePath, StringComparer.Ordinal)
+            .ToList();
+
+    /// <summary>
+    /// The best places for <paramref name="unit"/>. Time, names and kinds of files choose the candidates; what decides
+    /// is the content (https://github.com/crack666/smart_file_organizer/issues/56): a candidate whose content
+    /// contradicts the unit is dropped, even when the period fits; without fitting content (or the same files already
+    /// at the target) a proposal is at most <c>uncertain</c>. <paramref name="content"/> null means not checked.
+    /// </summary>
+    public static MatchResult Match(LibraryMap map, MatchUnit unit, LibraryMatchOptions o, int limit, LibraryWords words, ContentCheck? content = null)
+    {
+        content ??= ContentCheck.NoModel;
+        var (scored, considered) = Scored(map, unit, o, words);
+
+        var fitting = new List<MatchCandidate>();
+        var rejected = new List<MatchCandidate>();
+        foreach (var c in scored.Where(c => c.Score >= o.MinScore))
+        {
+            var judged = ApplyContent(c, unit, o, content);
+            if (judged is null) rejected.Add(c with { Content = content.ByKey[ContentCheck.KeyOf(c.Placement, c.Target.RelativePath)] });
+            else fitting.Add(judged);
+        }
+        fitting = fitting
+            .OrderByDescending(c => c.Score)
+            .ThenBy(c => (int)c.Certainty)
+            .ThenBy(c => c.Target.RelativePath, StringComparer.Ordinal)
+            .ToList();
+
+        if (fitting.Count >= 2 && fitting[0].Score - fitting[1].Score < o.Margin)
+        {
+            var best = fitting[0];
+            fitting[0] = best with
+            {
+                Certainty = Lower(best.Certainty),
+                Reason = best.Reason.TrimEnd('.') + $"; {fitting[1].Target.RelativePath} fits almost as well."
+            };
+        }
+
+        var top = fitting.Take(limit).ToList();
+        var newFolder = top.Count == 0 ? NewFolder(map, unit, o, words, rejected) : null;
+        return new MatchResult(top, considered, newFolder, rejected, content);
+    }
+
+    private static (List<MatchCandidate> Candidates, int Considered) Scored(LibraryMap map, MatchUnit unit, LibraryMatchOptions o, LibraryWords words)
     {
         var scored = new List<MatchCandidate>();
         var considered = 0;
@@ -136,28 +212,65 @@ public static partial class LibraryMatcher
                 if (AsSubfolder(e, unit, o) is { } c) scored.Add(c);
             }
         }
-
-        var fitting = scored
-            .Where(c => c.Score >= o.MinScore)
-            .OrderByDescending(c => c.Score)
-            .ThenBy(c => (int)c.Certainty)
-            .ThenBy(c => c.Target.RelativePath, StringComparer.Ordinal)
-            .ToList();
-
-        if (fitting.Count >= 2 && fitting[0].Score - fitting[1].Score < o.Margin)
-        {
-            var best = fitting[0];
-            fitting[0] = best with
-            {
-                Certainty = Lower(best.Certainty),
-                Reason = best.Reason.TrimEnd('.') + $"; {fitting[1].Target.RelativePath} fits almost as well."
-            };
-        }
-
-        var top = fitting.Take(limit).ToList();
-        var newFolder = top.Count == 0 ? NewFolder(map, unit, o, words) : null;
-        return new MatchResult(top, considered, newFolder);
+        return (scored, considered);
     }
+
+    // ------------------------------------------------------------------ content
+
+    /// <summary>
+    /// Adds the content signal to a candidate and judges it again: null when the content contradicts (and the same
+    /// files do not already lie there). The score grows by <c>WeightContentFit</c> for fitting content, so a fitting
+    /// folder outranks one that only shares the period.
+    /// </summary>
+    private static MatchCandidate? ApplyContent(MatchCandidate c, MatchUnit unit, LibraryMatchOptions o, ContentCheck content)
+    {
+        var sameFiles = c.Signals.Any(s => s.Signal == MatchSignal.ContentNeighbours && s.Strong);
+        content.ByKey.TryGetValue(ContentCheck.KeyOf(c.Placement, c.Target.RelativePath), out var verdict);
+        if (verdict is { Fit: ContentFit.Contradicts } && !sameFiles) return null;
+
+        var unitGist = content.Unit is { IsEmpty: false } u ? u.Gist() : null;
+        var folderGist = verdict?.Folder is { IsEmpty: false } f ? f.Gist() : null;
+        var signal = verdict switch
+        {
+            { Fit: ContentFit.Fits } => new SignalResult(MatchSignal.ContentFit, 1, o.WeightContentFit, true, true, false,
+                $"the content fits: {unitGist ?? "the files"}; the folder shows {folderGist ?? "the same"} ({verdict.Reason.TrimEnd('.')})"),
+            { Fit: ContentFit.Contradicts } => new SignalResult(MatchSignal.ContentFit, 0, o.WeightContentFit, false, false, true,
+                $"the content does not fit: {unitGist ?? "the files"}; the folder shows {folderGist ?? "something else"} ({verdict.Reason.TrimEnd('.')})"),
+            { Fit: ContentFit.Unclear } => new SignalResult(MatchSignal.ContentFit, 0, o.WeightContentFit, false, false, false,
+                $"the content is unclear ({verdict.Reason.TrimEnd('.')})"),
+            _ => new SignalResult(MatchSignal.ContentFit, 0, o.WeightContentFit, false, false, false,
+                $"the content was not checked ({NotCheckedWhy(content)})")
+        };
+        var signals = new List<SignalResult> { signal };
+        signals.AddRange(c.Signals);
+
+        var weak = WeakAt(c.Target, unit, c.Placement);
+        var certainty = c.Certainty == ResultCertainty.Review ? ResultCertainty.Review : Certainty(signals, weak.Cap);
+        var head = c.Placement == MatchPlacement.AsSubfolder ? $"As '{unit.Name}' into {c.Target.RelativePath}" : $"Into {c.Target.RelativePath}";
+        var reason = Reason(head, signals);
+        if (verdict is null || verdict.Fit == ContentFit.Unclear)
+            reason = reason.TrimEnd('.') + $"; {signal.Detail}.";
+        // Kept from the first judgement: content of the folder already lies below the place under another name.
+        if (c.Reason.Contains("under another name", StringComparison.Ordinal))
+            reason = reason.TrimEnd('.') + "; files of it already lie there under another name: is it the same occasion?";
+        return c with
+        {
+            Signals = signals,
+            Score = Score(signals),
+            Certainty = certainty,
+            Reason = reason,
+            Content = verdict
+        };
+    }
+
+    private static string NotCheckedWhy(ContentCheck content) => content.Status switch
+    {
+        ContentCheckStatus.NoModel => "no model",
+        ContentCheckStatus.Unavailable => "the local model is not reachable",
+        ContentCheckStatus.NoDescription => "the files are not described yet; sfo analyze describes them",
+        ContentCheckStatus.Failed => "the model gave no usable answer",
+        _ => "not among the folders described"
+    };
 
     // ------------------------------------------------------------------ into an existing folder
 
@@ -225,7 +338,8 @@ public static partial class LibraryMatcher
 
     // ------------------------------------------------------------------ new folder
 
-    private static NewFolderProposal NewFolder(LibraryMap map, MatchUnit unit, LibraryMatchOptions o, LibraryWords words)
+    private static NewFolderProposal NewFolder(LibraryMap map, MatchUnit unit, LibraryMatchOptions o, LibraryWords words,
+        IReadOnlyList<MatchCandidate>? rejected = null)
     {
         // The parent: the folder whose subfolders are most like the unit; the root when none is.
         var parents = map.Entries
@@ -272,6 +386,9 @@ public static partial class LibraryMatcher
               + (complete ? string.Empty : "; the occasion is unknown and stays to be filled in");
         var agreeing = signals.Where(s => s.Agrees).Select(s => s.Detail).ToList();
         var reason = why + (agreeing.Count > 0 ? ": " + string.Join("; ", agreeing) : string.Empty) + ".";
+        // An occasion without a folder yet: say which folders the period chose and why their content does not fit.
+        foreach (var r in (rejected ?? []).Take(2))
+            reason = reason.TrimEnd('.') + $"; {r.Target.RelativePath} fits by time or name, not by content ({r.Content?.Reason.TrimEnd('.') ?? "another occasion"}).";
 
         return new NewFolderProposal(parent, name, AdviceOrigin.Rule, complete, pattern, Join(parent.RelativePath, name),
             certainty, reason, weak.Place);
@@ -468,8 +585,11 @@ public static partial class LibraryMatcher
     // ------------------------------------------------------------------ certainty and weak places
 
     /// <summary>
-    /// <c>certain</c>: same content already there plus another independent signal. <c>likely</c>: two independent
-    /// signals, or one plus the right kind of files. <c>uncertain</c>: less. <c>review</c>: a signal contradicts.
+    /// Time and kind of files choose, the content decides (https://github.com/crack666/smart_file_organizer/issues/56):
+    /// <c>certain</c> with the same files already there plus another independent signal, or with fitting content and a
+    /// fitting period together. <c>likely</c> with the same files and the right kind of files, or with fitting content
+    /// and one more signal (name, siblings, kind of files). Everything else, however well period and names agree, is
+    /// <c>uncertain</c>; <c>review</c> when a signal contradicts.
     /// </summary>
     public static ResultCertainty Certainty(IReadOnlyList<SignalResult> signals, ResultCertainty? cap)
     {
@@ -478,11 +598,13 @@ public static partial class LibraryMatcher
             c = ResultCertainty.Review;
         else
         {
-            var strong = signals.Count(s => s.Strong && s.Signal != MatchSignal.FileType);
-            var content = signals.Any(s => s.Signal == MatchSignal.ContentNeighbours && s.Strong);
+            var sameFiles = signals.Any(s => s.Signal == MatchSignal.ContentNeighbours && s.Strong);
+            var fits = signals.Any(s => s.Signal == MatchSignal.ContentFit && s.Agrees);
+            var period = signals.Any(s => s.Signal == MatchSignal.Period && s.Strong);
+            var others = signals.Count(s => s.Strong && s.Signal is not (MatchSignal.FileType or MatchSignal.ContentFit or MatchSignal.ContentNeighbours));
             var type = signals.Any(s => s.Signal == MatchSignal.FileType && s.Agrees);
-            c = content && strong >= 2 ? ResultCertainty.Certain
-                : strong >= 2 || strong >= 1 && type ? ResultCertainty.Likely
+            c = sameFiles && (others >= 1 || fits) || fits && period ? ResultCertainty.Certain
+                : sameFiles && type || fits && (others >= 1 || type) ? ResultCertainty.Likely
                 : ResultCertainty.Uncertain;
         }
         return cap is { } limit && (int)limit > (int)c ? limit : c;

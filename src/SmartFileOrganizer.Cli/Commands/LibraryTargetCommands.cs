@@ -109,7 +109,24 @@ public static class LibraryTargetCommands
         string Reason,
         IReadOnlyList<SignalView> Signals,
         WeakPlaceView? WeakPlace,
-        long? LibraryJobId = null);
+        long? LibraryJobId = null,
+        ContentView? Content = null);
+
+    /// <summary>What a folder or the unit shows: fact code to values with counts, and the same as one line.</summary>
+    public sealed record DescriptionView(int Sampled, int Described, IReadOnlyDictionary<string, IReadOnlyList<DescriptionValue>> Values, string Text)
+    {
+        public static DescriptionView? From(ContentDescription? d) =>
+            d is null ? null : new DescriptionView(d.Sampled, d.Described, d.ByCode(), d.Text());
+    }
+
+    /// <summary>The content check of one candidate: fits, contradicts or unclear, why, and what the folder shows.</summary>
+    public sealed record ContentView(string Fit, string Reason, DescriptionView? Folder);
+
+    /// <summary>Whether the content was checked; <c>status</c> is a <see cref="ContentCheckStatus"/> code.</summary>
+    public sealed record ContentCheckView(string Status, string? Model, string? Note);
+
+    /// <summary>A folder time or names chose, dropped because its content contradicts the unit.</summary>
+    public sealed record RejectedView(string TargetRelative, string Reason, DescriptionView? Folder);
 
     public sealed record NewFolderView(
         string Placement,
@@ -142,7 +159,8 @@ public static class LibraryTargetCommands
         IReadOnlyDictionary<string, long> ByFileType,
         PeriodView Period,
         IReadOnlyList<string> Words,
-        IReadOnlyDictionary<string, long>? Comparison);
+        IReadOnlyDictionary<string, long>? Comparison,
+        DescriptionView? Description = null);
 
     public sealed record ComparisonView(long ComparisonId, DateTime ComparedAt, bool Complete);
 
@@ -161,7 +179,9 @@ public static class LibraryTargetCommands
         ModelView Advice,
         IReadOnlyList<string> Notes,
         IReadOnlyList<JobView>? Libraries = null,
-        IReadOnlyList<SpaceView>? Space = null);
+        IReadOnlyList<SpaceView>? Space = null,
+        ContentCheckView? ContentCheck = null,
+        IReadOnlyList<RejectedView>? Rejected = null);
 
     // ------------------------------------------------------------------ show
 
@@ -377,13 +397,14 @@ public static class LibraryTargetCommands
         var unit = new UnitView(u.Kind.ToCode(), u.FullPath, u.BundleId, u.BundleKind.ToCode(), u.Name, u.KeepWhole, u.KeepReason,
             u.Role.ToCode(), u.Files, ByType(u.Types),
             new PeriodView(BundlesCommand.Local(u.From), BundlesCommand.Local(u.To), u.TimeSource.ToCode()),
-            u.Words, u.States);
+            u.Words, u.States, DescriptionView.From(a.Result?.Content?.Unit));
 
         var candidates = (a.Result?.Candidates ?? []).Select((c, i) => new CandidateView(
             i + 1, c.Placement.ToCode(), c.Target.FullPath, c.Target.RelativePath, c.Target.Role.ToCode(), c.Target.Purpose,
             Full(LibraryOf(i)?.RootPath, c.Destination), c.Destination, u.KeepWhole, c.Score, c.Certainty.ToCode(), c.Reason,
             c.Signals.Select(s => new SignalView(s.Signal.ToCode(), Math.Round(s.Value, 3), s.Weight, s.Agrees, s.Contradicts, s.Detail)).ToList(),
-            Weak(c.Weak), LibraryOf(i)?.Id)).ToList();
+            Weak(c.Weak), LibraryOf(i)?.Id,
+            c.Content is { } cc ? new ContentView(cc.Fit.ToCode(), cc.Reason, DescriptionView.From(cc.Folder)) : null)).ToList();
 
         NewFolderView? newFolder = null;
         if (a.Result?.NewFolder is { } n)
@@ -409,7 +430,13 @@ public static class LibraryTargetCommands
             ModelView.From(a.Advice),
             a.Notes,
             (a.Libraries ?? []).Select(JobView.From).ToList(),
-            (a.Space ?? []).Select(s => new SpaceView(s.LibraryJobId, s.RootPath, s.FreeBytes, s.NeededBytes, s.Space.ToCode())).ToList());
+            (a.Space ?? []).Select(s => new SpaceView(s.LibraryJobId, s.RootPath, s.FreeBytes, s.NeededBytes, s.Space.ToCode())).ToList(),
+            a.Result?.Content is { } check
+                ? new ContentCheckView(check.Status.ToCode(), check.Status == ContentCheckStatus.Checked ? check.Note : null,
+                    check.Status == ContentCheckStatus.Checked ? null : check.Note)
+                : null,
+            (a.Result?.Rejected ?? []).Select(r => new RejectedView(r.Target.RelativePath,
+                r.Content?.Reason ?? "the content does not fit", DescriptionView.From(r.Content?.Folder))).ToList());
     }
 
     private static WeakPlaceView? Weak(WeakPlace? w) => w is null ? null : new WeakPlaceView(Refs(w.Findings), w.Note);
@@ -478,6 +505,8 @@ public static class LibraryTargetCommands
         }
         var u = r.Unit;
         sb.AppendLine($"{u.Kind} '{u.Name}': {u.Files} files" + (u.KeepWhole ? ", kept whole under its own name" : string.Empty));
+        if (u.Description is { } d)
+            sb.AppendLine($"   shows: {d.Text}");
         sb.AppendLine(r.Libraries is { Count: > 1 } libraries
             ? $"Library jobs {string.Join(", ", libraries.Select(l => l.Id))} ({r.LibraryFrom})"
             : $"Library job {r.Library!.Id} ({r.LibraryFrom})");
@@ -487,6 +516,8 @@ public static class LibraryTargetCommands
             sb.AppendLine($"   {c.Reason}");
             if (c.WeakPlace is { } w) sb.AppendLine($"   {w.Note}");
         }
+        foreach (var x in r.Rejected ?? [])
+            sb.AppendLine($"   not {x.TargetRelative}: {x.Reason}");
         if (r.NewFolder is { } n)
         {
             sb.AppendLine($"new_folder    {n.Destination}  [{n.Certainty}, name by {n.NameSource}]");

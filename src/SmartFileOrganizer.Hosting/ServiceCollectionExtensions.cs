@@ -216,6 +216,11 @@ public static class ServiceCollectionExtensions
             match.PatternsDirectory ??= Path.Combine(Path.GetDirectoryName(paths.DatabasePath)!, "library-patterns");
             return match;
         });
+        // Content of targets (https://github.com/crack666/smart_file_organizer/issues/56): candidate folders are described
+        // from a sample of their own files; another source of descriptions is one more IFolderDescriptionSource.
+        services.AddSingleton<IFolderDescriptionRepository, FolderDescriptionRepository>();
+        services.AddSingleton<IFolderDescriptionSource, SampleFolderDescriptionSource>();
+        services.TryAddSingleton<IContentFitJudge, ModelContentFitJudge>();
         services.AddSingleton<LibraryTargetService>();
 
         // Findings (https://github.com/crack666/smart_file_organizer/issues/26): computed from stored data, only
