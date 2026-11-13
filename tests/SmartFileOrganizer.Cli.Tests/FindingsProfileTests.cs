@@ -199,6 +199,80 @@ public class FindingsProfileTests : IDisposable
         Assert.Equal(_files.Count - 5 - 3, compared.GetProperty("counts").GetProperty("files").GetInt64());
     }
 
+    /// <summary>
+    /// Findings 8 and 9: after a full analysis no summary is open; while files are open, the classification names a
+    /// rate and the time left, counted on the files that go to the model only.
+    /// </summary>
+    [Fact]
+    public async Task Status_HasNoOpenSummaries_AndNamesTheTimeLeft()
+    {
+        var job = (await OkAsync("eval", _corpus, "--stub", Path.Combine(_corpus, EvalTruth.FileName))).GetProperty("job_id").GetInt64();
+        // Phase 3 with the scripted answers (sfo eval leaves it out on purpose).
+        var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        Hosting.ServiceCollectionExtensions.AddSmartFileOrganizerCore(services, o =>
+        {
+            o.DatabasePath = _dbPath;
+            o.ReloadSettingsOnChange = false;
+        });
+        Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions.AddSingleton<SmartFileOrganizer.Domain.Interfaces.IOllamaService>(
+            services, new ScriptedAnswerOllamaService(EvalTruth.Load(Path.Combine(_corpus, EvalTruth.FileName)), "stub"));
+        await using (var sp = Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions.BuildServiceProvider(services))
+        {
+            var coordinator = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions
+                .GetRequiredService<SmartFileOrganizer.Application.Services.AiClassificationCoordinator>(sp);
+            await coordinator.RunAsync(job, SmartFileOrganizer.Application.Services.AiPhases.Summary, null, CancellationToken.None);
+        }
+        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+
+        var status = await OkAsync("status", job.ToString());
+        var summary = status.GetProperty("phases").GetProperty("summary");
+        _output.WriteLine(summary.ToString());
+        Assert.Equal(0, summary.GetProperty("pending").GetInt64());
+        // The six folders inside the two copies of the tool are judged with the tool, and the root holds no file of
+        // its own: none of them needs a summary.
+        Assert.Equal(7,summary.GetProperty("skipped").GetInt64());
+        var classification = status.GetProperty("phases").GetProperty("classification");
+        Assert.Equal(JsonValueKind.Null, classification.GetProperty("remaining_seconds").ValueKind);
+
+        // Two files open again, and the model results spread over the last minutes: 6 s per file.
+        await using (var conn = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={_dbPath}"))
+        {
+            await conn.OpenAsync();
+            var reopen = conn.CreateCommand();
+            reopen.CommandText = """
+                UPDATE file_nodes SET status = @discovered WHERE id IN (
+                    SELECT f.id FROM file_nodes f JOIN ai_results r ON r.file_node_id = f.id
+                    WHERE f.job_id = @job ORDER BY f.id LIMIT 2)
+                """;
+            reopen.Parameters.AddWithValue("@discovered", (int)SmartFileOrganizer.Domain.Enums.FileNodeStatus.Discovered);
+            reopen.Parameters.AddWithValue("@job", job);
+            Assert.Equal(2, await reopen.ExecuteNonQueryAsync());
+
+            var ids = new List<long>();
+            var select = conn.CreateCommand();
+            select.CommandText = "SELECT r.id FROM ai_results r JOIN file_nodes f ON f.id = r.file_node_id WHERE f.job_id = @job ORDER BY r.id DESC";
+            select.Parameters.AddWithValue("@job", job);
+            await using (var reader = await select.ExecuteReaderAsync())
+                while (await reader.ReadAsync()) ids.Add(reader.GetInt64(0));
+            var now = DateTime.UtcNow;
+            for (var i = 0; i < ids.Count; i++)
+            {
+                var update = conn.CreateCommand();
+                update.CommandText = "UPDATE ai_results SET analyzed_at = @at WHERE id = @id";
+                update.Parameters.AddWithValue("@at", now.AddSeconds(-6 * i));
+                update.Parameters.AddWithValue("@id", ids[i]);
+                await update.ExecuteNonQueryAsync();
+            }
+        }
+        Microsoft.Data.Sqlite.SqliteConnection.ClearAllPools();
+
+        classification = (await OkAsync("status", job.ToString())).GetProperty("phases").GetProperty("classification");
+        // About ten a minute (rows the rate leaves out, such as inherited results, widen the gaps a little).
+        var rate = classification.GetProperty("rate_per_minute").GetDouble();
+        Assert.InRange(rate, 7.0, 10.0);
+        Assert.InRange(classification.GetProperty("remaining_seconds").GetInt64(), 12, 18);
+    }
+
     /// <summary>Finding 4: a mixed download folder falls into one finding per kind, each with examples; installers and archives are none.</summary>
     [Fact]
     public async Task MixedDownloads_FallIntoOneFindingPerKind()

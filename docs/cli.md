@@ -207,7 +207,8 @@ sfo status 7 --json
       "scan": { "status": "completed", "files_total": 1830, "files_processed": 1830,
                 "directories_total": 112, "directories_processed": 112, "errors": 0 },
       "pre_assessment": { "total": 104, "done": 104, "errors": 0, "pending": 0, "skipped": 0 },
-      "classification": { "total": 940, "done": 610, "errors": 3, "pending": 0, "skipped": 327 },
+      "classification": { "total": 940, "done": 610, "errors": 3, "pending": 0, "skipped": 327,
+                          "rate_per_minute": null, "remaining_seconds": null },
       "summary": { "total": 104, "done": 0, "errors": 0, "pending": 104, "skipped": 0 }
     },
     "errors": [
@@ -248,7 +249,13 @@ For each AI phase, `total = done + errors + pending + skipped`.
   Files a rule decides (programs, fonts, unknown binaries) count as `done` without a model call. `done`
   includes files that inherited the result of their directory's confirmed sample; `pending`
   includes files waiting for that sample. `skipped` are files of units and system directories,
-  which are not analysed one by one.
+  which are not analysed one by one. While a run goes on (the newest model result is less than 10 minutes old),
+  `rate_per_minute` is how many files the model judged per minute over the last 50 results and
+  `remaining_seconds` the time left for the files still waiting for the model (`pending` without those waiting for
+  a sample); both are `null` otherwise. Every phase carries the two fields; only `classification` fills them.
+- `summary`: folders that need no summary count as `skipped`, not `pending`: folders judged with their unit or by
+  rule without a pre-assessment, and pre-assessed folders without a file of their own. After a complete
+  `sfo analyze` nothing is `pending` (before 13.11.2026 they stayed `pending` for ever).
 
 ### `sfo compare <job> --against <job>`
 
@@ -1170,12 +1177,15 @@ UTC with a trailing `Z`.
 one JSON object with `schema_version` and `type`:
 
 ```json
-{"schema_version":1,"type":"progress","phase":"scan","processed":120,"total":480,"errors":0,"current_path":"/media/usb-stick/photos","message":null}
+{"schema_version":1,"type":"progress","phase":"scan","processed":120,"total":480,"errors":0,"current_path":"/media/usb-stick/photos","message":null,"rate_per_minute":null,"remaining_seconds":null}
 {"schema_version":1,"type":"log","level":"warning","category":"ClassificationService","message":"...","exception":null}
 ```
 
 `phase` is `scan`, `pre_assessment`, `classification`, `summary`, `compare` or `eval_cases`. Progress is throttled to
-one line per phase every 500 ms, plus the final line of a phase. `sfo analyze` also writes `"type":"wait"`
+one line per phase every 500 ms, plus the final line of a phase. `rate_per_minute` and `remaining_seconds` are
+filled after the first 5 seconds of a phase: the rate counts only what this run got through since its first line
+(files counted as done before, such as those skipped by rule, are left out), the time left rests on the open rest.
+Text lines then end in `, 277 open, 12.5/min, about 23 min left`. `sfo analyze` also writes `"type":"wait"`
 lines when it starts or stops waiting for the model server (see `sfo analyze`); they are never throttled.
 
 **Exit codes.**

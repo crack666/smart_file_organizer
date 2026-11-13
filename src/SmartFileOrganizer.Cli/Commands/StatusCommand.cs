@@ -19,8 +19,13 @@ public static class StatusCommand
         long DirectoriesProcessed,
         long Errors);
 
-    /// <summary>Counters of an AI phase. <c>total = done + errors + pending + skipped</c>.</summary>
-    public sealed record AiPhaseView(long Total, long Done, long Errors, long Pending, long Skipped);
+    /// <summary>
+    /// Counters of an AI phase. <c>total = done + errors + pending + skipped</c>. For the file classification, while a
+    /// run goes on: files per minute the model judged lately and the estimated seconds left for the pending files
+    /// (skipped and inherited files are not counted); null otherwise.
+    /// </summary>
+    public sealed record AiPhaseView(long Total, long Done, long Errors, long Pending, long Skipped,
+        double? RatePerMinute = null, long? RemainingSeconds = null);
 
     public sealed record PhasesView(
         ScanPhaseView Scan,
@@ -96,9 +101,12 @@ public static class StatusCommand
                 Math.Max(0, s.DirectoriesAiRelevant - s.DirectoriesPreAssessed), 0),
             // Inherited files count as done, files waiting for their sample as pending.
             new AiPhaseView(s.FilesAiEligible, s.FilesAiAnalyzed + s.FilesAiInherited, s.FilesAiErrors,
-                s.FilesAiPending + s.FilesAiDeferred, s.FilesAiSkipped),
+                s.FilesAiPending + s.FilesAiDeferred, s.FilesAiSkipped,
+                s.FilesAiRatePerMinute is { } rate ? Math.Round(rate, 1) : null,
+                RemainingSeconds(s.FilesAiPending, s.FilesAiRatePerMinute)),
+            // Folders that need no summary (judged by rule without a pre-assessment, or without files) are skipped, not pending.
             new AiPhaseView(s.DirectoriesAiRelevant, sumDone, s.SummaryErrors,
-                Math.Max(0, s.DirectoriesAiRelevant - s.DirectoriesSummarized), 0));
+                Math.Max(0, s.DirectoriesAiRelevant - s.DirectoriesSummarized - s.SummariesNotNeeded), s.SummariesNotNeeded));
 
         return new StatusResult(
             JobView.From(j),
@@ -159,6 +167,19 @@ public static class StatusCommand
     private static void Line(StringBuilder sb, string name, AiPhaseView p, string unit)
     {
         var skipped = p.Skipped > 0 ? $", {p.Skipped} skipped" : string.Empty;
-        sb.AppendLine($"  {name,-15} {p.Done}/{p.Total} {unit} done, {p.Errors} errors, {p.Pending} pending{skipped}");
+        var rate = p.RatePerMinute is { } r && p.RemainingSeconds is { } left
+            ? $", {r.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)} {unit}/min, about {Duration(left)} left"
+            : string.Empty;
+        sb.AppendLine($"  {name,-15} {p.Done}/{p.Total} {unit} done, {p.Errors} errors, {p.Pending} pending{skipped}{rate}");
     }
+
+    /// <summary>Seconds left for <paramref name="pending"/> files at <paramref name="ratePerMinute"/>; null without a rate.</summary>
+    public static long? RemainingSeconds(long pending, double? ratePerMinute) =>
+        ratePerMinute is > 0 && pending > 0 ? (long)Math.Ceiling(pending / ratePerMinute.Value * 60) : null;
+
+    /// <summary>"45 s", "12 min", "2 h 5 min".</summary>
+    public static string Duration(long seconds) =>
+        seconds < 60 ? $"{seconds} s"
+        : seconds < 3600 ? $"{(seconds + 59) / 60} min"
+        : $"{seconds / 3600} h {(seconds % 3600 + 59) / 60} min";
 }

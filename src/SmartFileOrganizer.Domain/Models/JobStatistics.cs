@@ -13,6 +13,12 @@ public sealed class JobStatistics
     public long DirectoriesSummarized { get; init; }
     public long SummaryErrors { get; init; }
 
+    /// <summary>
+    /// AI-relevant directories that get no summary because none is needed: judged without a pre-assessment (a folder
+    /// inside a unit or a dump part judged by rule), or pre-assessed without a file of their own.
+    /// </summary>
+    public long SummariesNotNeeded { get; init; }
+
     public long FilesTotal { get; init; }
 
     /// <summary>Files of a type the classification phase handles (image, video, document).</summary>
@@ -26,6 +32,9 @@ public sealed class JobStatistics
 
     /// <summary>Eligible files not analysed because their directory is a unit or system data.</summary>
     public long FilesAiSkipped { get; init; }
+
+    /// <summary>Files per minute the model judged lately (the newest results, if recent); null when no run is going on.</summary>
+    public double? FilesAiRatePerMinute { get; init; }
 
     /// <summary>Eligible files that inherited the result of the confirmed sample of their directory (not looked at).</summary>
     public long FilesAiInherited { get; init; }
