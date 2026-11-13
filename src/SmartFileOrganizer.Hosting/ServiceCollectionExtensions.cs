@@ -98,6 +98,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton(sp =>
             sp.GetRequiredService<IConfiguration>().GetSection("ModelServer").Get<ModelServerOptions>() ?? new ModelServerOptions());
         services.AddSingleton<IModelServerWaitRepository, ModelServerWaitRepository>();
+        // Calls and tokens per kind for this process; the typed client below gets it through its constructor.
+        services.TryAddSingleton<ModelUsageMeter>();
         services.AddHttpClient<IOllamaService, OllamaService>((sp, client) =>
         {
             var opts = sp.GetRequiredService<OllamaOptions>();

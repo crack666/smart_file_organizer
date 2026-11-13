@@ -350,13 +350,19 @@ and sets the other eligible files from `Discovered` to `Deferred` in one transac
    Rule results: installers and programs → `SoftwareInstaller`, libraries and fonts → `SystemFile`, `Thumbs.db` →
    `TrashCandidate`, other databases → `ReviewNeeded`, unknown binaries → `Unknown`. They are stored with
    `is_ai_result = 0` and `model_used = rule:<id>` (`rule:program`, `rule:unknown-binary`, ...).
-3. Otherwise `ClassifyAsync` sends a structured `/api/chat` request with `think: false`. The prompt lists the facts as
+3. Otherwise `ClassifyAsync` sends a structured `/api/chat` request with `think: false`. Every phase (pre-assessment,
+   classification, second check, summary) sends its fixed task as the system message, character for character the same
+   for all calls of the phase (classification: system prompt, guidance, markers, language, then the keep hint block when
+   asked), and only the file or directory as the user message, so the server can take the fixed part from its prompt
+   cache (since 13.11.2026; before, the guidance followed the file details). The user message lists the facts as
    reliable (`taken_at: 2019-07-14T10:22:33 (metadata)`), then "The evidence contains" and "Not available (do not guess these)"
 4. `ParseResponse` handles gemma4's field aliasing (`classification` → `category`). A missing `confidence` is not
    assumed (until 12.11.2026 it became 0.85): it stays 0, `ConfidenceMissing` is set and the answer gets a second check
 5. The schema also asks for `sensitive` (array of marker tokens); parsed into `FileClassification.SensitiveMarkers`
 6. For files of mixed and uniform directories the schema also asks for `keep_hint` (`temporary` or
-   `worth_keeping`) with `keep_reason`; uniform ones too, so that the hint is there if the sample escalates
+   `worth_keeping`), with `keep_reason` only for `temporary` (optional in the schema); uniform ones too, so that the hint
+   is there if the sample escalates. Since 13.11.2026 the answer has no `suggested_target` (targets come from the
+   library match) and `summary` is one short sentence of at most 200 characters; older stored answers are still read
 7. A marked file (rule or model) proposed as `TrashCandidate` is stored as `ReviewNeeded`, one proposed as
    `temporary` as `worth_keeping` (the model's reason is replaced by a neutral one)
 8. Second check (see below): an unsure or contradicted answer is asked again before anything is stored
@@ -548,6 +554,14 @@ A busy server (429, 503) never counts against an item.
 settings but not read. `Ollama.TimeoutSeconds` (180) is the limit per attempt; until this change the
 `HttpClient` of the model service kept its own default of 100 s, which cut every longer call short while
 the message said 180 s.
+
+Every call also caps its answer (`num_predict`, since 13.11.2026), well above what a sound answer needs,
+so a derailed answer stops early instead of running into `TimeoutSeconds`: `Ollama.ClassificationMaxAnswerTokens`
+(512, also the second check; a classification answer averaged 108 tokens, measured 13.11.2026 before it was
+shortened), `Ollama.PreAssessmentMaxAnswerTokens` (2048, it lists anomalous files) and
+`Ollama.SummaryMaxAnswerTokens` (1024). An answer that stops at the cap (`done_reason` `length`) is a passing
+error: it is asked once more, and a second cut-off is stored as the error of the file or directory, never parsed
+as a partial result.
 
 ## Sensitive files
 

@@ -256,6 +256,17 @@ Links and read errors: https://github.com/crack666/smart_file_organizer/issues/5
 | `failed` | The second call failed; the first answer stays as `uncertain`. |
 | `skipped` | A second check was due but not made (switched off, or a person corrected the file). |
 
+### Kind of a model call (`ModelCallKinds`)
+
+Counted per run in `model_calls` of `sfo analyze --json` and `sfo eval --json`.
+
+| Code | Meaning |
+|---|---|
+| `pre_assessment` | Phase 1: one call per directory, verdict and sample plan. |
+| `classification` | Phase 2: the first call for a file. |
+| `second_check` | Phase 2: the second call for an unsure or contradicted file, with its directory as context. |
+| `summary` | Phase 3: one call per directory, the closing summary. |
+
 ## File facts
 
 ### Fact key (`FileFactKey`)

@@ -16,8 +16,9 @@ public static class AnalyzeCommand
     /// <summary>Set when the run ended because the model server stayed away (exit code 4).</summary>
     public sealed record ModelServerLostView(string Phase, DateTime Since, string Cause, double WaitedSeconds);
 
+    /// <param name="ModelCalls">Calls and tokens of this run per call kind, as the model server counted them.</param>
     public sealed record AnalyzeResult(long JobId, string Model, int Parallel, IReadOnlyList<PhaseRunView> Phases, int ErrorCount,
-        ModelServerLostView? ModelServerLost = null);
+        ModelServerLostView? ModelServerLost = null, IReadOnlyList<ModelCallUsage>? ModelCalls = null);
 
     /// <summary>Accepted values of <c>--phase</c>.</summary>
     public static readonly IReadOnlyDictionary<string, AiPhases> PhaseNames = new Dictionary<string, AiPhases>
@@ -118,7 +119,8 @@ public static class AnalyzeCommand
                 run.Phases.Select(p => new PhaseRunView(p.Phase, p.Result.TotalFiles, p.Result.ProcessedFiles, p.Result.ErrorCount, p.Result.StatusText,
                     p.Result.RetriedFiles, p.Result.SecondChecks)).ToList(),
                 run.ErrorCount,
-                run.Lost is { } l ? new ModelServerLostView(PhaseName(l.Phase), l.Since, l.Cause.ToCode(), Math.Round(l.Waited.TotalSeconds, 1)) : null);
+                run.Lost is { } l ? new ModelServerLostView(PhaseName(l.Phase), l.Since, l.Cause.ToCode(), Math.Round(l.Waited.TotalSeconds, 1)) : null,
+                services.GetRequiredService<ModelUsageMeter>().Snapshot());
 
             if (run.Lost is { } lost)
             {
@@ -156,7 +158,21 @@ public static class AnalyzeCommand
             sb.Append($"{Environment.NewLine}  {PhaseName(p.Phase),-15} {p.Processed}/{p.Total}, {p.Errors} errors  {p.Message}");
         if (r.ModelServerLost is { } lost)
             sb.Append($"{Environment.NewLine}  {lost.Phase,-15} stopped: the model server did not answer for {lost.WaitedSeconds:F0}s");
-        return sb.ToString();
+        if (r.ModelCalls is { Count: > 0 } calls)
+            AppendModelCalls(sb.AppendLine().AppendLine("Model calls:"), calls);
+        return sb.ToString().TrimEnd();
+    }
+
+    /// <summary>One line per call kind: calls, prompt tokens and the share from the server cache, answer tokens, mean time.</summary>
+    public static StringBuilder AppendModelCalls(StringBuilder sb, IReadOnlyList<ModelCallUsage> calls)
+    {
+        var inv = System.Globalization.CultureInfo.InvariantCulture;
+        foreach (var c in calls)
+        {
+            var cached = c.PromptTokens > 0 ? (double)c.CachedPromptTokens / c.PromptTokens : 0;
+            sb.AppendLine(inv, $"  {c.Kind,-15} {c.Calls} calls, prompt {c.PromptTokens} tokens ({cached:P0} cached), answer {c.AnswerTokens} tokens, {c.MeanSeconds:F2}s per call{(c.CutOff > 0 ? $", {c.CutOff} cut off" : "")}");
+        }
+        return sb;
     }
 
     /// <summary>The line people read on stderr when the run starts or stops waiting.</summary>

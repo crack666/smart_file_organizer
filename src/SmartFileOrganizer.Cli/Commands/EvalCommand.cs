@@ -40,7 +40,8 @@ public static class EvalCommand
         IReadOnlyList<EvalFailure> Failures,
         int UntrackedCount,
         IReadOnlyList<string> Untracked,
-        IReadOnlyList<EvalCaseResult>? Cases);
+        IReadOnlyList<EvalCaseResult>? Cases,
+        IReadOnlyList<ModelCallUsage> ModelCalls);
 
     public sealed record GenerateResult(
         string Directory,
@@ -208,7 +209,8 @@ public static class EvalCommand
         var stored = await services.GetRequiredService<EvalRunService>().RecordAsync(
             EvalRunMode.Corpus, truth.Subject, job.Id, context, report, started, ct);
 
-        var result = ToResult(stored, context, report, scanClock.Elapsed.TotalSeconds, analyzeClock.Elapsed.TotalSeconds);
+        var result = ToResult(stored, context, report, scanClock.Elapsed.TotalSeconds, analyzeClock.Elapsed.TotalSeconds,
+            services.GetRequiredService<ModelUsageMeter>().Snapshot());
         return CommandOutcome.Success(result, () => Render(result));
     }
 
@@ -236,7 +238,8 @@ public static class EvalCommand
         var context = Context(ollama, sampling: null, stub, rules: null);
         var stored = await services.GetRequiredService<EvalRunService>().RecordAsync(
             EvalRunMode.Cases, "cases", null, context, report, started, ct);
-        var result = ToResult(stored, context, report, null, clock.Elapsed.TotalSeconds);
+        var result = ToResult(stored, context, report, null, clock.Elapsed.TotalSeconds,
+            services.GetRequiredService<ModelUsageMeter>().Snapshot());
         return CommandOutcome.Success(result, () => Render(result));
     }
 
@@ -310,10 +313,11 @@ public static class EvalCommand
             settings);
     }
 
-    private static EvalRunResult ToResult(EvalRun run, EvalRunContext context, EvalReport report, double? scanSeconds, double analyzeSeconds) =>
+    private static EvalRunResult ToResult(EvalRun run, EvalRunContext context, EvalReport report, double? scanSeconds, double analyzeSeconds,
+        IReadOnlyList<ModelCallUsage> modelCalls) =>
         new(run.Id, run.Mode, run.Subject, run.JobId, run.Model, run.Stub, run.PromptFingerprint, run.AppVersion,
             context.Settings, scanSeconds is { } s ? Math.Round(s, 2) : null, Math.Round(analyzeSeconds, 2),
-            report.Scores, report.Failures, report.UntrackedCount, report.Untracked, report.Cases);
+            report.Scores, report.Failures, report.UntrackedCount, report.Untracked, report.Cases, modelCalls);
 
     private static string Render(EvalRunResult r)
     {
@@ -337,6 +341,8 @@ public static class EvalCommand
         if (r.UntrackedCount > 0)
             sb.AppendLine().AppendLine(CultureInfo.InvariantCulture,
                 $"Not in the truth ({r.UntrackedCount}): {string.Join(", ", r.Untracked.Take(10))}{(r.UntrackedCount > 10 ? ", ..." : "")}");
+        if (r.ModelCalls.Count > 0)
+            AnalyzeCommand.AppendModelCalls(sb.AppendLine().AppendLine("Model calls:"), r.ModelCalls);
         return sb.ToString().TrimEnd();
     }
 
