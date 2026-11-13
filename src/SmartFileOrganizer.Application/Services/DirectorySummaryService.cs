@@ -52,11 +52,18 @@ public class DirectorySummaryService
         _logger = logger;
     }
 
+    /// <param name="retryErrors">Also write again the summaries stored with an error, and those older than a file
+    /// result or the pre-assessment of their directory (written while files of it had failed:
+    /// <c>sfo analyze --retry-errors</c>).</param>
+    /// <param name="gate">Holds the model calls while the server is away; without one, such a call throws
+    /// <see cref="ModelServerUnavailableException"/>. Either way no error is stored for that directory.</param>
     public async Task<AiClassificationRunResult> RunAsync(
         long jobId,
         IProgress<AiClassificationProgress>? progress = null,
         Func<CancellationToken, Task>? waitIfPausedAsync = null,
-        CancellationToken ct = default)
+        CancellationToken ct = default,
+        bool retryErrors = false,
+        ModelServerGate? gate = null)
     {
         // Directories ordered deepest-first for bottom-up summarization
         var allDirs = await _dirRepo.GetAllForJobOrderedByDepthAsync(jobId, ct);
@@ -72,8 +79,17 @@ public class DirectorySummaryService
         // A model summary written before a file of its directory was marked is written again.
         var summarizedIds = new HashSet<long>();
         var dirsById = dirsDeepFirst.ToDictionary(d => d.Id);
+        var preAssessedAt = retryErrors
+            ? (await _dirClassRepo.GetForJobAsync(jobId, "pre_assessment", ct)).ToDictionary(r => r.DirectoryNodeId, r => r.AnalyzedAt)
+            : [];
         foreach (var row in await _dirClassRepo.GetForJobAsync(jobId, "summary", ct))
         {
+            if (retryErrors && dirsById.TryGetValue(row.DirectoryNodeId, out var retriedDir)
+                && (row.Error is not null || await IsOlderThanItsInputsAsync(jobId, retriedDir, row, preAssessedAt, ct)))
+            {
+                _logger.LogInformation("Summary of {Path} failed or predates its inputs; it is written again.", retriedDir.FullPath);
+                continue;
+            }
             if (!string.IsNullOrEmpty(row.ModelUsed) && dirsById.TryGetValue(row.DirectoryNodeId, out var summarizedDir))
             {
                 var markedNow = MarkedNames(await _fileRepo.GetByDirectoryAsync(jobId, summarizedDir.FullPath, ct));
@@ -102,8 +118,13 @@ public class DirectorySummaryService
         var verdicts = (await _verdictRepo.GetForJobAsync(jobId, ct)).ToDictionary(v => v.DirectoryNodeId);
         var samples = (await _sampleRepo.GetForJobAsync(jobId, ct)).ToDictionary(s => s.DirectoryNodeId);
 
-        await Parallel.ForEachAsync(
-            pending,
+        // Directories whose call found no server keep no row and are summarized again once the gate opens.
+        var toDo = pending;
+        while (toDo.Count > 0)
+        {
+            var open = new System.Collections.Concurrent.ConcurrentBag<DirectoryNode>();
+            await Parallel.ForEachAsync(
+            toDo,
             new ParallelOptions { MaxDegreeOfParallelism = workerCount, CancellationToken = ct },
             async (dir, token) =>
             {
@@ -165,7 +186,23 @@ public class DirectorySummaryService
                 };
 
                 Interlocked.Increment(ref modelCalls);
-                var result = await _ollama.SummarizeDirectoryAsync(input, token);
+                DirectoryClassificationResult result;
+                if (gate is null)
+                {
+                    result = await _ollama.SummarizeDirectoryAsync(input, token);
+                }
+                else
+                {
+                    var call = await gate.CallAsync(("summary", dir.Id), t => _ollama.SummarizeDirectoryAsync(input, t), token);
+                    if (call.State == ModelCallState.Open)
+                    {
+                        open.Add(dir);
+                        return;
+                    }
+                    result = call.State == ModelCallState.GaveUp
+                        ? new DirectoryClassificationResult { Phase = "summary", AnalyzedAt = DateTime.UtcNow, Error = call.Error }
+                        : call.Value!;
+                }
                 result.DirectoryNodeId = dir.Id;
                 result.SamplingStrategy = preAssessment.SamplingStrategy;
                 result.SampleSize = preAssessment.SampleSize;
@@ -185,6 +222,8 @@ public class DirectorySummaryService
                     jobId, nowProcessed, pending.Count, nowErrors, dir.FullPath,
                     $"Phase 3/3: Summarizing directories… {nowProcessed}/{pending.Count} (parallel={workerCount})"));
             });
+            toDo = open.OrderByDescending(d => d.Depth).ThenBy(d => d.FullPath, StringComparer.Ordinal).ToList();
+        }
 
         var completedMsg = errorCount > 0
             ? $"Phase 3/3 finished with {errorCount} error(s)."
@@ -248,6 +287,19 @@ public class DirectorySummaryService
         return node.Classification?.Summary is { } s
             ? $"{node.Name} — {category} — {(s.Length > 120 ? s[..120] + "\u2026" : s)}"
             : $"{node.Name} — {category}";
+    }
+
+    /// <summary>
+    /// Whether a summary was written before a file of its directory got its result or before the directory was
+    /// judged again: then it describes a state that no longer holds.
+    /// </summary>
+    private async Task<bool> IsOlderThanItsInputsAsync(
+        long jobId, DirectoryNode dir, DirectoryClassificationResult summary, IReadOnlyDictionary<long, DateTime> preAssessedAt,
+        CancellationToken ct)
+    {
+        if (preAssessedAt.TryGetValue(dir.Id, out var judged) && judged > summary.AnalyzedAt) return true;
+        var files = await _fileRepo.GetByDirectoryAsync(jobId, dir.FullPath, ct);
+        return files.Any(f => f.Classification is { } c && c.AnalyzedAt > summary.AnalyzedAt);
     }
 
     /// <summary>Names of the marked files among <paramref name="nodes"/>: those that enter as their neutral line.</summary>

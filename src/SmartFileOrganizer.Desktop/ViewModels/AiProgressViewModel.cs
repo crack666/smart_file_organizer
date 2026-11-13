@@ -14,6 +14,8 @@ public partial class AiProgressViewModel : ViewModelBase
     [ObservableProperty] private int _errorCount;
     [ObservableProperty] private bool _isRunning;
     [ObservableProperty] private bool _isPaused;
+    /// <summary>The run holds its calls until the model server answers again; it still runs and can be paused or cancelled.</summary>
+    [ObservableProperty] private bool _isWaitingForModelServer;
 
     public bool CanPause => IsRunning;
     public bool CanResume => IsPaused;
@@ -27,7 +29,9 @@ public partial class AiProgressViewModel : ViewModelBase
         TotalFiles = progress.TotalFiles;
         CurrentPath = progress.CurrentPath;
         ErrorCount = progress.ErrorCount;
-        StatusText = progress.StatusText;
+        // A late progress report of a call that ended before the outage must not hide the waiting line.
+        if (!IsWaitingForModelServer)
+            StatusText = progress.StatusText;
         ProgressPercent = progress.TotalFiles > 0
             ? (double)progress.ProcessedFiles / progress.TotalFiles * 100.0
             : 0;
@@ -41,7 +45,8 @@ public partial class AiProgressViewModel : ViewModelBase
             ? $"{state.StatusText} ({state.ErrorMessage})"
             : state.StatusText;
 
-        IsRunning = state.State is AiProcessingState.Starting or AiProcessingState.Running;
+        IsWaitingForModelServer = state.State == AiProcessingState.WaitingForModelServer;
+        IsRunning = state.State is AiProcessingState.Starting or AiProcessingState.Running or AiProcessingState.WaitingForModelServer;
         IsPaused = state.State == AiProcessingState.Paused;
 
         if (state.State is AiProcessingState.Cancelled or AiProcessingState.Failed or AiProcessingState.Unavailable)

@@ -493,6 +493,62 @@ judges the members and resolves, so it spends the same calls as a run.
   (more content, names of neighbouring files) at `Debug` only
 - Pause/resume/cancel supported at any phase boundary via `WaitIfPausedAsync`
 
+### When the model server goes away
+
+https://github.com/crack666/smart_file_organizer/issues/63. A model server that restarts, is
+updated or runs out of memory must not leave a run with hundreds of stored errors. Two layers keep
+"the server is gone" apart from "this item fails"; neither knows Ollama, so a second provider
+(https://github.com/crack666/smart_file_organizer/issues/53) uses them unchanged.
+
+**One call: `ModelHttpSender` (Infrastructure/ModelServer).** Retries a request on connection errors,
+timeouts, 429, 502, 503 and 504, up to `Ollama.MaxRetries` further attempts, with pauses of
+`RetryDelaySeconds`, doubled each time, or the server's `Retry-After` up to `MaxRetryAfterSeconds`.
+After a timeout it probes `/api/tags`: no answer means the server is gone; an answer means this request
+is slow, and when every attempt timed out that is an error of the item. Every other status (400, 404,
+500) goes back to the caller and becomes an error of the item at once. A call that never reached the
+server throws `ModelServerUnavailableException` with a `ModelServerFailure` code
+([glossary](glossary.md#model-server)); `IOllamaService` returns errors only for answers it got.
+
+**One run: `ModelServerGate` (Application).** Every model call of the three phases and of the second
+check goes through `CallAsync`. It counts `ModelServerUnavailableException`s in a row; the first answer
+resets the count.
+
+1. At `OutageAfterFailures` failures in a row the server counts as down. The gate cancels the calls still
+   in flight (with `MaxParallelRequests` above 1 several run at once); their items stay open and the
+   failure does not count against them. New calls wait at the gate.
+2. One waiter stores the wait in `model_server_waits` (shown by `sfo status`), reports `waiting`, and
+   probes every `ProbeIntervalSeconds` (longer when a busy server asks for it with `Retry-After`) until the server answers
+   and lists the model (`IsReadyAsync`), touching `checked_at` each time.
+3. Back: the model is loaded first with an empty chat request, allowed `WarmupTimeoutSeconds`, so the
+   first held calls do not time out on a cold load. Then `resumed`, the row is removed, held calls go on.
+   The outage is over at that point, not only once a held call succeeds: a new one needs
+   `OutageAfterFailures` failures in a row again, and failures count against their items again.
+4. Longer than `MaxWaitMinutes` since the server counted as down: `given_up`, `ModelServerLostException`, the
+   run ends with exit code 4 (CLI) or `Unavailable` (GUI). Nothing open is stored as an error.
+
+What happens to the items left open: phase 2 puts the file back to `discovered` and repeats the pass;
+phases 1 and 3 ask the open folders of a level or batch again; an outage during the second check drops
+the first answer too and the file is judged anew, so a result never rests on half a check. A file
+whose own call brings the server down every time would hold the run forever, so after
+`MaxOutagesPerItem` failures that happened while the server counted as up, it is stored as an error.
+A busy server (429, 503) never counts against an item.
+
+| Setting (`ModelServer`) | Default | Why |
+|---|---|---|
+| `RetryDelaySeconds` | 2 | A hiccup or a proxy restart is over within seconds; doubling reaches 4 s and 8 s before the run decides the server is gone. |
+| `MaxRetryAfterSeconds` | 60 | Honour the server, but not an hour: after that the probe interval takes over. |
+| `OutageAfterFailures` | 3 | One failure can be a broken connection; three in a row, each after its retries, is an outage, and a single bad file never reaches it. |
+| `ProbeIntervalSeconds` | 10 | A restart takes 10 to 60 s; probing more often only loads the log. |
+| `ProbeTimeoutSeconds` | 5 | `/api/tags` answers in milliseconds on a live server. |
+| `MaxWaitMinutes` | 30 | Covers a restart, an update and pulling a model again; a server away longer needs a person, and the job stays resumable. |
+| `WarmupTimeoutSeconds` | 600 | Loading a large model from disk after a restart can take minutes. |
+| `MaxOutagesPerItem` | 3 | A file that crashes the server three times is an error of that file, not an outage. |
+
+`Ollama.MaxRetries` (default 2) bounds the attempts of one call; until this change it was in the
+settings but not read. `Ollama.TimeoutSeconds` (180) is the limit per attempt; until this change the
+`HttpClient` of the model service kept its own default of 100 s, which cut every longer call short while
+the message said 180 s.
+
 ## Sensitive files
 
 Spec: [#9](https://github.com/crack666/smart_file_organizer/issues/9); the decision and its limits are in [engineering-decisions.md](engineering-decisions.md#8-sensitive-files-local-and-external-readers).
@@ -624,6 +680,9 @@ Important tables:
 - `finding_decisions` — decisions about findings (step 14): `job_id`, `finding_key`, `kind`, `state` (`accepted`,
   `rejected`, `wrong`; no row means open), `origin` (`human`, `agent`), `note`, `decided_at`, `snapshot_json`.
   Findings themselves are computed when read; deleted with the job
+- `model_server_waits` — at most one row per job while an analysis waits for the model server (step 17):
+  `job_id`, `since`, `checked_at` (last probe), `cause` (`ModelServerFailure` code). Removed when the server
+  answers again or the run ends; a row whose `checked_at` stopped moving belongs to a killed run. Deleted with the job
 - `db_version` — one row per applied schema step (`version`, `applied_at`)
 
 ## Schema migrations

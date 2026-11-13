@@ -575,3 +575,30 @@ Recommended by every finding, executed by nothing yet.
 | `complete` | Every step the kind needs has run. |
 | `partial` | Computed, but a step that sharpens it is missing; the note says which. |
 | `not_computed` | Not computed: a step it needs is missing, or there is no library. |
+
+## Model server
+
+How an analysis run tells "the model server is gone" from "this one item fails", and how it waits
+(https://github.com/crack666/smart_file_organizer/issues/63). Written to the `wait` lines of
+`sfo analyze --progress jsonl`, to `sfo status` and stored in `model_server_waits`.
+
+### Why a call did not reach the model (`ModelServerFailure`)
+
+These are the transient failures: the call is tried again, and after several in a row the run
+waits for the server. Any other answer of the server (400, 404, 500, an unreadable reply) is an
+error of the one item and is never retried.
+
+| Code | Meaning |
+|---|---|
+| `connection_failed` | No connection: refused, reset or broken off while sending or reading. |
+| `timed_out` | The call ran out of time, and a short probe right after it got no answer either. If the probe answers, the server is up and only this item is slow; that is an error of the item. |
+| `busy` | The server answered 429 or 503: it is up but cannot take the call now. Honours `Retry-After`. Never counts against the item. |
+| `bad_gateway` | A proxy in front of the server answered 502 or 504. |
+
+### State of waiting for the model server (`ModelServerWaitState`)
+
+| Code | Meaning |
+|---|---|
+| `waiting` | Several calls in a row failed; the run holds every call and probes the server. |
+| `resumed` | The server and the model answer again; held calls continue. |
+| `given_up` | The server stayed away longer than `ModelServer.MaxWaitMinutes`; the run ends with exit code 4, open items stay open. |

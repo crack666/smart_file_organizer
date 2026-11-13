@@ -9,7 +9,9 @@ public enum AiProcessingState
     Completed,
     Cancelled,
     Failed,
-    Unavailable
+    Unavailable,
+    /// <summary>The run holds its model calls until the model server answers again; then it is Running again.</summary>
+    WaitingForModelServer
 }
 
 public sealed record AiClassificationProgress(
@@ -53,10 +55,16 @@ public sealed record AiPhaseRunResult(AiPhases Phase, AiClassificationRunResult 
 /// Outcome of <see cref="AiClassificationCoordinator.RunAsync"/>. When Ollama was not reachable,
 /// <see cref="OllamaAvailable"/> is false and no phase ran.
 /// </summary>
-public sealed record AiPipelineRunResult(bool OllamaAvailable, IReadOnlyList<AiPhaseRunResult> Phases)
+public sealed record AiPipelineRunResult(bool OllamaAvailable, IReadOnlyList<AiPhaseRunResult> Phases, AiModelServerLost? Lost = null)
 {
     public int ErrorCount => Phases.Sum(p => p.Result.ErrorCount);
 }
+
+/// <summary>
+/// The run ended because the model server stayed away longer than allowed: <see cref="Phase"/> was interrupted,
+/// the phases before it are in <see cref="AiPipelineRunResult.Phases"/>. Items not judged stay open.
+/// </summary>
+public sealed record AiModelServerLost(AiPhases Phase, DateTime Since, SmartFileOrganizer.Domain.Enums.ModelServerFailure Cause, TimeSpan Waited);
 
 public sealed record AiProcessingStateChanged(
     long JobId,

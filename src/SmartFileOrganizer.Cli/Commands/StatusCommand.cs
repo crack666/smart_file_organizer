@@ -40,12 +40,16 @@ public static class StatusCommand
 
     public sealed record LinkExampleView(string Path, string? Target, bool Followed);
 
+    /// <summary>An analysis of the job waits for the model server. <c>stale</c>: its run has stopped probing (killed).</summary>
+    public sealed record ModelServerWaitView(DateTime Since, DateTime CheckedAt, string Cause, bool Stale);
+
     public sealed record StatusResult(
         JobView Job,
         PhasesView Phases,
         IReadOnlyList<ErrorView> Errors,
         IReadOnlyList<ScanErrorGroupView> ScanErrors,
-        IReadOnlyList<LinkGroupView> Links);
+        IReadOnlyList<LinkGroupView> Links,
+        ModelServerWaitView? ModelServerWait = null);
 
     public static Command Create(CliHost host, GlobalOptions globals)
     {
@@ -103,13 +107,20 @@ public static class StatusCommand
             s.ScanErrors.Select(g => new ScanErrorGroupView(g.Cause, g.Directories, g.Files,
                 g.Examples.Select(e => new ScanErrorExampleView(e.Path, e.Message)).ToList())).ToList(),
             s.Links.Select(g => new LinkGroupView(g.Kind, g.NotFollowed, g.Followed, g.Files,
-                g.Examples.Select(e => new LinkExampleView(e.Path, e.Target, e.Followed)).ToList())).ToList());
+                g.Examples.Select(e => new LinkExampleView(e.Path, e.Target, e.Followed)).ToList())).ToList(),
+            report.Wait is { } w ? new ModelServerWaitView(w.Since, w.CheckedAt, w.Cause.ToCode(), report.WaitIsStale) : null);
     }
 
     private static string Render(StatusResult r)
     {
         var sb = new StringBuilder();
         sb.AppendLine(r.Job.ToLine());
+        if (r.ModelServerWait is { } wait)
+        {
+            sb.AppendLine(wait.Stale
+                ? $"  analysis        stopped while waiting for the model server (last probe {wait.CheckedAt:yyyy-MM-dd HH:mm:ss}Z); run sfo analyze {r.Job.Id} again"
+                : $"  analysis        waiting for the model server since {wait.Since:yyyy-MM-dd HH:mm:ss}Z ({wait.Cause}), last probe {wait.CheckedAt:HH:mm:ss}Z");
+        }
         var scan = r.Phases.Scan;
         sb.AppendLine($"  scan            {scan.Status.ToString().ToLowerInvariant()}: {scan.FilesProcessed} files, {scan.DirectoriesProcessed} dirs, {scan.Errors} errors");
         Line(sb, "pre_assessment", r.Phases.PreAssessment, "dirs");

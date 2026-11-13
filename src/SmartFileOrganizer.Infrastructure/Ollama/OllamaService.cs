@@ -4,9 +4,11 @@ using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using SmartFileOrganizer.Application.Sensitivity;
+using SmartFileOrganizer.Application.Services;
 using SmartFileOrganizer.Domain.Enums;
 using SmartFileOrganizer.Domain.Interfaces;
 using SmartFileOrganizer.Domain.Models;
+using SmartFileOrganizer.Infrastructure.ModelServer;
 
 namespace SmartFileOrganizer.Infrastructure.Ollama;
 
@@ -24,23 +26,62 @@ public class OllamaService : IOllamaService
 {
     private readonly HttpClient _http;
     private readonly OllamaOptions _options;
+    private readonly ModelServerOptions _server;
+    private readonly TimeProvider _time;
+    private readonly ModelHttpSender _sender;
     private readonly ILogger<OllamaService> _logger;
     private readonly ILogger _traffic;
 
-    public OllamaService(HttpClient http, OllamaOptions options, ILogger<OllamaService> logger, ILogger<ModelTraffic>? traffic = null)
+    /// <param name="http">Its own <c>Timeout</c> should be infinite: every call here sets its own limit.</param>
+    /// <param name="server">Retry pauses and probe limits; null for the defaults.</param>
+    public OllamaService(
+        HttpClient http,
+        OllamaOptions options,
+        ILogger<OllamaService> logger,
+        ILogger<ModelTraffic>? traffic = null,
+        ModelServerOptions? server = null,
+        TimeProvider? time = null)
     {
         _http = http;
         _options = options;
         _logger = logger;
         _traffic = (ILogger?)traffic ?? NullLogger.Instance;
+        _server = server ?? new ModelServerOptions();
+        _time = time ?? TimeProvider.System;
+        _sender = new ModelHttpSender(http, _time, logger);
     }
 
     public async Task<bool> IsAvailableAsync(CancellationToken ct = default)
     {
         try
         {
-            var response = await _http.GetAsync(BuildUri("api/tags"), ct);
+            using var limit = new CancellationTokenSource(_server.ProbeTimeout, _time);
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, limit.Token);
+            using var response = await _http.GetAsync(BuildUri("api/tags"), linked.Token);
             return response.IsSuccessStatusCode;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>The server answers and lists the configured model (a name without tag also matches <c>:latest</c>).</summary>
+    public async Task<bool> IsReadyAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            var models = await GetLocalModelsAsync(ct);
+            return models.Any(m => string.Equals(m.Name, _options.Model, StringComparison.OrdinalIgnoreCase)
+                                   || string.Equals(m.Name, _options.Model + ":latest", StringComparison.OrdinalIgnoreCase));
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
         }
         catch
         {
@@ -50,11 +91,13 @@ public class OllamaService : IOllamaService
 
     public async Task<IReadOnlyList<OllamaLocalModel>> GetLocalModelsAsync(CancellationToken ct = default)
     {
-        using var response = await _http.GetAsync(BuildUri("api/tags"), ct);
+        using var limit = new CancellationTokenSource(_server.ProbeTimeout, _time);
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, limit.Token);
+        using var response = await _http.GetAsync(BuildUri("api/tags"), linked.Token);
         response.EnsureSuccessStatusCode();
 
-        await using var stream = await response.Content.ReadAsStreamAsync(ct);
-        using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: ct);
+        await using var stream = await response.Content.ReadAsStreamAsync(linked.Token);
+        using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: linked.Token);
 
         var models = new List<OllamaLocalModel>();
         if (!doc.RootElement.TryGetProperty("models", out var modelsProp) || modelsProp.ValueKind != JsonValueKind.Array)
@@ -87,9 +130,26 @@ public class OllamaService : IOllamaService
             keep_alive = _options.KeepAlive
         };
 
-        using var response = await _http.PostAsJsonAsync(BuildUri("api/chat"), requestBody, ct);
+        // Loading a large model takes minutes; its own limit, far above the one of a call.
+        using var limit = new CancellationTokenSource(_server.WarmupTimeout, _time);
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, limit.Token);
+        using var response = await _http.PostAsJsonAsync(BuildUri("api/chat"), requestBody, linked.Token);
         response.EnsureSuccessStatusCode();
     }
+
+    private ModelHttpRetryPolicy RetryPolicy => new(_options.MaxRetries, _server.RetryDelay, _server.MaxRetryAfter);
+
+    private TimeSpan CallTimeout => TimeSpan.FromSeconds(Math.Max(0.001, _options.TimeoutSeconds));
+
+    /// <summary>
+    /// One <c>/api/chat</c> call with retries (<see cref="ModelHttpSender"/>). Returns the answer, also a refusal;
+    /// throws <see cref="ModelServerUnavailableException"/> when the server is away and
+    /// <see cref="ModelCallTimedOutException"/> when only this request runs out of time.
+    /// </summary>
+    private Task<HttpResponseMessage> PostChatAsync(object requestBody, string what, CancellationToken ct) =>
+        _sender.SendAsync(
+            () => new HttpRequestMessage(HttpMethod.Post, BuildUri("api/chat")) { Content = JsonContent.Create(requestBody) },
+            CallTimeout, RetryPolicy, IsAvailableAsync, what, ct);
 
     public async Task<FileClassification> ClassifyAsync(OllamaClassificationInput input, CancellationToken ct = default)
     {
@@ -126,16 +186,13 @@ public class OllamaService : IOllamaService
                 }
             };
 
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(_options.TimeoutSeconds));
-
             var sw = System.Diagnostics.Stopwatch.StartNew();
-            var response = await _http.PostAsJsonAsync(BuildUri("api/chat"), requestBody, cts.Token);
+            using var response = await PostChatAsync(requestBody, "Phase 2 call", ct);
             sw.Stop();
 
             if (!response.IsSuccessStatusCode)
             {
-                var errorBody = await response.Content.ReadAsStringAsync(cts.Token);
+                var errorBody = await response.Content.ReadAsStringAsync(ct);
                 var errorMessage = TryExtractOllamaError(errorBody)
                     ?? $"Ollama returned {(int)response.StatusCode} {response.ReasonPhrase}";
 
@@ -149,7 +206,7 @@ public class OllamaService : IOllamaService
                 return result;
             }
 
-            var json = await response.Content.ReadAsStringAsync(cts.Token);
+            var json = await response.Content.ReadAsStringAsync(ct);
             result.RawResponse = json;
 
             ParseResponse(json, result);
@@ -160,12 +217,13 @@ public class OllamaService : IOllamaService
             _traffic.LogDebug("[Phase2] ANSWER for '{File}': {Raw}",
                 file.Name, marked ? ModelTraffic.Withheld : Trunc(json, 4000));
         }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        catch (ModelCallTimedOutException ex)
         {
             result.Error = $"Ollama request timed out after {_options.TimeoutSeconds}s.";
-            _logger.LogWarning("[Phase2] TIMEOUT ({Seconds}s) for '{File}'", _options.TimeoutSeconds, file.Name);
+            _logger.LogWarning("[Phase2] TIMEOUT ({Seconds}s, {Attempts} attempts) for '{File}'; the server answers, so the error is stored with the file",
+                _options.TimeoutSeconds, ex.Attempts, file.Name);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not ModelServerUnavailableException and not OperationCanceledException)
         {
             result.Error = ex.Message;
             _logger.LogError(ex, "[Phase2] Unexpected error for '{File}'", file.Name);
@@ -582,16 +640,13 @@ public class OllamaService : IOllamaService
                 messages = new object[] { new { role = "user", content = prompt } }
             };
 
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(_options.TimeoutSeconds));
-
             var sw = System.Diagnostics.Stopwatch.StartNew();
-            var response = await _http.PostAsJsonAsync(BuildUri("api/chat"), requestBody, cts.Token);
+            using var response = await PostChatAsync(requestBody, "Phase 1 call", ct);
             sw.Stop();
 
             if (!response.IsSuccessStatusCode)
             {
-                var errorBody = await response.Content.ReadAsStringAsync(cts.Token);
+                var errorBody = await response.Content.ReadAsStringAsync(ct);
                 var error = TryExtractOllamaError(errorBody) ?? $"HTTP {(int)response.StatusCode}";
                 _logger.LogWarning(
                     "[Phase1] HTTP {Status} for '{Dir}' after {Elapsed:F1}s; the error is stored with the directory",
@@ -601,7 +656,7 @@ public class OllamaService : IOllamaService
                 return Failed(error, errorBody);
             }
 
-            var json = await response.Content.ReadAsStringAsync(cts.Token);
+            var json = await response.Content.ReadAsStringAsync(ct);
             var outcome = PreAssessmentResponseParser.Parse(json, _options.Model);
             outcome.Assessment.DirectoryNodeId = input.Directory.Id;
             outcome.Verdict.DirectoryNodeId = input.Directory.Id;
@@ -615,12 +670,13 @@ public class OllamaService : IOllamaService
             _traffic.LogDebug("[Phase1] ANSWER for '{Dir}': {Raw}", input.Directory.RelativePath, Trunc(json, 4000));
             return outcome;
         }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        catch (ModelCallTimedOutException ex)
         {
-            _logger.LogWarning("[Phase1] TIMEOUT ({Seconds}s) for '{Dir}'", _options.TimeoutSeconds, input.Directory.RelativePath);
+            _logger.LogWarning("[Phase1] TIMEOUT ({Seconds}s, {Attempts} attempts) for '{Dir}'",
+                _options.TimeoutSeconds, ex.Attempts, input.Directory.RelativePath);
             return Failed($"Ollama request timed out after {_options.TimeoutSeconds}s.");
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex) when (ex is not OperationCanceledException and not ModelServerUnavailableException)
         {
             _logger.LogError(ex, "[Phase1] Unexpected error for '{Dir}'", input.Directory.RelativePath);
             return Failed(ex.Message);
@@ -782,16 +838,13 @@ public class OllamaService : IOllamaService
                 messages = new object[] { new { role = "user", content = prompt } }
             };
 
-            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            cts.CancelAfter(TimeSpan.FromSeconds(_options.TimeoutSeconds));
-
             var sw = System.Diagnostics.Stopwatch.StartNew();
-            var response = await _http.PostAsJsonAsync(BuildUri("api/chat"), requestBody, cts.Token);
+            using var response = await PostChatAsync(requestBody, "Phase 3 call", ct);
             sw.Stop();
 
             if (!response.IsSuccessStatusCode)
             {
-                var errorBody = await response.Content.ReadAsStringAsync(cts.Token);
+                var errorBody = await response.Content.ReadAsStringAsync(ct);
                 result.Error = TryExtractOllamaError(errorBody) ?? $"HTTP {(int)response.StatusCode}";
                 _logger.LogWarning(
                     "[Phase3] Ollama returned {Status} for '{Dir}' after {Elapsed:F1}s; the error is stored with the directory",
@@ -801,19 +854,20 @@ public class OllamaService : IOllamaService
                 return result;
             }
 
-            var json = await response.Content.ReadAsStringAsync(cts.Token);
+            var json = await response.Content.ReadAsStringAsync(ct);
             ParseSummaryResponse(json, result);
 
             _logger.LogInformation("[Phase3] '{Dir}' summarized in {Elapsed:F1}s",
                 input.Directory.RelativePath, sw.Elapsed.TotalSeconds);
             _traffic.LogDebug("[Phase3] ANSWER for '{Dir}': {Raw}", input.Directory.RelativePath, Trunc(json, 4000));
         }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        catch (ModelCallTimedOutException ex)
         {
             result.Error = $"Ollama request timed out after {_options.TimeoutSeconds}s.";
-            _logger.LogWarning("[Phase3] TIMEOUT ({Seconds}s) for '{Dir}'", _options.TimeoutSeconds, input.Directory.RelativePath);
+            _logger.LogWarning("[Phase3] TIMEOUT ({Seconds}s, {Attempts} attempts) for '{Dir}'",
+                _options.TimeoutSeconds, ex.Attempts, input.Directory.RelativePath);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException and not ModelServerUnavailableException)
         {
             result.Error = ex.Message;
             _logger.LogError(ex, "[Phase3] Unexpected error for '{Dir}'", input.Directory.RelativePath);

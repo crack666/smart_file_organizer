@@ -136,6 +136,15 @@ before that) and in CI on Windows and Linux._
 All three phases run with bounded concurrency set by `MaxParallelRequests`
 (default 4 in `appsettings.json`; `ClassificationService` clamps it to 1..8).
 
+Since 13.11.2026 ([#63](https://github.com/crack666/smart_file_organizer/issues/63)) a model server
+that goes away during a run no longer leaves stored errors behind: single calls are retried on
+connection errors, timeouts, 429, 502, 503 and 504; after three failures in a row the run waits for the
+server (up to 30 min, shown by `sfo status` and in the GUI), loads the model again and continues; when the
+server stays away, `sfo analyze` ends with exit code 4 and the next run finishes the open items. Until
+then every call in that window was stored as an error, `Ollama.MaxRetries` was not read, and calls ended
+after 100 s instead of the configured 180 s. Checked with a fake server in `ModelServerOutageTests`; not
+yet against a real Ollama restart.
+
 ### Desktop UI (Avalonia)
 
 - Root folder selection; scan start, pause, cancel.

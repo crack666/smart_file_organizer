@@ -101,7 +101,7 @@ phase skips work already stored, so running it again after Ctrl+C or an error co
 | `--phase <name>` | `pre_assessment`, `classification`, `summary` or `all` (default). Repeatable; phases always run in this order. |
 | `--parallel <n>` | Concurrent Ollama requests, 1 to 8. Default: `Ollama.MaxParallelRequests`. |
 | `--model <name>` | Ollama model for this run. Default: `Ollama.Model`. |
-| `--retry-errors` | Classification: try files that failed in an earlier run again. Files with a result are never called again; files still pending are judged as in any run; files a person corrected are left alone. |
+| `--retry-errors` | Classification: try files that failed in an earlier run again. Files with a result are never called again; files still pending are judged as in any run; files a person corrected are left alone. Summary: write again the summaries that failed and those older than the results they rest on, so the folder of a retried file gets a summary that knows it. Failed directory verdicts (phase 1) are asked again in every run, with or without this option. |
 
 ```bash
 sfo analyze 7 --phase classification --parallel 2 --json
@@ -132,8 +132,26 @@ sfo analyze 7 --phase classification --parallel 2 --json
 second calls made for unsure or contradicted results (see
 [architecture.md](architecture.md#phase-2--per-file-classification-in-stages-classificationservice-directorysamplingservice));
 both are 0 for the other phases. Errors of single files or directories do not fail the command; they are counted here and
-listed by `sfo status`. Failures: `ollama_unavailable` (3), `scan_not_completed` (1),
-`job_not_found` (1), `wrong_role` (1, the job is a `library`), `cancelled` (130).
+listed by `sfo status`. Failures: `ollama_unavailable` (3), `model_server_lost` (4),
+`scan_not_completed` (1), `job_not_found` (1), `wrong_role` (1, the job is a `library`), `cancelled` (130).
+
+**When the model server goes away during the run.** `ollama_unavailable` (3) is only the check at
+the start: nothing has been asked yet. Once the run has started, a server that stops answering is
+waited for, not counted as errors of the files
+([architecture.md](architecture.md#when-the-model-server-goes-away)). With `--progress jsonl` each
+change is one `wait` line on stderr:
+
+```json
+{"schema_version":1,"type":"wait","phase":"classification","state":"waiting","since":"2026-11-13T09:12:04Z","cause":"connection_failed","waited_seconds":0,"message":"waiting for the model server since ..."}
+{"schema_version":1,"type":"wait","phase":"classification","state":"resumed","since":"2026-11-13T09:12:04Z","cause":"connection_failed","waited_seconds":41.5,"message":"model server answers again after 42s; continuing"}
+```
+
+`state` and `cause` are codes from the [glossary](glossary.md#model-server). When the server stays
+away longer than `ModelServer.MaxWaitMinutes`, a `given_up` line follows and the command ends with
+exit code 4, `model_server_lost`. `result` is then filled as usual plus `model_server_lost`:
+`{ "phase": "classification", "since": "...Z", "cause": "connection_failed", "waited_seconds": 1800 }`.
+The files and folders not judged stay pending, none is stored as an error; `sfo analyze <job>` again
+finishes them.
 
 ### `sfo jobs`
 
@@ -201,6 +219,11 @@ each; `errors` lists the AI phases only. `links` lists the links the scan found,
 links; none of them counts as content ([scan-rules.md](scan-rules.md#links-and-read-errors)). After a
 finished scan `directories_total` equals `directories_processed` and `files_total` equals `files_processed`:
 both are counted from the stored rows (since 13.11.2026; before, the scan root was missing from the total).
+
+`model_server_wait` is present only while an analysis of the job waits for the model server:
+`{ "since": "...Z", "checked_at": "...Z", "cause": "connection_failed", "stale": false }`. `checked_at`
+is the last probe. `stale` is `true` when no probe was recorded for longer than three probe intervals
+(at least one minute): the waiting run was killed, and `sfo analyze <job>` continues it.
 
 For each AI phase, `total = done + errors + pending + skipped`.
 
@@ -1127,7 +1150,8 @@ one JSON object with `schema_version` and `type`:
 ```
 
 `phase` is `scan`, `pre_assessment`, `classification`, `summary`, `compare` or `eval_cases`. Progress is throttled to
-one line per phase every 500 ms, plus the final line of a phase.
+one line per phase every 500 ms, plus the final line of a phase. `sfo analyze` also writes `"type":"wait"`
+lines when it starts or stops waiting for the model server (see `sfo analyze`); they are never throttled.
 
 **Exit codes.**
 
@@ -1137,6 +1161,7 @@ one line per phase every 500 ms, plus the final line of a phase.
 | 1 | The command ran but could not do its job | `job_not_found`, `path_not_found`, `scan_failed`, `scan_not_completed`, `wrong_role`, `compare_incomplete`, `database_error`, `model_missing`, `rules_invalid`, `words_invalid`, `output_inside_job`, `export_failed`, `truth_invalid`, `run_not_found`, `output_not_empty`, `bundle_not_found`, `patterns_invalid`, `library_patterns_invalid`, `settings_invalid`, `finding_not_found`, `internal_error` |
 | 2 | Wrong invocation: unknown command or option, missing or invalid value | `usage` |
 | 3 | Ollama not reachable | `ollama_unavailable` |
+| 4 | The model server went away during `sfo analyze` and did not come back within `ModelServer.MaxWaitMinutes`; open items stay open, run the command again | `model_server_lost` |
 | 130 | Interrupted with Ctrl+C; stored work stays and the command can be run again | `cancelled` |
 
 A second Ctrl+C terminates the process immediately.

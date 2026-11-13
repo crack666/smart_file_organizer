@@ -14,6 +14,10 @@ public static class ExitCodes
     /// <summary>Ollama is not reachable.</summary>
     public const int OllamaUnavailable = 3;
 
+    /// <summary>The model server went away during the run and stayed away longer than <c>ModelServer.MaxWaitMinutes</c>;
+    /// items not judged stay open and the command can be run again.</summary>
+    public const int ModelServerLost = 4;
+
     /// <summary>Interrupted by Ctrl+C; persisted work stays resumable.</summary>
     public const int Cancelled = 130;
 }
@@ -24,6 +28,7 @@ public static class ErrorCodes
     public const string Usage = "usage";
     public const string Cancelled = "cancelled";
     public const string OllamaUnavailable = "ollama_unavailable";
+    public const string ModelServerLost = "model_server_lost";
     public const string JobNotFound = "job_not_found";
     public const string PathNotFound = "path_not_found";
     public const string ScanFailed = "scan_failed";

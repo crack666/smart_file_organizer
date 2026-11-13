@@ -13,7 +13,11 @@ public static class AnalyzeCommand
 {
     public sealed record PhaseRunView(AiPhases Phase, long Total, long Processed, int Errors, string Message, int Retried, int SecondChecks);
 
-    public sealed record AnalyzeResult(long JobId, string Model, int Parallel, IReadOnlyList<PhaseRunView> Phases, int ErrorCount);
+    /// <summary>Set when the run ended because the model server stayed away (exit code 4).</summary>
+    public sealed record ModelServerLostView(string Phase, DateTime Since, string Cause, double WaitedSeconds);
+
+    public sealed record AnalyzeResult(long JobId, string Model, int Parallel, IReadOnlyList<PhaseRunView> Phases, int ErrorCount,
+        ModelServerLostView? ModelServerLost = null);
 
     /// <summary>Accepted values of <c>--phase</c>.</summary>
     public static readonly IReadOnlyDictionary<string, AiPhases> PhaseNames = new Dictionary<string, AiPhases>
@@ -92,15 +96,14 @@ public static class AnalyzeCommand
             try
             {
                 run = await services.GetRequiredService<AiClassificationCoordinator>().RunAsync(
-                    jobId, phases, progress, ct, ctx.ParseResult.GetValue(retryErrors));
+                    jobId, phases, progress, ct, ctx.ParseResult.GetValue(retryErrors),
+                    (p, wait) => ctx.Progress.ReportWait(PhaseName(p), wait.State.ToCode(), wait.Since, wait.Cause.ToCode(),
+                        wait.Waited, WaitText(wait)));
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
                 return CommandOutcome.Cancelled($"Analysis interrupted. Results so far are saved; resume with: sfo analyze {jobId}");
             }
-
-            // IsAvailableAsync swallows cancellation and reports "not available".
-            ct.ThrowIfCancellationRequested();
 
             if (!run.OllamaAvailable)
             {
@@ -114,7 +117,17 @@ public static class AnalyzeCommand
                 Math.Clamp(ollama.MaxParallelRequests, 1, 8),
                 run.Phases.Select(p => new PhaseRunView(p.Phase, p.Result.TotalFiles, p.Result.ProcessedFiles, p.Result.ErrorCount, p.Result.StatusText,
                     p.Result.RetriedFiles, p.Result.SecondChecks)).ToList(),
-                run.ErrorCount);
+                run.ErrorCount,
+                run.Lost is { } l ? new ModelServerLostView(PhaseName(l.Phase), l.Since, l.Cause.ToCode(), Math.Round(l.Waited.TotalSeconds, 1)) : null);
+
+            if (run.Lost is { } lost)
+            {
+                return CommandOutcome.Fail(ExitCodes.ModelServerLost, ErrorCodes.ModelServerLost,
+                    $"The model server at {ollama.BaseUrl} did not answer for {lost.Waited.TotalMinutes:F1} min " +
+                    $"(since {lost.Since:yyyy-MM-dd HH:mm:ss}Z, {lost.Cause.ToCode()}), during {PhaseName(lost.Phase)}. " +
+                    $"Files and folders not judged stay open; continue with: sfo analyze {jobId}",
+                    result, () => Render(result));
+            }
             return CommandOutcome.Success(result, () => Render(result));
         });
 
@@ -141,6 +154,18 @@ public static class AnalyzeCommand
         var sb = new StringBuilder($"Job {r.JobId}, model {r.Model}, parallel {r.Parallel}");
         foreach (var p in r.Phases)
             sb.Append($"{Environment.NewLine}  {PhaseName(p.Phase),-15} {p.Processed}/{p.Total}, {p.Errors} errors  {p.Message}");
+        if (r.ModelServerLost is { } lost)
+            sb.Append($"{Environment.NewLine}  {lost.Phase,-15} stopped: the model server did not answer for {lost.WaitedSeconds:F0}s");
         return sb.ToString();
     }
+
+    /// <summary>The line people read on stderr when the run starts or stops waiting.</summary>
+    public static string WaitText(ModelServerWaitEvent wait) => wait.State switch
+    {
+        ModelServerWaitState.Waiting =>
+            $"waiting for the model server since {wait.Since:yyyy-MM-dd HH:mm:ss}Z ({wait.Cause.ToCode()}); held calls continue when it answers",
+        ModelServerWaitState.Resumed =>
+            $"model server answers again after {wait.Waited.TotalSeconds:F0}s; continuing",
+        _ => $"model server did not answer for {wait.Waited.TotalMinutes:F1} min; stopping, open items stay open"
+    };
 }
