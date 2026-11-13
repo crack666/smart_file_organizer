@@ -295,6 +295,8 @@ items fixed and the new failures.
 
 _Scripted answers (`--stub truth.json`), on the branch of https://github.com/crack666/smart_file_organizer/issues/67
 rebased on master `0630264`, prompt fingerprint `d2f30ce0d015d9d5`, sampling 15 / 10 % / small folders up to 3 files.
+After the rebase on master `b88e089` (new prompt fingerprint `07982d6fb2feeae6`) the v4 run gave the same scores and
+the same 26 + 92 model calls.
 Model calls are the directory verdicts with source `model` plus the file results with origin `model` (summaries not
 counted):_
 
