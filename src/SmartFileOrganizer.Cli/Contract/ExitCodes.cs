@@ -51,5 +51,6 @@ public static class ErrorCodes
     public const string LibraryPatternsInvalid = "library_patterns_invalid";
     public const string SettingsInvalid = "settings_invalid";
     public const string FindingNotFound = "finding_not_found";
+    public const string TargetsInvalid = "targets_invalid";
     public const string InternalError = "internal_error";
 }

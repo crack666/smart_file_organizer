@@ -30,6 +30,7 @@ public static class SfoApp
         root.Subcommands.Add(EvalCommand.Create(host, globals));
         root.Subcommands.Add(BundlesCommand.Create(host, globals));
         root.Subcommands.Add(FindingsCommand.Create(host, globals));
+        root.Subcommands.Add(DecideCommand.Create(host, globals));
         return root;
     }
 
