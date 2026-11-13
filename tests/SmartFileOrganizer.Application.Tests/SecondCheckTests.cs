@@ -315,6 +315,38 @@ public class SecondCheckTests : IDisposable
     }
 
     [Fact]
+    public async Task KindOfFile_LimitsTheCategory_WithoutASecondCall_AndTheContradictionIsStored()
+    {
+        var jobId = await InsertAsync(
+            ("Lektion_01.mp4", FileType.Video), ("song.mp3", FileType.Audio), ("main.py", FileType.Code), ("old.mp4", FileType.Video));
+        _preparer.Facts["Lektion_01.mp4"] = [new FileFact(FileFactKey.DetectedFormat, "mp4")];
+        _preparer.Facts["main.py"] = [new FileFact(FileFactKey.DetectedFormat, "text")];
+        _ollama.Classify = input => input.File.Name switch
+        {
+            "Lektion_01.mp4" => Answer(FileCategory.Document, confidence: 0.4), // unsure too: still no second call
+            "song.mp3" => Answer(FileCategory.Photo),
+            "main.py" => Answer(FileCategory.Document),
+            _ => Answer(FileCategory.TrashCandidate) // a judgement of worth stays open
+        };
+
+        await Service().RunAsync(jobId);
+
+        Assert.Empty(_ollama.SecondLooks);
+        Assert.Equal(FileCategory.Video, (await FileAsync(jobId, "Lektion_01.mp4")).Classification!.Category);
+        Assert.Equal(FileCategory.Audio, (await FileAsync(jobId, "song.mp3")).Classification!.Category);
+        Assert.Equal(FileCategory.Code, (await FileAsync(jobId, "main.py")).Classification!.Category);
+        Assert.Equal(FileCategory.TrashCandidate, (await FileAsync(jobId, "old.mp4")).Classification!.Category);
+        Assert.Empty(await ChecksAsync(jobId, "old.mp4"));
+
+        var check = Assert.Single(await ChecksAsync(jobId, "Lektion_01.mp4"));
+        Assert.Equal(CheckOutcome.RuleWins, check.Outcome);
+        Assert.Contains(CheckReason.RuleDisagrees, check.Reasons);
+        Assert.Equal(FileCategory.Document, check.First.Category);
+        Assert.Contains("type_limit", check.RuleNote);
+        Assert.Equal(CheckOutcome.RuleWins, Assert.Single(await ChecksAsync(jobId, "song.mp3")).Outcome);
+    }
+
+    [Fact]
     public async Task CategoryThatTheFileCannotBe_IsCheckedAgain_AndTheFittingSecondAnswerStands()
     {
         var jobId = await InsertAsync(("holiday.jpg", FileType.Image), ("clip.mp4", FileType.Video));

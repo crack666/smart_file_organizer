@@ -387,7 +387,7 @@ signals. `ResultCheckRules.Find` lists what speaks against a first answer (codes
 | `low_confidence` | confidence below `BelowConfidence` (0.7) |
 | `unclear_category` | `ReviewNeeded` or `Unknown` |
 | `kind_mismatch` | `Photo`/`Screenshot` for a file that is no image, `Video` for no video, `Audio` for no audio; header bytes (`detected_format`) decide, the extension where the header is ambiguous (`mp4` is also HEIC and MOV, `mp3` a weak test) |
-| `rule_disagrees` | an unambiguous metadata rule: `image_origin = screenshot` against `Photo`, `image_origin = camera` with a device against `Screenshot`. The rule sets the category, no second call. A scan is not forced: a scanned print may be a photo |
+| `rule_disagrees` | an unambiguous metadata rule: `image_origin = screenshot` against `Photo`, `image_origin = camera` with a device against `Screenshot`. The rule sets the category, no second call. A scan is not forced: a scanned print may be a photo. Also the type limit (rule note `type_limit`, since 13.11.2026, https://github.com/crack666/smart_file_organizer/issues/67): a video stays `Video`, audio `Audio`, a code file `Code`; besides its kind the model may only choose `TrashCandidate` or `ReviewNeeded` (code also `SystemFile`). Any other answer is set to the kind and no second call is made, even when other reasons are present; the type limit is checked before `kind_mismatch` and also after a second call |
 | `verdict_disagrees` | retention of the directory verdict `disposable` and importance High or Critical, or `keep` and `TrashCandidate` or keep hint `temporary` |
 
 Any reason except `rule_disagrees` leads to a second call, made right after the first in the same worker: the

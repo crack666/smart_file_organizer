@@ -336,13 +336,15 @@ public class StagedAnalysisTests : IDisposable
 
         Assert.Equal(5, _ollama.FirstLooks.Count);
         Assert.All(_ollama.ClassifyInputs, i => Assert.True(i.AskKeepHint));
-        // The scripted verdict says "keep": every temporary file contradicts it and is looked at again.
-        Assert.Equal(4, _ollama.SecondLooks.Count);
-        Assert.DoesNotContain(_ollama.SecondLooks, i => i.File.Name == "passwoerter.txt");
+        // The scripted verdict says "keep": every temporary file contradicts it and is looked at again, except the
+        // video: "document" does not fit a video, so the kind of file sets the category without a second call.
+        Assert.Equal(3, _ollama.SecondLooks.Count);
+        Assert.DoesNotContain(_ollama.SecondLooks, i => i.File.Name is "passwoerter.txt" or "clip.mp4");
         Assert.Empty(await _sampleRepo.GetForJobAsync(jobId));
 
         var files = await _fileRepo.GetByDirectoryAsync(jobId, downloads);
         Assert.All(files.Where(f => f.Name != "passwoerter.txt"), f => Assert.Equal(KeepHint.Temporary, f.Classification!.KeepHint));
+        Assert.Equal(FileCategory.Video, files.Single(f => f.Name == "clip.mp4").Classification!.Category);
         var secret = files.Single(f => f.Name == "passwoerter.txt").Classification!;
         Assert.Equal(KeepHint.WorthKeeping, secret.KeepHint);
         Assert.DoesNotContain("download", secret.KeepReason);

@@ -476,7 +476,7 @@ public class ClassificationService
         check.Second = CheckAnswer.From(second);
 
         var (result, outcome) = ResultCheckRules.Combine(file, input.Facts, first, second);
-        if (ResultCheckRules.RuleOverride(input.Facts, result.Category) is { } rule)
+        if ((ResultCheckRules.TypeLimit(file, input.Facts, result.Category) ?? ResultCheckRules.RuleOverride(input.Facts, result.Category)) is { } rule)
         {
             result.Category = rule.Category;
             if (result.Certainty == ResultCertainty.Certain) result.Certainty = ResultCertainty.Likely;
