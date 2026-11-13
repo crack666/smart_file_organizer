@@ -555,6 +555,14 @@ settings but not read. `Ollama.TimeoutSeconds` (180) is the limit per attempt; u
 `HttpClient` of the model service kept its own default of 100 s, which cut every longer call short while
 the message said 180 s.
 
+Every call also caps its answer (`num_predict`, since 13.11.2026), well above what a sound answer needs,
+so a derailed answer stops early instead of running into `TimeoutSeconds`: `Ollama.ClassificationMaxAnswerTokens`
+(512, also the second check; a classification answer averaged 108 tokens, measured 13.11.2026 before it was
+shortened), `Ollama.PreAssessmentMaxAnswerTokens` (2048, it lists anomalous files) and
+`Ollama.SummaryMaxAnswerTokens` (1024). An answer that stops at the cap (`done_reason` `length`) is a passing
+error: it is asked once more, and a second cut-off is stored as the error of the file or directory, never parsed
+as a partial result.
+
 ## Sensitive files
 
 Spec: [#9](https://github.com/crack666/smart_file_organizer/issues/9); the decision and its limits are in [engineering-decisions.md](engineering-decisions.md#8-sensitive-files-local-and-external-readers).

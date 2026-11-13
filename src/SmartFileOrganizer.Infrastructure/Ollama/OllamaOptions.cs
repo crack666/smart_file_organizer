@@ -21,6 +21,16 @@ public class OllamaOptions
     /// </summary>
     public int MaxParallelRequests { get; set; } = 1;
 
+    // Upper bounds of an answer in tokens (Ollama num_predict), well above what a sound answer needs, so that a
+    // derailed answer stops early instead of running into the time limit. Measured 13.11.2026: a classification
+    // answer averaged 108 tokens before the answer was shortened.
+    /// <summary>Token limit of a classification answer (also the second check).</summary>
+    public int ClassificationMaxAnswerTokens { get; set; } = 512;
+    /// <summary>Token limit of a pre-assessment answer; it lists anomalous files with a reason each.</summary>
+    public int PreAssessmentMaxAnswerTokens { get; set; } = 2048;
+    /// <summary>Token limit of a directory summary answer.</summary>
+    public int SummaryMaxAnswerTokens { get; set; } = 1024;
+
     public const string DefaultSystemPrompt =
         """
         You classify user files to help organize a personal file collection.

@@ -31,17 +31,21 @@ public class OllamaService : IOllamaService
     private readonly ModelHttpSender _sender;
     private readonly ILogger<OllamaService> _logger;
     private readonly ILogger _traffic;
+    private readonly ModelUsageMeter? _meter;
 
     /// <param name="http">Its own <c>Timeout</c> should be infinite: every call here sets its own limit.</param>
     /// <param name="server">Retry pauses and probe limits; null for the defaults.</param>
+    /// <param name="meter">Counts calls and tokens per kind; null to count nothing.</param>
     public OllamaService(
         HttpClient http,
         OllamaOptions options,
         ILogger<OllamaService> logger,
         ILogger<ModelTraffic>? traffic = null,
         ModelServerOptions? server = null,
-        TimeProvider? time = null)
+        TimeProvider? time = null,
+        ModelUsageMeter? meter = null)
     {
+        _meter = meter;
         _http = http;
         _options = options;
         _logger = logger;
@@ -151,6 +155,56 @@ public class OllamaService : IOllamaService
             () => new HttpRequestMessage(HttpMethod.Post, BuildUri("api/chat")) { Content = JsonContent.Create(requestBody) },
             CallTimeout, RetryPolicy, IsAvailableAsync, what, ct);
 
+    /// <summary>An answer of <see cref="ChatAsync"/>: the body, and the status when the server refused.</summary>
+    private sealed record ChatReply(bool Success, int Status, string? Reason, string Body);
+
+    /// <summary>
+    /// One call as <see cref="PostChatAsync"/>, with the server counts recorded under <paramref name="kind"/>.
+    /// An answer that stopped at <paramref name="maxTokens"/> (<c>done_reason</c> <c>length</c>) is a passing error,
+    /// not a partial result: it is asked once more, and a second cut-off throws <see cref="ModelAnswerCutOffException"/>.
+    /// </summary>
+    private async Task<ChatReply> ChatAsync(object requestBody, string kind, int maxTokens, string what, CancellationToken ct)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            using var response = await PostChatAsync(requestBody, what, ct);
+            var body = await response.Content.ReadAsStringAsync(ct);
+            if (!response.IsSuccessStatusCode)
+                return new ChatReply(false, (int)response.StatusCode, response.ReasonPhrase, body);
+
+            var cutOff = RecordUsage(kind, body);
+            if (!cutOff)
+                return new ChatReply(true, (int)response.StatusCode, null, body);
+            _logger.LogWarning("{What}: answer cut off at the limit of {Tokens} tokens (attempt {Attempt} of 2)", what, maxTokens, attempt);
+            if (attempt >= 2)
+                throw new ModelAnswerCutOffException(maxTokens);
+        }
+    }
+
+    /// <summary>Records the counts of an answer in the meter; true when the answer stopped at the token limit.</summary>
+    private bool RecordUsage(string kind, string body)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            var root = doc.RootElement;
+            long Count(string name) =>
+                root.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number && v.TryGetInt64(out var n) ? n : 0;
+            var cutOff = root.TryGetProperty("done_reason", out var reason) && reason.ValueKind == JsonValueKind.String
+                         && reason.GetString() == "length";
+            // Durations are nanoseconds.
+            var seconds = (Count("prompt_eval_duration") + Count("eval_duration")) / 1e9;
+            _meter?.Record(kind, Count("prompt_eval_count"), Count("prompt_eval_cached_count"), Count("eval_count"),
+                TimeSpan.FromSeconds(seconds), cutOff);
+            return cutOff;
+        }
+        catch (JsonException)
+        {
+            // Not JSON: the parser of the phase handles it.
+            return false;
+        }
+    }
+
     public async Task<FileClassification> ClassifyAsync(OllamaClassificationInput input, CancellationToken ct = default)
     {
         var file = input.File;
@@ -179,6 +233,7 @@ public class OllamaService : IOllamaService
                 think = false,
                 keep_alive = _options.KeepAlive,
                 format = BuildClassificationSchema(input.AskKeepHint),
+                options = new { num_predict = _options.ClassificationMaxAnswerTokens },
                 messages = new object[]
                 {
                     new { role = "system", content = prompt.System },
@@ -187,26 +242,28 @@ public class OllamaService : IOllamaService
             };
 
             var sw = System.Diagnostics.Stopwatch.StartNew();
-            using var response = await PostChatAsync(requestBody, "Phase 2 call", ct);
+            var reply = await ChatAsync(requestBody,
+                input.Context is null ? ModelCallKinds.Classification : ModelCallKinds.SecondCheck,
+                _options.ClassificationMaxAnswerTokens, "Phase 2 call", ct);
             sw.Stop();
 
-            if (!response.IsSuccessStatusCode)
+            if (!reply.Success)
             {
-                var errorBody = await response.Content.ReadAsStringAsync(ct);
+                var errorBody = reply.Body;
                 var errorMessage = TryExtractOllamaError(errorBody)
-                    ?? $"Ollama returned {(int)response.StatusCode} {response.ReasonPhrase}";
+                    ?? $"Ollama returned {reply.Status} {reply.Reason}";
 
                 result.Error = errorMessage;
                 result.RawResponse = errorBody;
                 // The body can echo the prompt: only the status on the regular logger.
                 _logger.LogWarning("[Phase2] HTTP {Status} for '{File}' after {Elapsed:F1}s; the error is stored with the file",
-                    (int)response.StatusCode, file.Name, sw.Elapsed.TotalSeconds);
+                    reply.Status, file.Name, sw.Elapsed.TotalSeconds);
                 _traffic.LogDebug("[Phase2] HTTP {Status} for '{File}', body: {Body}",
-                    (int)response.StatusCode, file.Name, marked ? ModelTraffic.Withheld : Trunc(errorBody, 2000));
+                    reply.Status, file.Name, marked ? ModelTraffic.Withheld : Trunc(errorBody, 2000));
                 return result;
             }
 
-            var json = await response.Content.ReadAsStringAsync(ct);
+            var json = reply.Body;
             result.RawResponse = json;
 
             ParseResponse(json, result);
@@ -222,6 +279,12 @@ public class OllamaService : IOllamaService
             result.Error = $"Ollama request timed out after {_options.TimeoutSeconds}s.";
             _logger.LogWarning("[Phase2] TIMEOUT ({Seconds}s, {Attempts} attempts) for '{File}'; the server answers, so the error is stored with the file",
                 _options.TimeoutSeconds, ex.Attempts, file.Name);
+        }
+        catch (ModelAnswerCutOffException ex)
+        {
+            result.Error = ex.Message;
+            _logger.LogWarning("[Phase2] answer for '{File}' cut off twice at {Tokens} tokens; the error is stored with the file",
+                file.Name, ex.MaxTokens);
         }
         catch (Exception ex) when (ex is not ModelServerUnavailableException and not OperationCanceledException)
         {
@@ -680,6 +743,7 @@ public class OllamaService : IOllamaService
                 think = false,
                 keep_alive = _options.KeepAlive,
                 format = BuildPreAssessmentSchema(),
+                options = new { num_predict = _options.PreAssessmentMaxAnswerTokens },
                 messages = new object[]
                 {
                     new { role = "system", content = prompt.System },
@@ -688,22 +752,22 @@ public class OllamaService : IOllamaService
             };
 
             var sw = System.Diagnostics.Stopwatch.StartNew();
-            using var response = await PostChatAsync(requestBody, "Phase 1 call", ct);
+            var reply = await ChatAsync(requestBody, ModelCallKinds.PreAssessment, _options.PreAssessmentMaxAnswerTokens, "Phase 1 call", ct);
             sw.Stop();
 
-            if (!response.IsSuccessStatusCode)
+            if (!reply.Success)
             {
-                var errorBody = await response.Content.ReadAsStringAsync(ct);
-                var error = TryExtractOllamaError(errorBody) ?? $"HTTP {(int)response.StatusCode}";
+                var errorBody = reply.Body;
+                var error = TryExtractOllamaError(errorBody) ?? $"HTTP {reply.Status}";
                 _logger.LogWarning(
                     "[Phase1] HTTP {Status} for '{Dir}' after {Elapsed:F1}s; the error is stored with the directory",
-                    (int)response.StatusCode, input.Directory.RelativePath, sw.Elapsed.TotalSeconds);
+                    reply.Status, input.Directory.RelativePath, sw.Elapsed.TotalSeconds);
                 _traffic.LogDebug("[Phase1] HTTP {Status} for '{Dir}', body: {Body}",
-                    (int)response.StatusCode, input.Directory.RelativePath, Trunc(errorBody, 2000));
+                    reply.Status, input.Directory.RelativePath, Trunc(errorBody, 2000));
                 return Failed(error, errorBody);
             }
 
-            var json = await response.Content.ReadAsStringAsync(ct);
+            var json = reply.Body;
             var outcome = PreAssessmentResponseParser.Parse(json, _options.Model);
             outcome.Assessment.DirectoryNodeId = input.Directory.Id;
             outcome.Verdict.DirectoryNodeId = input.Directory.Id;
@@ -722,6 +786,11 @@ public class OllamaService : IOllamaService
             _logger.LogWarning("[Phase1] TIMEOUT ({Seconds}s, {Attempts} attempts) for '{Dir}'",
                 _options.TimeoutSeconds, ex.Attempts, input.Directory.RelativePath);
             return Failed($"Ollama request timed out after {_options.TimeoutSeconds}s.");
+        }
+        catch (ModelAnswerCutOffException ex)
+        {
+            _logger.LogWarning("[Phase1] answer for '{Dir}' cut off twice at {Tokens} tokens", input.Directory.RelativePath, ex.MaxTokens);
+            return Failed(ex.Message);
         }
         catch (Exception ex) when (ex is not OperationCanceledException and not ModelServerUnavailableException)
         {
@@ -902,6 +971,7 @@ public class OllamaService : IOllamaService
                 think = false,
                 keep_alive = _options.KeepAlive,
                 format = BuildSummarySchema(),
+                options = new { num_predict = _options.SummaryMaxAnswerTokens },
                 messages = new object[]
                 {
                     new { role = "system", content = prompt.System },
@@ -910,22 +980,22 @@ public class OllamaService : IOllamaService
             };
 
             var sw = System.Diagnostics.Stopwatch.StartNew();
-            using var response = await PostChatAsync(requestBody, "Phase 3 call", ct);
+            var reply = await ChatAsync(requestBody, ModelCallKinds.Summary, _options.SummaryMaxAnswerTokens, "Phase 3 call", ct);
             sw.Stop();
 
-            if (!response.IsSuccessStatusCode)
+            if (!reply.Success)
             {
-                var errorBody = await response.Content.ReadAsStringAsync(ct);
-                result.Error = TryExtractOllamaError(errorBody) ?? $"HTTP {(int)response.StatusCode}";
+                var errorBody = reply.Body;
+                result.Error = TryExtractOllamaError(errorBody) ?? $"HTTP {reply.Status}";
                 _logger.LogWarning(
                     "[Phase3] Ollama returned {Status} for '{Dir}' after {Elapsed:F1}s; the error is stored with the directory",
-                    (int)response.StatusCode, input.Directory.RelativePath, sw.Elapsed.TotalSeconds);
+                    reply.Status, input.Directory.RelativePath, sw.Elapsed.TotalSeconds);
                 _traffic.LogDebug("[Phase3] HTTP {Status} for '{Dir}', body: {Body}",
-                    (int)response.StatusCode, input.Directory.RelativePath, Trunc(errorBody, 2000));
+                    reply.Status, input.Directory.RelativePath, Trunc(errorBody, 2000));
                 return result;
             }
 
-            var json = await response.Content.ReadAsStringAsync(ct);
+            var json = reply.Body;
             ParseSummaryResponse(json, result);
 
             _logger.LogInformation("[Phase3] '{Dir}' summarized in {Elapsed:F1}s",
@@ -937,6 +1007,11 @@ public class OllamaService : IOllamaService
             result.Error = $"Ollama request timed out after {_options.TimeoutSeconds}s.";
             _logger.LogWarning("[Phase3] TIMEOUT ({Seconds}s, {Attempts} attempts) for '{Dir}'",
                 _options.TimeoutSeconds, ex.Attempts, input.Directory.RelativePath);
+        }
+        catch (ModelAnswerCutOffException ex)
+        {
+            result.Error = ex.Message;
+            _logger.LogWarning("[Phase3] answer for '{Dir}' cut off twice at {Tokens} tokens", input.Directory.RelativePath, ex.MaxTokens);
         }
         catch (Exception ex) when (ex is not OperationCanceledException and not ModelServerUnavailableException)
         {

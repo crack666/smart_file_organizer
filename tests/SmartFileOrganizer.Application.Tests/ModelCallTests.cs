@@ -45,12 +45,77 @@ public class ModelCallTests
 
     private const string Answer = """{"category":"Document","importance":"Medium","confidence":0.9,"summary":"A note.","sensitive":[]}""";
 
-    private static (OllamaService Service, Capturing Handler) Service(Func<int, string>? answer = null)
+    private static (OllamaService Service, Capturing Handler) Service(Func<int, string>? answer = null, ModelUsageMeter? meter = null)
     {
         var handler = new Capturing(answer ?? (_ => Chat(Answer)));
         var http = new HttpClient(handler) { Timeout = Timeout.InfiniteTimeSpan };
         return (new OllamaService(http, new OllamaOptions { BaseUrl = "http://model.test", MaxRetries = 0 },
-            NullLogger<OllamaService>.Instance), handler);
+            NullLogger<OllamaService>.Instance, meter: meter), handler);
+    }
+
+    private static OllamaClassificationInput Note() => new()
+    {
+        File = File("note.txt", ".txt", FileType.Document), ExtractedText = "shopping list"
+    };
+
+    [Fact]
+    public async Task Every_phase_sets_its_answer_limit()
+    {
+        var (service, handler) = Service();
+        await service.ClassifyAsync(Note());
+        var options = new OllamaOptions();
+        Assert.Equal(options.ClassificationMaxAnswerTokens,
+            handler.Requests[0].RootElement.GetProperty("options").GetProperty("num_predict").GetInt32());
+        Assert.True(options.ClassificationMaxAnswerTokens >= 4 * 108);
+        Assert.True(options.PreAssessmentMaxAnswerTokens > options.ClassificationMaxAnswerTokens);
+        Assert.True(options.SummaryMaxAnswerTokens > options.ClassificationMaxAnswerTokens);
+    }
+
+    [Fact]
+    public async Task A_cut_off_answer_is_asked_again_once()
+    {
+        var meter = new ModelUsageMeter();
+        var (service, handler) = Service(n => n == 1 ? Chat("""{"category":"Docu""", "length") : Chat(Answer), meter);
+        var result = await service.ClassifyAsync(Note());
+        Assert.Equal(2, handler.Requests.Count);
+        Assert.Null(result.Error);
+        Assert.Equal(FileCategory.Document, result.Category);
+        var usage = Assert.Single(meter.Snapshot());
+        Assert.Equal(2, usage.Calls);
+        Assert.Equal(1, usage.CutOff);
+    }
+
+    [Fact]
+    public async Task An_answer_cut_off_twice_is_an_error_not_a_partial_result()
+    {
+        var (service, handler) = Service(_ => Chat("""{"category":"Photo","importance":"Hi""", "length"));
+        var result = await service.ClassifyAsync(Note());
+        Assert.Equal(2, handler.Requests.Count);
+        Assert.Contains("cut off", result.Error);
+        Assert.NotEqual(FileCategory.Photo, result.Category);
+    }
+
+    [Fact]
+    public async Task The_meter_counts_calls_and_tokens_per_kind()
+    {
+        var meter = new ModelUsageMeter();
+        var (service, _) = Service(meter: meter);
+        await service.ClassifyAsync(Note());
+        await service.ClassifyAsync(Note());
+        await service.ClassifyAsync(new OllamaClassificationInput
+        {
+            File = File("x.txt", ".txt", FileType.Document), Context = new ClassificationContext(null, null, null, [], 1)
+        });
+
+        var usage = meter.Snapshot();
+        Assert.Equal([ModelCallKinds.Classification, ModelCallKinds.SecondCheck], usage.Select(u => u.Kind));
+        var c = usage[0];
+        Assert.Equal(2, c.Calls);
+        Assert.Equal(4000, c.PromptTokens);
+        Assert.Equal(3000, c.CachedPromptTokens);
+        Assert.Equal(80, c.AnswerTokens);
+        Assert.Equal(0.75, c.MeanSeconds, 3);
+        Assert.Equal(0, c.CutOff);
     }
 
     /// <summary>Everything the model reads, in order: the text of all messages; images go where the server puts them, before the user text.</summary>
