@@ -239,6 +239,40 @@ public static class SensitiveFileRules
         return result;
     }
 
+    /// <summary>Prefix of the rule ids that fired on the name of an archive entry (<c>entry:word:kontoauszug</c>).</summary>
+    public const string EntryRulePrefix = "entry:";
+
+    /// <summary>
+    /// The name rules (<see cref="MatchName"/>) on the entries of an archive, read from its listing without
+    /// unpacking: an archive named <c>20190312.zip</c> that holds <c>Kontoauszug_2019_03.pdf</c> is finance.
+    /// The path inside the archive counts as the folder of the entry. Rule ids get the prefix
+    /// <see cref="EntryRulePrefix"/> and are listed once each; they name the rule, never an entry.
+    /// </summary>
+    /// <param name="entryNames">Entry paths as the archive lists them (<c>/</c> or <c>\</c> as separator).</param>
+    public static SensitiveMatch MatchArchiveEntries(IEnumerable<string> entryNames)
+    {
+        ArgumentNullException.ThrowIfNull(entryNames);
+        var markers = SensitiveMarker.None;
+        var rules = new List<string>();
+        foreach (var entry in entryNames)
+        {
+            if (string.IsNullOrWhiteSpace(entry)) continue;
+            var path = entry.Replace('\\', '/').TrimEnd('/');
+            var slash = path.LastIndexOf('/');
+            var name = slash < 0 ? path : path[(slash + 1)..];
+            var dir = slash < 0 ? null : path[..slash];
+            var match = MatchName(name, dir);
+            if (!match.IsMatch) continue;
+            markers |= match.Markers;
+            foreach (var rule in match.Rule!.Split(';'))
+            {
+                var id = EntryRulePrefix + rule;
+                if (!rules.Contains(id, StringComparer.Ordinal)) rules.Add(id);
+            }
+        }
+        return markers == SensitiveMarker.None ? SensitiveMatch.None : new SensitiveMatch(markers, string.Join(";", rules));
+    }
+
     /// <summary>Whether the header rules should read the first bytes of this file.</summary>
     public static bool ShouldProbeHeader(FileType fileType, long size)
         => size > 0 && size <= MaxHeaderProbeFileSize && !NeverProbedTypes.Contains(fileType);

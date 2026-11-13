@@ -347,6 +347,11 @@ and sets the other eligible files from `Discovered` to `Deferred` in one transac
    | Code, text, text-like `Other` | — | text excerpt | — |
    | Program, library, font, database, unknown binary | `detected_format` | none: a **rule result** (`RuleResult`), no model call | file content |
 
+   Archive entries: their names run through the name rules for sensitive files (`SensitiveFileRules.MatchArchiveEntries`);
+   a hit marks the archive itself with origin rule and rule ids `entry:<rule>` before the model sees it, so a zip with a
+   number for a name that holds bank statements is `finance`. An archive whose `archive_content` is `documents` or `photos`
+   is stored as worth keeping and never as a trash candidate (`ApplyArchiveContentRule`).
+
    Rule results: installers and programs → `SoftwareInstaller`, libraries and fonts → `SystemFile`, `Thumbs.db` →
    `TrashCandidate`, other databases → `ReviewNeeded`, unknown binaries → `Unknown`. They are stored with
    `is_ai_result = 0` and `model_used = rule:<id>` (`rule:program`, `rule:unknown-binary`, ...).

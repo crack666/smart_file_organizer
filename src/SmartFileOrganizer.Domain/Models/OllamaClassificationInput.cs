@@ -26,6 +26,15 @@ public class OllamaClassificationInput
     /// <summary>A result decided by a rule (executable, font, unknown binary). Set: no model call.</summary>
     public FileClassification? RuleResult { get; init; }
 
+    /// <summary>
+    /// Markers the name rules found in the content of the file without the model, today the entry names of an
+    /// archive listing. They are stored on the file as rule markers (origin rule), like the markers of the scan.
+    /// </summary>
+    public Enums.SensitiveMarker ContentMarkers { get; init; }
+
+    /// <summary>Rule ids behind <see cref="ContentMarkers"/> (<c>entry:word:kontoauszug</c>); null when none fired.</summary>
+    public string? ContentMarkerRule { get; init; }
+
     /// <summary>How much evidence was gathered; <see cref="Enums.EvidenceDepth.Extended"/> for the second call of a check.</summary>
     public Enums.EvidenceDepth Depth { get; init; }
 

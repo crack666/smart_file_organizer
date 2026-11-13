@@ -123,6 +123,40 @@ public class Phase2EvidenceTests : IDisposable
     }
 
     [Fact]
+    public async Task ArchiveWithBankStatementsInside_IsFinanceByRule_AndWorthKeeping()
+    {
+        // A zip with a number for a name: only the entries tell what it holds.
+        GeneratedFiles.Zip(Path.Combine(_dir, "4711.zip"),
+            ("Kontoauszug_2019_03.pdf", 100), ("Kreditkartenabrechnung_2019_03.pdf", 100));
+        GeneratedFiles.Zip(Path.Combine(_dir, "0815.zip"), ("a.jpg", 10), ("b.jpg", 10));
+        var jobId = await InsertAsync(
+            ("4711.zip", FileType.Archive, SensitiveMarker.None),
+            ("0815.zip", FileType.Archive, SensitiveMarker.None));
+        _ollama.Answer = FileCategory.TrashCandidate;
+
+        await Service().RunAsync(jobId);
+
+        await using var conn = _db.CreateConnection();
+        var rows = (await conn.QueryAsync<(string Name, string? Markers, string? Rule, string? Category, string? KeepHint)>(
+            """
+            SELECT f.name, f.sensitive_markers, f.sensitive_rule, r.category, r.keep_hint
+            FROM file_nodes f JOIN ai_results r ON r.file_node_id = f.id WHERE f.job_id = @jobId
+            """, new { jobId })).ToDictionary(r => r.Name);
+
+        var statements = rows["4711.zip"];
+        Assert.Equal("finance", statements.Markers);
+        Assert.Equal("entry:word:kontoauszug;entry:word:kreditkarte", statements.Rule);
+        Assert.Equal(((int)FileCategory.ReviewNeeded).ToString(), statements.Category);
+        Assert.Equal("worth_keeping", statements.KeepHint);
+        Assert.DoesNotContain("Kontoauszug", statements.Rule!, StringComparison.Ordinal);
+
+        var photos = rows["0815.zip"];
+        Assert.Null(photos.Markers);
+        Assert.Equal(((int)FileCategory.Archive).ToString(), photos.Category);
+        Assert.Equal("worth_keeping", photos.KeepHint);
+    }
+
+    [Fact]
     public async Task Facts_AreStoredWithCodesAndSource()
     {
         await File.WriteAllBytesAsync(Path.Combine(_dir, "song.mp3"), GeneratedFiles.Mp3WithTags("Song", "Band", "Album"));
@@ -178,6 +212,7 @@ public class Phase2EvidenceTests : IDisposable
     {
         private readonly ConcurrentBag<string> _names = [];
         public IReadOnlyList<string> Names => _names.ToList();
+        public FileCategory Answer { get; set; } = FileCategory.Document;
 
         public Task<FileClassification> ClassifyAsync(OllamaClassificationInput input, CancellationToken ct = default)
         {
@@ -185,7 +220,7 @@ public class Phase2EvidenceTests : IDisposable
             _names.Add(input.File.Name);
             return Task.FromResult(new FileClassification
             {
-                Category = FileCategory.Document,
+                Category = Answer,
                 Importance = Importance.Medium,
                 Confidence = 0.8,
                 Summary = "scripted",

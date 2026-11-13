@@ -1,4 +1,5 @@
 using System.Globalization;
+using SmartFileOrganizer.Application.Sensitivity;
 using SmartFileOrganizer.Domain.Enums;
 using SmartFileOrganizer.Domain.Interfaces;
 using SmartFileOrganizer.Domain.Models;
@@ -286,6 +287,15 @@ public class AiClassificationInputPreparer : IClassificationInputPreparer
         if (listing.Encrypted) ev.Fact(FileFactKey.Encrypted, true);
         if (ArchiveListingReader.DecideContent(listing.Entries) is { } content)
             ev.Fact(FileFactKey.ArchiveContent, content);
+
+        // The entry names run through the same name rules as file names: a bank statement stays finance inside a
+        // zip with a number for a name.
+        var byEntries = SensitiveFileRules.MatchArchiveEntries(listing.Entries.Select(e => e.Name));
+        if (byEntries.IsMatch)
+        {
+            ev.ContentMarkers = byEntries.Markers;
+            ev.ContentMarkerRule = byEntries.Rule;
+        }
 
         var maxListed = ev.Extended ? MaxListedArchiveEntriesExtended : MaxListedArchiveEntries;
         var shown = listing.Entries.Take(maxListed).Select(e => $"{e.Name} | {e.Size}");
