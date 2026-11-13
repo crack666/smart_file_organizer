@@ -1,3 +1,6 @@
+using SmartFileOrganizer.Domain.Enums;
+using SmartFileOrganizer.Domain.Models;
+
 namespace SmartFileOrganizer.Domain.Interfaces;
 
 /// <summary>
@@ -23,7 +26,30 @@ public interface IFileSystemAccessor
     /// <summary>Subdirectories, read completely; throws like <see cref="ListFiles"/>.</summary>
     IReadOnlyList<string> ListDirectories(string path) => EnumerateDirectories(path).ToList();
 
+    /// <summary>
+    /// Size of a file in bytes. A file that cannot be read throws <see cref="IOException"/> or
+    /// <see cref="UnauthorizedAccessException"/>; it never reads as an empty file.
+    /// </summary>
     long GetFileSize(string path);
+
+    /// <summary>
+    /// The link at <paramref name="path"/> itself, without following it: a junction, a symbolic link or a
+    /// volume mount point. Null when the path is no link, does not exist, or cannot be looked at. Reparse points
+    /// that hold their own content (cloud placeholders, deduplicated files) are no links.
+    /// </summary>
+    FileSystemLink? GetLink(string path) => null;
+
+    /// <summary>The full path a link finally leads to (every link on the way resolved); null when it cannot be resolved.</summary>
+    string? ResolveLinkTarget(string path) => null;
+
+    /// <summary>
+    /// Whether two paths mean the same file: the same path written differently, a link, a hard link,
+    /// or a volume reached twice. Decided by the identity the file system gives a file (volume and file id),
+    /// not by name or content. <see cref="SameFileAnswer.Unknown"/> when a path is missing or unreadable or
+    /// the file system gives no identity; a caller about to remove a file treats that like <see cref="SameFileAnswer.Same"/>.
+    /// </summary>
+    SameFileResult SameFile(string first, string second) =>
+        new(SameFileAnswer.Unknown, "This file system accessor cannot tell file identities apart.");
     DateTime GetLastWriteTime(string path);
     string GetFileName(string path);
     string GetDirectoryName(string path);

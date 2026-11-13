@@ -161,6 +161,47 @@ These codes are fixed by the decision table but no code uses them yet.
 |---|---|
 | State of a plan action | `proposed`, `approved`, `rejected`, `executed`, `failed`, `undone` |
 
+## Scan
+
+Links and read errors: https://github.com/crack666/smart_file_organizer/issues/57 and
+[scan-rules.md](scan-rules.md#links-and-read-errors).
+
+### What the scan did with a folder (`DirectoryStatus`)
+
+| Code | Meaning |
+|---|---|
+| `pending` | Found but not yet decided (only during a scan). |
+| `scanned` | Entered: its files are listed and its subfolders decided one by one. |
+| `skip` | Not entered by a rule; its files are not listed. |
+| `shallow` | Its files are listed, its subfolders counted but not entered. |
+| `error` | It could not be read; the cause is stored with it. Never means empty. |
+| `link` | A link that was not followed; kind and target are stored with it, its content is not counted. |
+
+### Kind of a link (`LinkKind`)
+
+| Code | Meaning |
+|---|---|
+| `junction` | A Windows directory junction, such as `All Users` or `Documents and Settings` in an old profile. |
+| `symlink` | A symbolic link to a file or a folder, on Windows or Unix. |
+| `mount_point` | A Windows folder that shows another volume. |
+
+### Cause of a read error (`ScanErrorCause`)
+
+| Code | Meaning |
+|---|---|
+| `access_denied` | The account running the scan may not read the folder or file. |
+| `not_found` | The folder or file was gone when the scan came to read it. |
+| `path_too_long` | The path is longer than the system accepts. |
+| `io_error` | Any other read error of the file system or the device. |
+
+### Are two paths the same file (`SameFileAnswer`)
+
+| Code | Meaning |
+|---|---|
+| `same` | Both paths lead to one file: the same path, a link, a hard link, or one volume reached twice. |
+| `different` | Both files were found and the file system names them as two files. |
+| `unknown` | It could not be decided (a path missing or unreadable, no file identity); never treated as `different`. |
+
 ## Staged analysis
 
 ### State of a directory sample (`SampleState`)
