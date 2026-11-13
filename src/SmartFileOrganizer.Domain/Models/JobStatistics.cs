@@ -19,6 +19,18 @@ public sealed class JobStatistics
     /// </summary>
     public long SummariesNotNeeded { get; init; }
 
+    /// <summary>AI-relevant directories without a verdict that <c>sfo analyze --against</c> left out: every file below
+    /// them is <c>backed_up</c> (<c>analysis_skip</c>).</summary>
+    public long PreAssessmentBackedUp { get; init; }
+
+    /// <summary>AI-relevant directories without a summary that were left out as <c>backed_up</c>; not part of
+    /// <see cref="SummariesNotNeeded"/>.</summary>
+    public long SummaryBackedUp { get; init; }
+
+    /// <summary>Files left out of the classification because the library holds them (<c>analysis_skip</c>
+    /// <c>backed_up</c>); part of <see cref="FilesAiSkipped"/>.</summary>
+    public long FilesAiBackedUp { get; init; }
+
     public long FilesTotal { get; init; }
 
     /// <summary>Files of a type the classification phase handles (image, video, document).</summary>
@@ -30,7 +42,8 @@ public sealed class JobStatistics
     public long FilesAiAnalyzed { get; init; }
     public long FilesAiErrors { get; init; }
 
-    /// <summary>Eligible files not analysed because their directory is a unit or system data.</summary>
+    /// <summary>Eligible files not analysed because their directory is a unit or system data, or because the library
+    /// holds them (<see cref="FilesAiBackedUp"/>).</summary>
     public long FilesAiSkipped { get; init; }
 
     /// <summary>Files per minute the model judged lately (the newest results, if recent); null when no run is going on.</summary>

@@ -53,10 +53,13 @@ public sealed record AiPhaseRunResult(AiPhases Phase, AiClassificationRunResult 
 
 /// <summary>
 /// Outcome of <see cref="AiClassificationCoordinator.RunAsync"/>. When Ollama was not reachable,
-/// <see cref="OllamaAvailable"/> is false and no phase ran.
+/// <see cref="OllamaAvailable"/> is false and no phase ran. <see cref="BackedUp"/> is what the run left out because
+/// the library holds it (null when the run had no library job).
 /// </summary>
 public sealed record AiPipelineRunResult(bool OllamaAvailable, IReadOnlyList<AiPhaseRunResult> Phases, AiModelServerLost? Lost = null)
 {
+    public BackedUpSkip? BackedUp { get; init; }
+
     public int ErrorCount => Phases.Sum(p => p.Result.ErrorCount);
 }
 

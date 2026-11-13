@@ -39,11 +39,22 @@ public class JobStatisticsRepository : IJobStatisticsRepository
                 (SELECT COUNT(*) FROM directory_nodes n
                     WHERE n.job_id = @jobId AND n.dir_status <> @skip AND n.name <> '' AND substr(n.name, 1, 1) <> '.'
                       AND NOT EXISTS (SELECT 1 FROM ai_directory_results r WHERE r.directory_node_id = n.id AND r.phase = 'summary')
+                      AND n.analysis_skip IS NULL
                       AND CASE WHEN EXISTS (SELECT 1 FROM ai_directory_results r WHERE r.directory_node_id = n.id AND r.phase = 'pre_assessment')
                                THEN NOT EXISTS (SELECT 1 FROM file_nodes f WHERE f.job_id = @jobId AND f.parent_path = n.full_path)
                                ELSE EXISTS (SELECT 1 FROM directory_verdicts v
                                             WHERE v.directory_node_id = n.id AND v.verdict IS NOT NULL AND v.error IS NULL)
-                          END) AS summaries_not_needed
+                          END) AS summaries_not_needed,
+                (SELECT COUNT(*) FROM directory_nodes n
+                    WHERE n.job_id = @jobId AND n.analysis_skip IS NOT NULL
+                      AND n.dir_status <> @skip AND n.name <> '' AND substr(n.name, 1, 1) <> '.'
+                      AND NOT EXISTS (SELECT 1 FROM ai_directory_results r WHERE r.directory_node_id = n.id AND r.phase = 'pre_assessment')
+                      AND NOT EXISTS (SELECT 1 FROM directory_verdicts v
+                                      WHERE v.directory_node_id = n.id AND v.verdict IS NOT NULL AND v.error IS NULL)) AS pre_assessment_backed_up,
+                (SELECT COUNT(*) FROM directory_nodes n
+                    WHERE n.job_id = @jobId AND n.analysis_skip IS NOT NULL
+                      AND n.dir_status <> @skip AND n.name <> '' AND substr(n.name, 1, 1) <> '.'
+                      AND NOT EXISTS (SELECT 1 FROM ai_directory_results r WHERE r.directory_node_id = n.id AND r.phase = 'summary')) AS summary_backed_up
             FROM directory_nodes d
             WHERE d.job_id = @jobId
             """,
@@ -58,6 +69,7 @@ public class JobStatisticsRepository : IJobStatisticsRepository
                 COALESCE(SUM(CASE WHEN status = @analyzed THEN 1 ELSE 0 END), 0) AS analyzed,
                 COALESCE(SUM(CASE WHEN status = @error THEN 1 ELSE 0 END), 0) AS errors,
                 COALESCE(SUM(CASE WHEN status = @skipped THEN 1 ELSE 0 END), 0) AS skipped,
+                COALESCE(SUM(CASE WHEN status = @skipped AND analysis_skip IS NOT NULL THEN 1 ELSE 0 END), 0) AS backed_up,
                 COALESCE(SUM(CASE WHEN status = @inherited THEN 1 ELSE 0 END), 0) AS inherited,
                 COALESCE(SUM(CASE WHEN status = @deferred THEN 1 ELSE 0 END), 0) AS deferred
             FROM file_nodes
@@ -178,6 +190,9 @@ public class JobStatisticsRepository : IJobStatisticsRepository
             DirectoriesSummarized = dirs.Summarized,
             SummaryErrors = dirs.SummaryErrors,
             SummariesNotNeeded = dirs.SummariesNotNeeded,
+            PreAssessmentBackedUp = dirs.PreAssessmentBackedUp,
+            SummaryBackedUp = dirs.SummaryBackedUp,
+            FilesAiBackedUp = files.BackedUp,
             FilesTotal = files.Total,
             FilesAiEligible = files.Eligible,
             FilesAiPending = files.Pending,
@@ -213,6 +228,8 @@ public class JobStatisticsRepository : IJobStatisticsRepository
         public long Summarized { get; set; }
         public long SummaryErrors { get; set; }
         public long SummariesNotNeeded { get; set; }
+        public long PreAssessmentBackedUp { get; set; }
+        public long SummaryBackedUp { get; set; }
     }
 
     private sealed class FileCounts
@@ -223,6 +240,7 @@ public class JobStatisticsRepository : IJobStatisticsRepository
         public long Analyzed { get; set; }
         public long Errors { get; set; }
         public long Skipped { get; set; }
+        public long BackedUp { get; set; }
         public long Inherited { get; set; }
         public long Deferred { get; set; }
     }

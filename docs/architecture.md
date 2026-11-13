@@ -666,8 +666,8 @@ SQLite is the local source of truth. It stores both operational state and review
 Important tables:
 
 - `scan_jobs` — job lifecycle, counters, status, and the scan rules of the job (step 4: `rules_name`, `rules_source`, `rules_hash`, `rules_json`), role (`source`/`library`), `structure_only` (step 8)
-- `directory_nodes` — scanned directories with heuristic metadata and stats; `dir_status = Error` for directories the scan could not read; `sensitive_markers` / `sensitive_rule` for skipped folders marked by their name (step 12)
-- `file_nodes` — scanned files with metadata, type, AI status, rule-based sensitive markers (`sensitive_markers`, `sensitive_rule`) and the version of the file rules that ran (`sensitive_rules_version`, step 12)
+- `directory_nodes` — scanned directories with heuristic metadata and stats; `dir_status = Error` for directories the scan could not read; `sensitive_markers` / `sensitive_rule` for skipped folders marked by their name (step 12); `analysis_skip` (step 18, see below)
+- `file_nodes` — scanned files with metadata, type, AI status, rule-based sensitive markers (`sensitive_markers`, `sensitive_rule`) and the version of the file rules that ran (`sensitive_rules_version`, step 12); `analysis_skip` (step 18): `backed_up` when `sfo analyze --against` left the file or folder out because the stored comparison found it in the library. Such a file has status Skipped and no result; a folder gets no pre-assessment and no summary. Every run sets the column anew from the comparison it was given and releases the earlier marks first; rule markers are not touched (`BackedUpSkipService`)
 - `ai_results` — Phase 2 per-file classification results, including model sensitive markers (`sensitive_markers`) and the evidence notes (`evidence`, step 7)
 - `file_facts` — facts per file read without the model (step 7): `file_node_id`, `fact`, `value`, `source`
   (`metadata`, `rule`, `model`), `recorded_at`; one row per file and fact. Codes are defined on the Domain enums

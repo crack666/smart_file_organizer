@@ -40,6 +40,10 @@ public class FileNode
     /// scanned before versions were stored, whose header lines were possibly never checked.</summary>
     public int? SensitiveRulesVersion { get; set; }
 
+    /// <summary>Code of the <see cref="Enums.ContentState"/> that let <c>sfo analyze --against</c> leave the file out
+    /// (<c>backed_up</c>; status Skipped), or null when the file takes part in the analysis.</summary>
+    public string? AnalysisSkip { get; set; }
+
     /// <summary>Code of <see cref="Enums.ScanErrorCause"/> when the scan listed the file but could not read its
     /// size or time; <see cref="Size"/> is then 0 and not a measurement.</summary>
     public string? ScanErrorCause { get; set; }

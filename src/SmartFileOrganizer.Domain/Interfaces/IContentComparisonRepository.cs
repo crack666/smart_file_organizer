@@ -36,4 +36,14 @@ public interface IContentComparisonRepository
 
     /// <summary>Per-file results of a stored comparison, ordered by path.</summary>
     Task<IReadOnlyList<FileComparison>> GetFileComparisonsAsync(long comparisonId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Sets which files and directories of a job the analysis leaves out because the library holds them
+    /// (<c>analysis_skip = backed_up</c>), in one transaction. Every earlier mark of the job is released first:
+    /// such files that are still Skipped become Discovered again. Of <paramref name="fileIds"/> only files still
+    /// waiting for the analysis (Discovered or Deferred) are marked and set to Skipped; a file with a result keeps it.
+    /// Returns the number of files and directories marked.
+    /// </summary>
+    Task<(int Files, int Directories)> SetAnalysisSkipAsync(long jobId, IReadOnlyCollection<long> fileIds,
+        IReadOnlyCollection<long> directoryIds, CancellationToken ct = default);
 }

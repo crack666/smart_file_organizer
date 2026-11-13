@@ -101,6 +101,7 @@ phase skips work already stored, so running it again after Ctrl+C or an error co
 | `--phase <name>` | `pre_assessment`, `classification`, `summary` or `all` (default). Repeatable; phases always run in this order. |
 | `--parallel <n>` | Concurrent Ollama requests, 1 to 8. Default: `Ollama.MaxParallelRequests`. |
 | `--model <name>` | Ollama model for this run. Default: `Ollama.Model`. |
+| `--against <job>` | A `library` job: the stored comparison of this job against it (`sfo compare <job> --against <library>`) decides what is left out. Files with `backed_up` are not classified; folders whose every file below is `backed_up` (`backed_up_share` 1.0) get no pre-assessment and no summary. `new`, `differs` and `error` are judged as usual. Without the option the whole job is analysed, and the marks of an earlier run with `--against` are released, so the files are judged again. Fails with `comparison_not_found` (1) when no such comparison is stored. |
 | `--retry-errors` | Classification: try files that failed in an earlier run again. Files with a result are never called again; files still pending are judged as in any run; files a person corrected are left alone. Summary: write again the summaries that failed and those older than the results they rest on, so the folder of a retried file gets a summary that knows it. Failed directory verdicts (phase 1) are asked again in every run, with or without this option. |
 
 ```bash
@@ -143,12 +144,20 @@ counts the model server returns with every answer: `prompt_tokens` (`prompt_eval
 (answers that stopped at the token limit and were asked again). A repeated call counts again. The numbers
 in the example are illustrative. The text output prints the same as one line per kind.
 
+With `--against`, `result.backed_up` says what was left out:
+`{ "against": 8, "comparison_id": 3, "files": 411, "directories": 12 }` (files still waiting for the
+analysis that are `backed_up`, and fully backed-up folders); without it, `backed_up` is `null`. A left-out
+file keeps the sensitive markers of the scan rules, so it is still listed as sensitive, and `sfo findings`
+reads the comparison itself: it never counts such a file as not backed up. Issue:
+https://github.com/crack666/smart_file_organizer/issues/42
+
 `retried` is the number of failed files `--retry-errors` released, `second_checks` the number of
 second calls made for unsure or contradicted results (see
 [architecture.md](architecture.md#phase-2--per-file-classification-in-stages-classificationservice-directorysamplingservice));
 both are 0 for the other phases. Errors of single files or directories do not fail the command; they are counted here and
 listed by `sfo status`. Failures: `ollama_unavailable` (3), `model_server_lost` (4),
-`scan_not_completed` (1), `job_not_found` (1), `wrong_role` (1, the job is a `library`), `cancelled` (130).
+`scan_not_completed` (1), `job_not_found` (1), `wrong_role` (1, the job is a `library`),
+`comparison_not_found` (1, `--against` without a stored comparison), `cancelled` (130).
 
 **When the model server goes away during the run.** `ollama_unavailable` (3) is only the check at
 the start: nothing has been asked yet. Once the run has started, a server that stops answering is
@@ -241,7 +250,10 @@ both are counted from the stored rows (since 13.11.2026; before, the scan root w
 is the last probe. `stale` is `true` when no probe was recorded for longer than three probe intervals
 (at least one minute): the waiting run was killed, and `sfo analyze <job>` continues it.
 
-For each AI phase, `total = done + errors + pending + skipped`.
+For each AI phase, `total = done + errors + pending + skipped`. `backed_up` (every phase, since 13.11.2026) is
+the part of `skipped` that `sfo analyze --against` left out because the library holds it: files with `backed_up`
+for `classification`, fully backed-up folders without a verdict or summary for the two folder phases. The text
+output adds it as `(n already in the library)`.
 
 - `pre_assessment` and `summary` count directories the AI phases consider: not skipped by the
   scan rules and not hidden (name starting with a dot).
@@ -291,7 +303,8 @@ below them is compared and no read error below them is reported, even when the f
 `duplicates` groups source files with identical content (empty files excluded); a file's
 `duplicate_group` points to its group. `directories` counts each source directory including its
 subdirectories: a directory with `backed_up_share` 1.0 is fully in the library and needs no model
-analysis; otherwise only its files that are not `backed_up` do.
+analysis; otherwise only its files that are not `backed_up` do. `sfo analyze <job> --against <library>`
+acts on this.
 
 ```bash
 sfo compare 7 --against 8 --files new --files error --json

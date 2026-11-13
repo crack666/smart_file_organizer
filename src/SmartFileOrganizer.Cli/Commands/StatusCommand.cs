@@ -22,10 +22,11 @@ public static class StatusCommand
     /// <summary>
     /// Counters of an AI phase. <c>total = done + errors + pending + skipped</c>. For the file classification, while a
     /// run goes on: files per minute the model judged lately and the estimated seconds left for the pending files
-    /// (skipped and inherited files are not counted); null otherwise.
+    /// (skipped and inherited files are not counted); null otherwise. <c>BackedUp</c>: of <c>Skipped</c>, those
+    /// <c>sfo analyze --against</c> left out because the library holds them.
     /// </summary>
     public sealed record AiPhaseView(long Total, long Done, long Errors, long Pending, long Skipped,
-        double? RatePerMinute = null, long? RemainingSeconds = null);
+        double? RatePerMinute = null, long? RemainingSeconds = null, long BackedUp = 0);
 
     public sealed record PhasesView(
         ScanPhaseView Scan,
@@ -98,15 +99,18 @@ public static class StatusCommand
         var phases = new PhasesView(
             new ScanPhaseView(j.Status, j.TotalFiles, j.ProcessedFiles, j.TotalDirectories, j.ProcessedDirectories, j.ErrorCount),
             new AiPhaseView(s.DirectoriesAiRelevant, preDone, s.PreAssessmentErrors,
-                Math.Max(0, s.DirectoriesAiRelevant - s.DirectoriesPreAssessed), 0),
+                Math.Max(0, s.DirectoriesAiRelevant - s.DirectoriesPreAssessed - s.PreAssessmentBackedUp), s.PreAssessmentBackedUp,
+                BackedUp: s.PreAssessmentBackedUp),
             // Inherited files count as done, files waiting for their sample as pending.
             new AiPhaseView(s.FilesAiEligible, s.FilesAiAnalyzed + s.FilesAiInherited, s.FilesAiErrors,
                 s.FilesAiPending + s.FilesAiDeferred, s.FilesAiSkipped,
                 s.FilesAiRatePerMinute is { } rate ? Math.Round(rate, 1) : null,
-                RemainingSeconds(s.FilesAiPending, s.FilesAiRatePerMinute)),
-            // Folders that need no summary (judged by rule without a pre-assessment, or without files) are skipped, not pending.
+                RemainingSeconds(s.FilesAiPending, s.FilesAiRatePerMinute), s.FilesAiBackedUp),
+            // Folders that need no summary (judged by rule without a pre-assessment, or without files, or left out as
+            // backed_up) are skipped, not pending.
             new AiPhaseView(s.DirectoriesAiRelevant, sumDone, s.SummaryErrors,
-                Math.Max(0, s.DirectoriesAiRelevant - s.DirectoriesSummarized - s.SummariesNotNeeded), s.SummariesNotNeeded));
+                Math.Max(0, s.DirectoriesAiRelevant - s.DirectoriesSummarized - s.SummariesNotNeeded - s.SummaryBackedUp),
+                s.SummariesNotNeeded + s.SummaryBackedUp, BackedUp: s.SummaryBackedUp));
 
         return new StatusResult(
             JobView.From(j),
@@ -166,7 +170,9 @@ public static class StatusCommand
 
     private static void Line(StringBuilder sb, string name, AiPhaseView p, string unit)
     {
-        var skipped = p.Skipped > 0 ? $", {p.Skipped} skipped" : string.Empty;
+        var skipped = p.Skipped > 0
+            ? $", {p.Skipped} skipped{(p.BackedUp > 0 ? $" ({p.BackedUp} already in the library)" : string.Empty)}"
+            : string.Empty;
         var rate = p.RatePerMinute is { } r && p.RemainingSeconds is { } left
             ? $", {r.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)} {unit}/min, about {Duration(left)} left"
             : string.Empty;

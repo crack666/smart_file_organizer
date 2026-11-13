@@ -16,6 +16,7 @@ public class AiClassificationCoordinator
     private readonly ModelServerOptions _serverOptions;
     private readonly IModelServerWaitRepository? _waits;
     private readonly TimeProvider _time;
+    private readonly BackedUpSkipService? _backedUpSkip;
 
     private readonly object _sync = new();
     private CancellationTokenSource? _cts;
@@ -39,8 +40,10 @@ public class AiClassificationCoordinator
         SensitiveRulesBackfill? rulesBackfill = null,
         ModelServerOptions? serverOptions = null,
         IModelServerWaitRepository? waits = null,
-        TimeProvider? time = null)
+        TimeProvider? time = null,
+        BackedUpSkipService? backedUpSkip = null)
     {
+        _backedUpSkip = backedUpSkip;
         _rulesBackfill = rulesBackfill;
         _classificationService = classificationService;
         _preAssessmentService = preAssessmentService;
@@ -134,13 +137,17 @@ public class AiClassificationCoordinator
     /// <param name="retryErrors">Phase 2 first sets failed files back to Discovered and tries them again; Phase 3
     /// then writes again the summaries that failed or that predate a new result in their directory.</param>
     /// <param name="onWait">Called when the run starts or stops waiting for the model server, with the phase.</param>
+    /// <param name="againstJobId">Library job whose stored comparison decides what is left out: files <c>backed_up</c>
+    /// there are not classified, folders fully <c>backed_up</c> get no pre-assessment and no summary. Null: the whole
+    /// job is analysed, and the marks of an earlier run with a library job are released.</param>
     public Task<AiPipelineRunResult> RunAsync(
         long jobId,
         AiPhases phases = AiPhases.All,
         IProgress<AiPhaseProgress>? progress = null,
         CancellationToken ct = default,
         bool retryErrors = false,
-        Action<AiPhases, ModelServerWaitEvent>? onWait = null)
+        Action<AiPhases, ModelServerWaitEvent>? onWait = null,
+        long? againstJobId = null)
     {
         return RunPhasesAsync(
             jobId,
@@ -152,7 +159,8 @@ public class AiClassificationCoordinator
             waitIfPausedAsync: null,
             onWait,
             ct,
-            retryErrors);
+            retryErrors,
+            againstJobId);
     }
 
     private async Task<AiPipelineRunResult> RunPhasesAsync(
@@ -163,7 +171,8 @@ public class AiClassificationCoordinator
         Func<CancellationToken, Task>? waitIfPausedAsync,
         Action<AiPhases, ModelServerWaitEvent>? onWait,
         CancellationToken ct,
-        bool retryErrors = false)
+        bool retryErrors = false,
+        long? againstJobId = null)
     {
         // Single availability check — avoids 3x /api/tags calls. A server that is away when the run starts is
         // reported at once; waiting is for a server that goes away during the run.
@@ -173,6 +182,9 @@ public class AiClassificationCoordinator
         // Rows scanned with older file rules: run the header rules before any of their content reaches a model.
         if (_rulesBackfill != null)
             await _rulesBackfill.RunAsync(jobId, ct);
+
+        // What the library already holds by content is left out; without a library job, earlier marks are released.
+        var backedUp = _backedUpSkip is null ? null : await _backedUpSkip.ApplyAsync(jobId, againstJobId, ct);
 
         var results = new List<AiPhaseRunResult>();
         var current = AiPhases.None;
@@ -212,14 +224,14 @@ public class AiClassificationCoordinator
         }
         catch (ModelServerLostException lost)
         {
-            return new AiPipelineRunResult(true, results, new AiModelServerLost(current, lost.Since, lost.Cause, lost.Waited));
+            return new AiPipelineRunResult(true, results, new AiModelServerLost(current, lost.Since, lost.Cause, lost.Waited)) { BackedUp = backedUp };
         }
         finally
         {
             await ClearWaitAsync(jobId);
         }
 
-        return new AiPipelineRunResult(true, results);
+        return new AiPipelineRunResult(true, results) { BackedUp = backedUp };
     }
 
     private async Task ClearWaitAsync(long jobId)
