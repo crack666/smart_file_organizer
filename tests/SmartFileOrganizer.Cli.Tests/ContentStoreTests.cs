@@ -102,6 +102,14 @@ public class ContentStoreTests : IDisposable
         Assert.Equal("human", conn.ExecuteScalar<string>(
             "SELECT o.origin FROM user_overrides o JOIN file_nodes f ON f.id = o.file_node_id WHERE f.job_id = @jobA",
             new { jobA }));
+        // Read back through the repository the analysis uses, the code is the origin again.
+        var copyId = conn.ExecuteScalar<long>("SELECT id FROM file_nodes WHERE job_id = @jobB AND name = 'scan_0001.txt'", new { jobB });
+        await using (var provider = await ProviderAsync())
+        {
+            var node = await provider.GetRequiredService<IFileRepository>().GetByIdAsync(copyId);
+            Assert.Equal(ResultOrigin.Reused, node!.Override!.Origin);
+            Assert.Equal(ResultOrigin.Reused, node.Classification!.Origin);
+        }
 
         // sfo status counts the taken-over result apart from the model calls.
         var status = await SfoAsync("status", jobB.ToString(), "--json");
@@ -217,11 +225,17 @@ public class ContentStoreTests : IDisposable
         using (var conn = Open())
             id = conn.ExecuteScalar<long>("SELECT id FROM file_nodes WHERE name = @name", new { name });
 
+        await using var provider = await ProviderAsync();
+        await provider.GetRequiredService<ReviewService>().ApplyOverrideAsync(id, category, target, note);
+    }
+
+    private async Task<ServiceProvider> ProviderAsync()
+    {
         var services = new ServiceCollection();
         services.AddSmartFileOrganizerCore(o => { o.DatabasePath = _dbPath; o.ReloadSettingsOnChange = false; });
-        await using var provider = services.BuildServiceProvider();
+        var provider = services.BuildServiceProvider();
         await provider.InitializeSmartFileOrganizerDatabaseAsync();
-        await provider.GetRequiredService<ReviewService>().ApplyOverrideAsync(id, category, target, note);
+        return provider;
     }
 
     private SqliteConnection Open()
