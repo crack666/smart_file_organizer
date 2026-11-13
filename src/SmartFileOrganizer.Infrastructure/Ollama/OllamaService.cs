@@ -167,10 +167,10 @@ public class OllamaService : IOllamaService
 
         try
         {
-            var prompt = BuildClassificationPrompt(input, _options.SummaryLanguage);
+            var prompt = BuildClassificationMessages(input, _options);
             _traffic.LogDebug("[Phase2] PROMPT for '{File}' (depth={Depth}, images={ImgCount}, textLen={TextLen}):\n{Prompt}",
                 file.Name, input.Depth, input.Base64Images.Count, input.ExtractedText?.Length ?? 0,
-                marked ? ModelTraffic.Withheld : Trunc(prompt, 8000));
+                marked ? ModelTraffic.Withheld : Trunc(prompt.User, 8000));
 
             var requestBody = new
             {
@@ -181,8 +181,8 @@ public class OllamaService : IOllamaService
                 format = BuildClassificationSchema(input.AskKeepHint),
                 messages = new object[]
                 {
-                    new { role = "system", content = _options.SystemPrompt },
-                    new { role = "user", content = prompt, images = input.Base64Images.Count > 0 ? input.Base64Images : null }
+                    new { role = "system", content = prompt.System },
+                    new { role = "user", content = prompt.User, images = input.Base64Images.Count > 0 ? input.Base64Images : null }
                 }
             };
 
@@ -245,44 +245,60 @@ public class OllamaService : IOllamaService
             LastWriteTime = new DateTime(2000, 1, 1, 0, 0, 0, DateTimeKind.Utc), RelativeDir = "sample"
         };
         var dir = new DirectoryNode { Name = "sample", RelativePath = "sample" };
-        var parts = new[]
+        var messages = new[]
         {
-            options.SystemPrompt,
-            options.SummaryLanguage,
-            BuildClassificationPrompt(new OllamaClassificationInput { File = file, ExtractedText = "sample" }, options.SummaryLanguage),
-            BuildClassificationPrompt(new OllamaClassificationInput { File = file, ExtractedText = "sample", AskKeepHint = true }, options.SummaryLanguage),
-            BuildPreAssessmentPrompt(new DirectoryPreAssessmentInput
+            BuildClassificationMessages(new OllamaClassificationInput { File = file, ExtractedText = "sample" }, options),
+            BuildClassificationMessages(new OllamaClassificationInput { File = file, ExtractedText = "sample", AskKeepHint = true }, options),
+            BuildPreAssessmentMessages(new DirectoryPreAssessmentInput
             {
                 Directory = dir,
                 DirectFiles = [new DirectoryFileInfo { Name = "sample.pdf", Size = 1 }],
                 SubdirectoryNames = ["sub"]
             }, options.SummaryLanguage),
-            BuildSummaryPrompt(new DirectorySummaryInput
+            BuildSummaryMessages(new DirectorySummaryInput
             {
                 Directory = dir,
                 PreAssessment = new DirectoryClassificationResult(),
                 FileSummaryLines = ["sample.pdf"],
                 AnomalyDescriptions = ["sample.pdf: sample"]
-            }),
+            })
+        };
+        var parts = new List<string> { options.SystemPrompt, options.SummaryLanguage };
+        foreach (var m in messages) parts.AddRange([m.System, m.User]);
+        parts.AddRange(
+        [
             JsonSerializer.Serialize(BuildClassificationSchema(askKeepHint: false)),
             JsonSerializer.Serialize(BuildClassificationSchema(askKeepHint: true)),
             JsonSerializer.Serialize(BuildPreAssessmentSchema()),
             JsonSerializer.Serialize(BuildSummarySchema())
-        };
+        ]);
         var hash = System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(string.Join("\u0000", parts)));
         return Convert.ToHexString(hash, 0, 8).ToLowerInvariant();
     }
 
     /// <summary>
-    /// The Phase 2 prompt: file identity, facts read without the model (marked as reliable),
-    /// what the evidence contains and what is missing, then the extracted text and the guidance.
+    /// The two messages of a Phase 2 call (also the second check): the system message holds everything that is the
+    /// same for every file (system prompt, guidance, markers, language, then the keep hint block when asked), the user
+    /// message only what belongs to this file. The server can then reuse its prompt cache for the fixed part, and
+    /// attached images, which the server puts at the start of the user message, do not break it.
     /// </summary>
-    public static string BuildClassificationPrompt(OllamaClassificationInput input, string summaryLanguage = "English")
+    public static ChatPrompt BuildClassificationMessages(OllamaClassificationInput input, OllamaOptions options) =>
+        new(options.SystemPrompt.TrimEnd() + "\n\n" + BuildClassificationInstructions(input.AskKeepHint, options.SummaryLanguage),
+            BuildClassificationFilePart(input));
+
+    /// <summary>The whole Phase 2 text after the system prompt: the fixed instructions, then the part about the file.</summary>
+    public static string BuildClassificationPrompt(OllamaClassificationInput input, string summaryLanguage = "English") =>
+        BuildClassificationInstructions(input.AskKeepHint, summaryLanguage) + "\n" + BuildClassificationFilePart(input);
+
+    /// <summary>
+    /// The Phase 2 part about one file: identity, facts read without the model (marked as reliable),
+    /// what the evidence contains and what is missing, the extracted text and, for a second check, the directory.
+    /// </summary>
+    public static string BuildClassificationFilePart(OllamaClassificationInput input)
     {
         var file = input.File;
         var sb = new StringBuilder();
-        sb.AppendLine("Classify the following file. Choose the most accurate category and importance.");
-        sb.AppendLine();
+        sb.AppendLine("The file to classify:");
         sb.AppendLine($"File name: {file.Name}");
         sb.AppendLine($"Extension: {file.Extension}");
         sb.AppendLine($"File type: {file.FileType}");
@@ -329,6 +345,19 @@ public class OllamaService : IOllamaService
         if (input.Context is { } context)
             AppendContext(sb, context);
 
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// The fixed Phase 2 instructions, the same text for every file of a run: task, categories, markers, summary
+    /// language, then the keep hint block (only when asked, so it comes last).
+    /// </summary>
+    public static string BuildClassificationInstructions(bool askKeepHint, string summaryLanguage = "English")
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("Classify the file described in the user message. Choose the most accurate category and importance.");
+        sb.AppendLine();
+
         // The kinds of documents, one category each (https://github.com/crack666/smart_file_organizer/issues/50;
         // the same wording for people is in docs/glossary.md). The category says what the paper is, not how
         // important or how private it is: that is the importance and the sensitive markers below.
@@ -365,14 +394,6 @@ public class OllamaService : IOllamaService
         sb.AppendLine("If any marker applies: never use TrashCandidate, and keep the summary neutral (what kind of document it is),");
         sb.AppendLine("without quoting passwords, keys, numbers, names or message text.");
         sb.AppendLine();
-        if (input.AskKeepHint)
-        {
-            sb.AppendLine("Keep hint (field keep_hint, with a short keep_reason):");
-            sb.AppendLine("- temporary: installer, setup or update package, download remainder, partial download, duplicate or copy of another file, cache or log");
-            sb.AppendLine("- worth_keeping: personal, created by the user, or hard to get again");
-            sb.AppendLine("If unsure, use worth_keeping. Never temporary for a file with a sensitive marker.");
-            sb.AppendLine();
-        }
         if (!string.IsNullOrWhiteSpace(summaryLanguage) &&
             !string.Equals(summaryLanguage, "English", StringComparison.OrdinalIgnoreCase))
         {
@@ -380,8 +401,19 @@ public class OllamaService : IOllamaService
         }
 
         sb.AppendLine("Return only JSON matching the provided schema.");
+        if (askKeepHint)
+        {
+            sb.AppendLine();
+            sb.AppendLine("Keep hint (field keep_hint, with a short keep_reason):");
+            sb.AppendLine("- temporary: installer, setup or update package, download remainder, partial download, duplicate or copy of another file, cache or log");
+            sb.AppendLine("- worth_keeping: personal, created by the user, or hard to get again");
+            sb.AppendLine("If unsure, use worth_keeping. Never temporary for a file with a sensitive marker.");
+        }
         return sb.ToString();
     }
+
+    /// <summary>The two messages of one call: the fixed part of the phase, then the part about one file or directory.</summary>
+    public sealed record ChatPrompt(string System, string User);
 
     /// <summary>
     /// The directory around the file, for the second call of a check: verdict, purpose, retention and other
@@ -624,11 +656,11 @@ public class OllamaService : IOllamaService
 
         try
         {
-            var prompt = BuildPreAssessmentPrompt(input, _options.SummaryLanguage);
+            var prompt = BuildPreAssessmentMessages(input, _options.SummaryLanguage);
             // Phase 1 sees names and the profile only, no file content; still a prompt, so not on the regular logger.
             _traffic.LogDebug("[Phase1] PROMPT for '{Dir}' ({Files} files, {Subdirs} subdirs, {Len} chars):\n{Prompt}",
                 input.Directory.RelativePath, input.DirectFiles.Count, input.SubdirectoryNames.Count,
-                prompt.Length, Trunc(prompt, 8000));
+                prompt.User.Length, Trunc(prompt.User, 8000));
 
             var requestBody = new
             {
@@ -637,7 +669,11 @@ public class OllamaService : IOllamaService
                 think = false,
                 keep_alive = _options.KeepAlive,
                 format = BuildPreAssessmentSchema(),
-                messages = new object[] { new { role = "user", content = prompt } }
+                messages = new object[]
+                {
+                    new { role = "system", content = prompt.System },
+                    new { role = "user", content = prompt.User }
+                }
             };
 
             var sw = System.Diagnostics.Stopwatch.StartNew();
@@ -683,14 +719,62 @@ public class OllamaService : IOllamaService
         }
     }
 
+    /// <summary>
+    /// The two messages of a Phase 1 call: the fixed task as system message (the same for every directory, so the
+    /// server can reuse its prompt cache), the directory with its profile and listing as user message.
+    /// </summary>
+    public static ChatPrompt BuildPreAssessmentMessages(DirectoryPreAssessmentInput input, string summaryLanguage = "English") =>
+        new(BuildPreAssessmentInstructions(summaryLanguage), BuildPreAssessmentDirectoryPart(input));
+
+    /// <summary>The whole Phase 1 text: the fixed task, then the directory.</summary>
     public static string BuildPreAssessmentPrompt(DirectoryPreAssessmentInput input, string summaryLanguage = "English")
+    {
+        var m = BuildPreAssessmentMessages(input, summaryLanguage);
+        return m.System + "\n" + m.User;
+    }
+
+    /// <summary>The fixed Phase 1 task, the same text for every directory of a run.</summary>
+    public static string BuildPreAssessmentInstructions(string summaryLanguage = "English")
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("You are judging a directory before files are moved: what lies here, and can it be handled as a whole?");
+        sb.AppendLine("You also plan targeted file inspection. The directory is described in the user message.");
+        sb.AppendLine();
+        sb.AppendLine("Tasks:");
+        sb.AppendLine("1. Judge the directory as a whole (field verdict), using its profile:");
+        sb.AppendLine($"   {DirectoryVerdictKind.Unit.ToCode()} = project, program, game or backup that only makes sense as a whole; never split into single files");
+        sb.AppendLine($"   {DirectoryVerdictKind.Uniform.ToCode()} = collection of similar content with one purpose (photos of one trip, invoices of one year)");
+        sb.AppendLine($"   {DirectoryVerdictKind.Mixed.ToCode()} = storage without a common purpose (desktop, downloads, misc); files are handled one by one");
+        sb.AppendLine($"   {DirectoryVerdictKind.Empty.ToCode()} = nothing worth looking at");
+        sb.AppendLine($"   {DirectoryVerdictKind.System.ToCode()} = operating system, application or cache data, not user content");
+        sb.AppendLine("2. purpose: what the directory is for, in one sentence.");
+        sb.AppendLine($"3. retention: {RetentionValue.Keep.ToCode()} = personal or hard to replace; {RetentionValue.Review.ToCode()} = unclear, a human should look;");
+        sb.AppendLine($"   {RetentionValue.Disposable.ToCode()} = can be recreated or downloaded again (installers, caches, temporary files).");
+        sb.AppendLine("4. reason: one or two sentences why, naming the facts from the profile you relied on.");
+        sb.AppendLine("5. Assess homogeneity: high=all same type/theme, medium=mostly similar, low=very mixed.");
+        sb.AppendLine("6. Identify anomalous files: different type from the majority, or dramatically larger/smaller than peers.");
+        sb.AppendLine("7. Choose a sampling strategy for deep vision/text analysis:");
+        sb.AppendLine("   analyze_all = ≤10 files or content is too mixed to sample");
+        sb.AppendLine("   random_sample = pick a representative subset (use this for large homogeneous dirs)");
+        sb.AppendLine("   skip = only dir name/path are enough to classify (e.g. a clearly-named system folder)");
+        sb.AppendLine("8. Suggest how many files to analyze (0 for skip, all count for analyze_all).");
+        sb.AppendLine();
+        sb.AppendLine("Use the codes exactly as written for verdict and retention.");
+        if (!string.IsNullOrWhiteSpace(summaryLanguage) &&
+            !string.Equals(summaryLanguage, "English", StringComparison.OrdinalIgnoreCase))
+        {
+            sb.AppendLine($"Write the purpose and reason fields in: {summaryLanguage}.");
+        }
+        sb.AppendLine("Return only JSON matching the provided schema.");
+        return sb.ToString();
+    }
+
+    /// <summary>The Phase 1 part about one directory: identity, profile, subdirectories and files.</summary>
+    public static string BuildPreAssessmentDirectoryPart(DirectoryPreAssessmentInput input)
     {
         var dir = input.Directory;
         var profile = input.Profile;
         var sb = new StringBuilder();
-        sb.AppendLine("You are judging a directory before files are moved: what lies here, and can it be handled as a whole?");
-        sb.AppendLine("You also plan targeted file inspection.");
-        sb.AppendLine();
         sb.AppendLine($"Directory: {dir.Name}");
         sb.AppendLine($"Relative path: {dir.RelativePath}");
         sb.AppendLine($"Total direct files: {input.DirectFiles.Count}");
@@ -716,34 +800,6 @@ public class OllamaService : IOllamaService
             sb.AppendLine($"  {f.Name} | {f.Size}");
         if (input.DirectFiles.Count > 200)
             sb.AppendLine($"  ... (+{input.DirectFiles.Count - 200} more, total {input.DirectFiles.Count})");
-
-        sb.AppendLine();
-        sb.AppendLine("Tasks:");
-        sb.AppendLine("1. Judge the directory as a whole (field verdict), using the profile above:");
-        sb.AppendLine($"   {DirectoryVerdictKind.Unit.ToCode()} = project, program, game or backup that only makes sense as a whole; never split into single files");
-        sb.AppendLine($"   {DirectoryVerdictKind.Uniform.ToCode()} = collection of similar content with one purpose (photos of one trip, invoices of one year)");
-        sb.AppendLine($"   {DirectoryVerdictKind.Mixed.ToCode()} = storage without a common purpose (desktop, downloads, misc); files are handled one by one");
-        sb.AppendLine($"   {DirectoryVerdictKind.Empty.ToCode()} = nothing worth looking at");
-        sb.AppendLine($"   {DirectoryVerdictKind.System.ToCode()} = operating system, application or cache data, not user content");
-        sb.AppendLine("2. purpose: what the directory is for, in one sentence.");
-        sb.AppendLine($"3. retention: {RetentionValue.Keep.ToCode()} = personal or hard to replace; {RetentionValue.Review.ToCode()} = unclear, a human should look;");
-        sb.AppendLine($"   {RetentionValue.Disposable.ToCode()} = can be recreated or downloaded again (installers, caches, temporary files).");
-        sb.AppendLine("4. reason: one or two sentences why, naming the facts from the profile you relied on.");
-        sb.AppendLine("5. Assess homogeneity: high=all same type/theme, medium=mostly similar, low=very mixed.");
-        sb.AppendLine("6. Identify anomalous files: different type from the majority, or dramatically larger/smaller than peers.");
-        sb.AppendLine("7. Choose a sampling strategy for deep vision/text analysis:");
-        sb.AppendLine("   analyze_all = ≤10 files or content is too mixed to sample");
-        sb.AppendLine("   random_sample = pick a representative subset (use this for large homogeneous dirs)");
-        sb.AppendLine("   skip = only dir name/path are enough to classify (e.g. a clearly-named system folder)");
-        sb.AppendLine("8. Suggest how many files to analyze (0 for skip, all count for analyze_all).");
-        sb.AppendLine();
-        sb.AppendLine("Use the codes exactly as written for verdict and retention.");
-        if (!string.IsNullOrWhiteSpace(summaryLanguage) &&
-            !string.Equals(summaryLanguage, "English", StringComparison.OrdinalIgnoreCase))
-        {
-            sb.AppendLine($"Write the purpose and reason fields in: {summaryLanguage}.");
-        }
-        sb.AppendLine("Return only JSON matching the provided schema.");
         return sb.ToString();
     }
 
@@ -823,11 +879,11 @@ public class OllamaService : IOllamaService
 
         try
         {
-            var prompt = BuildSummaryPrompt(input);
+            var prompt = BuildSummaryMessages(input);
             // Marked files enter this prompt only as their neutral line (DirectorySummaryService), so the
             // local log may hold it.
             _traffic.LogDebug("[Phase3] PROMPT for '{Dir}' ({Len} chars):\n{Prompt}",
-                input.Directory.RelativePath, prompt.Length, Trunc(prompt, 8000));
+                input.Directory.RelativePath, prompt.User.Length, Trunc(prompt.User, 8000));
             var requestBody = new
             {
                 model = _options.Model,
@@ -835,7 +891,11 @@ public class OllamaService : IOllamaService
                 think = false,
                 keep_alive = _options.KeepAlive,
                 format = BuildSummarySchema(),
-                messages = new object[] { new { role = "user", content = prompt } }
+                messages = new object[]
+                {
+                    new { role = "system", content = prompt.System },
+                    new { role = "user", content = prompt.User }
+                }
             };
 
             var sw = System.Diagnostics.Stopwatch.StartNew();
@@ -876,13 +936,22 @@ public class OllamaService : IOllamaService
         return result;
     }
 
-    private static string BuildSummaryPrompt(DirectorySummaryInput input)
+    /// <summary>The fixed Phase 3 task, the same text for every directory of a run.</summary>
+    private const string SummaryInstructions =
+        "You are writing a final summary for a directory based on AI analysis of a sample of its files.\n" +
+        "The directory is described in the user message.\n" +
+        "Write a short summary (1-2 sentences) describing what this directory contains.\n" +
+        "Confirm which anomalies are real outliers, if any.\n" +
+        "Return only JSON matching the provided schema.\n";
+
+    /// <summary>The two messages of a Phase 3 call: the fixed task as system message, the directory as user message.</summary>
+    public static ChatPrompt BuildSummaryMessages(DirectorySummaryInput input) => new(SummaryInstructions, BuildSummaryDirectoryPart(input));
+
+    private static string BuildSummaryDirectoryPart(DirectorySummaryInput input)
     {
         var dir = input.Directory;
         var pre = input.PreAssessment;
         var sb = new StringBuilder();
-        sb.AppendLine("You are writing a final summary for a directory based on AI analysis of a sample of its files.");
-        sb.AppendLine();
         sb.AppendLine($"Directory: {dir.Name}");
         sb.AppendLine($"Relative path: {dir.RelativePath}");
         sb.AppendLine($"Pre-assessment: theme=\"{pre.Theme}\", homogeneity={pre.Homogeneity}, dominant_type={pre.DominantType}");
@@ -904,9 +973,6 @@ public class OllamaService : IOllamaService
             sb.AppendLine();
         }
 
-        sb.AppendLine("Write a short summary (1-2 sentences) describing what this directory contains.");
-        sb.AppendLine("Confirm which anomalies are real outliers, if any.");
-        sb.AppendLine("Return only JSON matching the provided schema.");
         return sb.ToString();
     }
 

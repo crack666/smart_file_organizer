@@ -115,10 +115,12 @@ public sealed class FakeModelServer : HttpMessageHandler
         var messages = doc.RootElement.GetProperty("messages");
         if (messages.GetArrayLength() == 0) return ("warm", null);
 
+        // The fixed task of a phase is the system message, the file or directory the last message.
+        var task = messages[0].GetProperty("content").GetString() ?? string.Empty;
         var prompt = messages[messages.GetArrayLength() - 1].GetProperty("content").GetString() ?? string.Empty;
-        if (prompt.StartsWith("You are judging a directory", StringComparison.Ordinal))
+        if (task.StartsWith("You are judging a directory", StringComparison.Ordinal))
             return ("pre_assessment", Line(prompt, "Relative path: "));
-        if (prompt.StartsWith("You are writing a final summary", StringComparison.Ordinal))
+        if (task.StartsWith("You are writing a final summary", StringComparison.Ordinal))
             return ("summary", Line(prompt, "Relative path: "));
         var kind = prompt.Contains("Context: the directory this file is in", StringComparison.Ordinal) ? "second_check" : "classification";
         return (kind, Line(prompt, "File name: "));

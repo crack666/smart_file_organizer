@@ -200,7 +200,8 @@ public class SecondCheckTests : IDisposable
         var prompt = OllamaService.BuildClassificationPrompt(second);
         Assert.Contains("downloads of a year", prompt);
         Assert.Contains("neighbour.jpg", prompt);
-        Assert.DoesNotContain("Screenshot", prompt[prompt.IndexOf("Context:", StringComparison.Ordinal)..prompt.IndexOf("Classification guidance", StringComparison.Ordinal)]);
+        // The context is the last part of the prompt, after the fixed guidance that names every category.
+        Assert.DoesNotContain("Screenshot", prompt[prompt.IndexOf("Context:", StringComparison.Ordinal)..]);
         Assert.DoesNotContain("looks like Screenshot", prompt);
     }
 
