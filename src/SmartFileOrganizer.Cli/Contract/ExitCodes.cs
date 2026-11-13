@@ -52,5 +52,10 @@ public static class ErrorCodes
     public const string SettingsInvalid = "settings_invalid";
     public const string FindingNotFound = "finding_not_found";
     public const string TargetsInvalid = "targets_invalid";
+    public const string PlanNotFound = "plan_not_found";
+    public const string ActionNotFound = "action_not_found";
+    public const string PlanChangeRefused = "plan_change_refused";
+    public const string LibraryInvalid = "library_invalid";
+    public const string ImportInvalid = "import_invalid";
     public const string InternalError = "internal_error";
 }
