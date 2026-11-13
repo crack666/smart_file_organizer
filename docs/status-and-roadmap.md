@@ -233,9 +233,9 @@ the phone backup is one `phone` dump with `DCIM` as `camera` part; the two progr
 - Capture dates exist only after `sfo analyze` has run Phase 2 on the photos; for a job that was only
   scanned, events rest on names and modification times (`period.time_source` says which).
 - Used by `sfo library match --bundle` and by the findings
-  (https://github.com/crack666/smart_file_organizer/issues/26); not yet by the plan
-  (https://github.com/crack666/smart_file_organizer/issues/11). (Until 12.11.2026 evening: "Not yet used by
-  findings".)
+  (https://github.com/crack666/smart_file_organizer/issues/26), and through the findings by the plan: a finding is
+  the unit of a plan (https://github.com/crack666/smart_file_organizer/issues/11). (Until 12.11.2026 evening: "Not
+  yet used by findings"; until 13.11.2026: "not yet by the plan".)
 
 ### Findings
 
@@ -252,7 +252,9 @@ library 17, `not_backed_up` not computed), and a generated old Windows profile w
   decision, `wrong` also a test case. Rules: [architecture.md, Findings flow](architecture.md#findings-flow).
 - `misplaced` stays `uncertain` at most: no step checks the content of a target folder yet
   (https://github.com/crack666/smart_file_organizer/issues/56).
-- Nothing executes an accepted finding yet (https://github.com/crack666/smart_file_organizer/issues/11).
+- Accepted findings become plan actions (`sfo plan create`); nothing executes them yet
+  (https://github.com/crack666/smart_file_organizer/issues/12). (Until 13.11.2026: "Nothing executes an accepted
+  finding yet", pointing at the plan issue.)
 
 ### Describing and deciding
 
@@ -268,6 +270,21 @@ fields well, and what they cost in answer tokens, is not measured._
   Rules: [architecture.md, Decision flow](architecture.md#decision-flow).
 - Importance and keep hint are still asked in the analysis; a model call over facts for what no rule can judge is
   not built; the content check of target folders is https://github.com/crack666/smart_file_organizer/issues/56.
+
+### Plan
+
+_Checked 13.11.2026 on the branch for https://github.com/crack666/smart_file_organizer/issues/11 (schema step 23):
+`dotnet test` 865 passed, 2 skipped; `eval --stub`, `scan --role library`, `compare`, `bundles build`, `decide`,
+`findings accept` and every `plan` command run in-process against a temp database (`PlanCommandTests`), the rules
+alone in `PlanChecksTests`. No run on a real medium or a real library._
+
+- `sfo plan create <job>` turns accepted findings into actions: a uniform or unit folder one action with its name, a
+  mixed folder one action per worth-keeping file, nothing for content a library holds, `leave` for sensitive files and
+  for anything without a target in a library. `show`, `summary`, `set`, `import`, `approve`, `reject` read, change and
+  confirm; see [cli.md, Planning](cli.md#planning).
+- Nothing is executed: moving, copying and removing is https://github.com/crack666/smart_file_organizer/issues/12.
+- Targets come from the findings (a place in a library) and from `sfo decide --targets` bound to a library root; the
+  content check of target folders (https://github.com/crack666/smart_file_organizer/issues/56) is not part of it.
 
 ### Placing into the library
 

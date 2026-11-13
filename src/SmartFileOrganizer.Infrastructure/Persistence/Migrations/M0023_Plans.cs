@@ -1,16 +1,16 @@
 namespace SmartFileOrganizer.Infrastructure.Persistence.Migrations;
 
 /// <summary>
-/// Step 22: plans (https://github.com/crack666/smart_file_organizer/issues/11). <c>sfo plan create</c> turns the
+/// Step 23: plans (https://github.com/crack666/smart_file_organizer/issues/11). <c>sfo plan create</c> turns the
 /// accepted findings of a source job into actions; a person or a steering agent changes and confirms them. Nothing is
 /// executed here. <c>libraries</c> and <c>notes</c> of a plan are JSON lists. An action points at its file or folder
 /// while the scan row exists (a rescan of the folder sets the reference to null, the path stays) and at the library
 /// whose root holds its target (deleting that library job sets it to null). Codes are those of docs/glossary.md,
 /// section Plans; the states were reserved there since the decision table.
 /// </summary>
-internal sealed class M0022_Plans : SqlSchemaMigration
+internal sealed class M0023_Plans : SqlSchemaMigration
 {
-    public override int Version => 22;
+    public override int Version => 23;
     public override string Description => "Plans: actions from accepted findings, to be confirmed";
 
     protected override string Sql => """

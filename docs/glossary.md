@@ -755,7 +755,7 @@ say nothing; `certainty` is a certainty code.
 
 ## Plans
 
-https://github.com/crack666/smart_file_organizer/issues/11, written by `sfo plan` ([cli.md](cli.md#sfo-plan)) and
+https://github.com/crack666/smart_file_organizer/issues/11, written by `sfo plan` ([cli.md](cli.md#planning)) and
 stored in `plans` and `plan_actions`. The kind of an action is a `PlanActionKind` code. A plan executes nothing.
 
 ### State of a plan action (`PlanActionState`)
