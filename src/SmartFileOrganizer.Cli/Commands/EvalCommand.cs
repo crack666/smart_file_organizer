@@ -118,7 +118,10 @@ public static class EvalCommand
             if (p.GetValue(stub) is { } stubPath)
             {
                 stubService = new ScriptedAnswerOllamaService(LoadTruth(Path.GetFullPath(stubPath)), Path.GetFileName(stubPath));
-                ctx.ConfigureServices(s => s.AddSingleton<IOllamaService>(stubService));
+                // The content check of targets compares the scripted descriptions by rule, not by a model.
+                ctx.ConfigureServices(s => s
+                    .AddSingleton<IOllamaService>(stubService)
+                    .AddSingleton<SmartFileOrganizer.Application.Library.IContentFitJudge, SmartFileOrganizer.Application.Library.DescriptionRulesFitJudge>());
             }
 
             var services = await ctx.GetServicesAsync(ct);
@@ -217,7 +220,29 @@ public static class EvalCommand
                 .ListAsync(new SmartFileOrganizer.Application.Findings.FindingQuery { JobId = job.Id }, ct);
         }
 
-        var report = await services.GetRequiredService<CorpusEvaluator>().EvaluateAsync(truth, job.Id, expectedFindings, listed, ct);
+        // With targets.json next to the truth, the target proposals are measured too
+        // (https://github.com/crack666/smart_file_organizer/issues/56): the corpus library is scanned like a real one
+        // (structure only), the source compared with it, and every expected unit matched with the content check.
+        IReadOnlyList<TargetResult>? targets = null;
+        var expectedTargets = EvalTargetTruth.LoadBeside(truthPath);
+        if (expectedTargets is not null)
+        {
+            var libraryRoot = Path.Combine(corpusDir, expectedTargets.Library);
+            if (!Directory.Exists(libraryRoot))
+                throw new CliFailureException(ExitCodes.Failure, ErrorCodes.PathNotFound, $"Corpus library not found: {libraryRoot}");
+            var library = await jobs.CreateJobAsync(libraryRoot, rules, ScanRole.Library, structureOnly: true, ct);
+            var libraryScan = await jobs.RunAsync(library.Id, null, null, ct);
+            if (libraryScan.Status != JobStatus.Completed)
+                throw new CliFailureException(ExitCodes.Failure, ErrorCodes.ScanFailed, $"Scan of the corpus library (job {library.Id}) ended as {libraryScan.Status}: {libraryScan.LastError}");
+            stub?.AnswerLibrary(library.Id, EvalTargetTruth.Descriptions(expectedTargets));
+            await services.GetRequiredService<ContentComparisonService>().CompareAsync(job.Id, library.Id,
+                new SynchronousProgress<ComparisonProgress>(pr => ctx.Progress.Report("compare", pr.Processed, pr.Total, 0)), ct);
+            if (expectedFindings is null)
+                await services.GetRequiredService<BundleService>().BuildAsync(job.Id, null, ct);
+            targets = await services.GetRequiredService<TargetEvaluator>().RunAsync(job.Id, library.Id, expectedTargets.Targets, useModel: true, ct);
+        }
+
+        var report = await services.GetRequiredService<CorpusEvaluator>().EvaluateAsync(truth, job.Id, expectedFindings, listed, targets, ct);
         var context = Context(ollama, services.GetRequiredService<DirectoryAnalysisOptions>(), stub, rules);
         var stored = await services.GetRequiredService<EvalRunService>().RecordAsync(
             EvalRunMode.Corpus, truth.Subject, job.Id, context, report, started, ct);

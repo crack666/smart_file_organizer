@@ -28,6 +28,19 @@ public sealed class ScriptedAnswerOllamaService : IOllamaService
 
     public string ModelName { get; }
 
+    private IReadOnlyDictionary<string, IReadOnlyList<FileFact>> _library = new Dictionary<string, IReadOnlyList<FileFact>>();
+    private readonly HashSet<long> _libraryJobs = [];
+
+    /// <summary>
+    /// Answers for the files of a library job (paths relative to its root) with these descriptions: what the corpus
+    /// library of <c>targets.json</c> shows, for the folder samples of <c>sfo library match</c>.
+    /// </summary>
+    public void AnswerLibrary(long libraryJobId, IReadOnlyDictionary<string, IReadOnlyList<FileFact>> descriptions)
+    {
+        _library = descriptions;
+        _libraryJobs.Add(libraryJobId);
+    }
+
     public Task<DirectoryPreAssessmentOutcome> PreAssessDirectoryAsync(DirectoryPreAssessmentInput input, CancellationToken ct = default)
     {
         var path = EvalTruth.NormalizePath(input.Directory.RelativePath);
@@ -79,7 +92,14 @@ public sealed class ScriptedAnswerOllamaService : IOllamaService
             Importance = Importance.Medium,
             Confidence = 1.0
         };
-        if (_answers.Files.TryGetValue(path, out var answer))
+        if (_libraryJobs.Contains(input.File.JobId) && _library.TryGetValue(path, out var described))
+        {
+            // A file of the corpus library, sampled by library match to describe its folder.
+            result.Category = input.File.FileType is FileType.Image or FileType.Video ? FileCategory.Photo : FileCategory.Document;
+            result.Summary = "scripted answer";
+            result.DescribedFacts = described.ToList();
+        }
+        else if (_answers.Files.TryGetValue(path, out var answer))
         {
             // The truth leaves a category open where it is ambiguous (not scored). The stub still has to commit
             // to one, like a model would; unknown would make every sample of such a folder unusable. It commits to
@@ -88,6 +108,8 @@ public sealed class ScriptedAnswerOllamaService : IOllamaService
             result.Category = answer.Category ?? OpenCategory(input.File.FileType);
             result.SensitiveMarkers = answer.Sensitive;
             result.Summary = "scripted answer";
+            if (answer.Description is { } d)
+                result.DescribedFacts = d.ToFacts().ToList();
         }
         else
         {

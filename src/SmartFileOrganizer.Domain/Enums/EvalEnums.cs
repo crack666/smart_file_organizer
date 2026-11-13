@@ -44,7 +44,13 @@ public enum EvalKind
     [JsonStringEnumMemberName("sensitive")] Sensitive,
 
     /// <summary>The findings of the job against the expected findings of the corpus (<c>findings.json</c>).</summary>
-    [JsonStringEnumMemberName("finding")] Finding
+    [JsonStringEnumMemberName("finding")] Finding,
+
+    /// <summary>
+    /// The place <c>sfo library match</c> proposes in the corpus library against the known right place
+    /// (<c>targets.json</c>, https://github.com/crack666/smart_file_organizer/issues/56).
+    /// </summary>
+    [JsonStringEnumMemberName("target")] Target
 }
 
 /// <summary>How one measured item turned out.</summary>

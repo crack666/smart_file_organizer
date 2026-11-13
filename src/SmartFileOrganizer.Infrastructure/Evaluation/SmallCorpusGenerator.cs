@@ -42,11 +42,16 @@ public static class SmallCorpusGenerator
     /// backup's camera is judged), and a folder with two user profiles full of noise.
     /// Version 4 (https://github.com/crack666/smart_file_organizer/issues/67): what rules decide without the model (the
     /// public profile with learning material, account pictures and shortcuts, a package manager, system files, a folder
-    /// with one file) and an archive of bank statements under a number.</remarks>
-    public const int GeneratorVersion = 4;
+    /// with one file) and an archive of bank statements under a number.
+    /// Version 5 (https://github.com/crack666/smart_file_organizer/issues/56): a folder <c>Import</c> with photos of two
+    /// occasions of one day, a lake outing and two invoices, and a library next to the tree with <c>targets.json</c>.</remarks>
+    public const int GeneratorVersion = 5;
 
     public const int DefaultSeed = 36;
     public const string RootFolder = "tree";
+
+    /// <summary>The library of the corpus, next to <see cref="RootFolder"/>; see <c>targets.json</c>.</summary>
+    public const string LibraryFolder = "ablage";
 
     public static GeneratedCorpus Generate(string outputDirectory, int seed = DefaultSeed)
     {
@@ -65,6 +70,7 @@ public static class SmallCorpusGenerator
         var truthPath = Path.Combine(dir, EvalTruth.FileName);
         File.WriteAllText(truthPath, JsonSerializer.Serialize(doc, EvalJson.Options) + "\n", new UTF8Encoding(false));
         SmallCorpusFindings.Write(dir);
+        Library(dir, new Random(seed + 1));
 
         b.ApplyDirectoryTimes();
         return new GeneratedCorpus(dir, truthPath, root, corpus, b.Directories.Count, b.Files.Count);
@@ -304,11 +310,111 @@ public static class SmallCorpusGenerator
         b.File("alt/bewerbungsfoto.jpg", PhotoOf(b, Scene.Portrait), D(2016, 3, 1), Photo, None);
         b.File("alt/Tabelle1.csv", Text("Monat;Betrag\nJanuar;120\nFebruar;95\nMaerz;143\n"), D(2016, 4, 4), null, None, "Category ambiguous.");
 
+        Import(b);
+
         // ── Hidden key folder ──
         b.Dir(".ssh", SystemDir, "Hidden tool folder.");
         b.File(".ssh/id_ed25519", PrivateKey(b), D(2022, 1, 9), null, [Keys], "Private key dummy (header and random filler).");
         b.File(".ssh/id_ed25519.pub", Text("ssh-ed25519 " + Convert.ToBase64String(Bytes(b, 32)) + " max@laptop\n"), D(2022, 1, 9), null, None,
             "A public key is not secret.");
+    }
+
+    // Descriptions (Issue 37) of the version 5 pictures and papers: the stub's answer for a source file and for a library file.
+    private static readonly TruthDescription SkiDay = new("snowy slope", "skiing", "outdoor", "winter", "holiday", true);
+    private static readonly TruthDescription BirthdayEvening = new("living room with cake", "blowing out candles", "indoor", "winter", "birthday", true);
+    private static readonly TruthDescription LakeDay = new("lake shore", "swimming", "outdoor", "summer", "outing", true);
+    private static readonly TruthDescription GardenParty = new("garden party", "eating together", "outdoor", "summer", "celebration", true);
+    private static readonly TruthDescription EasterGarden = new("garden lawn", "egg hunt", "outdoor", "spring", "easter", true);
+    private static TruthDescription InvoiceOf(string issuer, int year) => new(DocumentKind: "invoice", Issuer: issuer, Year: year);
+    private const string PowerCompany = "Stadtwerke Beispielstadt", PhoneCompany = "Telefon Beispiel AG";
+
+    /// <summary>
+    /// Version 5 (Issue 56): a folder under a generic name with what has no place yet. Two occasions of the same day (a
+    /// ski trip in the morning, a birthday in the evening, more than eight hours apart, so two bundles), a lake outing on
+    /// the day of a garden party, and two invoices of two providers. <c>targets.json</c> says where each belongs in the
+    /// library of the corpus (<see cref="Library"/>).
+    /// </summary>
+    private static void Import(Builder b)
+    {
+        b.Dir("Import", Mixed, "Generic name; photos of three occasions and two invoices waiting for a place.");
+        // The name carries the time (the grouping reads it), so it must be a valid one.
+        static string Named(DateTime t) => $"Import/IMG_{t:yyyyMMdd_HHmmss}.jpg";
+        for (var i = 0; i < 3; i++)
+        {
+            var t = D(2021, 2, 6, 9, 0).AddMinutes(i * 40).AddSeconds(12);
+            b.File(Named(t), PhotoOf(b, Scene.Snow), t, Photo, None, "Ski trip in the morning: belongs into the ski trip of the library.", SkiDay);
+        }
+        for (var i = 0; i < 3; i++)
+        {
+            var t = D(2021, 2, 6, 19, 30).AddMinutes(i * 25).AddSeconds(15);
+            b.File(Named(t), PhotoOf(b, Scene.Portrait), t, Photo, None,
+                "Birthday in the evening of the same day: same period as the ski trip, other occasion; no folder for it yet.", BirthdayEvening);
+        }
+        for (var i = 0; i < 3; i++)
+            b.File(Named(D(2021, 8, 14, 11, i * 15)), PhotoOf(b, Scene.Lake), D(2021, 8, 14, 11, i * 15), Photo, None,
+                "Lake outing on the day of the garden party of the library: same day, other occasion; no folder for it yet.", LakeDay);
+        b.File("Import/Rechnung_2023_11.pdf", MiniPdf.Text("Rechnung Nr. 2023-1120", [
+            PowerCompany + " GmbH, Musterweg 1, 12345 Beispielstadt",
+            "Stromlieferung November 2023: 198 kWh",
+            "Rechnungsbetrag: 76,10 EUR"]), D(2023, 11, 20), Invoice, None, "Belongs to the invoices of its provider.", InvoiceOf(PowerCompany, 2023));
+        b.File("Import/Rechnung_2023_12.pdf", MiniPdf.Text("Rechnung Dezember 2023", [
+            PhoneCompany + ", Postfach 10, 54321 Nachbarort",
+            "Festnetz und Internet Dezember 2023",
+            "Rechnungsbetrag: 34,99 EUR"]), D(2023, 12, 20), Invoice, None, "Belongs to the invoices of its provider.", InvoiceOf(PhoneCompany, 2023));
+    }
+
+    /// <summary>
+    /// Version 5 (Issue 56): the library of the corpus, a folder next to <c>tree</c> (never inside it), and
+    /// <c>targets.json</c> with what every file there shows and where the waiting things of <c>Import</c> belong.
+    /// </summary>
+    private static void Library(string dir, Random random)
+    {
+        var b = new Builder(Path.Combine(dir, LibraryFolder), random);
+        var files = new List<LibraryFileEntry>();
+        void Photos(string folder, string name, Scene scene, DateTime first, TruthDescription description)
+        {
+            b.Dir(folder, null);
+            for (var i = 0; i < 4; i++)
+            {
+                var when = first.AddMinutes(i * 95);
+                var path = $"{folder}/IMG_{when:yyyyMMdd_HHmmss}.jpg";
+                b.File(path, PhotoOf(b, scene), when, null, None);
+                files.Add(new LibraryFileEntry(path, description, name));
+            }
+        }
+        void Invoices(string folder, string issuer)
+        {
+            b.Dir(folder, null);
+            for (var m = 8; m <= 10; m++)
+            {
+                var path = $"{folder}/Rechnung_2023_{m:00}.pdf";
+                b.File(path, MiniPdf.Text($"Rechnung {m:00}/2023", [issuer, $"Rechnungsbetrag: {40 + m},00 EUR"]), D(2023, m, 20), null, None);
+                files.Add(new LibraryFileEntry(path, InvoiceOf(issuer, 2023)));
+            }
+        }
+
+        b.Dir(".", null);
+        b.Dir("Bilder", null);
+        Photos("Bilder/Skifahrt 2021", "ski trip", Scene.Snow, D(2021, 2, 5, 10, 0), SkiDay);
+        Photos("Bilder/Sommerfest 2021", "garden party", Scene.Garden, D(2021, 8, 14, 15, 0), GardenParty);
+        Photos("Bilder/Ostern 2020", "easter", Scene.Garden, D(2020, 4, 12, 11, 0), EasterGarden);
+        b.Dir("Unterlagen", null);
+        Invoices("Unterlagen/Rechnungen Stadtwerke", PowerCompany);
+        Invoices("Unterlagen/Rechnungen Telefon", PhoneCompany);
+        b.ApplyDirectoryTimes();
+
+        ExpectedTarget[] targets =
+        [
+            new("bundle", "Import/IMG_20210206_090012.jpg", "Bilder/Skifahrt 2021", "Same occasion as the ski trip folder."),
+            new("bundle", "Import/IMG_20210206_193015.jpg", null,
+                "Trap: same week as the ski trip, other occasion; the ski trip folder is wrong, a new folder is right."),
+            new("bundle", "Import/IMG_20210814_110000.jpg", null,
+                "Trap: same day as the garden party, other occasion; no folder for it yet."),
+            new("file", "Import/Rechnung_2023_11.pdf", "Unterlagen/Rechnungen Stadtwerke", "The invoices of its provider, not of the other."),
+            new("file", "Import/Rechnung_2023_12.pdf", "Unterlagen/Rechnungen Telefon", "The invoices of its provider, not of the other.")
+        ];
+        var doc = new EvalTargetTruthDocument(EvalTargetTruth.SchemaVersion, LibraryFolder, files, targets);
+        File.WriteAllText(Path.Combine(dir, EvalTargetTruth.FileName), JsonSerializer.Serialize(doc, EvalJson.Options) + "\n", new UTF8Encoding(false));
     }
 
     /// <summary>
@@ -676,12 +782,13 @@ public static class SmallCorpusGenerator
             Directories.Add(new TruthDirectoryEntry(path, verdict, note));
         }
 
-        public void File(string path, byte[] content, DateTime modified, string? category, string[] sensitive, string? note = null)
+        public void File(string path, byte[] content, DateTime modified, string? category, string[] sensitive, string? note = null,
+            TruthDescription? description = null)
         {
             var full = Full(path);
             System.IO.File.WriteAllBytes(full, content);
             System.IO.File.SetLastWriteTimeUtc(full, modified);
-            Files.Add(new TruthFileEntry(path, category, sensitive, note));
+            Files.Add(new TruthFileEntry(path, category, sensitive, note, description));
             _dirTimes.Add((EvalTruth.ParentOf(path), modified));
         }
 

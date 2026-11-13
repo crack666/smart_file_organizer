@@ -197,6 +197,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<EvalCaseService>();
         services.AddSingleton<EvalRunService>();
         services.AddSingleton<CorpusEvaluator>();
+        services.AddSingleton<TargetEvaluator>();
         services.AddSingleton<ScanExportService>();
         services.AddSingleton<FocusedRescanService>();
         services.AddSingleton<ContentComparisonService>();
