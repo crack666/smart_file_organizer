@@ -53,6 +53,20 @@ public sealed class LibraryMatchOptions
     public double SubfolderWeightPeriod { get; set; } = 0.10;
     public double SubfolderWeightName { get; set; } = 0.10;
 
+    // Content (https://github.com/crack666/smart_file_organizer/issues/56).
+
+    /// <summary>Added to the score of a candidate whose content fits, so it outranks one that only shares the period.</summary>
+    public double WeightContentFit { get; set; } = 0.40;
+
+    /// <summary>Candidates per library whose content is checked (best first); each costs a sample of the folder once.</summary>
+    public int MaxContentCandidates { get; set; } = 5;
+
+    /// <summary>Files of a candidate folder looked at for its description, spread over its period.</summary>
+    public int FolderSampleSize { get; set; } = 4;
+
+    /// <summary>Described files of the unit its description is built from, spread over its period.</summary>
+    public int UnitSampleSize { get; set; } = 12;
+
     /// <summary>
     /// Folder for the patterns files (one per library job, editable by hand). Set by the host to
     /// <c>library-patterns</c> next to the database; null keeps the patterns in memory only.
@@ -80,6 +94,10 @@ public sealed class LibraryMatchOptions
         if (MaxCandidates is < 1 or > 50) problems.Add($"{nameof(MaxCandidates)} must be between 1 and 50");
         if (ModelMaxDepth is < 0 or > 10) problems.Add($"{nameof(ModelMaxDepth)} must be between 0 and 10");
         if (ModelMaxFolders is < 1 or > 1000) problems.Add($"{nameof(ModelMaxFolders)} must be between 1 and 1000");
+        if (MaxContentCandidates is < 0 or > 20) problems.Add($"{nameof(MaxContentCandidates)} must be between 0 and 20");
+        if (FolderSampleSize is < 1 or > 10) problems.Add($"{nameof(FolderSampleSize)} must be between 1 and 10");
+        if (UnitSampleSize is < 1 or > 100) problems.Add($"{nameof(UnitSampleSize)} must be between 1 and 100");
+        Share(nameof(WeightContentFit), WeightContentFit);
         foreach (var (name, w) in new[]
                  {
                      (nameof(WeightContent), WeightContent), (nameof(WeightPeriod), WeightPeriod), (nameof(WeightName), WeightName),

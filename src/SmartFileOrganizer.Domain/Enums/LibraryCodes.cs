@@ -151,7 +151,58 @@ public enum MatchSignal
     [JsonStringEnumMemberName("file_type")] FileType,
 
     /// <summary>The folder's subfolders are of the same kind as the source folder (occasions next to occasions).</summary>
-    [JsonStringEnumMemberName("siblings")] Siblings
+    [JsonStringEnumMemberName("siblings")] Siblings,
+
+    /// <summary>
+    /// What the files show fits what the folder shows (https://github.com/crack666/smart_file_organizer/issues/56):
+    /// the description of the unit against the description of a sample of the folder, judged by the local model.
+    /// </summary>
+    [JsonStringEnumMemberName("content_fit")] ContentFit
+}
+
+/// <summary>The judgement of the content of a unit against the content of a candidate folder.</summary>
+public enum ContentFit
+{
+    /// <summary>The same occasion, or the same kind of document from the same issuer.</summary>
+    [JsonStringEnumMemberName("fits")] Fits,
+
+    /// <summary>Clearly something else (another occasion, another issuer), whatever the period says.</summary>
+    [JsonStringEnumMemberName("contradicts")] Contradicts,
+
+    /// <summary>The descriptions are too thin to tell.</summary>
+    [JsonStringEnumMemberName("unclear")] Unclear
+}
+
+/// <summary>Whether the content of a match was checked, and why not.</summary>
+public enum ContentCheckStatus
+{
+    /// <summary>The model compared the descriptions.</summary>
+    [JsonStringEnumMemberName("checked")] Checked,
+
+    /// <summary><c>--no-model</c>: places come from time, names and file types only.</summary>
+    [JsonStringEnumMemberName("no_model")] NoModel,
+
+    /// <summary>The local model is not reachable.</summary>
+    [JsonStringEnumMemberName("unavailable")] Unavailable,
+
+    /// <summary>The files of the unit are not described (not analysed, or nothing to describe).</summary>
+    [JsonStringEnumMemberName("no_description")] NoDescription,
+
+    /// <summary>No candidate folder to check.</summary>
+    [JsonStringEnumMemberName("no_candidates")] NoCandidates,
+
+    /// <summary>The model gave no usable answer.</summary>
+    [JsonStringEnumMemberName("failed")] Failed
+}
+
+/// <summary>Where the description of a library folder comes from.</summary>
+public enum FolderDescriptionSource
+{
+    /// <summary>A small sample of the folder's own files, described like the files of a source.</summary>
+    [JsonStringEnumMemberName("sample")] Sample,
+
+    /// <summary>Descriptions another program already holds (reserved; found by the checksum of a file).</summary>
+    [JsonStringEnumMemberName("external")] External
 }
 
 /// <summary>What <c>sfo library match</c> was asked about.</summary>

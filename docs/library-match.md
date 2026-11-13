@@ -8,12 +8,16 @@ when nothing fits. Issue: https://github.com/crack666/smart_file_organizer/issue
 
 Both commands only read. No file in the source or the library is moved, renamed or written;
 the proposals are data for the plan (https://github.com/crack666/smart_file_organizer/issues/11).
-The only file written is the patterns file next to the database (below).
+The only file written is the patterns file next to the database (below); the database gets the
+folder descriptions of the content check (`folder_descriptions`) and the model's answers.
 
-The rule part is complete without a model (`--no-model`). The model, when used, gets folder
-names, counters and patterns only, never file contents, and is asked for two things: a purpose
-for the upper folders (`show`) and a name for a new folder when the rules cannot complete it
-(`match`). Its answers are cached in `library_advice` like those of `library review`.
+The rule part is complete without a model (`--no-model`). The model, when used, is asked for
+three things: a purpose for the upper folders (`show`), a name for a new folder when the rules
+cannot complete it, and whether the content of the unit fits each candidate folder (`match`,
+below). The first two get folder names, counters and patterns only. For the content check, a few
+files of each candidate folder are described with the same call `sfo analyze` uses for a file
+(it reads the file); the comparison itself gets only these descriptions. Answers are cached in
+`library_advice` like those of `library review`.
 
 ## The map
 
@@ -69,22 +73,78 @@ Signals:
 | `file_type` | 0.15 | 0.15 | never strong; agrees when the unit's main kind of files is at least half of the folder |
 | `siblings` | | 0.30 | at least `MinSiblingShare` of the subfolders have the unit's role (for dated loose files, year folders count) |
 
-The score is the weighted sum. Certainty comes from agreeing signals, not from the score:
+| `content_fit` | 0.40 | 0.40 | the content check (below) says the unit's content fits the folder's; only for checked candidates |
+
+The score is the weighted sum. Time, name and file type say only that a folder *could* fit:
+two occasions of the same week share the period and the type. Certainty therefore needs content,
+either the same files already at the target or a content check that fits
+(https://github.com/crack666/smart_file_organizer/issues/56):
 
 - `review`: any signal contradicts. The period contradicts when both periods are known and
   apart and the folder is bound to its time (an occasion, a year, a date in its name); the file
   type contradicts when under 10 % of a folder with at least 3 files is of the unit's kind.
   A kept-whole folder whose content already lies in a differently named folder at that place is
   also `review`.
-- `certain`: same content plus at least one more strong signal.
-- `likely`: two strong signals, or one strong signal and the file type agreeing.
-- `uncertain`: less than that.
+- `certain`: same content plus one more strong signal or a fitting content check; or a fitting
+  content check plus a strong period.
+- `likely`: same content plus the file type agreeing; or a fitting content check plus another
+  strong signal or the file type agreeing.
+- `uncertain`: everything else, in particular period, name and type without content. No
+  proposal without content is better than `uncertain`.
 
 When the runner-up scores within `Margin` of the best, the best drops one level: two places
 fit about equally well and a person decides. Candidates below `MinScore` are dropped.
 
 Every proposal carries `reason`, one sentence a person can check, built from the agreeing
-signals, plus the full `signals` list.
+signals, plus the full `signals` list. A checked candidate names both descriptions
+("the content fits: snowy slope, skiing, holiday; the folder shows ..."); an unchecked one says
+why not ("the content was not checked (no model)").
+
+## Content check
+
+Run by `match` per library, after the scores and before the certainty:
+
+1. **The unit's description.** Built from the description facts of `sfo analyze` (scene,
+   activity, setting, season, occasion, people, document kind, issuer, year; see
+   [glossary.md](glossary.md#fact-key-filefactkey)) of up to `UnitSampleSize` of its files, spread
+   over its time. Counted values, the most frequent first; nothing is stored. A unit whose files
+   are not described yet is not checked (`no_description`): `sfo analyze` describes them.
+2. **The candidates.** Those that reach `MinScore` on time, name and type, at most
+   `MaxContentCandidates`, the best first.
+3. **The folder's description.** From a folder description source. The default (`sample`) takes
+   up to `FolderSampleSize` pictures and videos (for a media folder) or documents, spread over
+   time, never a file marked sensitive, and describes them with the model unless a stored
+   description of that file exists. The result is stored in `folder_descriptions` per library job,
+   folder and source and read again on the next match; `--refresh` describes again. The source is
+   an interface (`IFolderDescriptionSource`): an external one (a photo manager that already
+   describes the library, found by checksum) can be registered before the sample and wins when
+   it has an answer (`source: external`).
+4. **The comparison.** One short model call per unit and library: the unit's description and one
+   line per candidate (`id | placement | folder | period | description`); the fixed instructions
+   are the system message, the answer is limited to a short JSON list of
+   `{id, fit, reason}` with `fit` one of `fits`, `contradicts`, `unclear`. Unknown ids and codes
+   are dropped.
+5. **The result.** `fits` adds the signal `content_fit`. `contradicts` drops the candidate (it is
+   listed under `rejected` with the reason), unless the same files already lie there. `unclear`
+   leaves it unchanged, which caps it at `uncertain` without the same files.
+
+When every candidate is dropped, the new folder is proposed, and its reason names the folder
+that fit only by time or name. Without a model (`--no-model`, Ollama not reachable, no
+description) nothing is checked, `content_check.status` says why and a note says that no proposal
+without the same files at the target is better than `uncertain`.
+
+| `content_check.status` | Meaning |
+|---|---|
+| `checked` | The model compared the candidates. |
+| `no_model` | `--no-model`, or no comparison is configured. |
+| `unavailable` | Ollama does not answer. |
+| `no_description` | The unit's files are not described yet. |
+| `no_candidates` | No candidate reached `MinScore`; nothing to compare. |
+| `failed` | The model call failed or its answer did not parse. |
+
+In `sfo eval --stub` the comparison runs on fixed rules (`description-rules`: other occasion,
+document kind or issuer contradicts; shared scene or activity words, or the same occasion and
+season, fit), so the measurement runs without a model ([evaluation.md](evaluation.md)).
 
 ## Weak places
 
@@ -166,8 +226,9 @@ rules. A file that does not parse ends the command with `library_patterns_invali
 
 ## Settings (`LibraryMatch`)
 
-Starting values, not measured ones: no library with known truth exists yet in the evaluation
-corpus.
+Starting values, not measured against a real library. The evaluation corpus has a small library
+with known truth since version 5; with the stub, every target there is hit (measured 13.11.2026,
+`sfo eval --stub`), which checks the wiring, not the model.
 
 | Setting | Default | Reason |
 |---|---|---|
@@ -182,6 +243,10 @@ corpus.
 | `MaxCandidates` | 3 | Enough to choose, few enough to read. |
 | `ModelMaxDepth`, `ModelMaxFolders` | 2, 150 | Purposes are for the upper folders; deeper ones are explained by the rules. |
 | `Weight*` | 0.40 / 0.25 / 0.20 / 0.15 | Same content is the hardest evidence, then time, then name; the file type separates little. |
+| `WeightContentFit` | 0.40 | A fitting description counts like the same files: it is what tells two occasions of one week apart. |
+| `MaxContentCandidates` | 5 | One comparison call with a short list; more candidates than that rarely pass `MinScore`. |
+| `FolderSampleSize` | 4 | Enough to see what a folder shows; each described file is a model call the first time. |
+| `UnitSampleSize` | 12 | The unit's files are described already; more only lengthens the prompt. |
 | `SubfolderWeight*` | 0.35 / 0.30 / 0.15 / 0.10 / 0.10 | For a whole folder the neighbours count most after content: a new occasion goes next to occasions. |
 | `PatternsDirectory` | `library-patterns` next to the database | One file per library job, beside the data it was made from. |
 

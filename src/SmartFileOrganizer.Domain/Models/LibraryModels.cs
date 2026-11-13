@@ -27,7 +27,34 @@ public enum LibraryAdviceTask
     Map,
 
     /// <summary>Name a new folder in the style of its siblings in the library.</summary>
-    Name
+    Name,
+
+    /// <summary>
+    /// Judge whether what a unit of a source shows fits what candidate folders show, from descriptions only
+    /// (https://github.com/crack666/smart_file_organizer/issues/56).
+    /// </summary>
+    Fit
+}
+
+/// <summary>
+/// The stored description of one library folder (<c>folder_descriptions</c>, schema step 22): what a few of its files
+/// show, as fact codes and counts in <see cref="FactsJson"/>. Keyed by job, relative path and source.
+/// </summary>
+public sealed class FolderDescriptionRecord
+{
+    public long Id { get; set; }
+    public long JobId { get; set; }
+    public string RelativePath { get; set; } = string.Empty;
+    public FolderDescriptionSource Source { get; set; }
+
+    /// <summary>The sampled files as a JSON list of relative paths.</summary>
+    public string SampleJson { get; set; } = "[]";
+
+    public string FactsJson { get; set; } = "{}";
+    public int Sampled { get; set; }
+    public int Described { get; set; }
+    public string? Model { get; set; }
+    public DateTime DescribedAt { get; set; }
 }
 
 /// <summary>A question to the local model. <see cref="Facts"/> is the compact description built from scan data.</summary>

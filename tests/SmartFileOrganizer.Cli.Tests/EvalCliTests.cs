@@ -105,6 +105,7 @@ public class EvalCliTests : IDisposable
         var truthPath = Path.Combine(_corpus, "truth.json");
         // Verdicts, categories and markers only: wrong answers change the findings too, which has its own test.
         File.Delete(Path.Combine(_corpus, EvalFindingTruth.FileName));
+        File.Delete(Path.Combine(_corpus, EvalTargetTruth.FileName));
 
         var perfect = (await OkAsync("eval", _corpus, "--stub", truthPath, "--json")).Result;
         Assert.Equal("corpus", perfect.GetProperty("mode").GetString());
@@ -192,6 +193,72 @@ public class EvalCliTests : IDisposable
                                        && f.GetProperty("actual").GetString() == "in_noise/images");
         Assert.Contains(failures, f => f.GetProperty("outcome").GetString() == "missing"
                                        && f.GetProperty("path").GetString() == "Programme/PortableTool");
+    }
+
+    /// <summary>
+    /// Issue 56: the target proposals are measured against targets.json, the library of the corpus with known truth.
+    /// The perfect stub puts every unit where it belongs, the birthday of the ski trip day and the lake outing into a
+    /// new folder; when the birthday photos are described as the ski trip, the miss is named with what was proposed.
+    /// No run reaches a model server: the configured one is a local listener that counts every connection.
+    /// </summary>
+    [Fact]
+    public async Task Eval_Targets_PerfectStubHitsEveryPlace_AMissIsNamed_AndNoModelServerIsCalled()
+    {
+        var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+        listener.Start();
+        var connections = 0;
+        using var stop = new CancellationTokenSource();
+        var counting = Task.Run(async () =>
+        {
+            try
+            {
+                while (true)
+                {
+                    using var client = await listener.AcceptTcpClientAsync(stop.Token);
+                    Interlocked.Increment(ref connections);
+                }
+            }
+            catch (OperationCanceledException) { }
+        });
+        Directory.CreateDirectory(Path.GetDirectoryName(_dbPath)!);
+        File.WriteAllText(Path.Combine(Path.GetDirectoryName(_dbPath)!, "settings.json"),
+            $$"""{ "Ollama": { "BaseUrl": "http://127.0.0.1:{{((System.Net.IPEndPoint)listener.LocalEndpoint).Port}}" } }""");
+
+        await GenerateAsync();
+        var truthPath = Path.Combine(_corpus, "truth.json");
+        var targets = EvalTargetTruth.LoadBeside(truthPath);
+        Assert.NotNull(targets);
+        Assert.Contains(targets.Targets, t => t.Destination is null);
+        File.Delete(Path.Combine(_corpus, EvalFindingTruth.FileName));
+
+        static JsonElement TargetScore(JsonElement result) =>
+            result.GetProperty("scores").EnumerateArray().Single(s => s.GetProperty("kind").GetString() == "target");
+
+        var perfect = TargetScore((await OkAsync("eval", _corpus, "--stub", truthPath, "--json")).Result);
+        Assert.Equal(targets.Targets.Count, perfect.GetProperty("total").GetInt32());
+        Assert.Equal(targets.Targets.Count, perfect.GetProperty("hits").GetInt32());
+
+        // The answer sheet describes the birthday evening like the ski trip of the same morning.
+        const string birthday = "Import/IMG_20210206_193015.jpg";
+        var doc = JsonNode.Parse(File.ReadAllText(truthPath))!;
+        var ski = doc["files"]!.AsArray().First(e => e!["path"]!.GetValue<string>() == "Import/IMG_20210206_090012.jpg")!["description"]!;
+        foreach (var e in doc["files"]!.AsArray().Where(e => e!["path"]!.GetValue<string>().StartsWith("Import/IMG_20210206_19", StringComparison.Ordinal)))
+            e!["description"] = ski.DeepClone();
+        var wrongPath = Path.Combine(_dir, "wrong-content.json");
+        File.WriteAllText(wrongPath, doc.ToJsonString());
+
+        var run = (await OkAsync("eval", _corpus, "--stub", wrongPath, "--json")).Result;
+        Assert.Equal(1, TargetScore(run).GetProperty("wrong").GetInt32());
+        var miss = run.GetProperty("failures").EnumerateArray().Single(f => f.GetProperty("kind").GetString() == "target");
+        Assert.Equal(birthday, miss.GetProperty("path").GetString());
+        Assert.Equal("new folder", miss.GetProperty("expected").GetString());
+        Assert.Equal("Bilder/Skifahrt 2021", miss.GetProperty("actual").GetString());
+        Assert.Contains("content", miss.GetProperty("detail").GetString());
+
+        await stop.CancelAsync();
+        await counting;
+        listener.Stop();
+        Assert.Equal(0, connections);
     }
 
     [Fact]

@@ -17,6 +17,8 @@ public static class SmallCorpusFindings
         new("in_noise", "Desktop", Group: "documents", Note: "A shopping list and a letter to a gym on a mixed desktop."),
         new("in_noise", "Downloads", Group: "documents", Note: "An invoice and a router manual in a mixed download folder."),
         new("in_noise", "Downloads", Group: "images", Note: "A camera photo in the download folder."),
+        new("in_noise", "Import", Group: "documents", Note: "Two invoices waiting for a place under a generic name (version 5)."),
+        new("in_noise", "Import", Group: "images", Note: "Photos of three occasions waiting for a place under a generic name (version 5)."),
         new("in_noise", "alt", Group: "documents", Note: "A scanned letter and a table in an old mixed folder."),
         new("in_noise", "alt", Group: "images", Note: "An application photo in the old mixed folder."),
 

@@ -42,11 +42,14 @@ public static class ServiceCollectionExtensions
         services.AddSingleton(paths);
         services.AddLogging();
 
-        // Configuration: shipped defaults, then the user's overrides
+        // Configuration: shipped defaults, a default model server address from the environment, then the user's overrides
         Directory.CreateDirectory(Path.GetDirectoryName(paths.SettingsPath)!);
-        var configuration = new ConfigurationBuilder()
+        var builder = new ConfigurationBuilder()
             .SetBasePath(options.AppSettingsDirectory ?? AppContext.BaseDirectory)
-            .AddJsonFile("appsettings.json", optional: true, reloadOnChange: options.ReloadSettingsOnChange)
+            .AddJsonFile("appsettings.json", optional: true, reloadOnChange: options.ReloadSettingsOnChange);
+        if (Environment.GetEnvironmentVariable(SmartFileOrganizerHostOptions.OllamaUrlVariable) is { Length: > 0 } ollamaUrl)
+            builder.AddInMemoryCollection([new KeyValuePair<string, string?>("Ollama:BaseUrl", ollamaUrl)]);
+        var configuration = builder
             .AddJsonFile(paths.SettingsPath, optional: true, reloadOnChange: options.ReloadSettingsOnChange)
             .Build();
         services.TryAddSingleton<IConfiguration>(configuration);
@@ -197,6 +200,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<EvalCaseService>();
         services.AddSingleton<EvalRunService>();
         services.AddSingleton<CorpusEvaluator>();
+        services.AddSingleton<TargetEvaluator>();
         services.AddSingleton<ScanExportService>();
         services.AddSingleton<FocusedRescanService>();
         services.AddSingleton<ContentComparisonService>();
@@ -216,6 +220,11 @@ public static class ServiceCollectionExtensions
             match.PatternsDirectory ??= Path.Combine(Path.GetDirectoryName(paths.DatabasePath)!, "library-patterns");
             return match;
         });
+        // Content of targets (https://github.com/crack666/smart_file_organizer/issues/56): candidate folders are described
+        // from a sample of their own files; another source of descriptions is one more IFolderDescriptionSource.
+        services.AddSingleton<IFolderDescriptionRepository, FolderDescriptionRepository>();
+        services.AddSingleton<IFolderDescriptionSource, SampleFolderDescriptionSource>();
+        services.TryAddSingleton<IContentFitJudge, ModelContentFitJudge>();
         services.AddSingleton<LibraryTargetService>();
 
         // Findings (https://github.com/crack666/smart_file_organizer/issues/26): computed from stored data, only

@@ -22,3 +22,12 @@ public interface ILibraryAdvisor
 {
     Task<LibraryAdviceReply> AskAsync(LibraryAdviceRequest request, CancellationToken ct = default);
 }
+
+/// <summary>Stored descriptions of library folders (<c>folder_descriptions</c>), so a folder is sampled once.</summary>
+public interface IFolderDescriptionRepository
+{
+    Task<FolderDescriptionRecord?> GetAsync(long jobId, string relativePath, Enums.FolderDescriptionSource source, CancellationToken ct = default);
+
+    /// <summary>Stores the description, replacing an earlier one of the same job, path and source.</summary>
+    Task SaveAsync(FolderDescriptionRecord record, CancellationToken ct = default);
+}

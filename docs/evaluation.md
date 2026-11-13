@@ -31,7 +31,7 @@ reference and JSON shapes: [cli.md](cli.md#sfo-eval-corpus).
 
 `sfo eval generate <dir> [--seed n]` writes `<dir>/tree/` (the folder that is scanned) and
 `<dir>/truth.json`. The generator is `SmallCorpusGenerator` (Infrastructure/Evaluation); the same
-seed gives the same bytes and timestamps. Version 4 has 73 folders and 174 files (version 3: 62 and
+seed gives the same bytes and timestamps. Version 5 has 74 folders and 185 files (version 4: 73 and 174, version 3: 62 and
 160, version 2: 42 and 100, version 1: 41 and 97; the changes are listed under [Truth changes](#truth-changes)):
 
 | Kind | Example | Truth |
@@ -45,6 +45,7 @@ seed gives the same bytes and timestamps. Version 4 has 73 folders and 174 files
 | User profiles of an old computer (version 3) | `Profile alter PC/max` (`AppData`, `Documents`, `Desktop`, `Downloads`, `Pictures`, `NTUSER.DAT`), `Profile alter PC/lisa` (old style: `Anwendungsdaten`, `Lokale Einstellungen/Temp`, `Cookies`, `Eigene Dateien`) | each `dump`; documents, desktop, pictures judged like any folder, app data, caches and cookies `system`; the folder of both `uniform` |
 | Places of programs and Windows (version 4) | `Profile alter PC/Public` with `Documents/Fotostudio Pro/Tutorials` and `Samples`, `AccountPictures`, `Desktop` with shortcuts; `max/scoop/apps/7zip` | `system` by rule, no model call; the files have no category |
 | Archive known by its entries (version 4) | `max/Documents/20190312.zip` with bank and card statements | `finance`, category open |
+| Things waiting for a place (version 5) | `Import`: a ski trip and a birthday of the same day, a lake outing, two invoices of two providers | `mixed`; where each belongs is in `targets.json` |
 | Media | `Musik`, `Videos`, `Screenshots` | `uniform` |
 | Placeholder | `Neuer Ordner` (empty) | `empty` |
 | Hidden tool folder | `.ssh` | `system` |
@@ -129,10 +130,55 @@ a category open, the stub answers by file type since then (`document` for docume
 `trash_candidate` for logs and settings files); before, it answered `document` for every such file, which made a
 log file, a settings file and an archive superfluous findings.
 
+## Expected targets
+
+Since version 5 `sfo eval generate` also writes a library next to the tree, `<dir>/ablage/`, and `<dir>/targets.json`
+(https://github.com/crack666/smart_file_organizer/issues/56): what every file of the library shows (its description,
+the stub's answer when `sfo library match` samples the folder) and where each unit of the source belongs. When the
+file is there, `sfo eval` scans the library as a job with the role `library` (structure only), compares the source
+with it, builds the bundles and runs `sfo library match` for every expected target; it measures the kind `target`.
+
+```json
+{ "schema_version": 1, "library": "ablage",
+  "library_files": [ { "path": "Bilder/Skifahrt 2021/IMG_20210205_100000.jpg",
+      "description": { "scene": "snowy slope", "activity": "skiing", "season": "winter", "occasion": "holiday" } } ],
+  "targets": [
+    { "unit": "bundle", "path": "Import/IMG_20210206_090012.jpg", "destination": "Bilder/Skifahrt 2021" },
+    { "unit": "bundle", "path": "Import/IMG_20210206_193015.jpg", "destination": null,
+      "note": "Trap: same week as the ski trip, other occasion." },
+    { "unit": "file", "path": "Import/Rechnung_2023_11.pdf", "destination": "Unterlagen/Rechnungen Stadtwerke" } ] }
+```
+
+`unit` is `bundle` (the bundle that holds the file at `path`), `file` or `folder`; `destination` is a folder of the
+library relative to its root, `null` when no folder fits and a new one is right. A target is a `hit` when the best
+proposal is that folder, or a new folder where `null` is expected; anything else is `wrong`, named with what was
+proposed, its certainty and its reason, and no proposal at all is `missing`. Files of the source that the truth
+describes (`description` in `truth.json`) get these facts from the stub, so the unit has a description.
+
+With `--stub` no model is asked anything: the files are described from the answer sheets, the content comparison
+runs on fixed rules (`description-rules`, [library-match.md](library-match.md#content-check)), and the library
+questions (new folder names) get no answer, so the rules name the folder. Until 13.11.2026 `--stub` replaced only
+the file and folder calls, and a stub run with a library would have asked the configured model server for names.
+
 ## Truth changes
 
 Every change of the truth is listed here with its reason. The truth follows what is right for the
 user, never what the program happens to answer.
+
+### Version 5 (13.11.2026, https://github.com/crack666/smart_file_organizer/issues/56)
+
+Nothing of version 4 changed. New is a folder `Import` (`mixed`) with photos and papers that have no place yet, and
+the library `ablage` with `targets.json` (see [Expected targets](#expected-targets)):
+
+| Path in `Import` | Category | Belongs to | Why |
+|---|---|---|---|
+| three ski photos of 06.02.2021, morning | `photo` | `Bilder/Skifahrt 2021` | Same occasion as the folder. |
+| three birthday photos of 06.02.2021, evening (more than 8 h later, a bundle of its own) | `photo` | a new folder | Trap: same period as the ski trip, other occasion; time alone would put it there. |
+| three lake photos of 14.08.2021 | `photo` | a new folder | Trap: same day as the garden party of the library, other occasion. |
+| `Rechnung_2023_11.pdf`, `Rechnung_2023_12.pdf` | `invoice` | the invoice folder of their provider | Two providers, same year and same kind of paper. |
+
+`findings.json` expects two more findings: `in_noise` `images` and `documents` at `Import`, as for `Downloads`.
+Measured 13.11.2026 with the perfect stub: `finding` 23/23, 0 superfluous; `target` 5/5.
 
 ### Version 4 (13.11.2026, https://github.com/crack666/smart_file_organizer/issues/67)
 
@@ -226,6 +272,7 @@ prompt, which was wrong. `.ssh/id_ed25519.pub` keeps `sensitive: []`, see the ne
 | `directory_verdict` | every truth folder with a verdict | stored verdict, whether a rule, the model or the sample check decided |
 | `file_category` | every truth file with a category | the model's category, or the one inherited from a confirmed sample (a human override is ignored) |
 | `finding` | every expected finding of `findings.json` | the listed findings of the job; findings nobody expects count as `superfluous`, see [Expected findings](#expected-findings) |
+| `target` | every expected target of `targets.json` | the best place `sfo library match` proposes in the corpus library, or its new folder, see [Expected targets](#expected-targets) |
 | `sensitive` | every truth file | markers of the rules and of the model together; a hit needs exactly the expected set. A file inside a folder the scan skipped and marked (`.ssh`) carries the markers of that folder, see [below](#files-in-a-skipped-marked-folder) |
 
 Each item is a `hit`, `wrong` (a different result) or `missing` (not scanned, not analysed, or a
@@ -322,6 +369,24 @@ what changed (model, prompts, version, each setting), the score per kind before 
 items fixed and the new failures.
 
 ## Measured
+
+### Scripted answers after issue 56 (13.11.2026)
+
+_Scripted answers (`--stub truth.json`) on small v5 seed 36, on the branch of
+https://github.com/crack666/smart_file_organizer/issues/56, temporary directory and database, no model server._
+
+| Kind | Result |
+|---|---|
+| `directory_verdict` | 72/72 |
+| `file_category` | 90/90 |
+| `sensitive` | 184/185 (20 marked, 20 found, 1 false alarm: the deliberate `.ssh/id_ed25519.pub`) |
+| `finding` | 23/23, 0 superfluous |
+| `target` | 5/5 |
+
+This checks the wiring (descriptions, folder samples, the comparison, the weighting, the measurement), not the model:
+the comparison ran on the fixed rules of the stub. With answers that describe the birthday evening like the ski trip,
+the birthday bundle goes to `Bilder/Skifahrt 2021` and the run names exactly that miss (`EvalCliTests`). A run with
+a real model on version 5 has not been made.
 
 ### Scripted answers after issue 67 (13.11.2026)
 

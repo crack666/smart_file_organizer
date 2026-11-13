@@ -106,6 +106,7 @@ public class ScanJobRepository : IScanJobRepository
             UPDATE eval_cases SET file_node_id = NULL WHERE file_node_id IN (SELECT id FROM file_nodes WHERE job_id = @id);
             UPDATE eval_runs  SET job_id = NULL WHERE job_id = @id;
             DELETE FROM library_advice      WHERE job_id = @id;
+            DELETE FROM folder_descriptions WHERE job_id = @id;
             DELETE FROM finding_decisions   WHERE job_id = @id;
             DELETE FROM plan_actions        WHERE plan_id IN (SELECT id FROM plans WHERE job_id = @id);
             DELETE FROM plans               WHERE job_id = @id;

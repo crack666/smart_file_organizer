@@ -43,13 +43,21 @@ public sealed class CorpusEvaluator
     /// As <see cref="EvaluateAsync(EvalTruth, long, CancellationToken)"/>, and with <paramref name="expectedFindings"/>
     /// also the kind <c>finding</c>: the listed findings of the job against the expected ones.
     /// </summary>
+    public Task<EvalReport> EvaluateAsync(
+        EvalTruth truth, long jobId, IReadOnlyList<ExpectedFinding>? expectedFindings,
+        IReadOnlyList<Findings.Finding>? listedFindings, CancellationToken ct = default) =>
+        EvaluateAsync(truth, jobId, expectedFindings, listedFindings, null, ct);
+
+    /// <summary>As above, and with <paramref name="targets"/> also the kind <c>target</c>: the proposed places against the truth of the library.</summary>
     public async Task<EvalReport> EvaluateAsync(
         EvalTruth truth, long jobId, IReadOnlyList<ExpectedFinding>? expectedFindings,
-        IReadOnlyList<Findings.Finding>? listedFindings, CancellationToken ct = default)
+        IReadOnlyList<Findings.Finding>? listedFindings, IReadOnlyList<TargetResult>? targets, CancellationToken ct = default)
     {
         var report = new EvalReportBuilder();
         if (expectedFindings is not null)
             EvalFindingTruth.Score(report, expectedFindings, listedFindings ?? []);
+        if (targets is not null)
+            EvalTargetTruth.Score(report, targets);
 
         var dirs = await _directories.GetAllForJobOrderedByDepthAsync(jobId, ct);
         var verdicts = (await _verdicts.GetForJobAsync(jobId, ct)).ToDictionary(v => v.DirectoryNodeId);
@@ -83,7 +91,10 @@ public sealed class CorpusEvaluator
                 node is null ? SkippedMarkedFolder(expected.Path, dirByPath) : null);
         }
 
-        return report.Build(expectedFindings is null ? Kinds : [.. Kinds, EvalKind.Finding]);
+        IEnumerable<EvalKind> kinds = Kinds;
+        if (expectedFindings is not null) kinds = kinds.Append(EvalKind.Finding);
+        if (targets is not null) kinds = kinds.Append(EvalKind.Target);
+        return report.Build(kinds);
     }
 
     private static void ScoreVerdict(EvalReportBuilder report, TruthDirectory expected, DirectoryNode? node, DirectoryVerdict? verdict)

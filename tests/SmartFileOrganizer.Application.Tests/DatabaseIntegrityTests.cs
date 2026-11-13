@@ -232,6 +232,8 @@ public class DatabaseIntegrityTests : IDisposable
             INSERT INTO bundle_files (file_node_id, bundle_id) VALUES (@file, @bundle);
             INSERT INTO bundle_builds (job_id, built_at, settings_json, stats_json) VALUES (@job, @T, '{}', '{}');
             INSERT INTO library_advice (job_id, task, input_hash, created_at) VALUES (@job, 'review', 'h', @T);
+            INSERT INTO folder_descriptions (job_id, relative_path, source, sample_json, facts_json, sampled, described, described_at)
+                VALUES (@job, 'd', 'sample', '[]', '{}', 1, 1, @T);
             INSERT INTO finding_decisions (job_id, finding_key, kind, state, origin, decided_at, snapshot_json)
                 VALUES (@job, 'k', 'sensitive', 'accepted', 'human', @T, '{}');
             INSERT INTO model_server_waits (job_id, since, checked_at, cause) VALUES (@job, @T, @T, 'busy');
