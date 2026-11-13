@@ -63,7 +63,31 @@ public sealed class SchemaMigrator
                 "Use a newer build of SmartFileOrganizer or point it at a different database.");
         }
 
-        foreach (var step in _migrations.Where(m => m.Version > current))
+        var pending = _migrations.Where(m => m.Version > current).ToList();
+        if (pending.Count == 0) return current;
+
+        // Steps rebuild tables and copy rows that older builds left without a parent (the job deletion missed some
+        // tables until step 19 removed them). With foreign keys enforced such a copy would fail, so they are off for
+        // the steps and restored afterwards. The pragma has no effect inside a transaction, so it runs out here.
+        var foreignKeys = await connection.ExecuteScalarAsync<long>(new CommandDefinition("PRAGMA foreign_keys", cancellationToken: ct));
+        if (foreignKeys != 0)
+            await connection.ExecuteAsync(new CommandDefinition("PRAGMA foreign_keys=OFF", cancellationToken: ct));
+        try
+        {
+            current = await ApplyAsync(connection, pending, current, ct);
+        }
+        finally
+        {
+            if (foreignKeys != 0)
+                await connection.ExecuteAsync(new CommandDefinition("PRAGMA foreign_keys=ON", cancellationToken: CancellationToken.None));
+        }
+
+        return current;
+    }
+
+    private async Task<int> ApplyAsync(SqliteConnection connection, IReadOnlyList<ISchemaMigration> pending, int current, CancellationToken ct)
+    {
+        foreach (var step in pending)
         {
             _logger.LogInformation("Applying schema step {Version}: {Description}", step.Version, step.Description);
 
