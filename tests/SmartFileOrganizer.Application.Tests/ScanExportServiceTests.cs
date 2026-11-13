@@ -132,7 +132,8 @@ public class ScanExportServiceTests : IDisposable
         var fields = sw.ToString().TrimEnd('\r', '\n').Split(',');
         Assert.Equal(nameof(FileCategory.TrashCandidate), fields[ColumnIndex("category")]);
         Assert.Equal("human", fields[ColumnIndex("category_source")]);
-        Assert.Equal("D:\\Trash", fields[ColumnIndex("suggested_target")]);
+        // The column stays for the sheets that address it by position, but is always empty (deprecated, issue 74).
+        Assert.Equal(string.Empty, fields[ColumnIndex("suggested_target")]);
     }
 
     [Fact]

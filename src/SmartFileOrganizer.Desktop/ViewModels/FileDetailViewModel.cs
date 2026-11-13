@@ -84,7 +84,8 @@ public partial class FileDetailViewModel : ViewModelBase
             Importance = cls.Importance.ToString();
             Confidence = $"{cls.Confidence:P0}";
             Summary = cls.Summary ?? string.Empty;
-            SuggestedTarget = cls.SuggestedTarget ?? string.Empty;
+            // The old free-text target of the model is no target (deprecated): targets lie only in a library.
+            SuggestedTarget = string.Empty;
             ModelUsed = cls.ModelUsed ?? string.Empty;
         }
         else
@@ -106,7 +107,7 @@ public partial class FileDetailViewModel : ViewModelBase
             HasOverride = false;
             OverrideCategory = OverrideTarget = string.Empty;
             SelectedCategory = file.Classification?.Category ?? FileCategory.Unknown;
-            EditTarget = file.Classification?.SuggestedTarget ?? string.Empty;
+            EditTarget = string.Empty;
         }
 
         UpdateReviewStatus(file.Status);
