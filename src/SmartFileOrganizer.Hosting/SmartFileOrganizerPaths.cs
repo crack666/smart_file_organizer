@@ -9,6 +9,13 @@ public sealed class SmartFileOrganizerHostOptions
     /// <summary>Environment variable that overrides the user settings file path.</summary>
     public const string SettingsPathVariable = "SFO_SETTINGS";
 
+    /// <summary>
+    /// Environment variable with the model server address to use when <c>settings.json</c> names none: it replaces
+    /// the shipped default (<c>Ollama:BaseUrl</c> of <c>appsettings.json</c>), never a user's setting. The test projects
+    /// set it to a dead address, so no test reaches a real model server by falling back to the default.
+    /// </summary>
+    public const string OllamaUrlVariable = "SFO_OLLAMA_URL";
+
     /// <summary>SQLite database file. Takes precedence over <c>SFO_DB</c>.</summary>
     public string? DatabasePath { get; set; }
 

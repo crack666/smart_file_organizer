@@ -118,9 +118,11 @@ public static class EvalCommand
             if (p.GetValue(stub) is { } stubPath)
             {
                 stubService = new ScriptedAnswerOllamaService(LoadTruth(Path.GetFullPath(stubPath)), Path.GetFileName(stubPath));
-                // The content check of targets compares the scripted descriptions by rule, not by a model.
+                // The content check of targets compares the scripted descriptions by rule, not by a model, and no
+                // library question (new folder names) may reach a real model either.
                 ctx.ConfigureServices(s => s
                     .AddSingleton<IOllamaService>(stubService)
+                    .AddSingleton<ILibraryAdvisor>(new ScriptedLibraryAdvisor(stubService.ModelName))
                     .AddSingleton<SmartFileOrganizer.Application.Library.IContentFitJudge, SmartFileOrganizer.Application.Library.DescriptionRulesFitJudge>());
             }
 

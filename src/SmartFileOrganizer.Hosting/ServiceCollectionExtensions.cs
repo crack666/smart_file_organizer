@@ -42,11 +42,14 @@ public static class ServiceCollectionExtensions
         services.AddSingleton(paths);
         services.AddLogging();
 
-        // Configuration: shipped defaults, then the user's overrides
+        // Configuration: shipped defaults, a default model server address from the environment, then the user's overrides
         Directory.CreateDirectory(Path.GetDirectoryName(paths.SettingsPath)!);
-        var configuration = new ConfigurationBuilder()
+        var builder = new ConfigurationBuilder()
             .SetBasePath(options.AppSettingsDirectory ?? AppContext.BaseDirectory)
-            .AddJsonFile("appsettings.json", optional: true, reloadOnChange: options.ReloadSettingsOnChange)
+            .AddJsonFile("appsettings.json", optional: true, reloadOnChange: options.ReloadSettingsOnChange);
+        if (Environment.GetEnvironmentVariable(SmartFileOrganizerHostOptions.OllamaUrlVariable) is { Length: > 0 } ollamaUrl)
+            builder.AddInMemoryCollection([new KeyValuePair<string, string?>("Ollama:BaseUrl", ollamaUrl)]);
+        var configuration = builder
             .AddJsonFile(paths.SettingsPath, optional: true, reloadOnChange: options.ReloadSettingsOnChange)
             .Build();
         services.TryAddSingleton<IConfiguration>(configuration);

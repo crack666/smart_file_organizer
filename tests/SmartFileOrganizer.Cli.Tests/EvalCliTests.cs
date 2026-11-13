@@ -199,10 +199,31 @@ public class EvalCliTests : IDisposable
     /// Issue 56: the target proposals are measured against targets.json, the library of the corpus with known truth.
     /// The perfect stub puts every unit where it belongs, the birthday of the ski trip day and the lake outing into a
     /// new folder; when the birthday photos are described as the ski trip, the miss is named with what was proposed.
+    /// No run reaches a model server: the configured one is a local listener that counts every connection.
     /// </summary>
     [Fact]
-    public async Task Eval_Targets_PerfectStubHitsEveryPlace_AndAMissIsNamed()
+    public async Task Eval_Targets_PerfectStubHitsEveryPlace_AMissIsNamed_AndNoModelServerIsCalled()
     {
+        var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
+        listener.Start();
+        var connections = 0;
+        using var stop = new CancellationTokenSource();
+        var counting = Task.Run(async () =>
+        {
+            try
+            {
+                while (true)
+                {
+                    using var client = await listener.AcceptTcpClientAsync(stop.Token);
+                    Interlocked.Increment(ref connections);
+                }
+            }
+            catch (OperationCanceledException) { }
+        });
+        Directory.CreateDirectory(Path.GetDirectoryName(_dbPath)!);
+        File.WriteAllText(Path.Combine(Path.GetDirectoryName(_dbPath)!, "settings.json"),
+            $$"""{ "Ollama": { "BaseUrl": "http://127.0.0.1:{{((System.Net.IPEndPoint)listener.LocalEndpoint).Port}}" } }""");
+
         await GenerateAsync();
         var truthPath = Path.Combine(_corpus, "truth.json");
         var targets = EvalTargetTruth.LoadBeside(truthPath);
@@ -233,6 +254,11 @@ public class EvalCliTests : IDisposable
         Assert.Equal("new folder", miss.GetProperty("expected").GetString());
         Assert.Equal("Bilder/Skifahrt 2021", miss.GetProperty("actual").GetString());
         Assert.Contains("content", miss.GetProperty("detail").GetString());
+
+        await stop.CancelAsync();
+        await counting;
+        listener.Stop();
+        Assert.Equal(0, connections);
     }
 
     [Fact]

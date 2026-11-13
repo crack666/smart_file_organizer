@@ -75,6 +75,24 @@ public class HostingTests : IDisposable
         AssertNoAvaloniaReachable();
     }
 
+    /// <summary>
+    /// The guard of the test projects: the model server address falls back to SFO_OLLAMA_URL (a dead port here), not
+    /// to the shipped default, and an address in settings.json still wins, so tests with a stand-in keep theirs.
+    /// </summary>
+    [Fact]
+    public async Task ModelServerAddress_DefaultsToTheEnvironment_SettingsStillWin()
+    {
+        Assert.Equal(NoRealModelServer.DeadAddress, Environment.GetEnvironmentVariable(SmartFileOrganizerHostOptions.OllamaUrlVariable));
+        await using (var provider = BuildProvider())
+            Assert.Equal(NoRealModelServer.DeadAddress, provider.GetRequiredService<SmartFileOrganizer.Infrastructure.Ollama.OllamaOptions>().BaseUrl);
+
+        Directory.CreateDirectory(Path.GetDirectoryName(_dbPath)!);
+        File.WriteAllText(Path.Combine(Path.GetDirectoryName(_dbPath)!, "settings.json"),
+            """{ "Ollama": { "BaseUrl": "http://model-server.test:11999" } }""");
+        await using (var provider = BuildProvider())
+            Assert.Equal("http://model-server.test:11999", provider.GetRequiredService<SmartFileOrganizer.Infrastructure.Ollama.OllamaOptions>().BaseUrl);
+    }
+
     [Fact]
     public async Task ScanThenAnalysis_RunsThroughHostingOnly_WithFakeOllama()
     {

@@ -143,3 +143,14 @@ public sealed class ScriptedAnswerOllamaService : IOllamaService
 
     public Task WarmModelAsync(string? model = null, CancellationToken ct = default) => Task.CompletedTask;
 }
+
+/// <summary>
+/// Stand-in for the library model calls (purpose, new folder name, content fit) under <c>sfo eval --stub</c>: it never
+/// touches the network and answers every question with an error, so the rules decide alone. Without it, a stub run with
+/// a library asked the real local model for new folder names.
+/// </summary>
+public sealed class ScriptedLibraryAdvisor(string modelName) : ILibraryAdvisor
+{
+    public Task<LibraryAdviceReply> AskAsync(LibraryAdviceRequest request, CancellationToken ct = default) =>
+        Task.FromResult(new LibraryAdviceReply(null, modelName, null, $"{modelName} gives no library advice ({request.Task})"));
+}
