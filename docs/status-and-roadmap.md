@@ -204,9 +204,15 @@ against two temp folders and a temp database._
   [architecture.md](architecture.md#comparison-flow-source-against-library).
 - Directories a scan cannot read are now recorded as errors (before, they
   looked empty).
-- `sfo analyze` does not yet skip files that are `backed_up`; the
-  per-directory counts say which ones need no analysis
-  (https://github.com/crack666/smart_file_organizer/issues/42).
+- `sfo analyze --against <library>` leaves out files that are `backed_up` and
+  folders that are fully backed up
+  (https://github.com/crack666/smart_file_organizer/issues/42). Corrected
+  13.11.2026; until then this line said analyze did not skip them yet.
+- Several library roots (https://github.com/crack666/smart_file_organizer/issues/74):
+  `compare`, `analyze`, `findings` and `library match` take `--against` more
+  than once; a file is `backed_up` as soon as one root holds it. Targets lie
+  only in library roots, the old free-text `suggested_target` is no longer
+  shown, and `findings --summary` gives an overview and the free space per root.
 
 ### Bundles
 

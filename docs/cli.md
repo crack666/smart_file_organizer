@@ -101,7 +101,7 @@ phase skips work already stored, so running it again after Ctrl+C or an error co
 | `--phase <name>` | `pre_assessment`, `classification`, `summary` or `all` (default). Repeatable; phases always run in this order. |
 | `--parallel <n>` | Concurrent Ollama requests, 1 to 8. Default: `Ollama.MaxParallelRequests`. |
 | `--model <name>` | Ollama model for this run. Default: `Ollama.Model`. |
-| `--against <job>` | A `library` job: the stored comparison of this job against it (`sfo compare <job> --against <library>`) decides what is left out. Files with `backed_up` are not classified; folders whose every file below is `backed_up` (`backed_up_share` 1.0) get no pre-assessment and no summary. `new`, `differs` and `error` are judged as usual. Without the option the whole job is analysed, and the marks of an earlier run with `--against` are released, so the files are judged again. Fails with `comparison_not_found` (1) when no such comparison is stored. |
+| `--against <job>` | A `library` job: the stored comparison of this job against it (`sfo compare <job> --against <library>`) decides what is left out. Repeatable for a library with several roots: a file `backed_up` in any of them is left out. Files with `backed_up` are not classified; folders whose every file below is `backed_up` (`backed_up_share` 1.0) get no pre-assessment and no summary. `new`, `differs` and `error` are judged as usual. Without the option the whole job is analysed, and the marks of an earlier run with `--against` are released, so the files are judged again. Fails with `comparison_not_found` (1) when the comparison with one of them is not stored. |
 | `--retry-errors` | Classification: try files that failed in an earlier run again. Files with a result are never called again; files still pending are judged as in any run; files a person corrected are left alone. Summary: write again the summaries that failed and those older than the results they rest on, so the folder of a retried file gets a summary that knows it. Failed directory verdicts (phase 1) are asked again in every run, with or without this option. |
 
 ```bash
@@ -145,8 +145,9 @@ counts the model server returns with every answer: `prompt_tokens` (`prompt_eval
 in the example are illustrative. The text output prints the same as one line per kind.
 
 With `--against`, `result.backed_up` says what was left out:
-`{ "against": 8, "comparison_id": 3, "files": 411, "directories": 12 }` (files still waiting for the
-analysis that are `backed_up`, and fully backed-up folders); without it, `backed_up` is `null`. A left-out
+`{ "against": 8, "comparison_id": 3, "files": 411, "directories": 12, "libraries": [8, 9] }` (files still waiting
+for the analysis that are `backed_up` in any of the libraries, and fully backed-up folders; `against` and
+`comparison_id` are those of the first library named, `libraries` all of them); without it, `backed_up` is `null`. A left-out
 file keeps the sensitive markers of the scan rules, so it is still listed as sensitive, and `sfo findings`
 reads the comparison itself: it never counts such a file as not backed up. Issue:
 https://github.com/crack666/smart_file_organizer/issues/42
@@ -269,7 +270,7 @@ output adds it as `(n already in the library)`.
   rule without a pre-assessment, and pre-assessed folders without a file of their own. After a complete
   `sfo analyze` nothing is `pending` (before 13.11.2026 they stayed `pending` for ever).
 
-### `sfo compare <job> --against <job>`
+### `sfo compare <job> --against <job> [--against <job> ...]`
 
 Which files of a `source` scan are already in the `library` (the user's organised archive), by
 content, not by name. Codes in JSON and on the command line are English; this command never
@@ -278,7 +279,7 @@ https://github.com/crack666/smart_file_organizer/issues/24
 
 | Option | Meaning |
 |---|---|
-| `--against <job>` | The `library` job. Without it, only duplicates within the source are found and every `state` is `null`. |
+| `--against <job>` | The `library` job. Repeatable: a library often has several roots (separate shares for photos, videos, documents), each scanned as its own library job. Without it, only duplicates within the source are found and every `state` is `null`. |
 | `--files <state>` | List the files with this state (`backed_up`, `new`, `differs`, `error`, or `all`). Repeatable. Default: no file list. |
 | `--limit <n>` | Maximum entries per list (`directories`, `errors`, `duplicates.groups`, `files`); default 100, `0` lists everything. The `*_total` fields count all. |
 
@@ -337,13 +338,29 @@ sfo compare 7 --against 8 --files new --files error --json
     "files_total": 101,
     "files": [
       { "path": "/media/usb-stick/notes/2014.txt", "state": "new", "match_path": null, "match_count": 0,
-        "match_hash": null, "match_verified_at": null, "duplicate_group": null, "error": null }
+        "match_hash": null, "match_verified_at": null, "duplicate_group": null, "error": null,
+        "match_library_job_id": null }
     ],
-    "hashing": { "head_tail_computed": 240, "full_computed": 1716, "reused": 0 }
+    "hashing": { "head_tail_computed": 240, "full_computed": 1716, "reused": 0 },
+    "libraries": [
+      { "job": { "id": 8, "root_path": "/mnt/nas/library", "...": "" }, "comparison_id": 3,
+        "compared_at": "2026-11-12T15:02:11.410Z", "complete": true, "backed_up": 1712, "backed_up_bytes": 5120000000 }
+    ]
   },
   "error": null
 }
 ```
+
+**Several libraries** (https://github.com/crack666/smart_file_organizer/issues/74). Every job is checked first;
+then the source is compared with each library in the order named, and each pair is stored on its own as with one
+library. The result joins them per file: `backed_up` as soon as one library holds the content (the first one named
+that does), else `error` when one could not tell (another root might hold it), else `differs`, else `new`.
+`match_library_job_id` per file names the library of `match_path`. `against` is the first library, `libraries`
+lists each with `job`, `comparison_id`, `compared_at`, `complete` and `backed_up` / `backed_up_bytes` (source files
+it holds; a file held by several counts at the first). `counts`, `directories` and `errors` cover all of them,
+`compared_at` is the oldest of the comparisons. The comparisons of one run share a run id; `sfo analyze`,
+`sfo findings` and `sfo library match` without `--against` read the libraries of the newest run together. A
+comparison stored before is a run with one library.
 
 Errors are listed in `errors` with `role` (`source` or `library`), `kind` (`scan`: a directory the
 scan could not read, so its files are missing from the job; `read`: a file that could not be read
@@ -786,12 +803,17 @@ One directory or file with everything that is known about it. `kind` is `directo
 `file`; the other member is `null`.
 
 - File: every field of `files`, plus `relative_dir`, `extension`, `importance`,
-  `suggested_target`, `model_used`, `analyzed_at`, `error`, `raw_response`, `sensitive_rule`,
+  `suggested_target` (deprecated, always `null`, see below), `model_used`, `analyzed_at`, `error`, `raw_response`, `sensitive_rule`,
   `dir_retention`, `attempts` (how often the file went through classification), `previous_error`
   (the error a retry replaced) and `checks`: every second check with `reasons`, `outcome`
   (`agreed`, `disagreed`, `corrected`, `rule_wins`, `failed`, `skipped`), `rule_note`, `first` and
-  `second` (category, importance, confidence, keep hint, summary, target, keep reason, model, error,
+  `second` (category, importance, confidence, keep hint, summary, target (always `null`), keep reason, model, error,
   raw response; for a protected file only the codes, model texts are `null`) and `checked_at`.
+
+`suggested_target` is deprecated (https://github.com/crack666/smart_file_organizer/issues/74): the model is no
+longer asked for a target per file, and older runs stored paths it made up. The key stays in the JSON of `sfo show`
+and `sfo files` and the column in `sfo export`, always empty, and the text output and the desktop app show no
+target from it. Targets come from `sfo library match` and the findings and always lie in a library root.
 - Directory: every field of `dirs`, plus `verdict_rule`, `reason`, `verdict_error`,
   `unit_directory` (for a unit: the directory that is the whole), `verdict_model`,
   `judged_at`, `verdict_raw_response`, `profile` (the facts the verdict was based on, as
@@ -807,7 +829,8 @@ A path that is neither a directory nor a file of the job fails with `path_not_fo
 ### `sfo export <job> --csv <file>`
 
 Writes every file of the job as CSV (UTF-8 with BOM, the columns of `ScanExportService`) and
-nothing else. An existing file is replaced. `--include-sensitive` as above.
+nothing else. An existing file is replaced. `--include-sensitive` as above. The column `suggested_target`
+stays for sheets that address columns by position and is always empty (deprecated, see `sfo show`).
 
 ```json
 { "job_id": 7, "path": "/home/me/usb-stick.csv", "rows": 1830, "include_sensitive": false }
@@ -954,7 +977,7 @@ source root or full) or a bundle (`--bundle <id>`), exactly one of them.
 | Option | Meaning |
 |---|---|
 | `--bundle <id>` | Match a bundle of `sfo bundles build` as a whole. |
-| `--against <job>` | Library job. Default: the one of the latest `sfo compare`, else the newest completed library job. |
+| `--against <job>` | Library job. Repeatable: each library is matched on its own and the best places of all of them are listed by score (the first named wins a tie). Default: the libraries of the latest `sfo compare`, else the newest completed library job. |
 | `--limit <n>` | Proposals to list, 1 to 50. Default `LibraryMatch.MaxCandidates` (3). |
 | `--no-model`, `--model`, `--refresh`, `--words` | As for `review`. The model only names a new folder the rules cannot complete. |
 
@@ -986,10 +1009,19 @@ source root or full) or a bundle (`--bundle <id>`), exactly one of them.
   "new_folder": null,
   "patterns": { "file": "...", "created": false, "...": "..." },
   "advice": { "status": "skipped", "model": null, "error": null, "dropped": 0 },
-  "notes": []
+  "notes": [],
+  "libraries": [ { "id": 8, "role": "library", "...": "..." } ],
+  "space": [ { "library_job_id": 8, "root_path": "/media/archive", "free_bytes": 912000000000,
+               "needed_bytes": 20480, "space": "enough" } ]
 }
 ```
 
+- `library` is the library of the best proposal (or of the new folder); `libraries` lists every library matched.
+  Each candidate and `new_folder` carry `library_job_id`; `destination` is a full path inside that library's root.
+  A proposal never lies outside a library root.
+- `space`: per library root the free space (`free_bytes`, `null` when it cannot be determined) and what the unit
+  needs there (`needed_bytes`: its files not yet `backed_up` in any library), with `space` `enough`, `not_enough`
+  (also a note) or `unknown` ([glossary](glossary.md#room-at-a-target-root-targetspace)).
 - `placement`: `into_existing` (the files go into the folder), `as_subfolder` (a named source
   folder goes under the target as a whole, `keeps_name: true`) or, in `new_folder`, `new_folder`.
 - `certainty`: `certain`, `likely`, `uncertain` or `review`, from agreeing signals;
@@ -1000,7 +1032,8 @@ source root or full) or a bundle (`--bundle <id>`), exactly one of them.
   (`rule` or `model`), `name_complete` (`false` while a placeholder such as `{occasion}` is left),
   `pattern`, `destination`, `destination_relative`, `certainty`, `reason`, `weak_place`.
 - `status: "no_library"` with a `message` and no proposals, exit code 0, when there is no library
-  to match against. `notes` says when there is no or an incomplete comparison, when the newest
+  to match against: no permanent storage is known, so there is no target path at all, never a folder of the
+  user profile or the system drive instead. `notes` says when there is no or an incomplete comparison, when the newest
   library job was taken, or when every file is already backed up.
 
 Errors: `job_not_found` (1, source or `--against`), `scan_not_completed` (1), `wrong_role` (1, the
@@ -1106,6 +1139,7 @@ scanned file opened; decisions change only their row.
 | `--under <path>` | Only findings about files or folders at or below this folder (full, or relative to the job root). |
 | `--min-certainty <code>` | `certain`, `likely`, `uncertain`, `review`: only findings at least this certain. |
 | `--state <code>` | `open`, `accepted`, `rejected`, `wrong`. Repeatable. Default: open and accepted. |
+| `--against <job>` | Library job whose stored comparison counts. Repeatable: a file is backed up as soon as one of them holds it, and targets are looked up in all of them. Default: the libraries of the newest `sfo compare`. |
 | `--limit`, `--offset` | Paging as in every list. |
 
 ```json
@@ -1126,7 +1160,8 @@ scanned file opened; decisions change only their row.
       "decided_by": null, "decided_at": null, "decision_note": null }
   ],
   "inputs": { "files", "files_judged", "files_pending", "directories", "directories_judged",
-              "bundles_built_at", "library_job_id", "library_compared_at", "duplicates_compared_at" },
+              "bundles_built_at", "library_job_id", "library_compared_at", "duplicates_compared_at",
+              "library_job_ids" },
   "coverage": { "not_backed_up": { "coverage": "complete", "note": null }, "...": "" },
   "missing_steps": []
 }
@@ -1141,14 +1176,69 @@ scanned file opened; decisions change only their row.
 - `group` (for `not_backed_up` and `in_noise`): the kind of files, one finding per place and kind
   ([glossary](glossary.md#kind-of-files-of-a-finding-group)); `null` for the other kinds.
 - `target` (for `misplaced`): `path`, `relative_path`, `certainty`, `reason`, `same_content_files`,
-  `content_check` (`not_checked` until targets are checked by content).
+  `content_check` (`not_checked` until targets are checked by content), `library_job_id` and `library_root`: the
+  library the place lies in. A target lies inside a library root or there is none: a proposed place outside every
+  root is dropped with a note, and without a library no finding has a target.
+- `inputs.library_job_ids` lists every library the findings rest on; `library_job_id` and `library_compared_at` are
+  those of the first one.
 - `sensitive` findings name path, marker and rule ids, never content.
 - `--summary` gives `{ "job_id", "root_path", "inputs", "coverage", "missing_steps", "listed", "sure", "unsure",
   "by_kind": { "<kind>": { "findings", "sure", "unsure", "files", "bytes" } }, "by_certainty", "by_state",
   "below_threshold", "top": [ { "rank", "key", "kind", "certainty", "state", "title", "relative_path", "files",
-  "bytes", "action" } ] }`.
+  "bytes", "action" } ], "overview", "storage" }`.
 
-Errors: `job_not_found` (1), `wrong_role` (1, a library), `settings_invalid` (1, a `Findings` value), `usage` (2).
+**Overview first** (https://github.com/crack666/smart_file_organizer/issues/74). `overview` answers file by file,
+before any finding: what lies on the source, what of it is worth keeping and not safe, what is safe and where.
+
+```json
+"overview": {
+  "files": { "files": 2400, "bytes": 3100000000 },
+  "worth_keeping": { "files": 900, "bytes": 2000000000,
+                     "not_backed_up": { "files": 310, "bytes": 640000000 },
+                     "backed_up": { "files": 560, "bytes": 1300000000 },
+                     "unknown": { "files": 30, "bytes": 60000000 } },
+  "backed_up": { "files": 1700, "bytes": 2500000000,
+                 "by_library": [ { "library_job_id": 8, "root_path": "/mnt/nas/fotos", "files": 1500, "bytes": 2200000000 },
+                                 { "library_job_id": 9, "root_path": "/mnt/nas/videos", "files": 200, "bytes": 300000000 } ] },
+  "disposable": { "files": 1100, "bytes": 400000000 },
+  "sensitive": { "files": 12, "bytes": 90000 },
+  "not_compared": { "files": 30, "bytes": 60000000 }
+}
+```
+
+A marked file counts under `sensitive` only, never under `worth_keeping` or `disposable`; `backed_up` counts every
+file a library holds, marked ones included, each at the first library named that holds it. `worth_keeping.unknown`
+is worth keeping but not compared or unreadable: nobody knows whether it is safe. `not_compared` is every file
+without a comparison state (no library, or a read error). The by-kind counts of the findings stay as before; the
+overview counts files, the findings count what passed their thresholds.
+
+**Where the proposals go.** `storage` says whether a permanent storage is known and how much room it has:
+
+```json
+"storage": {
+  "status": "known", "message": null,
+  "roots": [ { "library_job_id": 8, "root_path": "/mnt/nas/fotos", "free_bytes": 52000000000,
+               "needed_bytes": 2048, "findings": 1, "space": "enough" },
+             { "library_job_id": 9, "root_path": "/mnt/nas/videos", "free_bytes": null,
+               "needed_bytes": 0, "findings": 0, "space": "unknown" } ],
+  "unplaced_findings": 4, "unplaced": { "files": 330, "bytes": 700000000 },
+  "warnings": []
+}
+```
+
+- `status` is `known` or `no_library` ([glossary](glossary.md#permanent-storage-for-targets-storagestatus)). Without a
+  library, `roots` is empty and `message` says that no permanent storage is known: no target is proposed.
+- `roots`: one entry per library. `needed_bytes` sums the listed (open or accepted) findings that move into this root;
+  `free_bytes` is what the file system lets the user write there (local folder, mounted share or network path;
+  `null` when it cannot be told). `space` is `enough`, `not_enough` or `unknown`
+  ([glossary](glossary.md#room-at-a-target-root-targetspace)); never an error.
+- `unplaced`: findings that should move (`not_backed_up`, `in_noise`) but have no target yet; they need room in one of
+  the roots too.
+- `warnings`: one line per root that has not enough room, and one when the unplaced findings need more than is left
+  free in all roots together (only when every root's free space is known).
+
+Errors: `job_not_found` (1), `wrong_role` (1, a library), `comparison_not_found` (1, `--against` names a library
+the job was not compared with), `settings_invalid` (1, a `Findings` value), `usage` (2).
 
 ### `sfo findings show <job> <key>`
 
@@ -1256,7 +1346,7 @@ lines when it starts or stops waiting for the model server (see `sfo analyze`); 
 | Code | Meaning | `error.code` |
 |---|---|---|
 | 0 | Done | |
-| 1 | The command ran but could not do its job | `job_not_found`, `path_not_found`, `scan_failed`, `scan_not_completed`, `wrong_role`, `compare_incomplete`, `database_error`, `model_missing`, `rules_invalid`, `words_invalid`, `output_inside_job`, `export_failed`, `truth_invalid`, `run_not_found`, `output_not_empty`, `bundle_not_found`, `patterns_invalid`, `library_patterns_invalid`, `settings_invalid`, `finding_not_found`, `targets_invalid`, `internal_error` |
+| 1 | The command ran but could not do its job | `job_not_found`, `path_not_found`, `scan_failed`, `scan_not_completed`, `wrong_role`, `compare_incomplete`, `comparison_not_found`, `database_error`, `model_missing`, `rules_invalid`, `words_invalid`, `output_inside_job`, `export_failed`, `truth_invalid`, `run_not_found`, `output_not_empty`, `bundle_not_found`, `patterns_invalid`, `library_patterns_invalid`, `settings_invalid`, `finding_not_found`, `targets_invalid`, `internal_error` |
 | 2 | Wrong invocation: unknown command or option, missing or invalid value | `usage` |
 | 3 | Ollama not reachable | `ollama_unavailable` |
 | 4 | The model server went away during `sfo analyze` and did not come back within `ModelServer.MaxWaitMinutes`; open items stay open, run the command again | `model_server_lost` |

@@ -119,6 +119,8 @@ A scan job has a role (`ScanJob.Role`, column `scan_jobs.role`): `source`, a med
 
 `ContentComparisonService.GetStoredAsync(sourceJobId, againstJobId)` reads a stored result back, with duplicate groups, per-directory counts (`SummarizeDirectories`, recursive) and errors (file errors plus directories the scans could not read). Later steps (target suggestions, findings) read the comparison through this method.
 
+**Several libraries** (https://github.com/crack666/smart_file_organizer/issues/74). `CompareWithLibrariesAsync(sourceJobId, againstJobIds, ...)` checks every job first, then runs the steps above once per library; each pair is stored as before, and the comparisons of one run share `comparisons.run_id` (migration 19; a comparison stored before is its own run). `LibraryComparisonSet` reads a set back, either the libraries named or, without ids, the newest run (`IContentComparisonRepository.GetLatestLibraryRunAsync`), and joins the rows per file: `backed_up` in any library, else `error`, else `differs`, else `new`; `FileComparison.MatchJobId` names the library of the match. `BackedUpSkipService` (`sfo analyze --against`), `FindingService` and `LibraryTargetService.MatchAsync` read the comparison only through this set.
+
 ## Bundle flow
 
 Issue: https://github.com/crack666/smart_file_organizer/issues/39; rules and thresholds in [bundles.md](bundles.md).
@@ -183,8 +185,17 @@ raised from `uniform` by a sample) or `disposable`. A folder judged `mixed` that
 A file is in at most one of `not_backed_up`, `in_noise`, `sensitive`. `misplaced` may only rest on a target
 whose content was checked (https://github.com/crack666/smart_file_organizer/issues/56). Until that check exists
 every target says `content_check: not_checked`. The check plugs in at `IFindingTargetAdvisor`
-(`LibraryFindingTargetAdvisor` wraps `LibraryTargetService.BestPlacesAsync`): `fits` lifts the cap to the target's
-certainty, `contradicts` drops the target; the rules stay as they are. `sensitive` names path, marker and rule
+(`LibraryFindingTargetAdvisor` wraps `LibraryTargetService.BestPlacesAsync` over every library of the set and keeps the
+best place of all): `fits` lifts the cap to the target's certainty, `contradicts` drops the target; the rules stay as
+they are. Whatever the advisor returns, `FindingService` keeps a target only when it lies inside a library root and
+records that library (`FindingTarget.LibraryJobId`, `LibraryRoot`); without a library no target exists
+(https://github.com/crack666/smart_file_organizer/issues/74).
+
+**Overview and room.** Besides the findings, `FindingService` counts the files of the job once
+(`FindingOverview`: worth keeping and not backed up, backed up per library, disposable, sensitive) and weighs the
+targets per library root (`FindingStorage`): the bytes of the listed findings moving there against the free space of
+the root from `IFreeSpaceProbe` (`Infrastructure/FreeSpaceProbe`: `GetDiskFreeSpaceEx` on Windows, `statvfs` through
+`DriveInfo` elsewhere, null on any failure, shown as `unknown`). `sensitive` names path, marker and rule
 ids, never content; files of `sfo findings show` pass the output guard; no checksum of a marked file is written.
 
 **Summarized, then ranked.** One unit per worth-keeping part of a device copy, device copy without parts, or

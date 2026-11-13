@@ -162,6 +162,10 @@ a contract and a scanned ID card, stays `uniform` ([architecture.md](architectur
 `file_nodes.analysis_skip` and `directory_nodes.analysis_skip` carry `backed_up` from this list when
 `sfo analyze --against` left the file or folder out because the library holds it; no other value is stored there.
 
+With several libraries (`--against` more than once, https://github.com/crack666/smart_file_organizer/issues/74) the
+states of the single comparisons are joined per file: `backed_up` in any library wins, then `error` (another root
+might hold it), then `differs`, then `new`. `match_library_job_id` names the library that holds the content.
+
 ### Reserved for planned work
 
 These codes are fixed by the decision table but no code uses them yet.
