@@ -39,7 +39,7 @@ public static class SmallCorpusGenerator
     /// <remarks>Version 2 (https://github.com/crack666/smart_file_organizer/issues/50): counter-samples for the
     /// finance and private_message boundaries, categories of money, medical and scanned papers; see docs/evaluation.md.
     /// Version 3 (https://github.com/crack666/smart_file_organizer/issues/59): a dump is no unit any more (the phone
-    /// backup's camera is judged), and a <c>Benutzer</c> folder with two user profiles full of noise.</remarks>
+    /// backup's camera is judged), and a folder with two user profiles full of noise.</remarks>
     public const int GeneratorVersion = 3;
 
     public const int DefaultSeed = 36;
@@ -308,7 +308,7 @@ public static class SmallCorpusGenerator
     }
 
     /// <summary>
-    /// Version 3 (https://github.com/crack666/smart_file_organizer/issues/59): a <c>Users</c> folder of an old
+    /// Version 3 (https://github.com/crack666/smart_file_organizer/issues/59): the profiles folder of an old
     /// computer with two profiles. Each profile is a dump of its own; its worth-keeping parts (desktop,
     /// documents, downloads, pictures) are judged like any folder, its app data and caches are skipped.
     /// <c>max</c> is a newer profile whose <c>AppData</c> the default scan rules skip; <c>lisa</c> is an older
@@ -317,10 +317,10 @@ public static class SmallCorpusGenerator
     /// </summary>
     private static void UserProfiles(Builder b)
     {
-        b.Dir("Benutzer", Uniform, "Only dumps below: the copies of two user profiles.");
+        b.Dir("Profile alter PC", Uniform, "Only dumps below: the copies of two user profiles.");
 
         // ── max: newer profile ──
-        const string max = "Benutzer/max";
+        const string max = "Profile alter PC/max";
         b.Dir(max, Dump, "Copy of a user profile (NTUSER.DAT, AppData). Recognised as a whole; its parts are judged on their own.");
         b.File($"{max}/NTUSER.DAT", Binary(b, Encoding.ASCII.GetBytes("regf"), 8192), D(2015, 9, 30), null, None,
             "Registry hive in the profile root. Files directly in a dump are judged one by one; no document type.");
@@ -370,7 +370,7 @@ public static class SmallCorpusGenerator
                 D(2015, 7, 11 + i, 10 + i), Photo, None);
 
         // ── lisa: older German profile, most of the noise ──
-        const string lisa = "Benutzer/lisa";
+        const string lisa = "Profile alter PC/lisa";
         b.Dir(lisa, Dump, "Copy of an older user profile (NTUSER.DAT, Anwendungsdaten, Lokale Einstellungen).");
         b.File($"{lisa}/NTUSER.DAT", Binary(b, Encoding.ASCII.GetBytes("regf"), 8192), D(2009, 12, 1), null, None,
             "Registry hive in the profile root; no document type.");

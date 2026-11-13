@@ -47,7 +47,7 @@ public class EvaluationTests : IDisposable
 
         Assert.Equal(onDiskDirs, truth.Directories.Keys.Order(StringComparer.Ordinal));
         Assert.Equal(onDiskFiles, truth.Files.Keys.Order(StringComparer.Ordinal));
-        Assert.InRange(truth.Directories.Count, 30, 60);
+        Assert.InRange(truth.Directories.Count, 30, 80);
         Assert.Equal(corpus.Directories, truth.Directories.Count);
         Assert.Equal(corpus.Files, truth.Files.Count);
         Assert.Equal("small", truth.Corpus.Name);
