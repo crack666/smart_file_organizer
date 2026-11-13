@@ -211,10 +211,12 @@ public class FindingsCommandTests : IDisposable
         // The trip in the library is no finding.
         Assert.DoesNotContain(items, f => (Str(f, "relative_path") ?? "").Contains("Italien", StringComparison.Ordinal));
 
-        // in_noise: photos and an invoice in the mixed download folder, the installer not.
-        var downloads = Assert.Single(items, f => Str(f, "kind") == "in_noise" && Str(f, "relative_path") == "Downloads");
-        Assert.Equal(3, downloads.GetProperty("files").GetInt64());
-        Assert.DoesNotContain("Downloads/setup_tool_1.2.exe", Strings(downloads, "examples"));
+        // in_noise: photos and an invoice in the mixed download folder, one finding per kind; the installer not.
+        var downloads = items.Where(f => Str(f, "kind") == "in_noise" && Str(f, "relative_path") == "Downloads").ToList();
+        Assert.Equal(2, downloads.Single(f => Str(f, "group") == "images").GetProperty("files").GetInt64());
+        Assert.Equal(1, downloads.Single(f => Str(f, "group") == "documents").GetProperty("files").GetInt64());
+        Assert.Equal(2, downloads.Count);
+        Assert.DoesNotContain(downloads, f => Strings(f, "examples").Contains("Downloads/setup_tool_1.2.exe"));
         // ... and the messenger photos in the app data of the old profile, as one finding.
         var appData = Assert.Single(items, f => Str(f, "kind") == "in_noise" && Str(f, "bundle_kind") == "dump_noise");
         Assert.Equal(3, appData.GetProperty("files").GetInt64());

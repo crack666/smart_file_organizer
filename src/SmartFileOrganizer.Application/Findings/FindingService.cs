@@ -320,7 +320,9 @@ public sealed class FindingService
     /// <summary>A part of the source findings summarize: a bundle, or the loose files of one folder.</summary>
     private sealed record Unit(string Subject, string? Path, string Rel, string Label, Bundle? Bundle, string? Noise);
 
-    private sealed record FileFacts(FileNode File, FilePlace Place, FileValue Value, SensitiveMatch Match, FileComparison? Row, Unit Unit, FileTime Time);
+    /// <param name="Container">The program, project or system folder the file belongs to (topmost folder judged unit or
+    /// system, a program folder, the app data of a device copy); null for a file of its own.</param>
+    private sealed record FileFacts(FileNode File, FilePlace Place, FileValue Value, SensitiveMatch Match, FileComparison? Row, Unit Unit, FileTime Time, string? Container);
 
     private async Task<Computed> ComputeInternalAsync(long jobId, CancellationToken ct)
     {
@@ -355,6 +357,27 @@ public sealed class FindingService
             ? null
             : libHeader is not null ? libRows!.Values.ToList() : await _comparisons.GetFileComparisonsAsync(dupHeader.Id, ct);
 
+        // ---- where the wholes are: folders judged unit or system, and the folders that hold one of them
+        var wholes = new Dictionary<string, (string? Root, bool InUnit)>(StringComparer.Ordinal);
+        (string? Root, bool InUnit) WholeOf(string dirPath)
+        {
+            if (wholes.TryGetValue(dirPath, out var known)) return known;
+            (string? Root, bool InUnit) result = (null, false);
+            if (dirByPath.TryGetValue(dirPath, out var d))
+            {
+                var above = WholeOf(d.ParentPath);
+                var self = FindingRules.IsWholeVerdict(d.Verdict);
+                result = (above.Root ?? (self ? d.FullPath : null),
+                    above.InUnit || d.Verdict == VerdictCodes.ToCode(DirectoryVerdictKind.Unit));
+            }
+            wholes[dirPath] = result;
+            return result;
+        }
+        var besideWholes = new HashSet<string>(
+            dirs.Where(d => FindingRules.IsWholeVerdict(d.Verdict)).Select(d => d.ParentPath)
+                .Concat(bundles.Where(FindingRules.IsProgramFolder).Select(x => x.RootPath).OfType<string>().Select(p => Path.GetDirectoryName(p) ?? p)),
+            StringComparer.Ordinal);
+
         // ---- every file: where it lies, what it is worth, whether it is marked
         var facts = new List<FileFacts>(rows.Count);
         foreach (var row in rows)
@@ -367,17 +390,33 @@ public sealed class FindingService
                 chain.Add(x);
             var part = chain.FirstOrDefault(x => x.Kind is BundleKind.DumpKeep or BundleKind.DumpNoise);
             var top = chain.Count > 0 ? chain[^1] : null;
-            var noiseByBundle = part?.Kind == BundleKind.DumpNoise || top is not null && FindingRules.IsProgramFolder(top);
+            var programFolder = top is not null && FindingRules.IsProgramFolder(top);
+            var noiseByBundle = part?.Kind == BundleKind.DumpNoise || programFolder;
             var keptByBundle = part?.Kind == BundleKind.DumpKeep || top?.Kind == BundleKind.Folder;
-            var noiseByDir = !noiseByBundle && !keptByBundle && FindingRules.DirectoryNoise(dir) is not null;
+            // A folder judged mixed between program folders (a desktop with unpacked tools) is noise even inside the
+            // kept part of a device copy: what is worth keeping there has to be moved before the programs go.
+            var besidePrograms = dir is not null && besideWholes.Contains(dir.FullPath);
+            var noiseByDir = !noiseByBundle && (!keptByBundle || besidePrograms && top?.Kind != BundleKind.Folder)
+                             && FindingRules.DirectoryNoise(dir) is not null;
             captures.TryGetValue(f.Id, out var capture);
             var place = new FilePlace(top, part, dir, capture, noiseByBundle, noiseByDir);
 
+            var whole = WholeOf(f.ParentPath);
             var value = FindingRules.ValueOf(f, place);
+            // Where a file lies is no reason to keep it when it lies inside a unit (the sounds of a program on the
+            // desktop): only a judgement of the file itself counts there.
+            if (whole.InUnit && value.Worth == FileWorth.Keep && !FindingRules.RestsOnFile(value))
+                value = FileValue.None;
             var match = SensitiveOutputGuard.GetMatch(f);
             FileComparison? cmp = null;
             libRows?.TryGetValue(f.Id, out cmp);
-            facts.Add(new FileFacts(f, place, value, match, cmp, UnitOf(job, f, place, dir, part, top), EventGrouper.TimeOf(f, captures)));
+            // The whole a file belongs to, for duplicates: two copies of a program are one finding, folder against folder.
+            var container = whole.Root
+                            ?? (programFolder ? top!.RootPath : null)
+                            ?? (part?.Kind == BundleKind.DumpNoise ? part.RootPath ?? "dump_noise|" + part.Id : null);
+            facts.Add(new FileFacts(f, place, value, match, cmp,
+                UnitOf(job, f, place, dir, part, top, besidePrograms && noiseByDir && keptByBundle),
+                EventGrouper.TimeOf(f, captures), container));
         }
 
         var fileById = facts.ToDictionary(x => x.File.Id, x => x.File);
@@ -385,12 +424,13 @@ public sealed class FindingService
         var findings = new List<Finding>();
         var below = FindingRules.KindOrder.ToDictionary(k => k, _ => 0L);
 
-        // ---- not_backed_up and in_noise
+        // ---- not_backed_up and in_noise: one finding per place, kind of file (documents, images, ...) and sureness
         foreach (var unitGroup in facts
                      .Where(x => !x.Match.IsMatch && x.Value.Worth == FileWorth.Keep)
-                     .GroupBy(x => x.Unit.Subject, StringComparer.Ordinal))
+                     .GroupBy(x => (x.Unit.Subject, Group: FindingRules.GroupOf(x.File.FileType))))
         {
             var unit = unitGroup.First().Unit;
+            var group = unitGroup.Key.Group;
             var noise = unit.Noise is not null;
             var counted = noise
                 ? unitGroup.Where(x => x.Row?.State != ContentState.BackedUp).ToList()
@@ -410,8 +450,8 @@ public sealed class FindingService
                     continue;
                 }
                 findings.Add(noise
-                    ? InNoise(job, unit, part, sure, unitFiles, libHeader)
-                    : NotBackedUp(job, unit, part, sure, unitFiles, libHeader!));
+                    ? InNoise(job, unit, group, part, sure, unitFiles, libHeader)
+                    : NotBackedUp(job, unit, group, part, sure, unitFiles, libHeader!));
             }
         }
 
@@ -452,7 +492,7 @@ public sealed class FindingService
         return new Computed(new FindingReport(job, inputs, coverage, missing, ranked, below), fileById);
     }
 
-    private static Unit UnitOf(ScanJob job, FileNode f, FilePlace place, DirectoryReadRow? dir, Bundle? part, Bundle? top)
+    private static Unit UnitOf(ScanJob job, FileNode f, FilePlace place, DirectoryReadRow? dir, Bundle? part, Bundle? top, bool besidePrograms)
     {
         if (place.NoiseByBundle)
         {
@@ -464,7 +504,7 @@ public sealed class FindingService
         {
             var rel = FindingRules.Rel(dir?.RelativePath ?? f.RelativeDir);
             return new Unit($"dir|{rel}|noise", f.ParentPath, rel, $"folder {rel}", null,
-                "a folder " + FindingRules.DirectoryNoise(dir));
+                "a folder " + FindingRules.DirectoryNoise(dir) + (besidePrograms ? " between program folders" : string.Empty));
         }
         if (part?.Kind == BundleKind.DumpKeep) return BundleUnit(job, part, null);
         if (top?.Kind is BundleKind.Dump or BundleKind.Folder) return BundleUnit(job, top, null);
@@ -497,7 +537,7 @@ public sealed class FindingService
 
     private Finding NewFinding(
         ScanJob job, FindingKind kind, string subjectSuffix, Unit unit, IReadOnlyList<FileFacts> files,
-        ResultCertainty certainty, string title, string reason, FindingAction action, bool withComparison)
+        ResultCertainty certainty, string title, string reason, FindingAction action, bool withComparison, string? group = null)
     {
         var ordered = files.OrderBy(x => x.File.FullPath, StringComparer.Ordinal).ToList();
         DateTime? from = null, to = null;
@@ -525,6 +565,7 @@ public sealed class FindingService
             BundleKind = unit.Bundle?.Kind,
             Files = ordered.Count,
             Bytes = ordered.Sum(x => x.File.Size),
+            Group = group,
             ByFileType = ordered.GroupBy(x => BundleBuilder.TypeCode(x.File.FileType))
                 .OrderBy(g => g.Key, StringComparer.Ordinal).ToDictionary(g => g.Key, g => (long)g.Count()),
             Period = from is null ? null : new FindingPeriod(from, to, source),
@@ -539,18 +580,18 @@ public sealed class FindingService
         };
     }
 
-    private Finding NotBackedUp(ScanJob job, Unit unit, IReadOnlyList<FileFacts> files, bool sure, int unitFiles, ComparisonHeader lib)
+    private Finding NotBackedUp(ScanJob job, Unit unit, string group, IReadOnlyList<FileFacts> files, bool sure, int unitFiles, ComparisonHeader lib)
     {
         var certainty = FindingRules.Weakest(files.Select(x => x.Value.Certainty), ResultCertainty.Uncertain);
-        var n = FindingRules.Count(files.Count, "file", "files");
+        var n = GroupCount(group, files.Count);
         var worth = sure ? "worth keeping" : "possibly worth keeping";
-        var title = $"{n} {worth}, not in the library: {unit.Label}";
+        var title = $"{n} ({FindingRules.Size(files.Sum(x => x.File.Size))}) {worth}, not in the library: {unit.Label}";
         var reason = $"{n} of the {unitFiles} in {unit.Rel} {(files.Count == 1 ? "is" : "are")} {worth} by {Bases(files)}, "
                      + $"and the comparison with library job {lib.AgainstJobId} on {lib.ComparedAt:yyyy-MM-dd} found no file with the same content.";
-        var finding = NewFinding(job, FindingKind.NotBackedUp, sure ? "|sure" : "|unsure", unit, files, certainty, title, reason,
+        var finding = NewFinding(job, FindingKind.NotBackedUp, $"|{group}" + (sure ? "|sure" : "|unsure"), unit, files, certainty, title, reason,
             new FindingAction(PlanActionKind.Move,
                 "Worth keeping and not in the library: move it there (copy, verify, then remove the original)."),
-            withComparison: true);
+            withComparison: true, group);
         var differs = files.Count(x => x.Row?.State == ContentState.Differs);
         if (differs > 0)
             finding.Notes.Add($"{FindingRules.Count(differs, "file has", "files have")} a namesake with other content in a folder of the same name in the library; compare before replacing anything.");
@@ -560,23 +601,35 @@ public sealed class FindingService
         return finding;
     }
 
-    private Finding InNoise(ScanJob job, Unit unit, IReadOnlyList<FileFacts> files, bool sure, int unitFiles, ComparisonHeader? lib)
+    private Finding InNoise(ScanJob job, Unit unit, string group, IReadOnlyList<FileFacts> files, bool sure, int unitFiles, ComparisonHeader? lib)
     {
         var certainty = FindingRules.Weakest(files.Select(x => x.Value.Certainty), ResultCertainty.Uncertain);
-        var n = FindingRules.Count(files.Count, "file", "files");
+        var n = GroupCount(group, files.Count);
         var worth = sure ? "worth keeping" : "possibly worth keeping";
-        var title = $"{n} {worth} among noise: {unit.Label}";
+        var title = $"{n} ({FindingRules.Size(files.Sum(x => x.File.Size))}) {worth} among noise: {unit.Label}";
         var reason = $"{n} of the {unitFiles} in {unit.Rel} {(files.Count == 1 ? "is" : "are")} {worth} by {Bases(files)}, "
                      + $"but {(files.Count == 1 ? "lies" : "lie")} in {unit.Noise}, a place whose other files have no value.";
-        var finding = NewFinding(job, FindingKind.InNoise, sure ? "|sure" : "|unsure", unit, files, certainty, title, reason,
+        var finding = NewFinding(job, FindingKind.InNoise, $"|{group}" + (sure ? "|sure" : "|unsure"), unit, files, certainty, title, reason,
             new FindingAction(PlanActionKind.Move,
                 "Worth keeping in a place without value: move it to a place of its own before the rest is cleaned up."),
-            withComparison: lib is not null);
+            withComparison: lib is not null, group);
         finding.Notes.Add(lib is null
             ? "Not compared with a library: some of these files may be backed up already."
             : "Files whose content is in the library are left out.");
         return finding;
     }
+
+    /// <summary>"3 documents", "1 audio file", "12 other files".</summary>
+    private static string GroupCount(string group, long n) => group switch
+    {
+        "documents" => FindingRules.Count(n, "document", "documents"),
+        "images" => FindingRules.Count(n, "image", "images"),
+        "videos" => FindingRules.Count(n, "video", "videos"),
+        "audio" => FindingRules.Count(n, "audio file", "audio files"),
+        "archives" => FindingRules.Count(n, "archive", "archives"),
+        "installers" => FindingRules.Count(n, "installer", "installers"),
+        _ => FindingRules.Count(n, "other file", "other files")
+    };
 
     private static string Bases(IReadOnlyList<FileFacts> files)
     {
@@ -666,10 +719,22 @@ public sealed class FindingService
         Dictionary<FindingKind, long> below)
     {
         var byId = facts.ToDictionary(x => x.File.Id);
-        var groups = dupRows
+        var allGroups = dupRows
             .Where(r => r.DuplicateGroup is not null && byId.ContainsKey(r.FileNodeId) && !byId[r.FileNodeId].Match.IsMatch)
             .GroupBy(r => r.DuplicateGroup!.Value)
             .Select(g => g.Select(r => byId[r.FileNodeId]).ToList())
+            .Where(g => g.Count >= 2)
+            .ToList();
+
+        // Copies inside programs, projects, system folders and app data are no finding of their own: the language
+        // files of a tool unpacked twice would fill the list. Two copies of the same whole are one finding, folder
+        // against folder; copies within one whole are none.
+        foreach (var f in FolderCopies(job, facts, allGroups, withLibrary, below))
+            yield return f;
+
+        // Single files: only those worth keeping and outside every whole count.
+        var groups = allGroups
+            .Select(g => g.Where(x => x.Container is null && x.Value.Worth == FileWorth.Keep).ToList())
             .Where(g => g.Count >= 2)
             .ToList();
 
@@ -697,11 +762,7 @@ public sealed class FindingService
             var unit = new Unit($"dirs|{set.Key.Replace('\n', '|')}", keep.File.ParentPath, keepRel, $"folder {keepRel}", null, null);
 
             var allBackedUp = withLibrary && all.All(x => x.Row?.State == ContentState.BackedUp);
-            var action = allBackedUp
-                ? new FindingAction(PlanActionKind.DeleteSource, "Every copy is in the library with the same content already: the copies here can go.")
-                : withLibrary
-                    ? new FindingAction(PlanActionKind.Move, $"Move the copy in {keepRel} to the library; once it is there, the other copies can go.")
-                    : new FindingAction(PlanActionKind.Leave, $"Without a library no copy can be removed safely; keep the copy in {keepRel}.");
+            var action = DuplicateAction(withLibrary, allBackedUp, keepRel, "copy");
 
             var shown = dirRels.Take(3).ToList();
             var where = shown.Count == 1 ? $"in {shown[0]}" : "in " + string.Join(", ", shown) + (dirRels.Length > 3 ? $" and {dirRels.Length - 3} more folders" : "");
@@ -718,6 +779,78 @@ public sealed class FindingService
     }
 
     private const int FindingDuplicatesMaxDirs = 10;
+
+    /// <summary>Share of the files of the smaller whole that must be identical before two wholes count as copies of each other.</summary>
+    private const double FolderCopyMinShare = 0.5;
+
+    /// <summary>
+    /// Wholes (program, project, system folder, app data) that exist more than once: one <c>duplicate</c> finding per set
+    /// of copied folders. Identical files shared by wholes that are no copies of each other (a common library in two
+    /// programs) and copies within one whole give no finding.
+    /// </summary>
+    private IEnumerable<Finding> FolderCopies(
+        ScanJob job, IReadOnlyList<FileFacts> facts, IReadOnlyList<List<FileFacts>> groups, bool withLibrary,
+        Dictionary<FindingKind, long> below)
+    {
+        var sizeOf = facts.Where(x => x.Container is not null)
+            .GroupBy(x => x.Container!, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
+        string RelOf(string container) => Path.IsPathRooted(container) ? RelativeTo(job, container) : container;
+
+        var sets = groups
+            .Select(g => g.Where(x => x.Container is not null).ToList())
+            .Where(g => g.Select(x => x.Container).Distinct(StringComparer.Ordinal).Count() >= 2)
+            .GroupBy(g => string.Join("\n", g.Select(x => x.Container!).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)),
+                StringComparer.Ordinal);
+        foreach (var set in sets)
+        {
+            var members = set.ToList();
+            var containers = set.Key.Split('\n');
+            var redundantFiles = members.Sum(g => (long)g.Count - 1);
+            var redundantBytes = members.Sum(g => g[0].File.Size * (g.Count - 1));
+            var smallestShare = containers.Min(c =>
+                (double)members.SelectMany(g => g).Count(x => x.Container == c) / Math.Max(1, sizeOf.GetValueOrDefault(c)));
+            if (smallestShare < FolderCopyMinShare
+                || redundantBytes < _options.DuplicateMinBytes && redundantFiles < _options.DuplicateMinFiles)
+            {
+                below[FindingKind.Duplicate] += redundantFiles;
+                continue;
+            }
+
+            var rels = containers.Select(RelOf).Order(StringComparer.Ordinal).ToList();
+            var keepRel = rels[0];
+            var keepFull = containers.First(c => RelOf(c) == keepRel);
+            var all = members.SelectMany(g => g).ToList();
+            var unit = new Unit($"folders|{string.Join("|", rels)}", Path.IsPathRooted(keepFull) ? keepFull : null, keepRel, $"folder {keepRel}", null, null);
+            var allBackedUp = withLibrary && all.All(x => x.Row?.State == ContentState.BackedUp);
+            var others = rels.Skip(1).ToList();
+            var title = others.Count == 1
+                ? $"{others[0]} is a copy of {keepRel}: {FindingRules.Count(members.Count, "identical file", "identical files")} ({FindingRules.Size(redundantBytes)})"
+                : $"{rels.Count} copies of the same folder: {string.Join(", ", rels.Take(3))}{(rels.Count > 3 ? $" and {rels.Count - 3} more" : "")}";
+            var f = NewFinding(job, FindingKind.Duplicate, string.Empty, unit, all, ResultCertainty.Certain, title,
+                $"{FindingRules.Count(members.Count, "file of", "files of")} {keepRel} exist with identical content (same full SHA-256) in "
+                + $"{string.Join(", ", others.Take(3))}{(others.Count > 3 ? $" and {others.Count - 3} more" : "")}; "
+                + $"{(smallestShare >= 0.999 ? "the folders are the same" : $"at least {smallestShare:P0} of each folder is the same")}, "
+                + $"{FindingRules.Count(redundantFiles, "copy", "copies")} with {FindingRules.Size(redundantBytes)} {(redundantFiles == 1 ? "is" : "are")} redundant.",
+                DuplicateAction(withLibrary, allBackedUp, keepRel, "folder"), withComparison: withLibrary);
+            f.Bytes = redundantBytes;
+            f.Duplicates = new FindingDuplicates(members.Count, redundantFiles, redundantBytes,
+                rels.Take(FindingDuplicatesMaxDirs).ToList(), rels.Count, keepRel, FindingDuplicates.FoldersScope);
+            f.Directories = containers.Where(Path.IsPathRooted).ToList();
+            yield return f;
+        }
+    }
+
+    /// <summary>
+    /// Keep one copy, the others can go (<c>delete_source</c>); without a library nothing is removed (<c>leave</c>),
+    /// because no second place holds the content should the kept copy be the wrong one.
+    /// </summary>
+    private static FindingAction DuplicateAction(bool withLibrary, bool allBackedUp, string keepRel, string what) =>
+        !withLibrary
+            ? new FindingAction(PlanActionKind.Leave, $"Without a library no copy is removed; keep the {what} in {keepRel}.")
+            : allBackedUp
+                ? new FindingAction(PlanActionKind.DeleteSource, "Every copy is in the library with the same content already: the copies here can go.")
+                : new FindingAction(PlanActionKind.DeleteSource, $"Keep the {what} in {keepRel}; the other copies can go.");
 
     private async Task<IReadOnlyList<Finding>> MisplacedAsync(
         ScanJob job, IReadOnlyList<FileFacts> facts, IReadOnlyList<DirectoryReadRow> dirs, BundlePatterns patterns,

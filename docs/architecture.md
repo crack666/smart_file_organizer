@@ -160,14 +160,16 @@ certainty (older rows: `likely` from confidence 0.8, else `uncertain`): keep hin
 importance is low; screenshot, audio, archive and code only with importance high or critical; trash candidate,
 installer and system file are disposable. `review_needed` or `unknown` counts as keep (`review`) only for
 pictures, videos, documents and audio and never among noise: "look at it" is no sign of worth (a trial on a
-generated user profile had a hundred database files the rules sent to review fill a finding). Without a result
+generated user profile had a hundred database files the rules sent to review fill a finding). Inside a folder judged `unit` only a judgement of the file itself (person, agent, model, rule, confirmed sample)
+counts: where it lies is no reason to keep the sounds of a program on a desktop. Without a result
 programs and fonts are disposable; among noise only camera photos and personal documents (office files and PDFs
 not named readme, license, manual and the like) count, as `uncertain`; elsewhere folder retention, then the
 bundle decide, never above `likely`.
 
 **Noise** is the noise part of a device copy (`dump_noise`), a program folder (a software copy recognised by
 programs and libraries alone), or, outside named folders and worth-keeping parts, a folder judged `mixed` (not
-raised from `uniform` by a sample) or `disposable`.
+raised from `uniform` by a sample) or `disposable`. A folder judged `mixed` that holds a folder judged `unit` or
+`system`, or a program folder, is noise even inside the kept part of a device copy (a desktop with unpacked tools).
 
 | Kind | Arises from | Certainty | Action |
 |---|---|---|---|
@@ -175,7 +177,7 @@ raised from `uniform` by a sample) or `disposable`.
 | `in_noise` | files worth keeping in a noise place; backed-up files left out | weakest file certainty | `move` |
 | `misplaced` | a folder judged `uniform` (or raised from it), or without analysis a named folder, with at least 5 pictures, documents or audio files of which 80 % are one group; the not disposable files of another group | weakest file certainty, at most `uncertain` until the target content is checked | `move` with a target, else `leave` |
 | `sensitive` | files marked by rule or model; skipped folders marked by name or place | header rule, or rule and model: `certain`; name or folder rule: `likely`; model alone: its certainty | `leave`, single decision |
-| `duplicate` | identical files (same full SHA-256) of the source, marked files left out | `certain` | `delete_source` if every copy is in the library, `move` one copy with a library, `leave` without |
+| `duplicate` | identical files (same full SHA-256) of the source worth keeping, outside every whole, marked files left out; or a whole (topmost folder judged `unit` or `system`, a program folder, app data of a device copy) that exists more than once, when at least half of the smaller one is identical | `certain` | keep one copy, `delete_source` for the others with a library, `leave` without |
 
 A file is in at most one of `not_backed_up`, `in_noise`, `sensitive`. `misplaced` may only rest on a target
 whose content was checked (https://github.com/crack666/smart_file_organizer/issues/56). Until that check exists
@@ -187,8 +189,12 @@ ids, never content; files of `sfo findings show` pass the output guard; no check
 **Summarized, then ranked.** One unit per worth-keeping part of a device copy, device copy without parts, or
 named folder; loose files (events, scattered, no bundle) one unit per folder however many events it holds, so
 300 loose photos are one finding; noise per noise part or program folder, else per folder; `sensitive` per
-folder and marker set, inside noise per noise part and marker set; `duplicate` per set of folders; `misplaced`
-per folder and foreign group. `not_backed_up` and `in_noise` split into a sure part (`certain`, `likely`) and an
+folder and marker set, inside noise per noise part and marker set; `duplicate` per set of folders (`scope: files`) or per set
+of copied wholes (`scope: folders`: a tool unpacked twice is one finding, folder against folder; copies within one whole
+are none); `misplaced`
+per folder and foreign group. `not_backed_up` and `in_noise` split by kind of file (`group`: `documents`, `images`, `videos`, `audio`,
+`archives`, `installers`, `other`), so a mixed download folder is one decision per kind with examples, period and size,
+and then into a sure part (`certain`, `likely`) and an
 unsure part (`uncertain`, `review`). Every sure finding comes before every unsure one; within each by kind
 (`not_backed_up`, `in_noise`, `sensitive`, `misplaced`, `duplicate`), certainty, files, bytes, key. The key
 (`in_noise-4e1f0a9b2c`) is the kind plus ten hex digits of the SHA-256 of a subject built from relative paths and
