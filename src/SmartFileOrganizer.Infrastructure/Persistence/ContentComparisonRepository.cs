@@ -231,6 +231,52 @@ public class ContentComparisonRepository : IContentComparisonRepository
             r.Error, r.MatchHash, r.MatchVerifiedAt)).ToList();
     }
 
+    public async Task<(int Files, int Directories)> SetAnalysisSkipAsync(long jobId, IReadOnlyCollection<long> fileIds,
+        IReadOnlyCollection<long> directoryIds, CancellationToken ct = default)
+    {
+        await using var conn = _db.CreateConnection();
+        await conn.OpenAsync(ct);
+        await using var tx = await conn.BeginTransactionAsync(ct);
+        var statuses = new
+        {
+            jobId,
+            reason = ContentStateValues.BackedUp,
+            skipped = (int)FileNodeStatus.Skipped,
+            discovered = (int)FileNodeStatus.Discovered,
+            deferred = (int)FileNodeStatus.Deferred
+        };
+
+        await conn.ExecuteAsync(
+            """
+            UPDATE file_nodes SET status = CASE WHEN status = @skipped THEN @discovered ELSE status END, analysis_skip = NULL
+            WHERE job_id = @jobId AND analysis_skip IS NOT NULL
+            """, statuses, tx);
+        await conn.ExecuteAsync(
+            "UPDATE directory_nodes SET analysis_skip = NULL WHERE job_id = @jobId AND analysis_skip IS NOT NULL",
+            new { jobId }, tx);
+
+        var files = 0;
+        foreach (var chunk in fileIds.Chunk(ChunkSize))
+        {
+            files += await conn.ExecuteAsync(
+                """
+                UPDATE file_nodes SET status = @skipped, analysis_skip = @reason
+                WHERE job_id = @jobId AND id IN @ids AND status IN (@discovered, @deferred)
+                """, new { statuses.jobId, statuses.reason, statuses.skipped, statuses.discovered, statuses.deferred, ids = chunk }, tx);
+        }
+
+        var directories = 0;
+        foreach (var chunk in directoryIds.Chunk(ChunkSize))
+        {
+            directories += await conn.ExecuteAsync(
+                "UPDATE directory_nodes SET analysis_skip = @reason WHERE job_id = @jobId AND id IN @ids",
+                new { jobId, reason = ContentStateValues.BackedUp, ids = chunk }, tx);
+        }
+
+        await tx.CommitAsync(ct);
+        return (files, directories);
+    }
+
     // Dapper row types: plain settable properties, so mapping does not depend on constructor matching.
 
     private sealed class FileRow

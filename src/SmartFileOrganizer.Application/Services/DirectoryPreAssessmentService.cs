@@ -86,7 +86,8 @@ public class DirectoryPreAssessmentService
             return new AiClassificationRunResult(true, 0, 0, 0, "No directories found.");
 
         var tree = await JobTree.LoadAsync(jobId, allDirs, _verdictRepo, ct);
-        var pending = allDirs.Where(d => !tree.HasVerdict(d.Id)).ToList();
+        // A folder whose every file is in the library (analysis_skip backed_up) needs no verdict.
+        var pending = allDirs.Where(d => !tree.HasVerdict(d.Id) && d.AnalysisSkip is null).ToList();
 
         if (pending.Count == 0)
         {

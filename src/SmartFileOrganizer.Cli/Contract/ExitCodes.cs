@@ -40,6 +40,7 @@ public static class ErrorCodes
     public const string ExportFailed = "export_failed";
     public const string WrongRole = "wrong_role";
     public const string CompareIncomplete = "compare_incomplete";
+    public const string ComparisonNotFound = "comparison_not_found";
     public const string WordsInvalid = "words_invalid";
     public const string OutputInsideJob = "output_inside_job";
     public const string TruthInvalid = "truth_invalid";

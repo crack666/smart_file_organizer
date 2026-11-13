@@ -15,6 +15,10 @@ public class DirectoryNode
     public DirectoryStatus DirStatus { get; set; } = DirectoryStatus.Pending;
     public string? DirReason { get; set; }
 
+    /// <summary>Code of the <see cref="Enums.ContentState"/> that let <c>sfo analyze --against</c> leave the folder out
+    /// (<c>backed_up</c>: every file below it is in the library), or null.</summary>
+    public string? AnalysisSkip { get; set; }
+
     // Aggregated statistics (populated after scan)
     public long TotalSize { get; set; }
     public int DirectFileCount { get; set; }

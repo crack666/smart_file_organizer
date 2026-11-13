@@ -95,7 +95,8 @@ public class DirectorySamplingService
     {
         var fullPath = verdict.DirectoryFullPath ?? string.Empty;
         var files = await _fileRepo.GetByDirectoryAsync(jobId, fullPath, ct);
-        var eligible = files.Where(f => IsEligible(f.FileType)).ToList();
+        // Files left out because the library holds them are never judged, so they cannot be members of a sample.
+        var eligible = files.Where(f => IsEligible(f.FileType) && f.AnalysisSkip is null).ToList();
         if (eligible.Count == 0) return false;
 
         var seed = DirectorySampler.Seed(jobId, verdict.DirectoryRelativePath ?? fullPath);

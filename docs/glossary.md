@@ -159,6 +159,9 @@ a contract and a scanned ID card, stays `uniform` ([architecture.md](architectur
 | `differs` | Not in the library by content, but a file with the same name lies in a folder of the same name there. |
 | `error` | The content could not be determined (read error, file gone, library unreachable); never counts as `new` or `backed_up`. |
 
+`file_nodes.analysis_skip` and `directory_nodes.analysis_skip` carry `backed_up` from this list when
+`sfo analyze --against` left the file or folder out because the library holds it; no other value is stored there.
+
 ### Reserved for planned work
 
 These codes are fixed by the decision table but no code uses them yet.

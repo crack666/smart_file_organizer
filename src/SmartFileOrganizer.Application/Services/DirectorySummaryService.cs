@@ -101,7 +101,8 @@ public class DirectorySummaryService
             }
             summarizedIds.Add(row.DirectoryNodeId);
         }
-        var pending = dirsDeepFirst.Where(d => !summarizedIds.Contains(d.Id)).ToList();
+        // A folder whose every file is in the library (analysis_skip backed_up) gets no summary.
+        var pending = dirsDeepFirst.Where(d => !summarizedIds.Contains(d.Id) && d.AnalysisSkip is null).ToList();
 
         if (pending.Count == 0)
         {
