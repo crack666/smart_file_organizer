@@ -274,7 +274,7 @@ call) or `model`.
    backup in the documents of a profile) is a dump of its own, and its own noise paths count from it.
    Until Issue 59 (13.11.2026) every dump was a unit and the scan root was never one
    ([#50](https://github.com/crack666/smart_file_organizer/issues/50), measured on the corpus of
-   [evaluation.md](evaluation.md)). Verdicts stored before schema step 15 stay as they were; a job
+   [evaluation.md](evaluation.md)). Verdicts stored before schema step 16 stay as they were; a job
    needs a new scan (or a new job) to get `dump` verdicts. The bundles split a dump the same way, but
    count a folder no pattern names as noise ([bundles.md](bundles.md#worth-keeping-and-noise)); the
    verdict judges it, because a folder of its own name may hold anything.
@@ -586,7 +586,7 @@ Important tables:
 - `directory_verdicts` — one verdict per directory (step 3): `verdict`, `source` (`rule`/`model`), `rule`,
   `purpose`, `retention`, `reason`, `unit_directory_node_id` (the directory that is the whole, for `unit`),
   `profile_json` (snake_case), `model_used`, `raw_response`, `judged_at`, `error`; either `verdict` or `error` is set;
-  step 15 widens the check of `verdict` by `dump` and changes no stored row;
+  step 16 widens the check of `verdict` by `dump` and changes no stored row;
   `escalated_from` and `escalation_reason` when a sample raised the directory to `mixed` (step 6)
 - `directory_samples` — one sample per uniform directory (step 6): `seed`, `state` (`open`, `confirmed`,
   `escalated`), `eligible_count`, `members_json` (file id, name, `role` = `stratum`/`size`/`date`/`anomaly`/`sensitive`,
