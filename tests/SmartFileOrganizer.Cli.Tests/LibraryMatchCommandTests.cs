@@ -123,6 +123,59 @@ public class LibraryMatchCommandTests : IDisposable
         return (library, source);
     }
 
+    private sealed class FixedProbe(long? free) : IFreeSpaceProbe
+    {
+        public long? AvailableBytes(string path) => free;
+    }
+
+    /// <summary>
+    /// Several library roots (https://github.com/crack666/smart_file_organizer/issues/74): each is matched, the best place
+    /// of all wins and names its library, and every root says how much room it has for what is not backed up yet.
+    /// </summary>
+    [Fact]
+    public async Task Match_OverTwoLibraries_PicksTheBestPlaceOfAll_AndWeighsTheRoom()
+    {
+        var second = Path.Combine(_dir, "ablage-urlaub");
+        Directory.CreateDirectory(Path.Combine(second, "Urlaub", "Ski Februar 2015"));
+        foreach (var file in Directory.GetFiles(Path.Combine(_source, "Neuer Ordner")))
+            File.Copy(file, Path.Combine(second, "Urlaub", "Ski Februar 2015", Path.GetFileName(file)));
+        var (first, source) = await PrepareAsync(compare: false);
+        var secondId = await ScanAsync(second, "library");
+        await OkAsync("compare", source.ToString(), "--against", first.ToString(), "--against", secondId.ToString());
+
+        // Without --against: the libraries of the newest compare.
+        var result = await OkAsync(s => s.AddSingleton<IFreeSpaceProbe>(new FixedProbe(1)),
+            "library", "match", source.ToString(), "Neuer Ordner", "--no-model", "--limit", "10");
+        Assert.Equal("comparison", Str(result, "library_from"));
+        Assert.Equal([first, secondId], result.GetProperty("libraries").EnumerateArray().Select(l => l.GetProperty("id").GetInt64()));
+        var candidates = Candidates(result);
+        Assert.Equal(secondId, candidates[0].GetProperty("library_job_id").GetInt64());
+        Assert.StartsWith(second, Str(candidates[0], "destination"));
+        Assert.Contains(candidates, c => c.GetProperty("library_job_id").GetInt64() == first);
+        // Every proposal lies inside the root of its library.
+        foreach (var c in candidates)
+        {
+            var root = c.GetProperty("library_job_id").GetInt64() == first ? _library : second;
+            Assert.StartsWith(root, Str(c, "destination"));
+        }
+
+        // The photos are all in the second library: nothing needs room, so even one free byte is enough.
+        var space = result.GetProperty("space").EnumerateArray().ToList();
+        Assert.Equal(2, space.Count);
+        Assert.All(space, s => Assert.Equal(0, s.GetProperty("needed_bytes").GetInt64()));
+        Assert.All(space, s => Assert.Equal("enough", Str(s, "space")));
+
+        // A folder no library holds needs room: one free byte is not enough, an unknown probe says unknown.
+        var zelten = await OkAsync(s => s.AddSingleton<IFreeSpaceProbe>(new FixedProbe(1)),
+            "library", "match", source.ToString(), "Zelten am See 2019", "--no-model");
+        Assert.All(zelten.GetProperty("space").EnumerateArray(), s => Assert.Equal("not_enough", Str(s, "space")));
+        var unknown = await OkAsync(s => s.AddSingleton<IFreeSpaceProbe>(new FixedProbe(null)),
+            "library", "match", source.ToString(), "Zelten am See 2019", "--no-model", "--against", first.ToString());
+        var root1 = Assert.Single(unknown.GetProperty("space").EnumerateArray());
+        Assert.Equal("unknown", Str(root1, "space"));
+        Assert.Equal(JsonValueKind.Null, root1.GetProperty("free_bytes").ValueKind);
+    }
+
     private static List<JsonElement> Candidates(JsonElement result) => result.GetProperty("candidates").EnumerateArray().ToList();
 
     private static string Str(JsonElement e, string name) => e.GetProperty(name).GetString()!;

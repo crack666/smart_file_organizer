@@ -120,6 +120,29 @@ public class BackedUpSkipTests : IDisposable
         Assert.DoesNotContain(_server.Log, r => r.Kind is "pre_assessment" or "classification" or "summary");
     }
 
+    /// <summary>A second root of the library holds the diary (issue 74): with both, nothing of fresh is judged.</summary>
+    [Fact]
+    public async Task TwoLibraries_ABackedUpFileInEitherIsLeftOut()
+    {
+        var second = Path.Combine(_dir, "archive-texts");
+        Write(second, "diaries/day-one.txt", "Diary, day one: nothing of this is anywhere else.");
+        var source = await ScanAsync(_source);
+        var library = await ScanAsync(_library, "--role", "library");
+        var secondId = await ScanAsync(second, "--role", "library");
+        var compare = await SfoAsync("compare", source.ToString(), "--against", library.ToString(), "--against", secondId.ToString(), "--json");
+        Assert.True(compare.ExitCode == 0, compare.Stderr + compare.Stdout);
+        Assert.Equal(4, compare.Json().GetProperty("result").GetProperty("counts").GetProperty("backed_up").GetInt64());
+
+        var run = await SfoAsync("analyze", source.ToString(), "--against", library.ToString(), "--against", secondId.ToString(), "--json");
+        Assert.True(run.ExitCode == 0, run.Stderr + run.Stdout);
+        Assert.Equal(0, _server.Answered("classification", "diary.txt"));
+        Assert.Equal(1, _server.Answered("classification", "plan.txt"));
+        var skip = run.Json().GetProperty("result").GetProperty("backed_up");
+        Assert.Equal(4, skip.GetProperty("files").GetInt64());
+        Assert.Equal(2, skip.GetProperty("directories").GetInt64()); // saved and fresh
+        Assert.Equal([library, secondId], skip.GetProperty("libraries").EnumerateArray().Select(x => x.GetInt64()));
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────
 
     private static void Write(string root, string relative, string text)
