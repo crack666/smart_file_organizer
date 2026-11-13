@@ -758,7 +758,7 @@ string json = SensitiveOutputGuard.ToJson(record);   // or ToJson(records) for a
 
 - `LibraryMap.Build` turns tree and findings into one entry per folder (role, period, naming habit, findings); dumps are one entry each. `LibraryMap.ToPatterns` writes the habits as a target file (`LibraryMatch:PatternsDirectory`, by default `library-patterns/` next to the database); a hand-edited file wins over the rules.
 - The match unit (folder, file or bundle) is built from `IJobReadRepository`, `IBundleRepository` and the latest comparison (`IContentComparisonRepository.GetLatestWithLibraryAsync`); its time follows `EventGrouper.TimeOf`.
-- `LibraryMatcher` scores existing folders and, when none fits, a new folder; it has no I/O and is tested on its own. The model is asked only for folder purposes (task `map`) and a new folder name (task `name`), through `ILibraryAdvisor` and the same `library_advice` cache.
+- `LibraryMatcher` scores existing folders and, when none fits, a new folder; it has no I/O and is tested on its own. The model is asked for folder purposes (task `map`), a new folder name (task `name`) and the content check (task `fit`, `IContentFitJudge`), through `ILibraryAdvisor` and the same `library_advice` cache. Folder descriptions come from an `IFolderDescriptionSource` (default `SampleFolderDescriptionSource`) and are stored in `folder_descriptions`.
 
 ## Ollama configuration flow
 

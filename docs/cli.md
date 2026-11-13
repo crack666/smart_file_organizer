@@ -29,6 +29,8 @@ Database and settings are found as described in
 the per-user default. With a redirected database, settings are read from `settings.json` next
 to it (or from `SFO_SETTINGS`), so a scratch database never touches the user's settings.
 The CLI never writes `settings.json`; `--model` and `--parallel` apply to one run only.
+`SFO_OLLAMA_URL` replaces the shipped default address of the model server (`http://localhost:11434`) when
+`settings.json` names none; an address in `settings.json` always wins. The test projects set it to a dead port.
 
 ## Commands
 
@@ -985,7 +987,7 @@ source root or full) or a bundle (`--bundle <id>`), exactly one of them.
 | `--bundle <id>` | Match a bundle of `sfo bundles build` as a whole. |
 | `--against <job>` | Library job. Repeatable: each library is matched on its own and the best places of all of them are listed by score (the first named wins a tie). Default: the libraries of the latest `sfo compare`, else the newest completed library job. |
 | `--limit <n>` | Proposals to list, 1 to 50. Default `LibraryMatch.MaxCandidates` (3). |
-| `--no-model`, `--model`, `--refresh`, `--words` | As for `review`. The model only names a new folder the rules cannot complete. |
+| `--no-model`, `--model`, `--refresh`, `--words` | As for `review`. The model names a new folder the rules cannot complete, describes a few files of each candidate folder (stored, `--refresh` describes again) and compares the unit's content with each candidate. With `--no-model` nothing is described or compared. |
 
 ```json
 {
@@ -1031,12 +1033,20 @@ source root or full) or a bundle (`--bundle <id>`), exactly one of them.
 - `placement`: `into_existing` (the files go into the folder), `as_subfolder` (a named source
   folder goes under the target as a whole, `keeps_name: true`) or, in `new_folder`, `new_folder`.
 - `certainty`: `certain`, `likely`, `uncertain` or `review`, from agreeing signals;
-  `signal`: `content_neighbours`, `period`, `name`, `file_type`, `siblings`.
+  `signal`: `content_neighbours`, `period`, `name`, `file_type`, `siblings`, `content_fit`.
 - `weak_place`: `null`, or `{ "findings": [ { "kind", "impact", "relative_path" } ], "note" }`
   when the review found the order at the target weak; the certainty is capped then.
 - `new_folder` when no candidate fits: `parent`, `parent_relative`, `name`, `name_source`
   (`rule` or `model`), `name_complete` (`false` while a placeholder such as `{occasion}` is left),
   `pattern`, `destination`, `destination_relative`, `certainty`, `reason`, `weak_place`.
+- Content check ([library-match.md](library-match.md#content-check)): `unit.description` is what the unit's
+  described files show, `{ "sampled", "described", "values": { "<fact key>": [ { "value", "count" } ] }, "text" }`,
+  or `null`. `content_check` is `{ "status", "model", "note" }` with `status` `checked`, `no_model`, `unavailable`,
+  `no_description`, `no_candidates` or `failed`. A checked candidate has `content`:
+  `{ "fit": "fits"|"unclear", "reason", "folder": <description of the folder> }`, and the signal `content_fit` when
+  it fits; an unchecked one has `content: null`. `rejected` lists the candidates whose content contradicts the unit:
+  `{ "target_relative", "reason", "folder" }`. Without a check (`--no-model`, no model, no description) no proposal
+  without the same files at the target is better than `uncertain`, and `notes` says so.
 - `status: "no_library"` with a `message` and no proposals, exit code 0, when there is no library
   to match against: no permanent storage is known, so there is no target path at all, never a folder of the
   user profile or the system drive instead. `notes` says when there is no or an incomplete comparison, when the newest

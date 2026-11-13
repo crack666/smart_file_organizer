@@ -498,6 +498,33 @@ Finer than the category: the category says invoice, letter or personal document,
 | `name` | Words of the names agree (folder name, file names, document kind). |
 | `file_type` | The folder holds files of the same kind. |
 | `siblings` | The folder's subfolders are of the same kind as the source folder. |
+| `content_fit` | The content check says what the unit shows fits what the folder shows ([library-match.md](library-match.md#content-check)). |
+
+### Content of a unit against a folder (`ContentFit`)
+
+| Code | Meaning |
+|---|---|
+| `fits` | The descriptions agree (same occasion, same scene; for papers the same kind and issuer). Adds `content_fit`. |
+| `contradicts` | The descriptions disagree; the candidate is dropped and listed under `rejected`, unless the same files already lie there. |
+| `unclear` | Compared without a clear answer; the candidate stays, at most `uncertain` without the same files. |
+
+### Whether the content was checked (`ContentCheckStatus`)
+
+| Code | Meaning |
+|---|---|
+| `checked` | The model compared the unit with the candidates. |
+| `no_model` | `--no-model`, or no comparison is configured. |
+| `unavailable` | The model server does not answer. |
+| `no_description` | The unit's files are not described yet (`sfo analyze` describes them). |
+| `no_candidates` | No candidate reached `MinScore`; nothing to compare. |
+| `failed` | The comparison call failed or its answer did not parse. |
+
+### Source of a folder description (`FolderDescriptionSource`)
+
+| Code | Meaning |
+|---|---|
+| `sample` | A few files of the folder, spread over its time, described by the model. Default. |
+| `external` | Another program that already describes the library (a photo manager, files found by checksum). Reserved; none is built in. |
 
 ### What was matched (`MatchUnitKind`)
 
@@ -579,6 +606,7 @@ Finer than the category: the category says invoice, letter or personal document,
 | `file_category` | The category of a file. |
 | `sensitive` | The sensitive markers of a file. |
 | `finding` | The findings of the job against the expected findings of the corpus (`findings.json`). |
+| `target` | The best place `sfo library match` proposes in the corpus library against the known right one (`targets.json`). |
 
 ### Outcome of a measured item (`EvalOutcome`)
 
@@ -672,7 +700,7 @@ nothing yet.
 
 | Code | Meaning |
 |---|---|
-| `not_checked` | Not compared: the target rests on period, names and file types. Every target today. |
+| `not_checked` | Not compared: the target rests on period, names and file types. Every target of a finding today; `sfo library match` checks content on its own (`ContentFit`). |
 | `fits` | The content of the unit fits what the target holds. |
 | `contradicts` | The content contradicts the target; the target is dropped. |
 | `unclear` | Compared, without a clear answer. |
