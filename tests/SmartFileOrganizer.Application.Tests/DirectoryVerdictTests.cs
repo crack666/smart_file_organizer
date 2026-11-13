@@ -419,7 +419,9 @@ public class DirectoryVerdictTests : IDisposable
     [Fact]
     public void Codes_AreTheGermanValuesOfTheIssue()
     {
-        Assert.Equal(new[] { "unit", "uniform", "mixed", "empty", "system" }, VerdictCodes.All<DirectoryVerdictKind>());
+        Assert.Equal(new[] { "unit", "uniform", "mixed", "empty", "system", "dump" }, VerdictCodes.All<DirectoryVerdictKind>());
+        // Only a rule decides dump; the model is offered the others.
+        Assert.Equal(new[] { "unit", "uniform", "mixed", "empty", "system" }, DirectoryVerdictKinds.ModelCodes);
         Assert.Equal(new[] { "keep", "review", "disposable" }, VerdictCodes.All<RetentionValue>());
         Assert.Equal(new[] { "rule", "model" }, VerdictCodes.All<VerdictSource>());
 

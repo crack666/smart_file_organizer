@@ -23,7 +23,25 @@ public enum DirectoryVerdictKind
     [JsonStringEnumMemberName("empty")] Empty,
 
     /// <summary>Operating system, tool or cache directory that is not user content.</summary>
-    [JsonStringEnumMemberName("system")] System
+    [JsonStringEnumMemberName("system")] System,
+
+    /// <summary>
+    /// Copy of a phone, a computer, a user profile or a removable drive. Recognised as a whole, but not a unit:
+    /// its worth-keeping parts are judged like any directory, only its noise is skipped. Decided by a rule only,
+    /// never by the model (https://github.com/crack666/smart_file_organizer/issues/59).
+    /// </summary>
+    [JsonStringEnumMemberName("dump")] Dump
+}
+
+/// <summary>Which verdicts the model may give.</summary>
+public static class DirectoryVerdictKinds
+{
+    /// <summary>Verdicts only a rule decides; the model is not offered them, and an answer with one is refused.</summary>
+    public static bool IsRuleOnly(this DirectoryVerdictKind kind) => kind == DirectoryVerdictKind.Dump;
+
+    /// <summary>The codes the model may answer, in declaration order.</summary>
+    public static IReadOnlyList<string> ModelCodes { get; } =
+        Enum.GetValues<DirectoryVerdictKind>().Where(k => !k.IsRuleOnly()).Select(k => k.ToCode()).ToList();
 }
 
 /// <summary>How worth keeping the content of a directory is.</summary>

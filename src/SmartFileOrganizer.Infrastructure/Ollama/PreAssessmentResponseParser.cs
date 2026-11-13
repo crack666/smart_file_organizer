@@ -92,8 +92,10 @@ public static class PreAssessmentResponseParser
         kind = default;
         if (string.IsNullOrWhiteSpace(text)) return false;
         var t = text.Trim();
-        return VerdictCodes.TryParse(t, out kind) || VerdictAliases.TryGetValue(t, out kind)
-               || CodeLabels.TryParseWord(t, out kind);
+        var known = VerdictCodes.TryParse(t, out kind) || VerdictAliases.TryGetValue(t, out kind)
+                    || CodeLabels.TryParseWord(t, out kind);
+        // A dump is recognised by the shared dump recognition, never by the model: such an answer is unknown.
+        return known && !kind.IsRuleOnly();
     }
 
     public static bool TryParseRetention(string? text, out RetentionValue value)
