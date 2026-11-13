@@ -30,7 +30,22 @@ public static class StatusCommand
 
     public sealed record ErrorView(string Phase, string Path, string Message);
 
-    public sealed record StatusResult(JobView Job, PhasesView Phases, IReadOnlyList<ErrorView> Errors);
+    /// <summary>Read errors of the scan with one cause (<c>access_denied</c>, ...): counts and the first paths.</summary>
+    public sealed record ScanErrorGroupView(string Cause, long Directories, long Files, IReadOnlyList<ScanErrorExampleView> Examples);
+
+    public sealed record ScanErrorExampleView(string Path, string? Message);
+
+    /// <summary>Links of one kind: folders not entered, folders entered by a <c>follow_link</c> rule, files that are links.</summary>
+    public sealed record LinkGroupView(string Kind, long NotFollowed, long Followed, long Files, IReadOnlyList<LinkExampleView> Examples);
+
+    public sealed record LinkExampleView(string Path, string? Target, bool Followed);
+
+    public sealed record StatusResult(
+        JobView Job,
+        PhasesView Phases,
+        IReadOnlyList<ErrorView> Errors,
+        IReadOnlyList<ScanErrorGroupView> ScanErrors,
+        IReadOnlyList<LinkGroupView> Links);
 
     public static Command Create(CliHost host, GlobalOptions globals)
     {
@@ -84,7 +99,11 @@ public static class StatusCommand
         return new StatusResult(
             JobView.From(j),
             phases,
-            s.RecentErrors.Select(e => new ErrorView(e.Phase, e.Path, e.Message)).ToList());
+            s.RecentErrors.Select(e => new ErrorView(e.Phase, e.Path, e.Message)).ToList(),
+            s.ScanErrors.Select(g => new ScanErrorGroupView(g.Cause, g.Directories, g.Files,
+                g.Examples.Select(e => new ScanErrorExampleView(e.Path, e.Message)).ToList())).ToList(),
+            s.Links.Select(g => new LinkGroupView(g.Kind, g.NotFollowed, g.Followed, g.Files,
+                g.Examples.Select(e => new LinkExampleView(e.Path, e.Target, e.Followed)).ToList())).ToList());
     }
 
     private static string Render(StatusResult r)
@@ -96,10 +115,35 @@ public static class StatusCommand
         Line(sb, "pre_assessment", r.Phases.PreAssessment, "dirs");
         Line(sb, "classification", r.Phases.Classification, "files");
         Line(sb, "summary", r.Phases.Summary, "dirs");
+        if (r.ScanErrors.Count > 0)
+        {
+            sb.AppendLine($"  scan errors     {string.Join(", ", r.ScanErrors.Select(g => $"{g.Directories + g.Files} {g.Cause}"))}");
+            foreach (var g in r.ScanErrors)
+            {
+                var what = string.Join(", ", new[] { Count(g.Directories, "dir"), Count(g.Files, "file") }.Where(p => p != null));
+                sb.AppendLine($"    {g.Cause,-14} {what}");
+                foreach (var e in g.Examples)
+                    sb.AppendLine($"      {e.Path}");
+            }
+        }
+        if (r.Links.Count > 0)
+        {
+            sb.AppendLine($"  links           {string.Join(", ", r.Links.Select(g => $"{g.NotFollowed + g.Followed + g.Files} {g.Kind}"))} (not counted as content)");
+            foreach (var g in r.Links)
+            {
+                var what = string.Join(", ", new[] { Count(g.NotFollowed, "dir") is { } n ? n + " not entered" : null,
+                    Count(g.Followed, "dir") is { } f ? f + " followed" : null, Count(g.Files, "file") }.Where(p => p != null));
+                sb.AppendLine($"    {g.Kind,-14} {what}");
+                foreach (var e in g.Examples)
+                    sb.AppendLine($"      {e.Path} -> {e.Target ?? "?"}");
+            }
+        }
         foreach (var e in r.Errors)
             sb.AppendLine($"  ! {e.Phase}: {e.Path}: {e.Message}");
         return sb.ToString().TrimEnd();
     }
+
+    private static string? Count(long n, string unit) => n == 0 ? null : $"{n} {unit}{(n == 1 ? "" : "s")}";
 
     private static void Line(StringBuilder sb, string name, AiPhaseView p, string unit)
     {

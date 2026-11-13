@@ -46,6 +46,7 @@ public class JobReadRepository : IJobReadRepository
             """
             SELECT d.id, d.full_path, d.name, d.parent_path, d.relative_path, d.depth, d.dir_status,
                    d.subdir_count, d.sensitive_markers, d.sensitive_rule,
+                   d.dir_reason AS scan_reason, d.link_kind, d.link_target, d.scan_error_cause,
                    dv.verdict, dv.source AS verdict_source, dv.rule AS verdict_rule, dv.retention,
                    dv.purpose, dv.reason, dv.error AS verdict_error, dv.escalated_from,
                    s.summary AS ai_summary, s.error AS ai_summary_error,

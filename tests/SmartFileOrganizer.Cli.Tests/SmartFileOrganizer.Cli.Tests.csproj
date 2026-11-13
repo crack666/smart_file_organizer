@@ -25,6 +25,8 @@
   <ItemGroup>
     <!-- Same Ollama stand-in as the hosting tests; never touches the network. -->
     <Compile Include="..\SmartFileOrganizer.Hosting.Tests\FakeOllamaService.cs" Link="FakeOllamaService.cs" />
+    <!-- Links and unreadable folders in temp folders, removed as links; shared with the application tests. -->
+    <Compile Include="..\SmartFileOrganizer.Application.Tests\FileSystemLinks.cs" Link="FileSystemLinks.cs" />
   </ItemGroup>
 
 </Project>
