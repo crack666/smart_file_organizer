@@ -360,6 +360,10 @@ and sets the other eligible files from `Discovered` to `Deferred` in one transac
    Rule results: installers and programs → `SoftwareInstaller`, libraries and fonts → `SystemFile`, `Thumbs.db` →
    `TrashCandidate`, other databases → `ReviewNeeded`, unknown binaries → `Unknown`. They are stored with
    `is_ai_result = 0` and `model_used = rule:<id>` (`rule:program`, `rule:unknown-binary`, ...).
+   Before any file is read, the name decides system files of a profile (since 13.11.2026, Issue 67): registry hives
+   and their logs (`NTUSER.DAT`, `ntuser.dat.LOG1`, `UsrClass.dat`), `ntuser.ini`, `desktop.ini`, `.DS_Store` and
+   `IconCache.db` → `SystemFile` by `rule:system-file`; the lock files of Office (`~$Brief.docx`) and LibreOffice
+   (`.~lock.Brief.odt#`) → `SystemFile` by `rule:office-lock`.
 3. Otherwise `ClassifyAsync` sends a structured `/api/chat` request with `think: false`. Every phase (pre-assessment,
    classification, second check, summary) sends its fixed task as the system message, character for character the same
    for all calls of the phase (classification: system prompt, guidance, markers, language, then the keep hint block when

@@ -157,6 +157,29 @@ public class Phase2EvidenceTests : IDisposable
     }
 
     [Fact]
+    public async Task SystemFilesOfAProfile_AreDecidedByName_WithoutTheModel()
+    {
+        var names = new[] { "NTUSER.DAT", "ntuser.dat.LOG1", "ntuser.ini", "desktop.ini", "~$Brief.docx", ".~lock.Brief.odt#", "Brief.docx" };
+        foreach (var name in names)
+            await File.WriteAllBytesAsync(Path.Combine(_dir, name), [0x72, 0x65, 0x67, 0x66, 0x00]);
+        var jobId = await InsertAsync(names.Select(n => (n, n.EndsWith(".docx", StringComparison.Ordinal) ? FileType.Document : FileType.Other, SensitiveMarker.None)).ToArray());
+
+        await Service().RunAsync(jobId);
+
+        Assert.Equal(["Brief.docx"], _ollama.Names);
+        await using var conn = _db.CreateConnection();
+        var rows = (await conn.QueryAsync<(string Name, string? Model, long Category)>(
+            "SELECT f.name, r.model_used, r.category FROM file_nodes f JOIN ai_results r ON r.file_node_id = f.id WHERE f.job_id = @jobId",
+            new { jobId })).ToDictionary(r => r.Name);
+        Assert.Equal("rule:system-file", rows["NTUSER.DAT"].Model);
+        Assert.Equal("rule:system-file", rows["ntuser.dat.LOG1"].Model);
+        Assert.Equal("rule:system-file", rows["desktop.ini"].Model);
+        Assert.Equal("rule:office-lock", rows["~$Brief.docx"].Model);
+        Assert.Equal("rule:office-lock", rows[".~lock.Brief.odt#"].Model);
+        Assert.All(rows.Values.Where(r => r.Name != "Brief.docx"), r => Assert.Equal((long)FileCategory.SystemFile, r.Category));
+    }
+
+    [Fact]
     public async Task Facts_AreStoredWithCodesAndSource()
     {
         await File.WriteAllBytesAsync(Path.Combine(_dir, "song.mp3"), GeneratedFiles.Mp3WithTags("Song", "Band", "Album"));
