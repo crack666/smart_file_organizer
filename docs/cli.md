@@ -180,11 +180,27 @@ sfo status 7 --json
     "errors": [
       { "phase": "classification", "path": "/media/usb-stick/scan_004.pdf",
         "message": "Ollama request timed out after 180s." }
+    ],
+    "scan_errors": [
+      { "cause": "access_denied", "directories": 97, "files": 0,
+        "examples": [ { "path": "C:/Users/Old/Local Settings", "message": "Read error: Access to the path ... is denied." } ] }
+    ],
+    "links": [
+      { "kind": "junction", "not_followed": 12, "followed": 0, "files": 0,
+        "examples": [ { "path": "C:/Users/All Users", "target": "C:/ProgramData", "followed": false } ] }
     ]
   },
   "error": null
 }
 ```
+
+`phases.scan.errors` counts the folders and files the scan could not read. `scan_errors` groups them by
+cause (`access_denied`, `not_found`, `path_too_long`, `io_error`) with counts and the first three paths of
+each; `errors` lists the AI phases only. `links` lists the links the scan found, by kind (`junction`,
+`symlink`, `mount_point`): folders not entered, folders a `follow_link` rule entered, and files that are
+links; none of them counts as content ([scan-rules.md](scan-rules.md#links-and-read-errors)). After a
+finished scan `directories_total` equals `directories_processed` and `files_total` equals `files_processed`:
+both are counted from the stored rows (since 13.11.2026; before, the scan root was missing from the total).
 
 For each AI phase, `total = done + errors + pending + skipped`.
 
@@ -641,12 +657,18 @@ sfo dirs 7 --sort size --depth 1 --limit 2 --json
       "size_bytes": 9126805504, "files": 1830, "direct_files": 12, "subdirs": 8,
       "verdict": "...", "verdict_source": "...", "retention": "...", "sensitive_files": 4,
       "sensitive": [], "sensitive_rule": null, "sensitive_dirs": 1,
-      "purpose": "...", "summary": "...", "text_withheld": false }
+      "purpose": "...", "summary": "...", "text_withheld": false,
+      "scan_reason": "Descend: scan root", "link_kind": null, "link_target": null, "error_cause": null }
   ]
 }
 ```
 
-`status` is the scan state (`scanned`, `skip`, `shallow`, `error`, `pending`). `verdict` is a
+`status` is the scan state (`scanned`, `skip`, `shallow`, `error`, `link`, `pending`; see the
+[glossary](glossary.md#what-the-scan-did-with-a-folder-directorystatus)). `scan_reason` says why the scan
+treated the folder as it did. A link that was not followed has status `link`, `link_kind` and
+`link_target`, and no files; a link a `follow_link` rule entered keeps `link_kind` and `link_target` with its
+normal status. A folder that could not be read has status `error` and `error_cause` (never `scanned` with 0
+files). `verdict` is a
 verdict code, `error` or `null`; `verdict_source` tells whether a rule or the model decided.
 `size_bytes`, `files`, `sensitive_files` and `sensitive_dirs` cover the subtree, `direct_files`
 the directory itself. `sensitive` and `sensitive_rule` are the markers of the folder itself

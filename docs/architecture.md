@@ -76,7 +76,11 @@ Other options: `AppSettingsDirectory` (where the shipped `appsettings.json` defa
 2. `MainViewModel` creates a scan job through `ScanJobService`
 3. `ScanJobService` starts `IScanEngine`
 4. `ScanEngine` builds a `HeuristicsEngine` from the rules stored at the job (the shipped rules if none), walks directories iteratively, decides each one with its reason (`dir_reason`), and writes batches to SQLite. On resume, directories stored as skipped or shallow are re-evaluated with the current rules (see [scan-rules.md](scan-rules.md))
-   - each directory is listed through `IFileSystemAccessor.ListFiles`/`ListDirectories`, which throw on access or I/O errors; such a directory is stored with `dir_status = Error` and the message in `dir_reason`, and counted in the job's `error_count`, instead of looking empty
+   - each directory is listed through `IFileSystemAccessor.ListFiles`/`ListDirectories`, which throw on access or I/O errors; such a directory is stored with `dir_status = Error` and the message in `dir_reason`, and counted in the job's `error_count`, instead of looking empty; the cause code is in `scan_error_cause`
+   - before a directory is read, `IFileSystemAccessor.GetLink` tells whether it is a link (junction, symbolic link, mount point); a link is stored with `dir_status = Link`, `link_kind` and `link_target` and not entered unless a `follow_link` rule allows it, and a file that is a link goes to `file_links` instead of `file_nodes` ([scan-rules.md](scan-rules.md#links-and-read-errors))
+   - `IFileSystemAccessor.GetFileSize` throws for an unreadable file; the row keeps `scan_error_cause` and `scan_error`
+   - at the end the job counters are recounted from the stored rows, so found and processed agree
+   - `IFileSystemAccessor.SameFile` answers `same`, `different` or `unknown` for two paths by volume and file id (Windows `GetFileInformationByHandleEx`, Linux `stat`); it is the check "source and target are not the same file" for the execution of a plan (https://github.com/crack666/smart_file_organizer/issues/12)
 5. progress events flow back into the UI
 6. tree and file views query persisted state from repositories/services
 
