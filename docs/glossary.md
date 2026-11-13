@@ -52,6 +52,7 @@ decided in https://github.com/crack666/smart_file_organizer/issues/35.
 | `human` | A person set the result. |
 | `agent` | A steering agent set the result through the command line. |
 | `external` | The result was imported from another tool. |
+| `reused` | Taken over from the content store without a model call: the same content (full SHA-256 and size) was judged before, in this or another job, by the same model with the same prompt version. Only what belongs to the content comes along (category, importance, confidence, certainty, summary, keep hint, model markers, description); never a target. In `user_overrides.origin`: a person's correction of the same content, carried over to this file (https://github.com/crack666/smart_file_organizer/issues/38). |
 
 ### Sensitive markers (`SensitiveMarker`)
 

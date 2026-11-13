@@ -19,6 +19,13 @@ public interface IOllamaService
     Task<FileClassification> ClassifyAsync(OllamaClassificationInput input, CancellationToken ct = default);
 
     /// <summary>
+    /// Model and prompt version of <see cref="ClassifyAsync"/>, the key under which its answers are kept in the content
+    /// store (https://github.com/crack666/smart_file_organizer/issues/38). Null: the answers are not kept and nothing is
+    /// taken over, as for scripted answers.
+    /// </summary>
+    AssessmentIdentity? AssessmentIdentity => null;
+
+    /// <summary>
     /// Check whether the configured Ollama endpoint is reachable. False when it does not answer;
     /// cancelling <paramref name="ct"/> throws.
     /// </summary>

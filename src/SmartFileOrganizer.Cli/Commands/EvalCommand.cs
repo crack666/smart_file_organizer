@@ -197,7 +197,7 @@ public static class EvalCommand
             job.Id, AiPhases.PreAssessment | AiPhases.Classification,
             new SynchronousProgress<AiPhaseProgress>(pr => ctx.Progress.Report(AnalyzeCommand.PhaseName(pr.Phase),
                 pr.Progress.ProcessedFiles, pr.Progress.TotalFiles, pr.Progress.ErrorCount, pr.Progress.CurrentPath, pr.Progress.StatusText)),
-            ct);
+            ct, reuse: false); // An evaluation measures the model, not an answer kept from an earlier run (Issue 38).
         analyzeClock.Stop();
         ct.ThrowIfCancellationRequested();
         if (!run.OllamaAvailable)

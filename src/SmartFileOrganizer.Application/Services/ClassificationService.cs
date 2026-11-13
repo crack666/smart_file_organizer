@@ -39,12 +39,24 @@ public class ClassificationService
     private readonly ILogger<ClassificationService> _logger;
     private readonly SecondCheckOptions _check;
     private readonly IUserOverrideRepository? _overrides;
+    private readonly ContentStoreService? _contentStore;
 
     /// <summary>Counters of one run, shared by its workers.</summary>
     private sealed class RunCounters
     {
         public int SecondCalls;
+        public int Reused;
     }
+
+    /// <summary>
+    /// How a run uses the content store (https://github.com/crack666/smart_file_organizer/issues/38): answers are kept
+    /// under <paramref name="Identity"/>, and with <paramref name="Lookup"/> an answer kept before is taken over instead
+    /// of a model call. Null: the store is not used (no store, or a model service without identity such as scripted answers).
+    /// </summary>
+    private sealed record StoreUse(AssessmentIdentity Identity, bool Lookup);
+
+    /// <summary>A file ready for a worker: its evidence and, when the store is used, its content key.</summary>
+    private sealed record Prepared(FileNode File, OllamaClassificationInput Input, ContentKey? Key);
 
     /// <summary>How many files to fetch from DB per producer iteration.</summary>
     private const int FetchBatchSize = 30;
@@ -69,8 +81,10 @@ public class ClassificationService
         Func<int> getMaxParallelRequests,
         ILogger<ClassificationService> logger,
         SecondCheckOptions? secondCheck = null,
-        IUserOverrideRepository? overrides = null)
+        IUserOverrideRepository? overrides = null,
+        ContentStoreService? contentStore = null)
     {
+        _contentStore = contentStore;
         _fileRepo = fileRepo;
         _classRepo = classRepo;
         _factRepo = factRepo;
@@ -88,17 +102,22 @@ public class ClassificationService
     /// <param name="gate">Holds the model calls while the server is away; a file whose call found no server stays
     /// Discovered and is sent again in the same run. Without a gate such a call throws
     /// <see cref="ModelServerUnavailableException"/> and nothing is stored for the file.</param>
+    /// <param name="reuse">Take over what the content store holds for the same content, model and prompt version
+    /// instead of asking the model, and keep new answers there (Issue 38). False: the store is neither read nor
+    /// written, as for an evaluation run, which has to measure the model and not an earlier answer.</param>
     public async Task<AiClassificationRunResult> RunAsync(
         long jobId,
         IProgress<AiClassificationProgress>? progress = null,
         Func<CancellationToken, Task>? waitIfPausedAsync = null,
         CancellationToken ct = default,
         bool retryErrors = false,
-        ModelServerGate? gate = null)
+        ModelServerGate? gate = null,
+        bool reuse = true)
     {
         try
         {
-            return await RunCoreAsync(jobId, progress, waitIfPausedAsync, ct, retryErrors, gate);
+            var store = reuse ? StoreUseFor(lookup: true) : null;
+            return await RunCoreAsync(jobId, progress, waitIfPausedAsync, ct, retryErrors, gate, store);
         }
         catch (ModelServerLostException)
         {
@@ -114,7 +133,8 @@ public class ClassificationService
         Func<CancellationToken, Task>? waitIfPausedAsync,
         CancellationToken ct,
         bool retryErrors,
-        ModelServerGate? gate)
+        ModelServerGate? gate,
+        StoreUse? store)
     {
         var retried = retryErrors ? await _fileRepo.ReleaseFailedAsync(jobId, ct) : 0;
         if (retried > 0)
@@ -143,7 +163,7 @@ public class ClassificationService
             do
             {
                 var before = gate?.LeftOpen ?? 0;
-                errorCount += await RunPassAsync(jobId, totalEligible, context, counters, progress, waitIfPausedAsync, gate, ct);
+                errorCount += await RunPassAsync(jobId, totalEligible, context, counters, progress, waitIfPausedAsync, gate, store, ct);
                 leftOpen = (gate?.LeftOpen ?? 0) - before;
             } while (leftOpen > 0 && await _fileRepo.CountPendingAiAnalysisAsync(jobId, ct) > 0);
 
@@ -157,12 +177,14 @@ public class ClassificationService
         var inheritedText = inherited > 0 ? $" {inherited:N0} file(s) inherited from confirmed samples." : string.Empty;
         var checkText = counters.SecondCalls > 0 ? $" {counters.SecondCalls:N0} result(s) checked a second time." : string.Empty;
         var retryText = retried > 0 ? $" {retried:N0} failed file(s) retried." : string.Empty;
+        var reusedText = counters.Reused > 0 ? $" {counters.Reused:N0} result(s) taken over from the content store." : string.Empty;
         var completedMessage = errorCount > 0
-            ? $"AI classification finished with {errorCount} error(s).{inheritedText}{checkText}{retryText}"
-            : $"AI classification completed.{inheritedText}{checkText}{retryText}";
+            ? $"AI classification finished with {errorCount} error(s).{inheritedText}{checkText}{retryText}{reusedText}"
+            : $"AI classification completed.{inheritedText}{checkText}{retryText}{reusedText}";
 
         progress?.Report(new AiClassificationProgress(jobId, processed, totalEligible, errorCount, string.Empty, completedMessage));
-        return new AiClassificationRunResult(true, totalEligible, processed, errorCount, completedMessage, retried, counters.SecondCalls);
+        return new AiClassificationRunResult(true, totalEligible, processed, errorCount, completedMessage, retried, counters.SecondCalls,
+            counters.Reused);
     }
 
     /// <summary>Judges every Discovered eligible file once. Returns the number of errors.</summary>
@@ -174,6 +196,7 @@ public class ClassificationService
         IProgress<AiClassificationProgress>? progress,
         Func<CancellationToken, Task>? waitIfPausedAsync,
         ModelServerGate? gate,
+        StoreUse? store,
         CancellationToken runToken)
     {
         var pendingAtStart = await _fileRepo.CountPendingAiAnalysisAsync(jobId, runToken);
@@ -198,7 +221,7 @@ public class ClassificationService
             string.Empty,
             $"AI classifying… {processed:N0} / {totalEligible:N0} (parallel={workerCount})"));
 
-        var channel = Channel.CreateBounded<(FileNode File, OllamaClassificationInput Input)>(
+        var channel = Channel.CreateBounded<Prepared>(
             new BoundedChannelOptions(ChannelCapacity)
             {
                 FullMode = BoundedChannelFullMode.Wait,
@@ -228,7 +251,9 @@ public class ClassificationService
                             if (waitIfPausedAsync != null) await waitIfPausedAsync(token);
                             var input = await _inputPreparer.PrepareAsync(file, token);
                             input.AskKeepHint = context.KeepHintDirectories.Contains(file.ParentPath);
-                            await channel.Writer.WriteAsync((file, input), token);
+                            // The checksum is read here, with the other IO, not by the workers that wait for the model.
+                            var key = store is not null && input.RuleResult is null ? await _contentStore!.KeyOfAsync(file, token) : null;
+                            await channel.Writer.WriteAsync(new Prepared(file, input, key), token);
                         });
                 }
             }
@@ -262,7 +287,7 @@ public class ClassificationService
 
         async Task WorkAsync()
         {
-            await foreach (var (file, input) in channel.Reader.ReadAllAsync(ct))
+            await foreach (var (file, input, key) in channel.Reader.ReadAllAsync(ct))
             {
                 if (waitIfPausedAsync != null) await waitIfPausedAsync(ct);
 
@@ -278,7 +303,7 @@ public class ClassificationService
 
                 _logger.LogDebug("Classifying: {Path}", file.FullPath);
 
-                var result = await CompleteAsync(file, input, context, counters, gate, ct);
+                var result = await CompleteAsync(file, input, context, counters, gate, ct, store, key);
                 if (result is null)
                 {
                     // The server was away: no result, the file is open again and is sent once the gate opens.
@@ -321,16 +346,22 @@ public class ClassificationService
         return Volatile.Read(ref errorCount);
     }
 
-    /// <summary>Judges one file with the model and stores the result (focused rescan, reanalysis).</summary>
+    /// <summary>Judges one file with the model and stores the result (focused rescan, reanalysis). The content store is
+    /// not asked, since judging anew is the point; the new answer replaces what it holds for the content.</summary>
     /// <param name="askKeepHint">Ask for the keep hint, as for files of mixed or uniform directories.</param>
     public async Task<FileClassification> ClassifySingleAsync(FileNode file, CancellationToken ct = default, bool askKeepHint = false)
     {
         var input = await _inputPreparer.PrepareAsync(file, ct);
         input.AskKeepHint = askKeepHint;
         var context = await _sampling.GetContextAsync(file.JobId, ct);
+        var store = StoreUseFor(lookup: false);
+        var key = store is not null && input.RuleResult is null ? await _contentStore!.KeyOfAsync(file, ct) : null;
         // No gate for a single file: if the server is away, the exception reaches the caller and nothing is stored.
-        return (await CompleteAsync(file, input, context, new RunCounters(), gate: null, ct))!;
+        return (await CompleteAsync(file, input, context, new RunCounters(), gate: null, ct, store, key))!;
     }
+
+    private StoreUse? StoreUseFor(bool lookup) =>
+        _contentStore is not null && _ollama.AssessmentIdentity is { } identity ? new StoreUse(identity, lookup) : null;
 
     /// <summary>
     /// Takes the rule result or asks the model, checks an unsure or contradicted answer a second time, applies
@@ -342,20 +373,35 @@ public class ClassificationService
     /// </summary>
     private async Task<FileClassification?> CompleteAsync(
         FileNode file, OllamaClassificationInput input, DirectorySamplingService.Context context, RunCounters counters,
-        ModelServerGate? gate, CancellationToken ct)
+        ModelServerGate? gate, CancellationToken ct, StoreUse? store = null, ContentKey? key = null)
     {
         // Markers the rules found in the content (archive entry names) belong to the file before anything else
         // happens to it: the model traffic log withholds a marked file, and the output guard reads the node.
         await ApplyContentMarkersAsync(file, input, ct);
 
+        // A person's correction of the same content follows it here, before any call: it also spares the second check.
+        if (key is not null)
+            await _contentStore!.CarryCorrectionAsync(file, key, ct);
+
         FileClassification result;
         ResultCheck? check = null;
+        var kept = store is { Lookup: true } && key is not null
+            ? await _contentStore!.FindAsync(key, store.Identity, input.AskKeepHint, ct)
+            : null;
         if (input.RuleResult is { } rule)
         {
             result = CopyRuleResult(rule);
             result.Origin = ResultOrigin.Rule;
             result.Certainty = ResultCheckRules.RuleResultCertainty(result);
             result.Evidence = FormatEvidence(input);
+        }
+        else if (kept is not null)
+        {
+            // The same content was judged before by this model with this prompt: no call. The rules of this place run
+            // on it below like on every answer.
+            result = await _contentStore!.TakeOverAsync(kept, file, input.AskKeepHint, ct);
+            result.Evidence = FormatEvidence(input);
+            Interlocked.Increment(ref counters.Reused);
         }
         else
         {
@@ -400,6 +446,8 @@ public class ClassificationService
         // would fall back to Discovered and cost another call on resume. Result and check in one transaction.
         await _classRepo.SaveAsync(result, check, CancellationToken.None);
         await _factRepo.ReplaceAsync(file.Id, FactsToStore(file, result, input.Facts), CancellationToken.None);
+        if (store is not null && key is not null && ContentStoreService.MayKeep(file, result, check, store.Identity))
+            await _contentStore!.KeepAsync(key, store.Identity, input.AskKeepHint, result, CancellationToken.None);
 
         var newStatus = result.Error != null ? FileNodeStatus.Error : FileNodeStatus.AiAnalyzed;
         await _fileRepo.UpdateStatusAsync(file.Id, newStatus, CancellationToken.None);

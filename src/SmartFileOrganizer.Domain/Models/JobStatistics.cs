@@ -55,6 +55,13 @@ public sealed class JobStatistics
     /// <summary>Eligible files waiting for the sample of their directory.</summary>
     public long FilesAiDeferred { get; init; }
 
+    /// <summary>Of the analysed files, those whose result the model gave in a call for this file.</summary>
+    public long FilesAiByModel { get; init; }
+
+    /// <summary>Of the analysed files, those whose result was taken over from the content store without a model call
+    /// (origin <c>reused</c>, https://github.com/crack666/smart_file_organizer/issues/38).</summary>
+    public long FilesAiReused { get; init; }
+
     /// <summary>The most recent errors, newest first.</summary>
     public IReadOnlyList<JobErrorEntry> RecentErrors { get; init; } = [];
 

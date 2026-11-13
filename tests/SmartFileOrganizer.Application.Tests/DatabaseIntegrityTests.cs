@@ -12,8 +12,14 @@ namespace SmartFileOrganizer.Application.Tests;
 /// </summary>
 public class DatabaseIntegrityTests : IDisposable
 {
-    /// <summary>Tables that hold no job data: the version record and checksums keyed by path for all jobs.</summary>
-    private static readonly HashSet<string> NotPerJob = ["sqlite_sequence", "db_version", "content_fingerprints"];
+    /// <summary>
+    /// Tables that hold no job data: the version record, checksums keyed by path for all jobs, and the content store
+    /// (assessments and corrections keyed by content, Issue 38). The content store outlives every job on purpose: the
+    /// point is that the same content on the next old disk is not judged again, and that disk is a new job. Nothing
+    /// in it names a job, a file or a path, so deleting a job leaves no reference behind.
+    /// </summary>
+    private static readonly HashSet<string> NotPerJob =
+        ["sqlite_sequence", "db_version", "content_fingerprints", "content_assessments", "content_corrections"];
 
     /// <summary>Tables whose rows outlive the job and only lose the reference to it.</summary>
     private static readonly HashSet<string> Detached = ["eval_cases", "eval_runs"];
@@ -90,7 +96,19 @@ public class DatabaseIntegrityTests : IDisposable
             "INSERT INTO comparison_files (comparison_id, file_node_id, state, match_file_node_id) VALUES (@cross, @fb, 'backed_up', @fa)",
             new { cross, fb = b.File, fa = a.File });
 
+        await conn.ExecuteAsync(
+            """
+            INSERT INTO content_assessments (content_hash, size, model, prompt_version, keep_hint_asked, category, importance,
+                                             confidence, facts_json, created_at)
+                VALUES ('h', 1, 'm', 'p', 0, 1, 1, 0.9, '[]', @T);
+            INSERT INTO content_corrections (content_hash, size, category, corrected_at) VALUES ('h', 1, 2, @T);
+            """, new { T });
+
         await new ScanJobRepository(db).DeleteAsync(a.Job);
+
+        // The content store keeps its rows: they belong to content, not to the job.
+        Assert.Equal(1, await conn.ExecuteScalarAsync<long>("SELECT COUNT(*) FROM content_assessments"));
+        Assert.Equal(1, await conn.ExecuteScalarAsync<long>("SELECT COUNT(*) FROM content_corrections"));
 
         foreach (var table in tables)
         {

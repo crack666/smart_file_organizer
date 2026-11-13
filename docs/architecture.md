@@ -121,6 +121,48 @@ A scan job has a role (`ScanJob.Role`, column `scan_jobs.role`): `source`, a med
 
 **Several libraries** (https://github.com/crack666/smart_file_organizer/issues/74). `CompareWithLibrariesAsync(sourceJobId, againstJobIds, ...)` checks every job first, then runs the steps above once per library; each pair is stored as before, and the comparisons of one run share `comparisons.run_id` (migration 21; a comparison stored before is its own run). `LibraryComparisonSet` reads a set back, either the libraries named or, without ids, the newest run (`IContentComparisonRepository.GetLatestLibraryRunAsync`), and joins the rows per file: `backed_up` in any library, else `error`, else `differs`, else `new`; `FileComparison.MatchJobId` names the library of the match. `BackedUpSkipService` (`sfo analyze --against`), `FindingService` and `LibraryTargetService.MatchAsync` read the comparison only through this set.
 
+## Content store
+
+Issue: https://github.com/crack666/smart_file_organizer/issues/38. Commands: [cli.md, Content store](cli.md#content-store);
+origin code `reused`: [glossary.md](glossary.md#origin-of-a-file-result-resultorigin).
+
+An assessment belongs to the content of a file, not to its path. Whoever goes through several old disks one after the
+other, renames files or scans anew should not pay the model for the same content twice. `ContentStoreService`
+(Application) keeps what the model said about a content in `content_assessments` and what a person corrected in
+`content_corrections`; both tables name no job, file or path and outlive every job.
+
+**Key.** The content is its full SHA-256 and its size (`ContentKey`); head-and-tail alone is never enough. The checksum
+comes from `content_fingerprints` while size and modification time of the path match, otherwise `IContentHasher`
+reads the file and the fingerprint is stored (shared with the comparison). An entry is taken over only when the model
+and the prompt version are the same (`IOllamaService.AssessmentIdentity`): `OllamaService.ClassificationPromptVersion`
+hashes the classification prompt itself (system prompt, language, the messages for a fixed sample with and without
+keep hint and context, every answer schema), so a changed prompt is a new version without anyone raising a number, and
+older entries stay but are no longer taken over. Whether the keep hint was asked is part of the key, because it changes
+the prompt. Scripted answers (`sfo eval --stub`) have no identity and use no store; `sfo eval` with a model passes
+`reuse: false`, because an evaluation has to measure the model and not an answer kept from an earlier run.
+
+**Phase 2.** The producer reads the content key with the other IO, for every file that has no rule result. The worker
+then (`ClassificationService.CompleteAsync`):
+
+1. carries a person's correction of the content over to the file, as a `user_overrides` row with origin `reused` and no
+   target, unless the file has a correction of its own; this also spares the second check;
+2. takes over a current entry instead of calling the model: category, importance, confidence, certainty, the
+   one-sentence summary, the keep hint, the markers the model found and the description of stage 1, origin `reused`,
+   `model_used` the model of the entry, no raw answer and no target. The rules of this place run on it as on every
+   answer (name markers of the file, archive content, the sensitive review rule), and the facts are stored through
+   `FactsToStore` as for a model answer, so a copy marked by its name gets no description;
+3. after a model call, keeps the answer (`ContentStoreService.MayKeep`) when it has no error, came from the model of the
+   identity, was not shaped by a second call (that call sees the folder verdict and the neighbours, which belong to the
+   place; a `rule_wins` check is fine) and the file is not marked by a rule (a marked file is never described, so the
+   entry would lack what a copy needs). Markers the model found are kept with the entry, its description is not.
+
+Never taken over, because it depends on where the file lies: folder verdict, sample, findings, target and decision.
+A focused rescan judges anew without asking the store and replaces the entry with the new answer. A correction made
+through `ReviewService` is kept for the content (category and note, not the target); resetting the review withdraws it
+for the content too, files that already got it keep their row.
+
+`sfo status` counts `reused` apart from `by_model`; the rate per minute counts model calls only.
+
 ## Bundle flow
 
 Issue: https://github.com/crack666/smart_file_organizer/issues/39; rules and thresholds in [bundles.md](bundles.md).
@@ -735,8 +777,8 @@ Important tables:
   `escalated`), `eligible_count`, `members_json` (file id, name, `role` = `stratum`/`size`/`date`/`anomaly`/`sensitive`,
   category, `deviates`, error), `max_deviation_share`, `majority_category`, `deviating_count`, `failed_count`,
   `deviation_share`, `inherited_count`, `inherited_confidence`, `reason`, `drawn_at`, `decided_at`
-- `ai_results` columns of step 6: `origin` (`rule`, `model`, `inherited`, `human`, `agent`, `external`; NULL for
-  older rows, all judged by the model), `inherited_from_directory_node_id`, `keep_hint` (`temporary`,
+- `ai_results` columns of step 6: `origin` (`rule`, `model`, `inherited`, `human`, `agent`, `external`, since step 22
+  `reused`; NULL for older rows, all judged by the model), `inherited_from_directory_node_id`, `keep_hint` (`temporary`,
   `worth_keeping`), `keep_reason`. File statuses `Deferred` (waits for its sample) and `Inherited` are new
 - `ai_results` columns of step 10: `certainty` (`certain`, `likely`, `uncertain`, `review`; NULL for older rows),
   `attempts`, `previous_error`
@@ -744,7 +786,14 @@ Important tables:
   codes), `outcome` (`agreed`, `disagreed`, `corrected`, `rule_wins`, `failed`, `skipped`), `rule_note`,
   `first_answer` and `second_answer` (JSON, snake_case: category, importance, confidence or null, summary, target,
   keep hint, markers, model, raw response, evidence, error), `checked_at`
-- `user_overrides` — manual category/target corrections
+- `user_overrides` — manual category/target corrections; `origin` (step 22): `human` (null for older rows) or `reused`
+  for a correction carried over from the content store
+- `content_assessments` — the content store (step 22): `content_hash` (full SHA-256), `size`, `model`, `prompt_version`,
+  `keep_hint_asked` (unique together), `category`, `importance`, `confidence`, `certainty`, `summary`, `keep_hint`,
+  `keep_reason`, `sensitive_markers` (model markers), `facts_json` (description of stage 1 as code list), `created_at`,
+  `last_used_at`, `use_count`; no job reference, kept when a job is deleted
+- `content_corrections` — a person's category per content (step 22): `content_hash`, `size`, `category`, `note`,
+  `corrected_at`; kept when a job is deleted
 - `content_fingerprints` — head-and-tail and full SHA-256 per path, with the size and modification time (`last_write_ticks`) they belong to and the time the full checksum was computed (`full_hash_at`); shared by all jobs
 - `comparisons` — one row per compared pair of source job and library job (`against_job_id` null: duplicates only), with `complete` and `error_count`
 - `comparison_files` — per source file: `state` (`backed_up`, `new`, `differs`, `error`; null without library), `match_file_node_id`, `match_count`, `match_hash`, `match_verified_at`, `duplicate_group`, `error`
@@ -784,7 +833,9 @@ Deleting a job (`ScanJobRepository.DeleteAsync`) removes every row that belongs 
 transaction: files, folders, links, results, overrides, facts, checks, samples, verdicts, directory summaries,
 comparisons (as source and as library), bundles, finding decisions, model-server waits and library advice. Test cases
 (`eval_cases`) and evaluation runs (`eval_runs`) are kept and lose only their job and file reference;
-`content_fingerprints` belongs to paths, not jobs. `DatabaseIntegrityTests` seeds a row in every table and fails when a
+`content_fingerprints` belongs to paths, not jobs, and the content store (`content_assessments`, `content_corrections`)
+to content: it is kept on purpose, so the next disk with the same content is not judged again. `DatabaseIntegrityTests`
+seeds a row in every table and fails when a
 new table is not covered.
 
 - The current version is `MAX(version)` in `db_version`.
@@ -797,7 +848,7 @@ new table is not covered.
 1. Add one file `Migrations/M000N_ShortName.cs` with a class implementing `ISchemaMigration`, or deriving from `SqlSchemaMigration` when plain SQL is enough. `Version` is `N`.
 2. Take the next free number on `master`. Steps are discovered by reflection, so no shared list is edited.
 3. Versions must be exactly `1..N`. If two branches picked the same number, startup and `SchemaMigrationTests` fail with a "Duplicate schema migration versions" message; the branch merged second renumbers its step (file name and `Version`).
-4. Never change a step that has been merged; add a new one. Step 1 (`M0001_InitialSchema`) is the schema as it existed before migrations. Step 2 (`M0002_SensitiveMarkers`) adds the sensitive-marker columns. Step 3 (`M0003_DirectoryVerdicts`) adds `directory_verdicts`. Step 4 (`M0004_ScanJobRules`) adds the scan rules of a job. Step 5 (`M0005_ContentComparison`) adds the comparison with the library. Step 6 (`M0006_DirectorySamples`) adds `directory_samples`, the escalation columns and the origin and keep-hint columns of `ai_results`; its new codes are English. Step 7 (`M0007_FileFacts`) adds `file_facts` and `ai_results.evidence`. Step 8 (`M0008_LibraryReview`) adds `scan_jobs.structure_only` and `library_advice`. Step 9 (`M0009_Evaluation`) adds `eval_cases` and `eval_runs`. Step 10 (`M0010_ResultChecks`) adds certainty, attempts and previous error to `ai_results` and the table `result_checks`. Step 11 (`M0011_Bundles`) adds `bundles`, `bundle_files` and `bundle_builds`. Step 12 (`M0012_SensitiveGaps`) adds the markers of skipped folders, the rule version per file and the marked inputs of directory summaries. Step 13 (`M0013_EnglishCodes`) switches the German codes of steps 2 and 3 to the English codes of [glossary.md](glossary.md): it rebuilds `directory_verdicts` (its CHECK constraints named the old codes), rewrites marker lists token by token, and the texts the program wrote from codes (keep reason, container reason, profile hint, `dominant_type` of the pre-assessment, stored check answers, stored evaluation reports); raw model answers stay as received. The old codes are spelled out in that step, and in step 3, and nowhere else in code. Step 14 (`M0014_FindingDecisions`) adds `finding_decisions`. Step 19 (`M0019_OrphanRows`) removes rows whose job, file or folder no longer exists, left behind by job deletions before the deletion covered every table; optional references to a missing row become NULL, test cases and evaluation runs are kept. Step 20 (`M0020_FileDecisions`) adds `file_decisions`; results and facts stored before stay as they are and are decided without a new analysis. Step 21 (`M0021_ComparisonRuns`) adds `comparisons.run_id`, which groups the comparisons of one run against several libraries; a comparison stored before is its own run.
+4. Never change a step that has been merged; add a new one. Step 1 (`M0001_InitialSchema`) is the schema as it existed before migrations. Step 2 (`M0002_SensitiveMarkers`) adds the sensitive-marker columns. Step 3 (`M0003_DirectoryVerdicts`) adds `directory_verdicts`. Step 4 (`M0004_ScanJobRules`) adds the scan rules of a job. Step 5 (`M0005_ContentComparison`) adds the comparison with the library. Step 6 (`M0006_DirectorySamples`) adds `directory_samples`, the escalation columns and the origin and keep-hint columns of `ai_results`; its new codes are English. Step 7 (`M0007_FileFacts`) adds `file_facts` and `ai_results.evidence`. Step 8 (`M0008_LibraryReview`) adds `scan_jobs.structure_only` and `library_advice`. Step 9 (`M0009_Evaluation`) adds `eval_cases` and `eval_runs`. Step 10 (`M0010_ResultChecks`) adds certainty, attempts and previous error to `ai_results` and the table `result_checks`. Step 11 (`M0011_Bundles`) adds `bundles`, `bundle_files` and `bundle_builds`. Step 12 (`M0012_SensitiveGaps`) adds the markers of skipped folders, the rule version per file and the marked inputs of directory summaries. Step 13 (`M0013_EnglishCodes`) switches the German codes of steps 2 and 3 to the English codes of [glossary.md](glossary.md): it rebuilds `directory_verdicts` (its CHECK constraints named the old codes), rewrites marker lists token by token, and the texts the program wrote from codes (keep reason, container reason, profile hint, `dominant_type` of the pre-assessment, stored check answers, stored evaluation reports); raw model answers stay as received. The old codes are spelled out in that step, and in step 3, and nowhere else in code. Step 14 (`M0014_FindingDecisions`) adds `finding_decisions`. Step 19 (`M0019_OrphanRows`) removes rows whose job, file or folder no longer exists, left behind by job deletions before the deletion covered every table; optional references to a missing row become NULL, test cases and evaluation runs are kept. Step 20 (`M0020_FileDecisions`) adds `file_decisions`; results and facts stored before stay as they are and are decided without a new analysis. Step 21 (`M0021_ComparisonRuns`) adds `comparisons.run_id`, which groups the comparisons of one run against several libraries; a comparison stored before is its own run. Step 22 (`M0022_ContentStore`) adds `content_assessments`, `content_corrections` and `user_overrides.origin`, and copies `ai_results` once to widen the CHECK of `origin` by `reused` (SQLite cannot change a constraint in place; the copy takes the table definition from `sqlite_master`, so every column and row stays).
 5. Do not put `PRAGMA journal_mode` or other transaction-incompatible statements in a step.
 
 ## Architectural rules

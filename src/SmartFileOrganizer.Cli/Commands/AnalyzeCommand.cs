@@ -11,7 +11,8 @@ namespace SmartFileOrganizer.Cli.Commands;
 /// <summary><c>sfo analyze &lt;job&gt;</c>: runs the AI phases for a scanned job and waits for them.</summary>
 public static class AnalyzeCommand
 {
-    public sealed record PhaseRunView(AiPhases Phase, long Total, long Processed, int Errors, string Message, int Retried, int SecondChecks);
+    public sealed record PhaseRunView(AiPhases Phase, long Total, long Processed, int Errors, string Message, int Retried, int SecondChecks,
+        int Reused = 0);
 
     /// <summary>Set when the run ended because the model server stayed away (exit code 4).</summary>
     public sealed record ModelServerLostView(string Phase, DateTime Since, string Cause, double WaitedSeconds);
@@ -141,7 +142,7 @@ public static class AnalyzeCommand
                 ollama.Model,
                 Math.Clamp(ollama.MaxParallelRequests, 1, 8),
                 run.Phases.Select(p => new PhaseRunView(p.Phase, p.Result.TotalFiles, p.Result.ProcessedFiles, p.Result.ErrorCount, p.Result.StatusText,
-                    p.Result.RetriedFiles, p.Result.SecondChecks)).ToList(),
+                    p.Result.RetriedFiles, p.Result.SecondChecks, p.Result.Reused)).ToList(),
                 run.ErrorCount,
                 run.Lost is { } l ? new ModelServerLostView(PhaseName(l.Phase), l.Since, l.Cause.ToCode(), Math.Round(l.Waited.TotalSeconds, 1)) : null,
                 services.GetRequiredService<ModelUsageMeter>().Snapshot(),

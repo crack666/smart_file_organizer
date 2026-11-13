@@ -121,7 +121,7 @@ sfo analyze 7 --phase classification --parallel 2 --json
     "phases": [
       { "phase": "classification", "total": 940, "processed": 940, "errors": 3,
         "message": "AI classification finished with 3 error(s). 41 result(s) checked a second time.",
-        "retried": 0, "second_checks": 41 }
+        "retried": 0, "second_checks": 41, "reused": 0 }
     ],
     "error_count": 3,
     "model_server_lost": null,
@@ -155,7 +155,8 @@ https://github.com/crack666/smart_file_organizer/issues/42
 `retried` is the number of failed files `--retry-errors` released, `second_checks` the number of
 second calls made for unsure or contradicted results (see
 [architecture.md](architecture.md#phase-2--per-file-classification-in-stages-classificationservice-directorysamplingservice));
-both are 0 for the other phases. Errors of single files or directories do not fail the command; they are counted here and
+both are 0 for the other phases. `reused` is the number of files whose result was taken over from the content store
+instead of a model call ([`sfo cache`](#sfo-cache-stats)); 0 for the other phases. Errors of single files or directories do not fail the command; they are counted here and
 listed by `sfo status`. Failures: `ollama_unavailable` (3), `model_server_lost` (4),
 `scan_not_completed` (1), `job_not_found` (1), `wrong_role` (1, the job is a `library`),
 `comparison_not_found` (1, `--against` without a stored comparison), `cancelled` (130).
@@ -218,7 +219,7 @@ sfo status 7 --json
                 "directories_total": 112, "directories_processed": 112, "errors": 0 },
       "pre_assessment": { "total": 104, "done": 104, "errors": 0, "pending": 0, "skipped": 0 },
       "classification": { "total": 940, "done": 610, "errors": 3, "pending": 0, "skipped": 327,
-                          "rate_per_minute": null, "remaining_seconds": null },
+                          "rate_per_minute": null, "remaining_seconds": null, "by_model": 402, "reused": 120 },
       "summary": { "total": 104, "done": 0, "errors": 0, "pending": 104, "skipped": 0 }
     },
     "errors": [
@@ -256,6 +257,11 @@ the part of `skipped` that `sfo analyze --against` left out because the library 
 for `classification`, fully backed-up folders without a verdict or summary for the two folder phases. The text
 output adds it as `(n already in the library)`.
 
+- `classification` also says where `done` came from (since Issue 38): `by_model` files the model judged in a call of
+  their own, `reused` files whose result was taken over from the content store without a call (origin `reused`,
+  [`sfo cache`](#sfo-cache-stats)). The rest of `done` are rule results and inherited results. Both are `null` for the
+  folder phases. The text output adds `(n by the model, m taken over from the content store)` when something was taken
+  over. `rate_per_minute` counts model calls only.
 - `pre_assessment` and `summary` count directories the AI phases consider: not skipped by the
   scan rules and not hidden (name starting with a dot).
 - `classification` counts every file (since 12.11.2026; before: only image, video, document).
@@ -1304,6 +1310,56 @@ or changed rules this is all that has to run; the description of stage 1 stays a
 
 Errors: `job_not_found` (1), `wrong_role` (1, a library), `path_not_found` (1, the target file), `targets_invalid` (1,
 the target file is not a valid target structure), `settings_invalid` (1, a `Findings` value), `usage` (2).
+
+## Content store
+
+Issue: https://github.com/crack666/smart_file_organizer/issues/38; how it works:
+[architecture.md](architecture.md#content-store). Before every classification call `sfo analyze` looks for an
+assessment of the same content (full SHA-256 and size) made with the same model and the same prompt version, and
+takes it over instead of asking the model (origin `reused`). The same file on the next old disk, renamed or in a new
+scan costs no call. Only what belongs to the content is taken over; folder verdict, findings, target and decision
+are made anew in every job. A person's correction of a category follows the content into every job as well. The
+store is kept when a job is deleted. `sfo eval` neither reads nor writes it.
+
+### `sfo cache stats`
+
+Counts the store; no model call, the current model and prompt version come from the settings.
+
+```json
+{
+  "schema_version": 1,
+  "command": "cache stats",
+  "ok": true,
+  "exit_code": 0,
+  "result": {
+    "model": "gemma4:26b", "prompt_version": "3f9c0a1e22b74d58",
+    "entries": 1250, "current": 1180, "stale": 70, "reuses": 640, "corrections": 12, "fingerprints": 4100,
+    "groups": [
+      { "model": "gemma4:26b", "prompt_version": "3f9c0a1e22b74d58", "current": true, "entries": 1180, "reuses": 640,
+        "last_used_at": "2026-11-13T09:40:00Z" },
+      { "model": "gemma4:26b", "prompt_version": "0b77e1d0c9a35f12", "current": false, "entries": 70, "reuses": 0,
+        "last_used_at": null }
+    ]
+  },
+  "error": null
+}
+```
+
+`current` entries are taken over by the next analysis; `stale` ones were made with another model or another prompt
+version and are never taken over, but kept until `sfo cache clear`. The prompt version is a hash of the classification
+prompt (system prompt, language, instructions, answer schemas): a changed prompt is a new version by itself.
+`reuses` counts take-overs, `corrections` the categories a person set by content, `fingerprints` the files with a
+full checksum (shared with `sfo compare`).
+
+### `sfo cache clear`
+
+| Option | Meaning |
+|---|---|
+| `--stale` | Only remove entries of another model or prompt version; the current ones stay. |
+| `--corrections` | Also remove the corrections by content. The corrections of single files (`user_overrides`) stay. |
+
+Result: `{ "only_stale": false, "entries_removed": 1250, "corrections_removed": 0, "entries_left": 0, "corrections_left": 12 }`.
+Checksums are not removed. The next analysis asks the model again for every file.
 
 ## Machine contract
 
