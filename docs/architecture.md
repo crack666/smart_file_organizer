@@ -154,7 +154,8 @@ opens no scanned file and changes nothing on disk. Only decisions are stored (`f
 
 The result carries `coverage` per kind (`complete`, `partial`, `not_computed` with a note) and `missing_steps`.
 
-**Worth of a file** (`FindingRules.ValueOf`). A human override is certain. An analysis result counts with its
+**Worth of a file** (`DecisionRules.ValueOf`, on top of `FindingRules.ValueOf`; the same worth `sfo decide`
+stores, see [Decision flow](#decision-flow)). A human override is certain. An analysis result counts with its
 certainty (older rows: `likely` from confidence 0.8, else `uncertain`): keep hint `worth_keeping` keeps,
 `temporary` drops; photo, video, document scan, document, invoice, personal document and letter are kept unless
 importance is low; screenshot, audio, archive and code only with importance high or critical; trash candidate,
@@ -228,6 +229,35 @@ desktop and downloads; scripted answers (`sfo eval --stub`), a library with one 
 Before the grouping of sensitive files in noise and the review rule the same tree gave 12, with four sensitive
 findings in app data and an unsure `in_noise` of 112 database files. The modern `AppData` is skipped by the
 default scan rules and then shows as one skipped folder marked sensitive.
+
+## Decision flow
+
+Issue: https://github.com/crack666/smart_file_organizer/issues/37. Command: [cli.md, `sfo decide`](cli.md#sfo-decide-job);
+codes: [glossary.md, Decisions](glossary.md#decisions).
+
+Describing and deciding are two stages. **Stage 1, describing**, is the analysis: rules and the local model, expensive,
+once per content. What it finds is stored as results (`ai_results`), folder verdicts and facts with their source
+(`file_facts`: `metadata`, `rule`, `model`). **Stage 2, deciding**, is `DecisionService.DecideAsync` (Application/Decisions):
+cheap and repeatable, it reads only what stage 1 and the later steps stored and never the scanned file. It has no
+model service; a test counts the requests to the model server across two runs with different target structures (none).
+
+1. `FindingService.ComputeValuesAsync` gives every file with its place (bundle, part, folder verdict, noise) and its
+   facts, and the findings beside it. The worth is `DecisionRules.ValueOf`: first the rules of the findings (override,
+   result, folder retention, bundle, file type), then the facts may keep a file those give up (a paper about the
+   person, a picture with people or of an occasion; `likely`, `uncertain` against a disposable result or among noise).
+   Findings and decisions therefore rest on one worth.
+2. `DecisionRules.Decide` names the inputs (`basis`: key, value, source) by the rule that decided. A marked file
+   rests on its marker and rule ids alone (`SensitiveOutputGuard.GetMatch`): kept, never disposable, no target.
+3. A kept file gets a target from an `ITargetProposer`. Today that is `TargetStructureProposer` over a target structure
+   (`TargetStructureFile`, written by `sfo library propose`): the first target whose `holds` names the file type, its
+   pattern filled from the facts; an unfilled placeholder leaves the folder level open and is listed in `unresolved`.
+   The content check of target folders (https://github.com/crack666/smart_file_organizer/issues/56) plugs in as
+   another proposer (`DecideOptions.Proposer`); the library match is not part of this stage.
+4. `IFileDecisionRepository.ReplaceAsync` stores the decisions of the job in one transaction (`file_decisions`); the
+   run reports what changed against the rows it replaced.
+
+A model call over the facts only, for the cases a rule cannot judge, is the next step and not built: stage 2 sees
+facts, never content, so it could run outside the machine; the facts of a marked file stay its marker.
 
 ## AI flow (current architecture)
 
@@ -383,13 +413,21 @@ and sets the other eligible files from `Discovered` to `Deferred` in one transac
    `worth_keeping`), with `keep_reason` only for `temporary` (optional in the schema); uniform ones too, so that the hint
    is there if the sample escalates. Since 13.11.2026 the answer has no `suggested_target` (targets come from the
    library match) and `summary` is one short sentence of at most 200 characters; older stored answers are still read
+   **Description (stage 1 of https://github.com/crack666/smart_file_organizer/issues/37, since 13.11.2026).** The same
+   call describes what is to be seen, as facts with source `model` (`OllamaService.DescriptionOf`,
+   `ParseDescription`): for a picture the model sees (an image or video frames are attached) `scene`, `activity`,
+   `setting`, `season`, `occasion`, `people`; for a document `document_kind`, `issuer`, `year`. The fields are asked
+   through the answer schema only, all required for their kind, so the system message stays one text for every
+   file and only pictures and documents get the few extra codes and words in their answer; a file the rules marked
+   is not described. `unknown`, empty texts and a year 0 are not stored. Codes: [glossary.md](glossary.md#fact-key-filefactkey)
 7. A marked file (rule or model) proposed as `TrashCandidate` is stored as `ReviewNeeded`, one proposed as
    `temporary` as `worth_keeping` (the model's reason is replaced by a neutral one)
 8. Second check (see below): an unsure or contradicted answer is asked again before anything is stored
 9. Result stored in `ai_results` with `origin = model` (`rule` for a rule result), `certainty` and `evidence`
-   (`{"contains":[...],"missing":[...]}`), even when the run is being stopped; facts replace the file's rows in
-   `file_facts`. For a file marked sensitive (rule or model), free-text facts (`title`, `author`, `artist`, `album`)
-   are not stored. File status becomes `AiAnalyzed` (rule or model result) or `Error`
+   (`{"contains":[...],"missing":[...]}`), even when the run is being stopped; facts and the description of the
+   stored answer (`FileClassification.DescribedFacts`; none after a disagreement or a failed call) replace the file's
+   rows in `file_facts`. For a file marked sensitive (rule or model), free-text facts (`title`, `author`, `artist`,
+   `album`) and every description are not stored. File status becomes `AiAnalyzed` (rule or model result) or `Error`
 
 **Second check** ([#23](https://github.com/crack666/smart_file_organizer/issues/23); `ResultCheckRules`,
 `SecondCheckOptions`). What the tool calls sure has to be right, and what is unsure has to show as unsure. The
@@ -669,9 +707,13 @@ Important tables:
 - `directory_nodes` — scanned directories with heuristic metadata and stats; `dir_status = Error` for directories the scan could not read; `sensitive_markers` / `sensitive_rule` for skipped folders marked by their name (step 12); `analysis_skip` (step 18, see below)
 - `file_nodes` — scanned files with metadata, type, AI status, rule-based sensitive markers (`sensitive_markers`, `sensitive_rule`) and the version of the file rules that ran (`sensitive_rules_version`, step 12); `analysis_skip` (step 18): `backed_up` when `sfo analyze --against` left the file or folder out because the stored comparison found it in the library. Such a file has status Skipped and no result; a folder gets no pre-assessment and no summary. Every run sets the column anew from the comparison it was given and releases the earlier marks first; rule markers are not touched (`BackedUpSkipService`)
 - `ai_results` — Phase 2 per-file classification results, including model sensitive markers (`sensitive_markers`) and the evidence notes (`evidence`, step 7)
-- `file_facts` — facts per file read without the model (step 7): `file_node_id`, `fact`, `value`, `source`
-  (`metadata`, `rule`, `model`), `recorded_at`; one row per file and fact. Codes are defined on the Domain enums
-  `FileFactKey` and `FactSource` (`FileFactCodes.cs`)
+- `file_facts` — facts per file (step 7): `file_node_id`, `fact`, `value`, `source` (`metadata`, `rule`, `model`),
+  `recorded_at`; one row per file and fact. Since Issue 37 also the description of the model (source `model`), no
+  schema change. Codes are defined on the Domain enums `FileFactKey` and `FactSource` (`FileFactCodes.cs`)
+- `file_decisions` — stage 2 per file (step 20): `file_node_id`, `job_id`, `worth` (`keep`, `disposable`, null),
+  `certainty`, `rule`, `basis` (JSON list of key, value, source), `target_id`, `target_path`, `target_rule`,
+  `target_basis`, `target_unresolved` (comma-separated placeholders), `decided_at`; replaced by every `sfo decide`,
+  removed with the file
 - `ai_directory_results` — Phase 1 pre-assessment + Phase 3 directory summaries (distinguished by `phase` column); `marked_inputs` (step 12) lists the marked files a model summary saw as their neutral line
 - `directory_verdicts` — one verdict per directory (step 3): `verdict`, `source` (`rule`/`model`), `rule`,
   `purpose`, `retention`, `reason`, `unit_directory_node_id` (the directory that is the whole, for `unit`),
@@ -744,7 +786,7 @@ new table is not covered.
 1. Add one file `Migrations/M000N_ShortName.cs` with a class implementing `ISchemaMigration`, or deriving from `SqlSchemaMigration` when plain SQL is enough. `Version` is `N`.
 2. Take the next free number on `master`. Steps are discovered by reflection, so no shared list is edited.
 3. Versions must be exactly `1..N`. If two branches picked the same number, startup and `SchemaMigrationTests` fail with a "Duplicate schema migration versions" message; the branch merged second renumbers its step (file name and `Version`).
-4. Never change a step that has been merged; add a new one. Step 1 (`M0001_InitialSchema`) is the schema as it existed before migrations. Step 2 (`M0002_SensitiveMarkers`) adds the sensitive-marker columns. Step 3 (`M0003_DirectoryVerdicts`) adds `directory_verdicts`. Step 4 (`M0004_ScanJobRules`) adds the scan rules of a job. Step 5 (`M0005_ContentComparison`) adds the comparison with the library. Step 6 (`M0006_DirectorySamples`) adds `directory_samples`, the escalation columns and the origin and keep-hint columns of `ai_results`; its new codes are English. Step 7 (`M0007_FileFacts`) adds `file_facts` and `ai_results.evidence`. Step 8 (`M0008_LibraryReview`) adds `scan_jobs.structure_only` and `library_advice`. Step 9 (`M0009_Evaluation`) adds `eval_cases` and `eval_runs`. Step 10 (`M0010_ResultChecks`) adds certainty, attempts and previous error to `ai_results` and the table `result_checks`. Step 11 (`M0011_Bundles`) adds `bundles`, `bundle_files` and `bundle_builds`. Step 12 (`M0012_SensitiveGaps`) adds the markers of skipped folders, the rule version per file and the marked inputs of directory summaries. Step 13 (`M0013_EnglishCodes`) switches the German codes of steps 2 and 3 to the English codes of [glossary.md](glossary.md): it rebuilds `directory_verdicts` (its CHECK constraints named the old codes), rewrites marker lists token by token, and the texts the program wrote from codes (keep reason, container reason, profile hint, `dominant_type` of the pre-assessment, stored check answers, stored evaluation reports); raw model answers stay as received. The old codes are spelled out in that step, and in step 3, and nowhere else in code. Step 14 (`M0014_FindingDecisions`) adds `finding_decisions`. Step 19 (`M0019_OrphanRows`) removes rows whose job, file or folder no longer exists, left behind by job deletions before the deletion covered every table; optional references to a missing row become NULL, test cases and evaluation runs are kept.
+4. Never change a step that has been merged; add a new one. Step 1 (`M0001_InitialSchema`) is the schema as it existed before migrations. Step 2 (`M0002_SensitiveMarkers`) adds the sensitive-marker columns. Step 3 (`M0003_DirectoryVerdicts`) adds `directory_verdicts`. Step 4 (`M0004_ScanJobRules`) adds the scan rules of a job. Step 5 (`M0005_ContentComparison`) adds the comparison with the library. Step 6 (`M0006_DirectorySamples`) adds `directory_samples`, the escalation columns and the origin and keep-hint columns of `ai_results`; its new codes are English. Step 7 (`M0007_FileFacts`) adds `file_facts` and `ai_results.evidence`. Step 8 (`M0008_LibraryReview`) adds `scan_jobs.structure_only` and `library_advice`. Step 9 (`M0009_Evaluation`) adds `eval_cases` and `eval_runs`. Step 10 (`M0010_ResultChecks`) adds certainty, attempts and previous error to `ai_results` and the table `result_checks`. Step 11 (`M0011_Bundles`) adds `bundles`, `bundle_files` and `bundle_builds`. Step 12 (`M0012_SensitiveGaps`) adds the markers of skipped folders, the rule version per file and the marked inputs of directory summaries. Step 13 (`M0013_EnglishCodes`) switches the German codes of steps 2 and 3 to the English codes of [glossary.md](glossary.md): it rebuilds `directory_verdicts` (its CHECK constraints named the old codes), rewrites marker lists token by token, and the texts the program wrote from codes (keep reason, container reason, profile hint, `dominant_type` of the pre-assessment, stored check answers, stored evaluation reports); raw model answers stay as received. The old codes are spelled out in that step, and in step 3, and nowhere else in code. Step 14 (`M0014_FindingDecisions`) adds `finding_decisions`. Step 19 (`M0019_OrphanRows`) removes rows whose job, file or folder no longer exists, left behind by job deletions before the deletion covered every table; optional references to a missing row become NULL, test cases and evaluation runs are kept. Step 20 (`M0020_FileDecisions`) adds `file_decisions`; results and facts stored before stay as they are and are decided without a new analysis.
 5. Do not put `PRAGMA journal_mode` or other transaction-incompatible statements in a step.
 
 ## Architectural rules

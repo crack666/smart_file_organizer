@@ -248,6 +248,21 @@ library 17, `not_backed_up` not computed), and a generated old Windows profile w
   (https://github.com/crack666/smart_file_organizer/issues/56).
 - Nothing executes an accepted finding yet (https://github.com/crack666/smart_file_organizer/issues/11).
 
+### Describing and deciding
+
+_Checked 13.11.2026 on the branch for https://github.com/crack666/smart_file_organizer/issues/37 (schema step 20):
+`dotnet test` 825 passed, 2 skipped; `scan`, `analyze` and `decide` run in-process against the fake model server
+and a temp database (`DecideCommandTests`). No run with a real model: whether real models fill the description
+fields well, and what they cost in answer tokens, is not measured._
+
+- The analysis also stores a description as facts with source `model`: scene, activity, setting, season, occasion
+  and people of a picture; kind, issuer and year of a document. Never for a marked file.
+- `sfo decide <job> [--targets <file>]` computes worth and target of every file by rule from the stored facts and
+  results, without a model call, and stores them (`file_decisions`); every decision and target names its inputs.
+  Rules: [architecture.md, Decision flow](architecture.md#decision-flow).
+- Importance and keep hint are still asked in the analysis; a model call over facts for what no rule can judge is
+  not built; the content check of target folders is https://github.com/crack666/smart_file_organizer/issues/56.
+
 ### Placing into the library
 
 _Checked 12.11.2026 on the branch for

@@ -687,6 +687,47 @@ Recommended by every finding, executed by nothing yet.
 | `partial` | Computed, but a step that sharpens it is missing; the note says which. |
 | `not_computed` | Not computed: a step it needs is missing, or there is no library. |
 
+## Decisions
+
+Stage 2 of https://github.com/crack666/smart_file_organizer/issues/37, written by `sfo decide` ([cli.md](cli.md#sfo-decide-job))
+and stored in `file_decisions`. `worth` is a retention code (`keep`, `disposable`) or empty when the stored results
+say nothing; `certainty` is a certainty code.
+
+### What decided the worth (`rule`)
+
+| Code | Meaning |
+|---|---|
+| `human` | A person corrected the category; always stands. |
+| `agent`, `external` | A steering agent or another tool set the result. |
+| `model` | The result of the local model: keep hint, else category and importance. |
+| `rule` | A rule result (programs, fonts, system files of a profile). |
+| `inherited` | The result of the confirmed sample of the folder. |
+| `facts` | A described fact kept the file the result gave up: a paper about the person (`document_kind` `contract`, `statement`, `tax`, `payslip`, `certificate`, `insurance`, `medical`, `official`) or a picture with people or of an occasion (`people`, `occasion` `holiday`, `celebration`, `outing`, `sport`), not a screenshot. `likely`; `uncertain` against a disposable result or among noise. |
+| `directory` | No result: the retention of the folder verdict. |
+| `bundle` | No result: the part of a device copy or the event the file belongs to. |
+| `file_type` | No result: programs and fonts are disposable, pictures, videos, documents and audio kept as `uncertain`. |
+| `name` | No result, among noise: a camera file name or a personal document name. |
+| `sensitive` | The file is marked; it rests on its marker alone, is kept and gets no target. |
+| `none` | Nothing to go by. |
+
+### Inputs of a decision (`basis[].key`, `basis[].source`)
+
+| Key | Value | Source |
+|---|---|---|
+| a fact code (`document_kind`, `occasion`, `taken_at`, ...) | the stored value | the source of the fact: `metadata`, `rule`, `model` |
+| `category`, `keep_hint`, `importance` | the result, in codes | its origin: `model`, `rule`, `inherited`, `human`, `agent`, `external` |
+| `directory_retention` | the retention of the folder verdict | `rule` or `model` |
+| `bundle` | bundle kind, and the part of a device copy after `:` (`dump_keep:camera`) | `bundle` |
+| `file_type` | the file type of the scan (`image`, `document`, ...) | `scan` |
+| `file_name` | the name of the file | `scan` |
+| `sensitive` | the marker codes | the rule ids that set them (`word:kontoauszug`, `model`) |
+
+### What chose a target (`target.rule`)
+
+| Code | Meaning |
+|---|---|
+| `target_structure` | The first target of the target structure whose `holds` names the file type; its pattern filled from the facts. |
+
 ## Model server
 
 How an analysis run tells "the model server is gone" from "this one item fails", and how it waits

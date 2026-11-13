@@ -45,6 +45,8 @@ dotnet run --project src/SmartFileOrganizer.Cli -- compare <job> --against <libr
 # decide in bundles: phone and computer copies, named folders, events (docs/bundles.md):
 dotnet run --project src/SmartFileOrganizer.Cli -- bundles build <job>
 dotnet run --project src/SmartFileOrganizer.Cli -- bundles list <job> --json
+# worth and target of every file from what the analysis described, by rule, no model call:
+dotnet run --project src/SmartFileOrganizer.Cli -- decide <job> --targets <target-structure.json> --json
 ```
 
 To judge how an existing library is filed, without opening a file and
