@@ -274,7 +274,7 @@ fields well, and what they cost in answer tokens, is not measured._
 ### Plan
 
 _Checked 13.11.2026 on the branch for https://github.com/crack666/smart_file_organizer/issues/11 (schema step 23):
-`dotnet test` 865 passed, 2 skipped; `eval --stub`, `scan --role library`, `compare`, `bundles build`, `decide`,
+`dotnet test` 871 passed, 2 skipped (after the rebase on the content store); `eval --stub`, `scan --role library`, `compare`, `bundles build`, `decide`,
 `findings accept` and every `plan` command run in-process against a temp database (`PlanCommandTests`), the rules
 alone in `PlanChecksTests`. No run on a real medium or a real library._
 
