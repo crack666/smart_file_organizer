@@ -132,7 +132,8 @@ public class DirectoryPreAssessmentService
 
                 var prepared = await PrepareAsync(jobId, dir, tree, ct);
                 var (next, verdict) = DirectoryVerdictRules.Evaluate(
-                    dir, prepared.Profile, prepared.UnitAncestor, prepared.UnitAncestorPath, prepared.Dump, prepared.InDump);
+                    dir, prepared.Profile, prepared.UnitAncestor, prepared.UnitAncestorPath, prepared.Dump, prepared.InDump,
+                    prepared.SystemPlace);
 
                 switch (next)
                 {
@@ -205,7 +206,8 @@ public class DirectoryPreAssessmentService
         var tree = await JobTree.LoadAsync(jobId, allDirs, _verdictRepo, ct);
         var prepared = await PrepareAsync(jobId, dir, tree, ct);
         var (next, verdict) = DirectoryVerdictRules.Evaluate(
-            dir, prepared.Profile, prepared.UnitAncestor, prepared.UnitAncestorPath, prepared.Dump, prepared.InDump);
+            dir, prepared.Profile, prepared.UnitAncestor, prepared.UnitAncestorPath, prepared.Dump, prepared.InDump,
+                    prepared.SystemPlace);
 
         switch (next)
         {
@@ -234,7 +236,8 @@ public class DirectoryPreAssessmentService
         var dump = unitAncestor is null && inDump?.NoisePath is null
             ? await RecogniseDumpAsync(jobId, dir, files, children, tree, ct)
             : null;
-        return new PreparedDirectory(dir, files, children, profile, unitAncestor, unitPath, dump, inDump);
+        var systemPlace = unitAncestor is null ? _patterns.SystemPlaceOf(BundlePatterns.SplitPath(dir.FullPath)) : null;
+        return new PreparedDirectory(dir, files, children, profile, unitAncestor, unitPath, dump, inDump, systemPlace);
     }
 
     /// <summary>
@@ -315,7 +318,8 @@ public class DirectoryPreAssessmentService
 
         // A dump root carries its recognition as summary. Its own files (NTUSER.DAT, loose files on a phone)
         // are judged one by one: in doubt a file is judged, and a dump root rarely holds more than a few.
-        var assessment = handledAsWhole || verdict.Verdict == DirectoryVerdictKind.Dump
+        // A folder with one file (rule single-file) likewise: its file is judged, the folder follows it.
+        var assessment = handledAsWhole || verdict.Verdict == DirectoryVerdictKind.Dump || verdict.Rule == DirectoryVerdictRules.SingleFile
             ? new DirectoryClassificationResult
             {
                 DirectoryNodeId = dir.Id,
@@ -416,7 +420,7 @@ public class DirectoryPreAssessmentService
 
     /// <summary>Directories Phase 2 and Phase 3 work on; the others get a verdict only.</summary>
     private static bool IsAiCandidate(DirectoryNode d) =>
-        d.DirStatus != DirectoryStatus.Skip
+        d.DirStatus is not (DirectoryStatus.Skip or DirectoryStatus.Link or DirectoryStatus.Error)
         && !string.IsNullOrWhiteSpace(d.Name)
         && !d.Name.StartsWith('.');
 
@@ -511,7 +515,8 @@ public class DirectoryPreAssessmentService
         DirectoryVerdict? UnitAncestor,
         string? UnitAncestorPath,
         DumpRecognition? Dump,
-        DirectoryVerdictRules.DumpPlace? InDump);
+        DirectoryVerdictRules.DumpPlace? InDump,
+        SystemPlace? SystemPlace);
 
     /// <summary>All directories of a job with their verdicts so far; safe for the parallel model calls.</summary>
     private sealed class JobTree

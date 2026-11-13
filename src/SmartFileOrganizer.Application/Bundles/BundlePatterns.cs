@@ -45,6 +45,9 @@ public sealed class BundlePatterns
             .SelectMany(p => p.Paths!.Select(path => (Segments: SplitPath(path), Part: ParsePart(p.Part!))))
             .ToList();
         NoisePaths = (file.NoisePaths ?? []).Select(SplitPath).ToList();
+        SystemPlaces = (file.SystemPlaces ?? [])
+            .SelectMany(p => p.Paths!.Select(path => (SplitPath(path), p.Rule!.Trim(), path)))
+            .ToList();
         GenericNames = new HashSet<string>((file.GenericFolderNames ?? []).Select(n => n.Trim()), StringComparer.OrdinalIgnoreCase);
         GenericRegexes = (file.GenericFolderRegexes ?? []).Select(r => new Regex(r, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)).ToList();
     }
@@ -62,6 +65,9 @@ public sealed class BundlePatterns
     public IReadOnlyList<DumpSignature> Signatures { get; }
     public IReadOnlyList<(string[] Segments, DumpPart Part)> KeepParts { get; }
     public IReadOnlyList<string[]> NoisePaths { get; }
+
+    /// <summary>Entries of <c>system_places</c>: the path split into folder names, the rule name, the path as written.</summary>
+    public IReadOnlyList<(string[] Run, string Rule, string Path)> SystemPlaces { get; }
     public IReadOnlySet<string> GenericNames { get; }
     public IReadOnlyList<Regex> GenericRegexes { get; }
 
@@ -166,12 +172,32 @@ public sealed class BundlePatterns
         return null;
     }
 
+    /// <summary>
+    /// The <c>system_places</c> entry a directory lies at or below, by the folder names of its full path; null when
+    /// none. A path is a run of folder names that may start anywhere in the path; <c>*</c> stands for one folder of
+    /// any name, and <c>a|b</c> for one folder named a or b.
+    /// </summary>
+    public SystemPlace? SystemPlaceOf(IReadOnlyList<string> segments)
+    {
+        foreach (var (run, rule, path) in SystemPlaces)
+        {
+            for (var end = run.Length; end <= segments.Count; end++)
+            {
+                if (RunEndsAt(segments, run, end))
+                    return new SystemPlace(rule, path);
+            }
+        }
+        return null;
+    }
+
     private static bool RunEndsAt(IReadOnlyList<string> segments, string[] run, int end)
     {
         var start = end - run.Length;
         for (var i = 0; i < run.Length; i++)
         {
-            if (!string.Equals(segments[start + i], run[i], StringComparison.OrdinalIgnoreCase))
+            if (run[i] == "*") continue;
+            var segment = segments[start + i];
+            if (!run[i].Split('|').Any(name => string.Equals(segment, name, StringComparison.OrdinalIgnoreCase)))
                 return false;
         }
         return true;
@@ -256,6 +282,17 @@ public sealed class BundlePatterns
                 problems.Add($"keep_parts[{i}].paths must list at least one non-empty path.");
         }
 
+        for (var i = 0; i < (file.SystemPlaces?.Count ?? 0); i++)
+        {
+            var p = file.SystemPlaces![i];
+            if (string.IsNullOrWhiteSpace(p.Rule))
+                problems.Add($"system_places[{i}].rule is missing.");
+            if (p.Paths is null || p.Paths.Count == 0 || p.Paths.Any(path => SplitPath(path).Length == 0))
+                problems.Add($"system_places[{i}].paths must list at least one non-empty path.");
+            else if (p.Paths.Any(path => SplitPath(path).All(s => s == "*")))
+                problems.Add($"system_places[{i}].paths must name at least one folder, not only '*'.");
+        }
+
         for (var i = 0; i < (file.GenericFolderRegexes?.Count ?? 0); i++)
         {
             try { _ = new Regex(file.GenericFolderRegexes![i]); }
@@ -274,6 +311,7 @@ public sealed class BundlePatterns
         public List<SignatureEntry>? Signatures { get; set; }
         public List<KeepPartEntry>? KeepParts { get; set; }
         public List<string>? NoisePaths { get; set; }
+        public List<SystemPlaceEntry>? SystemPlaces { get; set; }
         public List<string>? GenericFolderNames { get; set; }
         public List<string>? GenericFolderRegexes { get; set; }
     }
@@ -306,7 +344,21 @@ public sealed class BundlePatterns
         public string? Part { get; set; }
         public List<string>? Paths { get; set; }
     }
+
+    private sealed class SystemPlaceEntry
+    {
+        public string? Rule { get; set; }
+        public List<string>? Paths { get; set; }
+    }
 }
+
+/// <summary>
+/// A directory at or below a <c>system_places</c> path: content of programs or of the operating system in a place
+/// a person also uses (learning material of an application in the public documents, account pictures, shortcuts
+/// on the public desktop, package manager folders). <see cref="Rule"/> is the name of the entry, <see cref="Path"/>
+/// the path that matched, as written in the file.
+/// </summary>
+public sealed record SystemPlace(string Rule, string Path);
 
 /// <summary>One way of recognising a dump from the names directly inside a directory.</summary>
 /// <summary>A directory recognised as a dump by <see cref="BundlePatterns.Recognise"/>.</summary>

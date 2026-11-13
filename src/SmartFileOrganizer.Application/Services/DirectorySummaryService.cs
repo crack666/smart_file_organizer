@@ -68,7 +68,7 @@ public class DirectorySummaryService
         // Directories ordered deepest-first for bottom-up summarization
         var allDirs = await _dirRepo.GetAllForJobOrderedByDepthAsync(jobId, ct);
         var aiCandidateDirs = allDirs
-            .Where(d => d.DirStatus != DirectoryStatus.Skip)
+            .Where(d => d.DirStatus is not (DirectoryStatus.Skip or DirectoryStatus.Link or DirectoryStatus.Error))
             .Where(d => !string.IsNullOrWhiteSpace(d.Name) && !d.Name.StartsWith(".", StringComparison.Ordinal))
             .ToList();
         var dirsDeepFirst = aiCandidateDirs.OrderByDescending(d => d.Depth).ThenBy(d => d.FullPath).ToList();

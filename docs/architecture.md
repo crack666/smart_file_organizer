@@ -257,9 +257,14 @@ call) or `model`.
    `game:exe+_Data`, backup images, …) and a hint (`uniform` from 80 % of one file type or naming
    series, `mixed` from three or more types with none above 50 %).
 3. `DirectoryVerdictRules` decide the clear cases without the model, in this order: below a directory
-   judged `unit` (`inside-unit`), skipped by the scan (`scan-skip`), name starting with a dot
-   (`hidden`), inside a dump at or below one of its noise paths (`dump-noise`), unit markers
-   (`marker`), a dump (`dump`), no files and no subdirectories (`empty`).
+   judged `unit` (`inside-unit`), skipped by the scan (`scan-skip`), a link the scan did not enter
+   (`link`, `system`), a folder the scan could not read (`scan-error`: no verdict, the error names the cause, and a
+   parent judged from its subdirectories leaves it out), name starting with a dot
+   (`hidden`), inside a dump at or below one of its noise paths (`dump-noise`), at or below a `system_places` path of
+   the patterns (`system-place`, `system`; [bundles.md](bundles.md#pattern-file)), unit markers
+   (`marker`), a dump (`dump`), no files and no subdirectories (`empty`), exactly one file and no subdirectory
+   (`single-file`: `uniform` without retention, the file is judged and the folder follows it). The rules `link`, `scan-error`,
+   `system-place` and `single-file` were added on 13.11.2026 (https://github.com/crack666/smart_file_organizer/issues/67).
    `dump` uses the one recognition the bundles and the library review use (`BundlePatterns.Recognise`,
    `bundle-patterns.json`, or `Bundles:PatternsFile` when set). Unpacked software is a `unit`, so
    everything inside it is `inside-unit` and none of its files is judged one by one. A copy of a phone,
