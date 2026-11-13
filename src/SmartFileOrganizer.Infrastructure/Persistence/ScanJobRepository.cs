@@ -83,25 +83,37 @@ public class ScanJobRepository : IScanJobRepository
     {
         await using var conn = _db.CreateConnection();
         await conn.OpenAsync(ct);
+        await using var tx = await conn.BeginTransactionAsync(ct);
 
-        // Cascade manually (SQLite FK cascade requires ON DELETE CASCADE in DDL;
-        // we delete in dependency order instead).
+        // Children before parents: foreign keys are enforced, and most references were declared without
+        // ON DELETE CASCADE. One transaction, so a failure leaves the job whole. Test cases and evaluation runs
+        // outlive the job and only lose their reference to it; content_fingerprints belongs to paths, not jobs.
+        // A table added later with a job, file or folder reference belongs in this list
+        // (ScanJobDeletionTests seeds every table and fails otherwise).
         const string sql = BundleRepository.DeleteForJobSql + """
 
             DELETE FROM comparison_files    WHERE comparison_id IN (SELECT id FROM comparisons WHERE source_job_id = @id OR against_job_id = @id);
             DELETE FROM comparisons         WHERE source_job_id = @id OR against_job_id = @id;
-            DELETE FROM user_overrides     WHERE file_node_id IN (SELECT id FROM file_nodes WHERE job_id = @id);
+            DELETE FROM user_overrides      WHERE file_node_id IN (SELECT id FROM file_nodes WHERE job_id = @id);
             DELETE FROM ai_results          WHERE file_node_id IN (SELECT id FROM file_nodes WHERE job_id = @id);
+            DELETE FROM file_facts          WHERE file_node_id IN (SELECT id FROM file_nodes WHERE job_id = @id);
+            DELETE FROM result_checks       WHERE file_node_id IN (SELECT id FROM file_nodes WHERE job_id = @id);
             DELETE FROM ai_directory_results WHERE directory_node_id IN (SELECT id FROM directory_nodes WHERE job_id = @id);
+            DELETE FROM directory_samples   WHERE directory_node_id IN (SELECT id FROM directory_nodes WHERE job_id = @id);
+            DELETE FROM directory_verdicts  WHERE directory_node_id IN (SELECT id FROM directory_nodes WHERE job_id = @id);
+            UPDATE eval_cases SET job_id = NULL, file_node_id = NULL WHERE job_id = @id;
+            UPDATE eval_cases SET file_node_id = NULL WHERE file_node_id IN (SELECT id FROM file_nodes WHERE job_id = @id);
+            UPDATE eval_runs  SET job_id = NULL WHERE job_id = @id;
             DELETE FROM library_advice      WHERE job_id = @id;
             DELETE FROM finding_decisions   WHERE job_id = @id;
             DELETE FROM model_server_waits  WHERE job_id = @id;
-            DELETE FROM file_nodes        WHERE job_id = @id;
+            DELETE FROM file_nodes          WHERE job_id = @id;
             DELETE FROM file_links          WHERE job_id = @id;
             DELETE FROM directory_nodes     WHERE job_id = @id;
             DELETE FROM scan_jobs           WHERE id = @id;
             """;
 
-        await conn.ExecuteAsync(sql, new { id, jobId = id });
+        await conn.ExecuteAsync(new CommandDefinition(sql, new { id, jobId = id }, tx, cancellationToken: ct));
+        await tx.CommitAsync(ct);
     }
 }

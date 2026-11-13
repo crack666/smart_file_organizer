@@ -28,7 +28,14 @@ public class DatabaseContext
     public DatabaseContext(string dbPath, ILogger<DatabaseContext> logger)
     {
         DatabasePath = dbPath;
-        _connectionString = $"Data Source={dbPath};Pooling=False;";
+        // PRAGMA foreign_keys applies to one connection only, and every repository call opens a new one.
+        // "Foreign Keys=True" makes Microsoft.Data.Sqlite run the pragma on each open.
+        _connectionString = new SqliteConnectionStringBuilder
+        {
+            DataSource = dbPath,
+            Pooling = false,
+            ForeignKeys = true
+        }.ToString();
         _logger = logger;
     }
 
@@ -48,8 +55,9 @@ public class DatabaseContext
         await conn.OpenAsync(ct);
 
         // journal_mode cannot change inside a transaction, so it runs before the migrator.
+        // The migrator switches foreign keys off for its steps and on again afterwards.
         await conn.ExecuteAsync(new CommandDefinition(
-            "PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;", cancellationToken: ct));
+            "PRAGMA journal_mode=WAL;", cancellationToken: ct));
 
         var migrator = new SchemaMigrator(SchemaMigrator.BuiltIn, _logger);
         var version = await migrator.MigrateAsync(conn, ct);

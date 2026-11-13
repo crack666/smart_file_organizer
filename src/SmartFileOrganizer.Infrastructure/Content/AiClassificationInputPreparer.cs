@@ -356,13 +356,19 @@ public class AiClassificationInputPreparer : IClassificationInputPreparer
                     ev.Lacks("document properties: none in the file");
                 }
             }
+            catch (ContentLimitException ex)
+            {
+                ev.Lacks($"document properties: not read, {ex.Message}");
+            }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
                 ev.Lacks($"document properties: could not be read ({ex.GetType().Name})");
             }
 
             var content = await _extractor.ExtractAsync(file, ct);
-            if (ev.Section("Document text", content.TextPreview))
+            if (content.NotReadCause is { } cause)
+                ev.Lacks($"document text: not read, {cause}");
+            else if (ev.Section("Document text", content.TextPreview))
                 ev.Has(content.TextPreview.Contains("preview truncated") ? "document text (truncated)" : "document text");
             else
                 ev.Lacks("document text: none found");
