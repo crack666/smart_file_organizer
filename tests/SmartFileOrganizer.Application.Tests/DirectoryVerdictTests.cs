@@ -300,20 +300,28 @@ public class DirectoryVerdictTests : IDisposable
         Assert.Equal(DirectoryVerdictKind.Uniform, (await VerdictAsync(jobId, root)).Verdict); // a collection of units
     }
 
-    /// <summary>
-    /// A phone backup has no direct files, so before issue 50 the container rule made it a uniform
-    /// collection and the model judged its camera folder. The dump recognition of the bundles
-    /// (<c>BundlePatterns.Recognise</c>) now decides it as one unit, and everything inside follows.
-    /// </summary>
-    [Fact]
-    public async Task PhoneBackup_IsOneUnit_WithEverythingInside_WithoutModelCall()
+    private static string Sub(string root, string relative) =>
+        relative.Length == 0 ? root : Path.Combine(root, relative.Replace('/', Path.DirectorySeparatorChar));
+
+    private static void WritePhone(string phone)
     {
-        var root = MakeTree("Platte");
-        var phone = Path.Combine(root, "Handy-Backup 2021");
         for (var i = 1; i <= 5; i++)
             WriteFile(Path.Combine(phone, "DCIM", "Camera", $"IMG_2021031{i}_120000.jpg"));
         Directory.CreateDirectory(Path.Combine(phone, "LOST.DIR"));
         WriteFile(Path.Combine(phone, "Android", "data", "com.example.notes", "files", "notes.db"));
+    }
+
+    /// <summary>
+    /// A phone backup is a dump (issue 59), no longer a unit as after issue 50: the dump itself is decided by
+    /// the shared recognition, its camera folder goes to the model like any folder, its app data is noise and
+    /// is skipped without a model call.
+    /// </summary>
+    [Fact]
+    public async Task PhoneBackup_IsADump_CameraIsJudged_AppDataIsSkipped()
+    {
+        var root = MakeTree("Platte");
+        var phone = Path.Combine(root, "Handy-Backup 2021");
+        WritePhone(phone);
         WriteFile(Path.Combine(root, "Fotos", "IMG_0001.jpg"));
 
         var jobId = await ScanAsync(root);
@@ -321,24 +329,151 @@ public class DirectoryVerdictTests : IDisposable
         await NewService().RunAsync(jobId);
 
         var dump = await VerdictAsync(jobId, phone);
-        Assert.Equal(DirectoryVerdictKind.Unit, dump.Verdict);
+        Assert.Equal(DirectoryVerdictKind.Dump, dump.Verdict);
         Assert.Equal(DirectoryVerdictRules.Dump, dump.Rule);
         Assert.Contains("phone", dump.Reason);
-        Assert.Equal(dump.DirectoryNodeId, dump.UnitDirectoryNodeId);
+        Assert.Null(dump.UnitDirectoryNodeId);
 
-        foreach (var inside in new[] { "DCIM", "DCIM/Camera", "LOST.DIR", "Android", "Android/data",
-                     "Android/data/com.example.notes", "Android/data/com.example.notes/files" })
+        async Task Expect(string relative, DirectoryVerdictKind kind, string? rule)
         {
-            var v = await VerdictAsync(jobId, Path.Combine(phone, inside.Replace('/', Path.DirectorySeparatorChar)));
-            Assert.Equal(DirectoryVerdictKind.Unit, v.Verdict);
-            Assert.Equal(DirectoryVerdictRules.InsideUnit, v.Rule);
-            Assert.Equal(dump.DirectoryNodeId, v.UnitDirectoryNodeId);
+            var v = await VerdictAsync(jobId, Sub(phone, relative));
+            Assert.True(kind == v.Verdict && rule == v.Rule, $"{relative}: expected {kind} by {rule}, got {v.Verdict} by {v.Rule} ({v.Reason})");
+            Assert.Null(v.UnitDirectoryNodeId);
         }
 
-        // Only the photo folder next to the dump needed the model.
-        Assert.Equal(new[] { "Fotos" }, _ollama.CalledDirectoryNames);
+        await Expect("DCIM/Camera", DirectoryVerdictKind.Uniform, null);
+        await Expect("DCIM", DirectoryVerdictKind.Uniform, DirectoryVerdictRules.Container);
+        await Expect("LOST.DIR", DirectoryVerdictKind.Empty, DirectoryVerdictRules.Empty);
+        await Expect("Android/data", DirectoryVerdictKind.System, DirectoryVerdictRules.DumpNoise);
+        await Expect("Android/data/com.example.notes/files", DirectoryVerdictKind.System, DirectoryVerdictRules.DumpNoise);
+        await Expect("Android", DirectoryVerdictKind.System, DirectoryVerdictRules.Container);
+
+        Assert.Equal(new[] { "Camera", "Fotos" }, _ollama.CalledDirectoryNames.Order(StringComparer.Ordinal));
         Assert.All(await _fileRepo.GetByDirectoryAsync(jobId, Path.Combine(phone, "DCIM", "Camera")),
+            f => Assert.Equal(FileNodeStatus.Discovered, f.Status));
+        Assert.All(await _fileRepo.GetByDirectoryAsync(jobId, Sub(phone, "Android/data/com.example.notes/files")),
             f => Assert.Equal(FileNodeStatus.Skipped, f.Status));
+        Assert.Contains("'Android/data'", (await VerdictAsync(jobId, Sub(phone, "Android/data"))).Reason);
+    }
+
+    /// <summary>A Windows profile with documents, desktop, app data and old-style noise folders.</summary>
+    private static void WriteProfile(string profile)
+    {
+        WriteFile(Path.Combine(profile, "NTUSER.DAT"));
+        WriteFile(Path.Combine(profile, "AppData", "Local", "Temp", "a.tmp"));
+        WriteFile(Path.Combine(profile, "AppData", "Roaming", "App", "settings.xml"));
+        WriteFile(Path.Combine(profile, "Lokale Einstellungen", "Temp", "b.tmp"));
+        WriteFile(Path.Combine(profile, "Documents", "Brief.docx"));
+        WriteFile(Path.Combine(profile, "Documents", "Steuer 2014", "Bescheid.pdf"));
+        WriteFile(Path.Combine(profile, "Desktop", "notiz.txt"));
+        Directory.CreateDirectory(Path.Combine(profile, "Downloads"));
+    }
+
+    private static readonly string[] ProfileParts =
+        ["", "AppData", "AppData/Local", "AppData/Local/Temp", "AppData/Roaming/App", "Lokale Einstellungen/Temp",
+         "Documents", "Documents/Steuer 2014", "Desktop", "Downloads"];
+
+    /// <summary>
+    /// Fertig-wenn of issue 59: files under the documents of a profile are judged, files under AppData are not,
+    /// and the verdicts are the same whether the profile is the scan root or lies one level below.
+    /// </summary>
+    [Fact]
+    public async Task Profile_DocumentsAreJudged_AppDataIsNot_AtTheRootAndBelow()
+    {
+        var alone = MakeTree("max");
+        WriteProfile(alone);
+        var users = MakeTree("Users");
+        WriteProfile(Path.Combine(users, "max"));
+
+        _ollama.Answer = _ => DirectoryVerdictKind.Mixed;
+        var aloneJob = await ScanAsync(alone);
+        await NewService().RunAsync(aloneJob);
+        var usersJob = await ScanAsync(users);
+        await NewService().RunAsync(usersJob);
+
+        foreach (var (jobId, profile) in new[] { (aloneJob, alone), (usersJob, Path.Combine(users, "max")) })
+        {
+            var root = await VerdictAsync(jobId, profile);
+            Assert.Equal(DirectoryVerdictKind.Dump, root.Verdict);
+            Assert.Contains("user-profile", root.Reason);
+
+            foreach (var noise in new[] { "AppData", "AppData/Local/Temp", "Lokale Einstellungen/Temp" })
+            {
+                var v = await VerdictAsync(jobId, Sub(profile, noise));
+                Assert.Equal(DirectoryVerdictKind.System, v.Verdict);
+                Assert.Equal(DirectoryVerdictRules.DumpNoise, v.Rule);
+                Assert.All(await _fileRepo.GetByDirectoryAsync(jobId, Sub(profile, noise)), f => Assert.Equal(FileNodeStatus.Skipped, f.Status));
+            }
+
+            foreach (var part in new[] { "", "Documents", "Documents/Steuer 2014", "Desktop" })
+                Assert.All(await _fileRepo.GetByDirectoryAsync(jobId, Sub(profile, part)), f => Assert.Equal(FileNodeStatus.Discovered, f.Status));
+            Assert.Equal(DirectoryVerdictKind.Mixed, (await VerdictAsync(jobId, Sub(profile, "Documents"))).Verdict);
+        }
+
+        foreach (var part in ProfileParts)
+        {
+            var a = await VerdictAsync(aloneJob, Sub(alone, part));
+            var b = await VerdictAsync(usersJob, Sub(Path.Combine(users, "max"), part));
+            Assert.True((a.Verdict, a.Rule) == (b.Verdict, b.Rule), $"{part}: {a.Verdict}/{a.Rule} at the root, {b.Verdict}/{b.Rule} below");
+        }
+
+        // The model saw the same folders in both scans, and none of the noise.
+        var calls = _ollama.CalledDirectoryNames.ToList();
+        Assert.Equal(new[] { "Desktop", "Desktop", "Documents", "Documents", "Steuer 2014", "Steuer 2014" },
+            calls.Where(n => n is not ("max" or "Users")).Order(StringComparer.Ordinal));
+    }
+
+    /// <summary>A <c>Users</c> folder with two profiles holds two dumps, not one; it is a collection of them.</summary>
+    [Fact]
+    public async Task UsersFolderWithTwoProfiles_IsTwoDumps()
+    {
+        var users = MakeTree("Users");
+        WriteProfile(Path.Combine(users, "max"));
+        WriteProfile(Path.Combine(users, "lisa"));
+
+        var jobId = await ScanAsync(users);
+        _ollama.Answer = _ => DirectoryVerdictKind.Mixed;
+        await NewService().RunAsync(jobId);
+
+        var dumps = (await _verdictRepo.GetForJobAsync(jobId)).Where(v => v.Verdict == DirectoryVerdictKind.Dump)
+            .Select(v => Path.GetFileName(v.DirectoryFullPath)).Order(StringComparer.Ordinal).ToList();
+        Assert.Equal(new[] { "lisa", "max" }, dumps);
+
+        var root = await VerdictAsync(jobId, users);
+        Assert.Equal(DirectoryVerdictKind.Uniform, root.Verdict);
+        Assert.Equal(DirectoryVerdictRules.Container, root.Rule);
+        Assert.Equal(DirectoryVerdictRules.DumpDominantType, root.Profile.SubdirectoryDominantType);
+        Assert.DoesNotContain("Users", _ollama.CalledDirectoryNames);
+    }
+
+    /// <summary>
+    /// A phone backup inside the documents of a profile is a dump of its own: its app data is noise although no
+    /// noise path of the profile covers it. Unpacked software stays a unit with everything inside.
+    /// </summary>
+    [Fact]
+    public async Task NestedPhoneInAProfile_IsADumpOfItsOwn_SoftwareStaysAUnit()
+    {
+        var profile = MakeTree("max");
+        WriteProfile(profile);
+        WritePhone(Path.Combine(profile, "Documents", "Altes Handy"));
+        var tool = Path.Combine(profile, "Downloads", "tool");
+        WriteFile(Path.Combine(tool, "tool.exe"));
+        WriteFile(Path.Combine(tool, "tool.dll"));
+
+        var jobId = await ScanAsync(profile);
+        _ollama.Answer = _ => DirectoryVerdictKind.Mixed;
+        await NewService().RunAsync(jobId);
+
+        var phone = await VerdictAsync(jobId, Sub(profile, "Documents/Altes Handy"));
+        Assert.Equal(DirectoryVerdictKind.Dump, phone.Verdict);
+        var appData = await VerdictAsync(jobId, Sub(profile, "Documents/Altes Handy/Android/data"));
+        Assert.Equal(DirectoryVerdictRules.DumpNoise, appData.Rule);
+        Assert.Contains("Documents", appData.Reason);   // the nearest dump is the phone
+        Assert.Contains("Altes Handy", appData.Reason);
+
+        var unit = await VerdictAsync(jobId, tool);
+        Assert.Equal(DirectoryVerdictKind.Unit, unit.Verdict);
+        Assert.Equal(unit.DirectoryNodeId, unit.UnitDirectoryNodeId);
     }
 
     /// <summary>
@@ -365,23 +500,22 @@ public class DirectoryVerdictTests : IDisposable
     }
 
     /// <summary>
-    /// A scan of the phone itself is not one unit: that would leave no file to judge. The bundles split
-    /// such a scan into its parts (docs/bundles.md); the verdicts judge its folders one by one.
+    /// A scan of the phone itself is the same dump as a phone backup below the scan root (issue 59; after
+    /// issue 50 the scan root was never a dump, because a dump was a unit and would have left nothing to judge).
     /// </summary>
     [Fact]
-    public async Task PhoneScannedAtTheRoot_IsNotOneUnit()
+    public async Task PhoneScannedAtTheRoot_IsADump_JudgedLikeOneBelowTheRoot()
     {
         var phone = MakeTree("Handy");
-        WriteFile(Path.Combine(phone, "DCIM", "Camera", "IMG_20210311_120000.jpg"));
-        Directory.CreateDirectory(Path.Combine(phone, "LOST.DIR"));
-        WriteFile(Path.Combine(phone, "Android", "data", "com.example.notes", "files", "notes.db"));
+        WritePhone(phone);
 
         var jobId = await ScanAsync(phone);
         _ollama.Answer = _ => DirectoryVerdictKind.Uniform;
         await NewService().RunAsync(jobId);
 
-        Assert.NotEqual(DirectoryVerdictRules.Dump, (await VerdictAsync(jobId, phone)).Rule);
-        Assert.Contains("Camera", _ollama.CalledDirectoryNames);
+        Assert.Equal(DirectoryVerdictKind.Dump, (await VerdictAsync(jobId, phone)).Verdict);
+        Assert.Equal(DirectoryVerdictRules.DumpNoise, (await VerdictAsync(jobId, Sub(phone, "Android/data"))).Rule);
+        Assert.Equal(new[] { "Camera" }, _ollama.CalledDirectoryNames);
     }
 
     [Fact]

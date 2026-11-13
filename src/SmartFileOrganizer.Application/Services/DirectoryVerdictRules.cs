@@ -14,11 +14,21 @@ public static class DirectoryVerdictRules
     public const string Hidden = "hidden";
     public const string Marker = "marker";
     public const string Dump = "dump";
+    public const string DumpNoise = "dump-noise";
     public const string Empty = "empty";
     public const string Container = "container";
 
     /// <summary>Dominant type key for a collection of units in <see cref="DirectoryProfile.SubdirectoryDominantType"/>.</summary>
     public const string UnitDominantType = "unit";
+
+    /// <summary>Dominant type key for a collection of dumps (a <c>Users</c> folder with several profiles).</summary>
+    public const string DumpDominantType = "dump";
+
+    /// <summary>Where a directory lies inside the nearest dump above it.</summary>
+    /// <param name="DumpPath">The dump root, relative to the scan root.</param>
+    /// <param name="NoisePath">The <c>noise_paths</c> entry the directory lies at or below, or null for a part
+    /// that is judged (a worth-keeping part such as <c>Documents</c>, or a folder no pattern names).</param>
+    public sealed record DumpPlace(string DumpPath, string? NoisePath);
 
     public enum Next
     {
@@ -31,16 +41,18 @@ public static class DirectoryVerdictRules
     }
 
     /// <summary>
-    /// Rules that need only the directory itself and its nearest ancestor that is a unit.
-    /// Order matters: being part of a unit wins over everything, because a unit is never split.
+    /// Rules that need only the directory itself, its nearest ancestor that is a unit and its place in the
+    /// nearest dump above it. Order matters: being part of a unit wins over everything, because a unit is
+    /// never split. Inside a dump only the noise is decided here; every other part goes on through the rules
+    /// below and the model like any directory (https://github.com/crack666/smart_file_organizer/issues/59).
     /// </summary>
-    /// <param name="dump">The directory recognised as a device, computer or software dump by
-    /// <see cref="Bundles.BundlePatterns.Recognise"/>, the one recognition the bundles and the library review
-    /// use as well; null when it is none. A dump is a backup that belongs together, so it is a unit like a
-    /// project: https://github.com/crack666/smart_file_organizer/issues/50.</param>
+    /// <param name="dump">The directory recognised as a dump by <see cref="Bundles.BundlePatterns.Recognise"/>, the
+    /// one recognition the bundles and the library review use as well; null when it is none. Unpacked software
+    /// is a <c>unit</c>; a copy of a phone, computer, user profile or removable drive is a <c>dump</c>.</param>
+    /// <param name="inDump">Where the directory lies inside the nearest dump above it; null outside every dump.</param>
     public static (Next Next, DirectoryVerdict? Verdict) Evaluate(
         DirectoryNode dir, DirectoryProfile profile, DirectoryVerdict? unitAncestor, string? unitAncestorPath,
-        Bundles.DumpRecognition? dump = null)
+        Bundles.DumpRecognition? dump = null, DumpPlace? inDump = null)
     {
         if (unitAncestor is not null)
         {
@@ -64,6 +76,14 @@ public static class DirectoryVerdictRules
                 RetentionValue.Keep, null);
         }
 
+        if (inDump?.NoisePath is { } noisePath)
+        {
+            return Decide(dir, profile, DirectoryVerdictKind.System, DumpNoise,
+                $"Noise of the dump '{inDump.DumpPath}': at or below '{noisePath}' (app data, caches, system); "
+                + "its files are not analysed one by one.",
+                RetentionValue.Review, null);
+        }
+
         if (profile.UnitMarkers.Count > 0)
         {
             return Decide(dir, profile, DirectoryVerdictKind.Unit, Marker,
@@ -73,9 +93,17 @@ public static class DirectoryVerdictRules
 
         if (dump is not null)
         {
-            return Decide(dir, profile, DirectoryVerdictKind.Unit, Dump,
-                $"Recognised as a {dump.Describe()}; a copy of a device, computer or software is handled as a whole.",
-                RetentionValue.Review, dir.Id);
+            if (dump.Signature.Origin == DumpOrigin.Software)
+            {
+                return Decide(dir, profile, DirectoryVerdictKind.Unit, Dump,
+                    $"Recognised as a {dump.Describe()}; unpacked software is handled as a whole.",
+                    RetentionValue.Review, dir.Id);
+            }
+
+            return Decide(dir, profile, DirectoryVerdictKind.Dump, Dump,
+                $"Recognised as a {dump.Describe()}. A copy of a device or computer is no unit: its parts are judged "
+                + "on their own, only its noise (app data, caches, system) is skipped.",
+                RetentionValue.Review, null);
         }
 
         if (profile.FileCount == 0 && dir.DirStatus == DirectoryStatus.Scanned)
@@ -130,13 +158,18 @@ public static class DirectoryVerdictRules
         }
 
         var keys = nonSystem.Select(DominantType).Distinct(StringComparer.Ordinal).ToList();
-        var allAlike = nonSystem.All(c => c.Verdict is DirectoryVerdictKind.Unit or DirectoryVerdictKind.Uniform)
+        var allAlike = nonSystem.All(c => c.Verdict is DirectoryVerdictKind.Unit or DirectoryVerdictKind.Uniform or DirectoryVerdictKind.Dump)
                        && keys.Count == 1 && keys[0] is not null;
 
         if (allAlike)
         {
             profile.SubdirectoryDominantType = keys[0];
-            var what = keys[0] == UnitDominantType ? "units (projects, programs, games or backups)" : $"collections of {keys[0]}";
+            var what = keys[0] switch
+            {
+                UnitDominantType => "units (projects, programs, games or backups)",
+                DumpDominantType => "dumps (copies of devices, computers or user profiles)",
+                _ => $"collections of {keys[0]}"
+            };
             return Decide(dir, profile, DirectoryVerdictKind.Uniform, Container,
                 $"No direct files; all {nonSystem.Count} subdirectories with content are {what}.",
                 RetentionValue.Review, null).Verdict!;
@@ -151,10 +184,11 @@ public static class DirectoryVerdictRules
             RetentionValue.Review, null).Verdict!;
     }
 
-    /// <summary>What a judged directory mainly holds, for comparing siblings: <c>unit</c>, a file type name, or null.</summary>
+    /// <summary>What a judged directory mainly holds, for comparing siblings: <c>unit</c>, <c>dump</c>, a file type name, or null.</summary>
     public static string? DominantType(DirectoryVerdict v)
     {
         if (v.Verdict == DirectoryVerdictKind.Unit) return UnitDominantType;
+        if (v.Verdict == DirectoryVerdictKind.Dump) return DumpDominantType;
         if (v.Profile.FileCount > 0 && v.Profile.FileTypes.Count > 0) return v.Profile.FileTypes[0].Key;
         return v.Profile.SubdirectoryDominantType;
     }

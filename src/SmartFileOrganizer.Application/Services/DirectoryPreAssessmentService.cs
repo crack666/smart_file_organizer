@@ -127,7 +127,7 @@ public class DirectoryPreAssessmentService
 
                 var prepared = await PrepareAsync(jobId, dir, tree, ct);
                 var (next, verdict) = DirectoryVerdictRules.Evaluate(
-                    dir, prepared.Profile, prepared.UnitAncestor, prepared.UnitAncestorPath, prepared.Dump);
+                    dir, prepared.Profile, prepared.UnitAncestor, prepared.UnitAncestorPath, prepared.Dump, prepared.InDump);
 
                 switch (next)
                 {
@@ -192,7 +192,7 @@ public class DirectoryPreAssessmentService
         var tree = await JobTree.LoadAsync(jobId, allDirs, _verdictRepo, ct);
         var prepared = await PrepareAsync(jobId, dir, tree, ct);
         var (next, verdict) = DirectoryVerdictRules.Evaluate(
-            dir, prepared.Profile, prepared.UnitAncestor, prepared.UnitAncestorPath, prepared.Dump);
+            dir, prepared.Profile, prepared.UnitAncestor, prepared.UnitAncestorPath, prepared.Dump, prepared.InDump);
 
         switch (next)
         {
@@ -217,29 +217,47 @@ public class DirectoryPreAssessmentService
         var children = tree.ChildrenOf(dir);
         var profile = DirectoryProfileBuilder.Build(files, children.Select(c => c.Name).ToList());
         var (unitAncestor, unitPath) = tree.FindUnitAncestor(dir);
-        var dump = unitAncestor is null ? await RecogniseDumpAsync(jobId, dir, files, children, tree, ct) : null;
-        return new PreparedDirectory(dir, files, children, profile, unitAncestor, unitPath, dump);
+        var inDump = unitAncestor is null ? PlaceInDump(dir, tree) : null;
+        var dump = unitAncestor is null && inDump?.NoisePath is null
+            ? await RecogniseDumpAsync(jobId, dir, files, children, tree, ct)
+            : null;
+        return new PreparedDirectory(dir, files, children, profile, unitAncestor, unitPath, dump, inDump);
     }
 
     /// <summary>
-    /// Whether the directory is a dump by the shared recognition of the bundles. Never the scan root: a
-    /// scanned phone or user profile as one unit would leave no file to judge, and the bundles split it into
-    /// its parts anyway. The media share of the subtree is read only when a signature limits it.
+    /// The place of a directory inside the nearest dump above it, by its path below the dump root and the
+    /// <c>noise_paths</c> of the shared patterns (<see cref="BundlePatterns.NoisePathOf"/>), the same the bundles
+    /// split a dump by. Null outside every dump.
+    /// </summary>
+    private DirectoryVerdictRules.DumpPlace? PlaceInDump(DirectoryNode dir, JobTree tree)
+    {
+        if (tree.FindDumpAncestor(dir) is not { } root) return null;
+        var segments = BundlePatterns.SplitPath(Path.GetRelativePath(root.FullPath, dir.FullPath));
+        var dumpPath = string.IsNullOrEmpty(root.RelativePath) ? "." : root.RelativePath;
+        return new DirectoryVerdictRules.DumpPlace(dumpPath, _patterns.NoisePathOf(segments));
+    }
+
+    /// <summary>
+    /// Whether the directory is a dump by the shared recognition of the bundles. The scan root too, with the
+    /// signatures that allow it (<c>at_root</c>), as the bundles do: a dump is no unit, so a scanned profile is
+    /// judged the same whether it is the scan root or lies below it. Inside a dump a nested one is recognised
+    /// as well (a phone backup in the documents of a profile). The media share of the subtree is read only when
+    /// a signature limits it.
     /// </summary>
     private async Task<DumpRecognition?> RecogniseDumpAsync(
         long jobId, DirectoryNode dir, IReadOnlyList<DirectoryFileInfo> files, IReadOnlyList<DirectoryNode> children,
         JobTree tree, CancellationToken ct)
     {
-        if (dir.Depth == 0) return null;
+        var isRoot = dir.Depth == 0;
         var subdirectories = children.Select(c => c.Name).ToList();
         var names = files.Select(f => f.Name).ToList();
 
         var shareAsked = false;
-        var first = _patterns.Recognise(subdirectories, names, isRoot: false, () => { shareAsked = true; return 0; });
+        var first = _patterns.Recognise(subdirectories, names, isRoot, () => { shareAsked = true; return 0; });
         if (!shareAsked) return first;
 
         var share = await SubtreeMediaShareAsync(jobId, dir, files, tree, ct);
-        return _patterns.Recognise(subdirectories, names, isRoot: false, () => share);
+        return _patterns.Recognise(subdirectories, names, isRoot, () => share);
     }
 
     private async Task<double> SubtreeMediaShareAsync(
@@ -282,16 +300,18 @@ public class DirectoryPreAssessmentService
             return;
         }
 
-        var assessment = handledAsWhole
+        // A dump root carries its recognition as summary. Its own files (NTUSER.DAT, loose files on a phone)
+        // are judged one by one: in doubt a file is judged, and a dump root rarely holds more than a few.
+        var assessment = handledAsWhole || verdict.Verdict == DirectoryVerdictKind.Dump
             ? new DirectoryClassificationResult
             {
                 DirectoryNodeId = dir.Id,
                 Phase = PreAssessmentPhase,
                 Summary = verdict.Reason,
-                Homogeneity = "high",
+                Homogeneity = handledAsWhole ? "high" : "low",
                 DominantType = verdict.Verdict.ToCode(),
-                SamplingStrategy = "skip",
-                SampleSize = 0,
+                SamplingStrategy = handledAsWhole ? "skip" : "analyze_all",
+                SampleSize = handledAsWhole ? 0 : p.Files.Count,
                 AnalyzedAt = DateTime.UtcNow
             }
             : NoFilesAssessment(dir);
@@ -390,7 +410,7 @@ public class DirectoryPreAssessmentService
     /// <list type="bullet">
     /// <item>unit or system: no file is analysed (Skipped); the directory carries the result.</item>
     /// <item>uniform: Phase 2 draws a stratified sample (<see cref="DirectorySamplingService"/>).</item>
-    /// <item>mixed, no valid verdict, or "empty" for a directory that has files: every file is judged.</item>
+    /// <item>mixed, the root of a dump, no valid verdict, or "empty" for a directory that has files: every file is judged.</item>
     /// </list>
     /// </summary>
     private async Task ApplyVerdictToFilesAsync(
@@ -461,7 +481,8 @@ public class DirectoryPreAssessmentService
         DirectoryProfile Profile,
         DirectoryVerdict? UnitAncestor,
         string? UnitAncestorPath,
-        DumpRecognition? Dump);
+        DumpRecognition? Dump,
+        DirectoryVerdictRules.DumpPlace? InDump);
 
     /// <summary>All directories of a job with their verdicts so far; safe for the parallel model calls.</summary>
     private sealed class JobTree
@@ -508,6 +529,20 @@ public class DirectoryPreAssessmentService
                 parentPath = parent.ParentPath;
             }
             return (null, null);
+        }
+
+        /// <summary>Nearest ancestor judged <c>dump</c>; null outside every dump.</summary>
+        public DirectoryNode? FindDumpAncestor(DirectoryNode dir)
+        {
+            var parentPath = dir.ParentPath;
+            var guard = 0;
+            while (!string.IsNullOrEmpty(parentPath) && _byPath.TryGetValue(parentPath, out var parent) && guard++ < 512)
+            {
+                if (_verdicts.TryGetValue(parent.Id, out var v) && v.Verdict == DirectoryVerdictKind.Dump)
+                    return parent;
+                parentPath = parent.ParentPath;
+            }
+            return null;
         }
     }
 }
