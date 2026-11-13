@@ -98,6 +98,33 @@ public class EvaluationTests : IDisposable
         Assert.NotEqual(Fingerprint(a.Directory), Fingerprint(c.Directory));
     }
 
+    /// <summary>
+    /// Issue 56: the library of the corpus lies next to the tree, every file it describes exists there, every expected
+    /// place is a folder of it, and the traps are in: two occasions of one day, and occasions without a folder.
+    /// </summary>
+    [Fact]
+    public void Generator_WritesALibraryWithKnownTargets_NextToTheTree()
+    {
+        var corpus = SmallCorpusGenerator.Generate(Path.Combine(_dir, "t"));
+        var targets = EvalTargetTruth.LoadBeside(corpus.TruthPath);
+        Assert.NotNull(targets);
+        var library = Path.Combine(corpus.Directory, targets.Library);
+        Assert.NotEqual(Path.GetFullPath(corpus.RootPath), Path.GetFullPath(library));
+        Assert.False(Path.GetFullPath(library).StartsWith(Path.GetFullPath(corpus.RootPath) + Path.DirectorySeparatorChar, StringComparison.Ordinal));
+
+        Assert.All(targets.LibraryFiles, f => Assert.True(File.Exists(Path.Combine(library, f.Path))));
+        Assert.Equal(Directory.EnumerateFiles(library, "*", SearchOption.AllDirectories).Count(), targets.LibraryFiles.Count);
+        var truth = EvalTruth.Load(corpus.TruthPath);
+        foreach (var t in targets.Targets)
+        {
+            Assert.True(truth.Files.ContainsKey(t.Path), t.Path);
+            Assert.NotNull(truth.Files[t.Path].Description);
+            if (t.Destination is { } d) Assert.True(Directory.Exists(Path.Combine(library, d)), d);
+        }
+        Assert.True(targets.Targets.Count(t => t.Unit == "bundle" && t.Path.StartsWith("Import/IMG_20210206_", StringComparison.Ordinal)) == 2);
+        Assert.Contains(targets.Targets, t => t.Destination is null);
+    }
+
     [Fact]
     public void Generator_RefusesAFolderThatIsNotEmpty()
     {
@@ -367,8 +394,9 @@ public class EvaluationTests : IDisposable
         {
             sb.Append(Path.GetRelativePath(directory, file)).Append('|')
               .Append(Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(file)))).Append('|')
-              // Corpus files carry fixed dates; truth.json and findings.json are written now.
-              .Append(Path.GetFileName(file) is EvalTruth.FileName or EvalFindingTruth.FileName ? 0 : File.GetLastWriteTimeUtc(file).Ticks).Append('\n');
+              // Corpus files carry fixed dates; truth.json, findings.json and targets.json are written now.
+              .Append(Path.GetFileName(file) is EvalTruth.FileName or EvalFindingTruth.FileName or EvalTargetTruth.FileName
+                  ? 0 : File.GetLastWriteTimeUtc(file).Ticks).Append('\n');
         }
         return sb.ToString();
     }

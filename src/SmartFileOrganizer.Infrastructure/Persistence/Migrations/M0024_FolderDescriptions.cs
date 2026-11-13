@@ -1,16 +1,16 @@
 namespace SmartFileOrganizer.Infrastructure.Persistence.Migrations;
 
 /// <summary>
-/// Step 22: descriptions of library folders (https://github.com/crack666/smart_file_organizer/issues/56).
+/// Step 24: descriptions of library folders (https://github.com/crack666/smart_file_organizer/issues/56).
 /// <c>sfo library match</c> describes a candidate folder from a small sample of its own files (scene, occasion,
 /// document kind, issuer, as stored in <c>file_facts</c> for a source) and keeps the description here, so a folder is
 /// sampled once and not on every match. <c>source</c> says where the description comes from: <c>sample</c> today,
 /// <c>external</c> reserved for descriptions another program already holds. The library is only read; this table is
 /// the only thing written about it. Rows go with the job.
 /// </summary>
-internal sealed class M0022_FolderDescriptions : SqlSchemaMigration
+internal sealed class M0024_FolderDescriptions : SqlSchemaMigration
 {
-    public override int Version => 22;
+    public override int Version => 24;
     public override string Description => "Descriptions of library folders from a sample of their files";
 
     protected override string Sql => """
