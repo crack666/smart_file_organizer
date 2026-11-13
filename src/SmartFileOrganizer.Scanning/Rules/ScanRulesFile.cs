@@ -155,11 +155,12 @@ public static class ScanRulesFile
             "skip" => ScanRuleAction.Skip,
             "shallow" => ScanRuleAction.Shallow,
             "user_data" => ScanRuleAction.UserData,
+            "follow_link" => ScanRuleAction.FollowLink,
             _ => null
         };
         if (action == null)
         {
-            problems.Add($"{at}.action must be 'skip', 'shallow' or 'user_data'" +
+            problems.Add($"{at}.action must be 'skip', 'shallow', 'user_data' or 'follow_link'" +
                          (dto.Action == null ? " (missing)" : $", not '{dto.Action}'"));
             ok = false;
         }

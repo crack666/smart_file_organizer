@@ -36,6 +36,10 @@ public class ScopedRefreshService : IScopedRefreshService
         if (!_fs.DirectoryExists(directoryPath))
             throw new DirectoryNotFoundException($"Directory '{directoryPath}' does not exist anymore.");
 
+        // A link is not entered by a rescan either: its content belongs to its target.
+        if (_fs.GetLink(directoryPath) is { } link)
+            throw new InvalidOperationException($"Directory '{directoryPath}' is a link ({HeuristicsEngine.DescribeLink(link)}) and is not entered.");
+
         var refreshedFiles = BuildDirectFileNodes(job, dir, directoryPath).ToList();
         await _fileRepo.ReplaceDirectoryFilesAsync(jobId, directoryPath, refreshedFiles, ct);
 
@@ -69,7 +73,7 @@ public class ScopedRefreshService : IScopedRefreshService
         file.ParentPath = _fs.GetDirectoryName(file.FullPath) ?? file.ParentPath;
         file.RelativePath = _fs.GetRelativePath(job.RootPath, file.FullPath);
         file.RelativeDir = _fs.GetRelativePath(job.RootPath, file.ParentPath);
-        file.Size = _fs.GetFileSize(file.FullPath);
+        ReadSize(file);
         file.LastWriteTime = _fs.GetLastWriteTime(file.FullPath);
         file.Extension = _fs.GetExtension(file.FullPath);
         file.FileType = FileTypeDetector.Detect(file.Extension);
@@ -81,10 +85,30 @@ public class ScopedRefreshService : IScopedRefreshService
         return file;
     }
 
+    /// <summary>Size of the file, or the cause why it could not be read (never a silent 0).</summary>
+    private void ReadSize(FileNode file)
+    {
+        try
+        {
+            file.Size = _fs.GetFileSize(file.FullPath);
+            file.ScanErrorCause = null;
+            file.ScanError = null;
+        }
+        catch (Exception ex) when (ScanErrorCauses.IsReadError(ex))
+        {
+            file.Size = 0;
+            file.ScanErrorCause = ScanErrorCauses.Of(ex).ToCode();
+            file.ScanError = ex.Message;
+        }
+    }
+
     private IEnumerable<FileNode> BuildDirectFileNodes(ScanJob job, DirectoryNode dir, string directoryPath)
     {
-        foreach (var filePath in _fs.EnumerateFiles(directoryPath))
+        // ListFiles throws for an unreadable folder: a failed rescan must not store it as empty.
+        foreach (var filePath in _fs.ListFiles(directoryPath))
         {
+            if (_fs.GetLink(filePath) != null)
+                continue;   // a link is no content; the scan records it in file_links
             var ext = _fs.GetExtension(filePath);
             var node = new FileNode
             {
@@ -96,13 +120,13 @@ public class ScopedRefreshService : IScopedRefreshService
                 RelativePath = _fs.GetRelativePath(job.RootPath, filePath),
                 RelativeDir = _fs.GetRelativePath(job.RootPath, directoryPath),
                 Depth = dir.Depth + 1,
-                Size = _fs.GetFileSize(filePath),
                 LastWriteTime = _fs.GetLastWriteTime(filePath),
                 Extension = ext,
                 FileType = FileTypeDetector.Detect(ext),
                 Status = FileNodeStatus.Discovered,
                 ScannedAt = DateTime.UtcNow
             };
+            ReadSize(node);
             SensitiveFileRules.Apply(node, job.StructureOnly ? null : maxBytes => _fs.ReadPrefix(filePath, maxBytes));
             yield return node;
         }

@@ -18,6 +18,17 @@ public sealed class DirectoryReadRow
     public DirectoryStatus DirStatus { get; set; }
     public int SubdirCount { get; set; }
 
+    /// <summary>Why the scan treated the folder as it did (<c>directory_nodes.dir_reason</c>).</summary>
+    public string? ScanReason { get; set; }
+
+    /// <summary>Code of <see cref="LinkKind"/> when the folder is a link; see <see cref="DirectoryNode.LinkKind"/>.</summary>
+    public string? LinkKind { get; set; }
+
+    public string? LinkTarget { get; set; }
+
+    /// <summary>Code of <see cref="ScanErrorCause"/> for a folder the scan could not read.</summary>
+    public string? ScanErrorCause { get; set; }
+
     /// <summary>Stored verdict code (<c>unit</c>, ...); null when there is no verdict or only an error.</summary>
     public string? Verdict { get; set; }
 

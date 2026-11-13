@@ -44,4 +44,14 @@ public class DirectoryNode
 
     /// <summary>Ids of the rules that marked the folder (<c>dir:ssh</c>); no content.</summary>
     public string? SensitiveRule { get; set; }
+
+    /// <summary>Code of <see cref="Enums.LinkKind"/> when the folder is a link: not followed
+    /// (<see cref="DirectoryStatus.Link"/>) or followed by a <c>follow_link</c> rule. Null for a plain folder.</summary>
+    public string? LinkKind { get; set; }
+
+    /// <summary>Where the link points, as stored in it; null when unreadable or no link.</summary>
+    public string? LinkTarget { get; set; }
+
+    /// <summary>Code of <see cref="Enums.ScanErrorCause"/> when <see cref="DirStatus"/> is <see cref="DirectoryStatus.Error"/>.</summary>
+    public string? ScanErrorCause { get; set; }
 }

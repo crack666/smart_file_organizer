@@ -9,7 +9,10 @@ public enum ScanDecision
     /// <summary>List direct files and count subdirectories, but do not recurse.</summary>
     Shallow,
     /// <summary>Completely skip this directory.</summary>
-    Skip
+    Skip,
+    /// <summary>The directory is a link (junction, symbolic link, mount point) that is not followed: recorded
+    /// with its target, not entered, its content not counted.</summary>
+    Link
 }
 
 /// <summary>

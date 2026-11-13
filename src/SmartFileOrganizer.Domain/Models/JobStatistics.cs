@@ -35,7 +35,23 @@ public sealed class JobStatistics
 
     /// <summary>The most recent errors, newest first.</summary>
     public IReadOnlyList<JobErrorEntry> RecentErrors { get; init; } = [];
+
+    /// <summary>Folders and files the scan could not read, grouped by cause (code of <see cref="Enums.ScanErrorCause"/>).</summary>
+    public IReadOnlyList<ScanErrorGroup> ScanErrors { get; init; } = [];
+
+    /// <summary>Links the scan found, grouped by kind (code of <see cref="Enums.LinkKind"/>).</summary>
+    public IReadOnlyList<LinkGroup> Links { get; init; } = [];
 }
+
+/// <summary>Read errors of one cause: how many folders and files, and the first few by path.</summary>
+public sealed record ScanErrorGroup(string Cause, long Directories, long Files, IReadOnlyList<ScanErrorExample> Examples);
+
+public sealed record ScanErrorExample(string Path, string? Message);
+
+/// <summary>Links of one kind: folders not entered, folders a <c>follow_link</c> rule entered, files that are links.</summary>
+public sealed record LinkGroup(string Kind, long NotFollowed, long Followed, long Files, IReadOnlyList<LinkExample> Examples);
+
+public sealed record LinkExample(string Path, string? Target, bool Followed);
 
 /// <summary>One recorded failure. <see cref="Phase"/> is <c>classification</c>, <c>pre_assessment</c> or <c>summary</c>.</summary>
 public sealed record JobErrorEntry(string Phase, string Path, string Message);

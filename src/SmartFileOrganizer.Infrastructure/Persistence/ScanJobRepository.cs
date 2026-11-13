@@ -96,6 +96,7 @@ public class ScanJobRepository : IScanJobRepository
             DELETE FROM library_advice      WHERE job_id = @id;
             DELETE FROM finding_decisions   WHERE job_id = @id;
             DELETE FROM file_nodes         WHERE job_id = @id;
+            DELETE FROM file_links          WHERE job_id = @id;
             DELETE FROM directory_nodes     WHERE job_id = @id;
             DELETE FROM scan_jobs           WHERE id = @id;
             """;

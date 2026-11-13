@@ -21,11 +21,13 @@ public class FileRepository : IFileRepository
             INSERT OR IGNORE INTO file_nodes
                 (job_id, full_path, name, parent_path, root_path, relative_path,
                  relative_dir, depth, size, last_write_time, extension,
-                 file_type, status, scanned_at, sensitive_markers, sensitive_rule, sensitive_rules_version)
+                 file_type, status, scanned_at, sensitive_markers, sensitive_rule, sensitive_rules_version,
+                 scan_error_cause, scan_error)
             VALUES
                 (@JobId, @FullPath, @Name, @ParentPath, @RootPath, @RelativePath,
                  @RelativeDir, @Depth, @Size, @LastWriteTime, @Extension,
-                 @FileType, @Status, @ScannedAt, @SensitiveMarkers, @SensitiveRule, @SensitiveRulesVersion)
+                 @FileType, @Status, @ScannedAt, @SensitiveMarkers, @SensitiveRule, @SensitiveRulesVersion,
+                 @ScanErrorCause, @ScanError)
             """;
 
         await conn.ExecuteAsync(sql, nodes.Select(ToParameters), transaction: tx);
@@ -76,11 +78,13 @@ public class FileRepository : IFileRepository
                 INSERT INTO file_nodes
                     (job_id, full_path, name, parent_path, root_path, relative_path,
                      relative_dir, depth, size, last_write_time, extension,
-                     file_type, status, scanned_at, sensitive_markers, sensitive_rule, sensitive_rules_version)
+                     file_type, status, scanned_at, sensitive_markers, sensitive_rule, sensitive_rules_version,
+                 scan_error_cause, scan_error)
                 VALUES
                     (@JobId, @FullPath, @Name, @ParentPath, @RootPath, @RelativePath,
                      @RelativeDir, @Depth, @Size, @LastWriteTime, @Extension,
-                     @FileType, @Status, @ScannedAt, @SensitiveMarkers, @SensitiveRule, @SensitiveRulesVersion)
+                     @FileType, @Status, @ScannedAt, @SensitiveMarkers, @SensitiveRule, @SensitiveRulesVersion,
+                 @ScanErrorCause, @ScanError)
                 """;
 
             await conn.ExecuteAsync(insertSql, nodeList.Select(ToParameters), transaction: tx);
@@ -206,7 +210,9 @@ public class FileRepository : IFileRepository
                 scanned_at = @ScannedAt,
                 sensitive_markers = @SensitiveMarkers,
                 sensitive_rule = @SensitiveRule,
-                sensitive_rules_version = @SensitiveRulesVersion
+                sensitive_rules_version = @SensitiveRulesVersion,
+                scan_error_cause = @ScanErrorCause,
+                scan_error = @ScanError
             WHERE id = @Id
             """,
             ToParameters(node));
@@ -364,6 +370,22 @@ public class FileRepository : IFileRepository
         n.ScannedAt,
         SensitiveMarkers = SensitiveMarkerNames.Format(n.SensitiveMarkers),
         n.SensitiveRule,
-        n.SensitiveRulesVersion
+        n.SensitiveRulesVersion,
+        n.ScanErrorCause,
+        n.ScanError
     };
+
+    public async Task InsertLinksAsync(IEnumerable<FileLinkNode> links, CancellationToken ct = default)
+    {
+        await using var conn = _db.CreateConnection();
+        await conn.OpenAsync(ct);
+        await using var tx = await conn.BeginTransactionAsync(ct);
+        await conn.ExecuteAsync(
+            """
+            INSERT OR IGNORE INTO file_links (job_id, full_path, name, parent_path, link_kind, link_target, scanned_at)
+            VALUES (@JobId, @FullPath, @Name, @ParentPath, @LinkKind, @LinkTarget, @ScannedAt)
+            """,
+            links, transaction: tx);
+        await tx.CommitAsync(ct);
+    }
 }

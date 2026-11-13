@@ -115,7 +115,7 @@ public static class RulesCommand
                 RuleCheck check;
                 try
                 {
-                    check = engine.Check(scanRoot, full, folder => Probe(fs, folder));
+                    check = engine.Check(scanRoot, full, folder => Probe(fs, folder), fs.GetLink);
                 }
                 catch (ArgumentException ex)
                 {
