@@ -52,7 +52,15 @@ public static class DoctorCommand
             using (var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct))
             {
                 timeout.CancelAfter(OllamaTimeout);
-                reachable = await ollama.IsAvailableAsync(timeout.Token);
+                try
+                {
+                    reachable = await ollama.IsAvailableAsync(timeout.Token);
+                }
+                catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+                {
+                    // Our own limit: IsAvailableAsync passes a cancelled token through instead of answering false.
+                    reachable = false;
+                }
             }
             ct.ThrowIfCancellationRequested();
 

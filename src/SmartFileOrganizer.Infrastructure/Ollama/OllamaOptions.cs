@@ -4,7 +4,10 @@ public class OllamaOptions
 {
     public string BaseUrl { get; set; } = "http://localhost:11434";
     public string Model { get; set; } = "gemma4:26b";
-    public int TimeoutSeconds { get; set; } = 180;
+    /// <summary>Time limit of one attempt of a model call. A fraction is allowed (tests).</summary>
+    public double TimeoutSeconds { get; set; } = 180;
+
+    /// <summary>Attempts after the first when the server does not answer (no connection, time limit, 429, 502, 503, 504).</summary>
     public int MaxRetries { get; set; } = 2;
     public string KeepAlive { get; set; } = "60m";
     public string SystemPrompt { get; set; } = DefaultSystemPrompt;
