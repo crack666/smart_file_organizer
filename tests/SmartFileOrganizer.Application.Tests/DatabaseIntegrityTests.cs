@@ -235,6 +235,12 @@ public class DatabaseIntegrityTests : IDisposable
             INSERT INTO finding_decisions (job_id, finding_key, kind, state, origin, decided_at, snapshot_json)
                 VALUES (@job, 'k', 'sensitive', 'accepted', 'human', @T, '{}');
             INSERT INTO model_server_waits (job_id, since, checked_at, cause) VALUES (@job, @T, @T, 'busy');
+            INSERT INTO plans (job_id, created_at, libraries, notes) VALUES (@job, @T, '[]', '[]');
+            INSERT INTO plan_actions (plan_id, finding_key, finding_kind, unit, source_kind, source_path, relative_path,
+                                      file_node_id, directory_node_id, files, bytes, kind, recommended, target_path,
+                                      library_job_id, reason, origin, state, updated_at)
+                VALUES (last_insert_rowid(), 'k', 'not_backed_up', 'u', 'file', @root || '/d/f.txt', 'd/f.txt',
+                        @file, @dir, 1, 1, 'move', 'move', '/lib/f.txt', @job, 'r', 'rule', 'proposed', @T);
             INSERT INTO file_links (job_id, full_path, name, parent_path, link_kind, scanned_at)
                 VALUES (@job, @root || '/l', 'l', @root, 'symlink', @T);
             INSERT INTO eval_cases (kind, origin, job_id, file_node_id, subject_path, expected, created_at, updated_at)
