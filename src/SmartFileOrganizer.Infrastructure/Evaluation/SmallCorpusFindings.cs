@@ -34,6 +34,8 @@ public static class SmallCorpusFindings
         new("sensitive", "Profile alter PC/lisa", Markers: ["credentials"], Note: "The password store of the old profile, in its app data."),
         new("sensitive", "Profile alter PC/max/AppData", Markers: ["credentials", "private_message"], Note: "Skipped by the scan rules, marked by its place."),
         new("sensitive", "Profile alter PC/max/Desktop", Markers: ["credentials"]),
+        new("sensitive", "Profile alter PC/max/Documents", Markers: ["finance"],
+            Note: "Version 4: the zip of bank and card statements under a number, marked by its entry names (issue 67)."),
         new("sensitive", "Profile alter PC/max/Documents/Steuer 2014", Markers: ["finance"]),
         new("sensitive", "Projekte/haushaltsbuch-app", Markers: ["credentials"], Note: "The .env file of a project.")
     ];
