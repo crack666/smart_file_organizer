@@ -24,12 +24,16 @@ public static class DuplicatesCommand
     public sealed record SummaryView(int Groups, int FileGroups, int FolderGroups, int Copies, long WastedBytes, int Certain, int Likely,
         int AcrossJobs, int InLibrary);
 
-    /// <param name="Sensitive">Marker tokens of a marked file; for such a file only path and markers are shown.</param>
+    /// <param name="Sensitive">Marker tokens of a marked file (a hint); the report shows no more than path and markers of any file.</param>
     public sealed record FileView(string Path, long JobId, ScanRole Role, bool Managed, IReadOnlyList<string> Sensitive, string? SensitiveRule);
 
     public sealed record FolderView(string Path, long JobId, ScanRole Role, bool Managed, int Files, int MatchedFiles);
 
-    /// <param name="Hash">Full SHA-256 of a certain file group; null otherwise and when a file of the group is marked.</param>
+    /// <param name="Hash">
+    /// Full SHA-256 of a certain file group; null otherwise and when the disclosure withholds the content of a file of the
+    /// group: with <c>Sensitive:Disclosure</c> <c>open</c> a file with an access data marker, with <c>restricted</c> any marked
+    /// file (before 14.11.2026 always any marked file, https://github.com/crack666/smart_file_organizer/issues/99).
+    /// </param>
     /// <param name="FilesTotal">Files of the group; a folder group lists its folders, not its files.</param>
     public sealed record GroupView(
         int Group,
@@ -142,8 +146,9 @@ public static class DuplicatesCommand
                     "Interrupted. Checksums computed so far are saved; run the command again to continue where it stopped.");
             }
 
-            // A marked file shows its path and markers only; a group with one gets no checksum.
+            // A marked file shows its path and markers; a group with a file whose content the disclosure withholds gets no checksum.
             var reads = services.GetRequiredService<JobReadService>();
+            var disclosure = services.GetRequiredService<SensitiveOutputOptions>();
             var marked = new Dictionary<long, SensitiveMatch>();
             if (report.Groups.Count > 0)
             {
@@ -152,7 +157,7 @@ public static class DuplicatesCommand
                         marked[id] = match;
             }
 
-            var result = Map(report, p.GetValue(summary), p.GetValue(limit), marked);
+            var result = Map(report, p.GetValue(summary), p.GetValue(limit), marked, disclosure);
             return CommandOutcome.Success(result, () => Render(result));
         });
 
@@ -160,14 +165,14 @@ public static class DuplicatesCommand
     }
 
     public static DuplicatesResult Map(
-        DuplicateReport report, bool summaryOnly, int limit, IReadOnlyDictionary<long, SensitiveMatch> marked)
+        DuplicateReport report, bool summaryOnly, int limit, IReadOnlyDictionary<long, SensitiveMatch> marked, SensitiveOutputOptions disclosure)
     {
         IReadOnlyList<T> Take<T>(IEnumerable<T> items) =>
             summaryOnly ? [] : (limit == 0 ? items : items.Take(limit)).ToList();
 
         var groups = report.Groups.Select((g, i) =>
         {
-            var anyMarked = g.Files.Any(f => marked.ContainsKey(f.FileNodeId));
+            var anyMarked = g.Files.Any(f => !disclosure.ShowsContent(marked.GetValueOrDefault(f.FileNodeId).Markers));
             var files = g.Scope == DuplicateScope.Files
                 ? g.Files.Select(f =>
                 {

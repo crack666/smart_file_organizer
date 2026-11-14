@@ -111,11 +111,14 @@ public partial class FindingTargetsCommandTests
 
     /// <summary>
     /// Done when: a marked file of the finding and a marked library folder appear in the candidates without description,
-    /// excerpt or file names: the file with path and markers, the folder with its markers only.
+    /// excerpt or file names: the file with path and markers, the folder with its markers only. Since 14.11.2026 this is
+    /// the behaviour of <c>Sensitive:Disclosure restricted</c> (Issue 99); <see cref="Open_MarkedFolders_ShowTheirFacts_ButNeverTheFreeTextsOfAccessData"/>
+    /// shows the default.
     /// </summary>
     [Fact]
     public async Task Candidates_ShowAMarkedFileAndAMarkedFolder_WithoutDescriptionOrNames()
     {
+        Restricted();
         Write(_source, "Neuer Ordner/passwords.txt", "user: nobody", new DateTime(2015, 2, 8, 12, 0, 0));
         var (library, source) = await PrepareAsync();
         var job = source.ToString();
