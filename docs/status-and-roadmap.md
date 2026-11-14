@@ -301,6 +301,21 @@ second drive or a network drive._
 - Not built: renaming on the same drive instead of copying, the system recycle bin, reading a copy on a network drive
   around the system cache, a name suffix on a collision (the action fails instead).
 
+### Memory: places, refresh, move notices
+
+_Checked 14.11.2026 on the branch for https://github.com/crack666/smart_file_organizer/issues/86 (schema step 27):
+`dotnet test` 926 passed, 2 skipped; `sfo scan --refresh`, `sfo places`, `sfo where` and the move notice of
+`sfo plan apply --remove-sources` run in-process on generated trees in a temp folder (`RefreshAndPlacesTests`,
+`PlanApplyCommandTests`). No run on a real medium._
+
+- Every completed scan makes its root a known place (`sfo places`, with drive, age and the overview of the findings,
+  also when the drive is not attached). `sfo scan <path> --refresh` compares with the previous job of the place and
+  carries results, facts and corrections of unchanged files over; `sfo where` answers from the move history, the scans
+  and found notices. See [cli.md, Memory](cli.md#memory).
+- Step 2 of the execution leaves `_moved-files.txt` in emptied folders ([move-notice.md](move-notice.md)).
+- Not built: updating the library job in place after `plan apply` (the copy counts as backed up only after the library
+  is scanned again); carrying directory verdicts and summaries over in a refresh.
+
 ### Placing into the library
 
 _Checked 12.11.2026 on the branch for

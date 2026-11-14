@@ -394,7 +394,9 @@ the file at the target still has its checksum and is another file, so the last c
    writes nothing: it reads the library file and the original whole and compares. The action becomes `verified`; a
    `copy`, or any action of a job with `keep_source`, becomes `executed` and its original is never touched.
 2. `RemoveSourcesAsync`, step 2, for `verified` actions, with the checks above; the action becomes `executed`. Source
-   folders left empty stay where they are and are reported (`empty_folders`).
+   folders left empty stay where they are and are reported (`empty_folders`). At the end the move notice of every
+   source folder of the plan is brought in line with the journal ([move-notice.md](move-notice.md)), unless
+   `PlanRunOptions.Notices` is false; `UndoAsync` does the same for existing notices.
 3. `UndoAsync`, newest action first: originals back from the hold folder (or, when purged, copied back from the checked
    file at the target, as for `delete_source` from the library), then copies this tool wrote removed once the original
    is back with its checksum and the copy is unchanged, then the target folders it created when empty, then the empty
@@ -404,7 +406,8 @@ the file at the target still has its checksum and is another file, so the last c
 4. `PurgeAsync` removes held originals as above.
 
 **Journal.** `IPlanJournal` (`PlanJournalRepository`, table `plan_steps`) writes every step as `started` before the file
-system is touched and finishes it as `done` or `failed` afterwards. A run cut off (crash, Ctrl+C) leaves one step
+system is touched and finishes it as `done` or `failed` afterwards. Finishing a `hold` step also writes the move
+history (`moves`) in the same transaction; a finished `restore` or `purge` marks it. A run cut off (crash, Ctrl+C) leaves one step
 `started`; the next run with `--execute` settles it first by what the file system shows: a partial copy is removed, a
 copy carrying its name with the checksum of its original counts as done, an original found in the hold folder and not
 in its place counts as held. Because an original is only ever renamed and a copy only named after its check, no state
@@ -413,6 +416,31 @@ in between loses a file. `PlanExecutionHooks` names the points between the steps
 Not done here: renaming instead of copying on the same drive (step 1 always copies, so the original stays until its
 own confirmation), the system recycle bin (the hold folder takes its place and is undoable on every system), reading
 around the system cache on network drives (the target is read again through the normal file API).
+
+## Memory: places, refresh, move history
+
+Issue: https://github.com/crack666/smart_file_organizer/issues/86. Commands: `sfo scan --refresh`, `sfo places`,
+`sfo where` ([cli.md](cli.md#memory)); codes: [glossary.md, Places](glossary.md#places).
+
+- **Places.** `ScanJobService` records every completed scan at its place (`IPlaceRepository.RecordScanAsync`, table
+  `places`, keyed by the full root path), with what `IVolumeProbe` (`VolumeProbe`, Infrastructure) learns about the
+  drive. `PlaceService.ListAsync` adds whether the root is reachable now and the overview of the findings of the last
+  job (`FindingService.ComputeAsync`, from stored data only).
+- **Refresh.** `sfo scan <path> --refresh` creates and scans a new job, then `PlaceRepository.RefreshAsync` compares it
+  with the previous completed job of the place in one transaction, by path, size and modification time: for unchanged
+  files it copies `ai_results` (with the file status), `file_facts` and `user_overrides` to the new file rows (a
+  reference to a folder of the old job is moved to the folder with the same path); checksums need no copy, since
+  `content_fingerprints` is keyed by path and holds while size and time match. The rest goes to `scan_changes`
+  (`new`, `changed`, `missing`, or `moved` when the move history says a plan took the file away). No file is read.
+- **Move history.** `moves` holds every original that went into the hold folder (from the `hold` step), with source,
+  target, checksum and time, and when it came back or was purged. It names no job and outlives jobs and plans.
+- **Move notices.** `PlanExecutor` writes them (see Plan execution); `ScanEngine` leaves a notice and the hold folder
+  out of the scan and stores the entries of a notice in `notice_entries`.
+- **Where.** `PlaceService.WhereAsync` answers from `moves`, `notice_entries`, `file_nodes` of all jobs and
+  `content_fingerprints`; for a checksum from `moves` and `content_fingerprints`.
+
+Not done yet: after `plan apply`, the library job is not updated in place (the moved file counts as backed up there
+only after the library is scanned or refreshed again).
 
 ## AI flow (current architecture)
 
@@ -941,6 +969,16 @@ Important tables:
   checked with), `detail`, `started_at`, `finished_at`. Deleted with the plan and with the job; deleting the job does
   not touch the hold folder, so held originals then have to be put back by hand
 - `scan_jobs.keep_source` (step 25): 1 when the person set "leave the source untouched" for the job
+- `places` — known places (step 27): `root_path` (unique), `role`, `volume_label`, `volume_id`, `volume_format`,
+  `last_job_id` (moved to the newest other job of the root when the job is deleted, else null), `last_scan_at`,
+  `files`, `bytes`, `first_seen_at`. Outlives its jobs on purpose
+- `moves` — the move history (step 27): `plan_id`, `action_id`, `source_path`, `target_path`, `hash`, `bytes`,
+  `moved_at`, `returned_at`, `purged_at`. No job reference; outlives jobs and plans on purpose, so `sfo where` still
+  answers after a job is deleted
+- `scan_changes` — what a refresh found (step 27): `job_id`, `previous_job_id` (null when that job is deleted),
+  `full_path`, `change` (`FileChange`), `size`, `target_path`, `plan_id`, `moved_at`. Deleted with the job
+- `notice_entries` — entries of move notices a scan found (step 27): `job_id`, `notice_path`, `source_path`,
+  `target_path`, `plan_id`, `moved_at`. Deleted with the job
 - `model_server_waits` — at most one row per job while an analysis waits for the model server (step 17):
   `job_id`, `since`, `checked_at` (last probe), `cause` (`ModelServerFailure` code). Removed when the server
   answers again or the run ends; a row whose `checked_at` stopped moving belongs to a killed run. Deleted with the job
@@ -974,7 +1012,7 @@ new table is not covered.
 1. Add one file `Migrations/M000N_ShortName.cs` with a class implementing `ISchemaMigration`, or deriving from `SqlSchemaMigration` when plain SQL is enough. `Version` is `N`.
 2. Take the next free number on `master`. Steps are discovered by reflection, so no shared list is edited.
 3. Versions must be exactly `1..N`. If two branches picked the same number, startup and `SchemaMigrationTests` fail with a "Duplicate schema migration versions" message; the branch merged second renumbers its step (file name and `Version`).
-4. Never change a step that has been merged; add a new one. Step 1 (`M0001_InitialSchema`) is the schema as it existed before migrations. Step 2 (`M0002_SensitiveMarkers`) adds the sensitive-marker columns. Step 3 (`M0003_DirectoryVerdicts`) adds `directory_verdicts`. Step 4 (`M0004_ScanJobRules`) adds the scan rules of a job. Step 5 (`M0005_ContentComparison`) adds the comparison with the library. Step 6 (`M0006_DirectorySamples`) adds `directory_samples`, the escalation columns and the origin and keep-hint columns of `ai_results`; its new codes are English. Step 7 (`M0007_FileFacts`) adds `file_facts` and `ai_results.evidence`. Step 8 (`M0008_LibraryReview`) adds `scan_jobs.structure_only` and `library_advice`. Step 9 (`M0009_Evaluation`) adds `eval_cases` and `eval_runs`. Step 10 (`M0010_ResultChecks`) adds certainty, attempts and previous error to `ai_results` and the table `result_checks`. Step 11 (`M0011_Bundles`) adds `bundles`, `bundle_files` and `bundle_builds`. Step 12 (`M0012_SensitiveGaps`) adds the markers of skipped folders, the rule version per file and the marked inputs of directory summaries. Step 13 (`M0013_EnglishCodes`) switches the German codes of steps 2 and 3 to the English codes of [glossary.md](glossary.md): it rebuilds `directory_verdicts` (its CHECK constraints named the old codes), rewrites marker lists token by token, and the texts the program wrote from codes (keep reason, container reason, profile hint, `dominant_type` of the pre-assessment, stored check answers, stored evaluation reports); raw model answers stay as received. The old codes are spelled out in that step, and in step 3, and nowhere else in code. Step 14 (`M0014_FindingDecisions`) adds `finding_decisions`. Step 19 (`M0019_OrphanRows`) removes rows whose job, file or folder no longer exists, left behind by job deletions before the deletion covered every table; optional references to a missing row become NULL, test cases and evaluation runs are kept. Step 20 (`M0020_FileDecisions`) adds `file_decisions`; results and facts stored before stay as they are and are decided without a new analysis. Step 21 (`M0021_ComparisonRuns`) adds `comparisons.run_id`, which groups the comparisons of one run against several libraries; a comparison stored before is its own run. Step 22 (`M0022_ContentStore`) adds `content_assessments`, `content_corrections` and `user_overrides.origin`, and copies `ai_results` once to widen the CHECK of `origin` by `reused` (SQLite cannot change a constraint in place; the copy takes the table definition from `sqlite_master`, so every column and row stays). Step 23 (`M0023_Plans`) adds `plans` and `plan_actions`. Step 24 (`M0024_FolderDescriptions`) adds `folder_descriptions`, what a few files of a library folder show, per library job, folder and description source (https://github.com/crack666/smart_file_organizer/issues/56). Step 25 (`M0025_PlanExecution`) copies `plan_actions` once to widen the CHECK of `state` by `verified`, adds `scan_jobs.keep_source` and the journal `plan_steps` (https://github.com/crack666/smart_file_organizer/issues/12). Step 26 (`M0026_FindingTargets`) adds `finding_targets`, the stored target match per finding (https://github.com/crack666/smart_file_organizer/issues/83).
+4. Never change a step that has been merged; add a new one. Step 1 (`M0001_InitialSchema`) is the schema as it existed before migrations. Step 2 (`M0002_SensitiveMarkers`) adds the sensitive-marker columns. Step 3 (`M0003_DirectoryVerdicts`) adds `directory_verdicts`. Step 4 (`M0004_ScanJobRules`) adds the scan rules of a job. Step 5 (`M0005_ContentComparison`) adds the comparison with the library. Step 6 (`M0006_DirectorySamples`) adds `directory_samples`, the escalation columns and the origin and keep-hint columns of `ai_results`; its new codes are English. Step 7 (`M0007_FileFacts`) adds `file_facts` and `ai_results.evidence`. Step 8 (`M0008_LibraryReview`) adds `scan_jobs.structure_only` and `library_advice`. Step 9 (`M0009_Evaluation`) adds `eval_cases` and `eval_runs`. Step 10 (`M0010_ResultChecks`) adds certainty, attempts and previous error to `ai_results` and the table `result_checks`. Step 11 (`M0011_Bundles`) adds `bundles`, `bundle_files` and `bundle_builds`. Step 12 (`M0012_SensitiveGaps`) adds the markers of skipped folders, the rule version per file and the marked inputs of directory summaries. Step 13 (`M0013_EnglishCodes`) switches the German codes of steps 2 and 3 to the English codes of [glossary.md](glossary.md): it rebuilds `directory_verdicts` (its CHECK constraints named the old codes), rewrites marker lists token by token, and the texts the program wrote from codes (keep reason, container reason, profile hint, `dominant_type` of the pre-assessment, stored check answers, stored evaluation reports); raw model answers stay as received. The old codes are spelled out in that step, and in step 3, and nowhere else in code. Step 14 (`M0014_FindingDecisions`) adds `finding_decisions`. Step 19 (`M0019_OrphanRows`) removes rows whose job, file or folder no longer exists, left behind by job deletions before the deletion covered every table; optional references to a missing row become NULL, test cases and evaluation runs are kept. Step 20 (`M0020_FileDecisions`) adds `file_decisions`; results and facts stored before stay as they are and are decided without a new analysis. Step 21 (`M0021_ComparisonRuns`) adds `comparisons.run_id`, which groups the comparisons of one run against several libraries; a comparison stored before is its own run. Step 22 (`M0022_ContentStore`) adds `content_assessments`, `content_corrections` and `user_overrides.origin`, and copies `ai_results` once to widen the CHECK of `origin` by `reused` (SQLite cannot change a constraint in place; the copy takes the table definition from `sqlite_master`, so every column and row stays). Step 23 (`M0023_Plans`) adds `plans` and `plan_actions`. Step 24 (`M0024_FolderDescriptions`) adds `folder_descriptions`, what a few files of a library folder show, per library job, folder and description source (https://github.com/crack666/smart_file_organizer/issues/56). Step 25 (`M0025_PlanExecution`) copies `plan_actions` once to widen the CHECK of `state` by `verified`, adds `scan_jobs.keep_source` and the journal `plan_steps` (https://github.com/crack666/smart_file_organizer/issues/12). Step 26 (`M0026_FindingTargets`) adds `finding_targets`, the stored target match per finding (https://github.com/crack666/smart_file_organizer/issues/83). Step 27 (`M0027_Places`) adds `places`, `moves`, `scan_changes` and `notice_entries`, and copies `plan_steps` once to widen the CHECK of `kind` by `notice` (https://github.com/crack666/smart_file_organizer/issues/86).
 5. Do not put `PRAGMA journal_mode` or other transaction-incompatible statements in a step.
 
 ## Architectural rules

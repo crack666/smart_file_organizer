@@ -49,6 +49,34 @@ re-evaluate the folders stored as skipped or shallow; `rules_changed` is then `t
 |---|---|
 | `--role source\|library` | Only with `<path>`. `source` (default): a medium to clean up. `library`: the user's organised archive (NAS, a folder on disk); it is only read, never changed and never analysed by a model (`sfo analyze` refuses it with `wrong_role`). The role is fixed when the job is created. |
 | `--structure-only` | Only with `<path>`. Records names, sizes and dates and opens no file: sensitive files are marked by name and extension only, without looking at their first bytes. The job keeps the flag (`structure_only` in the job view), so a later `--resume` scans the same way. Use it for `sfo library review`. |
+| `--refresh` | Only with `<path>`. Scan a known place again and compare with its previous completed job (same root and role; without `--role` a library job of the root is found too). See below. |
+
+Every completed scan makes its root a known place (`sfo places`). The scan leaves out the hold folder of
+`sfo plan apply` (`<root>/.sfo-hold`, recorded as a skipped folder) and every move notice (`_moved-files.txt`, see
+[move-notice.md](move-notice.md)); the entries of a notice are stored as origin and answered by `sfo where`.
+
+**Refresh** (https://github.com/crack666/smart_file_organizer/issues/86). `--refresh` creates a new job with the rules
+and the structure-only setting of the previous job of the place (unless `--rules` is given), scans it, and then
+compares the two by path, size and modification time without reading a file. An unchanged file keeps its analysis
+result, its facts and a person's correction (copied to the new job), and its stored checksum still holds, so no model
+is asked and no checksum is computed again for it; `sfo compare` of the new job only reads new and changed files.
+Directory verdicts and summaries are not carried over. New, changed and missing files are listed; a missing file that
+a plan moved (see the move history of `sfo where`) is `moved` and names its target. Without an earlier completed scan
+of the root the scan runs in full and `refresh` is `null`.
+
+```json
+"refresh": {
+  "previous_job_id": 7, "unchanged": 1826, "new": 3, "changed": 1, "missing": 0, "moved": 6,
+  "carried": { "checksums": 412, "results": 1790, "facts": 2201, "corrections": 2 },
+  "changes": [ { "path": "/media/usb-stick/DCIM/IMG_0001.jpg", "change": "moved", "size": 18234,
+                 "target": "/mnt/nas/library/Fotos/IMG_0001.jpg", "plan_id": 1, "moved_at": "2026-11-14T10:00:00Z" } ],
+  "changes_truncated": false
+}
+```
+
+`change` is a `FileChange` code ([glossary.md, Places](glossary.md#places)); `changes` lists at most 200 files by path,
+`changes_truncated` says whether there are more. `carried.checksums` counts unchanged files with a stored checksum,
+`carried.results` those whose analysis result was taken over.
 
 A directory the scan cannot read (access denied, network path gone) is stored with that error
 and counted in `error_count` instead of looking empty; the scan itself continues and completes.
@@ -82,7 +110,8 @@ sfo scan /mnt/nas/library --role library --json
       "rules": { "name": "default", "source": "built-in", "hash": "3f9c…" }
     },
     "resumed": false,
-    "rules_changed": false
+    "rules_changed": false,
+    "refresh": null
   },
   "error": null
 }
@@ -1594,11 +1623,16 @@ sfo plan purge 1                              # dry run of removing the held ori
   reason.
 - An original is only renamed into the hold folder `<job root>/.sfo-hold/plan-<id>/action-<id>/` on its own drive, from
   where `undo` puts it back. Only `purge` removes it for good, and only while the copy at the target still has its
-  checksum: the last copy of anything is never removed. The hold folder lies in the job root, so a new scan of the
-  source sees it; `purge` or `undo` before scanning again. Deleting the job drops the journal but not the
-  hold folder.
+  checksum: the last copy of anything is never removed. The hold folder lies in the job root; a new scan of the source
+  leaves it out (since https://github.com/crack666/smart_file_organizer/issues/86; until then a new scan counted the
+  held originals as content). Deleting the job drops the journal but not the hold folder; the move history of
+  `sfo where` stays.
 - Links and junctions are never followed; a source that is or holds one is skipped. Empty source folders stay and are
   reported (`empty_folders`).
+- Step 2 leaves a move notice `_moved-files.txt` in every folder whose originals went: plain text, readable without sfo,
+  with the file names, their new places, the time and the plan ([move-notice.md](move-notice.md)). `undo` removes the
+  lines of the files that came back and the notice when none is left. A file of that name that is not a notice is never
+  touched. `--no-notice` writes none.
 - `sfo plan keep-source <job>` leaves every source of the job untouched: a move only copies, nothing is removed.
 
 Every step is journalled before it touches a file (`plan_steps`); a run cut off by a crash or Ctrl+C is finished by
@@ -1611,6 +1645,7 @@ running the same command again, which first settles the step it finds open.
 | `--execute` | Really change files. Without it: dry run. |
 | `--remove-sources` | Step 2 instead of step 1: the originals of `verified` actions go into the hold folder. |
 | `--action <id>` | Only this action; repeatable. Needed for a sensitive action. Default: every action of the plan. |
+| `--no-notice` | With `--remove-sources`: leave no move notice in the source folders in this run. |
 
 Step 1 runs `approved` actions: `move`, `quarantine` and `copy` copy and check; `delete_source` reads the library file
 and the original whole and compares them. The action becomes `verified` (its original waits for step 2), or
@@ -1623,13 +1658,17 @@ the scan is skipped (`source_changed`). Step 2 runs `verified` actions and makes
   "items": [ { "action_id": 3, "kind": "move", "outcome": "done", "state": "verified", "reasons": [],
                "files": 1, "bytes": 18234, "detail": null } ],
   "removal": { "actions": 4, "files": 6, "bytes": 81234 },
-  "empty_folders": [] }
+  "empty_folders": [],
+  "notices": [ { "path": "/media/usb-stick/DCIM/_moved-files.txt", "outcome": "written", "entries": 6, "detail": null } ] }
 ```
 
 `outcome` is `done`, `would_run` or `would_fail` (dry run), `skipped` (left as it was), `failed` (state `failed`, the
 original stays) or `partial` (undo and purge: not all of it). `reasons` are `PlanRunReason` codes, `PlanProblem` codes
 or the state of an action named by `--action` that cannot run. `removal` is what step 2 would take away now: the
 originals of every `verified` action and the bytes they free. `mode` is `apply`, `remove_sources`, `undo` or `purge`.
+`notices` (step 2 and undo) lists the move notices the run wrote (`written`), removed (`removed`) or left alone because
+a file that is not a notice carries the name (`skipped`), or could not write (`failed`); a folder whose notice needed
+no change is not listed. A folder that holds only its notice counts as left empty.
 
 Errors: `plan_run_incomplete` (1, with the result: an action failed or an undo or purge was partial), `plan_not_found`
 (1), `action_not_found` (1).
@@ -1656,6 +1695,55 @@ Result and errors as `apply`.
 The person's switch "leave the source untouched" for a whole job: a move then only copies and becomes `executed`,
 `delete_source` and `quarantine` are skipped (`keep_source`), step 2 removes nothing. `--off` lifts it. Result:
 `{ "job_id", "keep_source" }`. Errors: `job_not_found` (1).
+
+## Memory
+
+https://github.com/crack666/smart_file_organizer/issues/86: what the tool remembers about places and moves. Both
+commands read the database only (and whether a path exists): no model, and the drive need not be attached. Codes:
+[glossary.md, Places](glossary.md#places).
+
+### `sfo places`
+
+Every known place: the root of a completed scan, with its drive and its last scan. A place outlives its jobs; after the
+job is deleted it points at its newest other job, or at none, and keeps its last numbers.
+
+```json
+{ "places": [ {
+    "id": 1, "root_path": "/media/usb-stick", "role": "source",
+    "volume": { "label": "USB-STICK", "id": "4A3B1C2D", "format": "exFAT" },
+    "last_job_id": 9, "last_scan_at": "2026-11-14T10:05:00Z", "age_days": 0, "reachable": false,
+    "files": 1830, "bytes": 5234000000,
+    "report": { "worth_keeping_not_backed_up": { "files": 212, "bytes": 912000000 },
+                "backed_up": { "files": 1400, "bytes": 4100000000 },
+                "disposable": { "files": 180, "bytes": 22000000 },
+                "sensitive": { "files": 3, "bytes": 12000 } },
+    "report_note": null, "first_seen_at": "2026-11-12T13:36:44Z" } ] }
+```
+
+`volume` holds what the system tells about the drive (Windows: label, serial number, file system; elsewhere label and
+file system); every part may be `null`. `reachable` says whether the root can be reached now. `report` is the overview
+of the findings of the last job (as `sfo findings --summary` counts it: a marked file counts under `sensitive` only);
+`null` for a library or without a job, with the reason in `report_note`.
+
+### `sfo where <path-or-hash>`
+
+Where a file lies today, where it lay, and when and by which plan it moved. The argument is a path (a file, or a
+folder for everything below it) or a full SHA-256 checksum (64 hex digits).
+
+```json
+{ "query": "/media/usb-stick/DCIM/IMG_0001.jpg", "kind": "path", "hash": "9f2c…",
+  "now": [ { "path": "/mnt/nas/library/Fotos/IMG_0001.jpg", "source": "journal", "exists": true, "job_id": null,
+             "seen_at": "2026-11-14T10:00:00Z" } ],
+  "history": [ { "from": "/media/usb-stick/DCIM/IMG_0001.jpg", "to": "/mnt/nas/library/Fotos/IMG_0001.jpg",
+                 "moved_at": "2026-11-14T10:00:00Z", "plan_id": 1, "action_id": 3, "state": "moved",
+                 "returned_at": null, "purged": false, "source": "journal" } ] }
+```
+
+`now` lists the places of today, newest first: the target of a move that did not come back, else where scans saw the
+file (`scan`), or for a checksum every path with that stored checksum (`checksum`). `exists` says whether the path is
+there now (`false` also when its drive is not attached). `history` lists the moves, oldest first, from the move
+history (`journal`) and from move notices a scan found (`notice`); `state` is `moved` or `returned` (put back by
+`undo`), `purged` says the held original was removed for good. Both lists are empty when nothing is known.
 
 ## Machine contract
 
