@@ -117,12 +117,25 @@ public class EvaluationTests : IDisposable
         var truth = EvalTruth.Load(corpus.TruthPath);
         foreach (var t in targets.Targets)
         {
-            Assert.True(truth.Files.ContainsKey(t.Path), t.Path);
-            Assert.NotNull(truth.Files[t.Path].Description);
+            if (t.Unit == "folder")
+            {
+                Assert.True(Directory.Exists(Path.Combine(corpus.RootPath, t.Path)), t.Path);
+            }
+            else
+            {
+                Assert.True(truth.Files.ContainsKey(t.Path), t.Path);
+                Assert.NotNull(truth.Files[t.Path].Description);
+            }
             if (t.Destination is { } d) Assert.True(Directory.Exists(Path.Combine(library, d)), d);
         }
         Assert.True(targets.Targets.Count(t => t.Unit == "bundle" && t.Path.StartsWith("Import/IMG_20210206_", StringComparison.Ordinal)) == 2);
         Assert.Contains(targets.Targets, t => t.Destination is null);
+
+        // Issue 85: closed units of the library with loose files of their time, and a library that is gone.
+        foreach (var unit in new[] { "Filme/Sommer am See (2009)", "Serien/Beispielserie/Staffel 1", "Spiele/Beispielspiel/cache", "Programme/Bildbetrachter" })
+            Assert.True(Directory.Exists(Path.Combine(library, unit)), unit);
+        Assert.Equal(4, targets.Targets.Count(t => t.Destination is null && t.Note!.StartsWith("Trap (Issue 85)", StringComparison.Ordinal) && t.Outcome is null));
+        Assert.Contains(targets.Targets, t => t.Outcome == EvalTargetTruth.LibraryUnreachable);
     }
 
     [Fact]
