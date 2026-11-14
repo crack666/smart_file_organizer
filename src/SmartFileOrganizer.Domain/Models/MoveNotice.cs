@@ -45,13 +45,6 @@ public static class MoveNotice
     public static bool HasNoticeName(string path) =>
         string.Equals(Path.GetFileName(path), FileName, StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>Whether the first bytes of a file are the first line of a notice, of any version.</summary>
-    public static bool StartsLikeNotice(ReadOnlySpan<byte> prefix)
-    {
-        var text = Encoding.UTF8.GetString(prefix).TrimStart('﻿');
-        return text.StartsWith(Marker + " ", StringComparison.Ordinal);
-    }
-
     /// <summary>
     /// Reads a notice. Null when the text is not a notice (another file that happens to carry the name). A notice of
     /// another version is returned without entries (<see cref="MoveNoticeDocument.Readable"/> false).
