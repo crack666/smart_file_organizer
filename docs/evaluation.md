@@ -31,7 +31,7 @@ reference and JSON shapes: [cli.md](cli.md#sfo-eval-corpus).
 
 `sfo eval generate <dir> [--seed n]` writes `<dir>/tree/` (the folder that is scanned) and
 `<dir>/truth.json`. The generator is `SmallCorpusGenerator` (Infrastructure/Evaluation); the same
-seed gives the same bytes and timestamps. Version 5 has 74 folders and 185 files (version 4: 73 and 174, version 3: 62 and
+seed gives the same bytes and timestamps. Version 6 has 74 folders and 193 files (version 5: 74 and 185, version 4: 73 and 174, version 3: 62 and
 160, version 2: 42 and 100, version 1: 41 and 97; the changes are listed under [Truth changes](#truth-changes)):
 
 | Kind | Example | Truth |
@@ -46,6 +46,7 @@ seed gives the same bytes and timestamps. Version 5 has 74 folders and 185 files
 | Places of programs and Windows (version 4) | `Profile alter PC/Public` with `Documents/Fotostudio Pro/Tutorials` and `Samples`, `AccountPictures`, `Desktop` with shortcuts; `max/scoop/apps/7zip` | `system` by rule, no model call; the files have no category |
 | Archive known by its entries (version 4) | `max/Documents/20190312.zip` with bank and card statements | `finance`, category open |
 | Things waiting for a place (version 5) | `Import`: a ski trip and a birthday of the same day, a lake outing, two invoices of two providers | `mixed`; where each belongs is in `targets.json` |
+| Traps of closed units (version 6) | `Import`: pictures named with an everyday word of a film title, pictures and clips of the time of a game cache, an episode folder and a program in the library | where none of them belongs is in `targets.json` |
 | Media | `Musik`, `Videos`, `Screenshots` | `uniform` |
 | Placeholder | `Neuer Ordner` (empty) | `empty` |
 | Hidden tool folder | `.ssh` | `system` |
@@ -150,9 +151,12 @@ with it, builds the bundles and runs `sfo library match` for every expected targ
 ```
 
 `unit` is `bundle` (the bundle that holds the file at `path`), `file` or `folder`; `destination` is a folder of the
-library relative to its root, `null` when no folder fits and a new one is right. A target is a `hit` when the best
-proposal is that folder, or a new folder where `null` is expected; anything else is `wrong`, named with what was
-proposed, its certainty and its reason, and no proposal at all is `missing`. Files of the source that the truth
+library relative to its root, `null` when no folder fits and a new one or none is right. A target is a `hit` when the
+best proposal is that folder, or a new folder or `no_target` where `null` is expected (Issue 85: rather no target than
+a wrong one); anything else is `wrong`, named with what was proposed, its certainty and its reason, and no proposal at
+all is `missing`. `outcome: "library_unreachable"` (since version 6) expects a named failure instead of an answer:
+`sfo eval` scans an empty temporary folder as a second library, deletes it, and matches the unit against that one; the
+failure `library_unreachable` is the hit, any answer is `wrong`. Files of the source that the truth
 describes (`description` in `truth.json`) get these facts from the stub, so the unit has a description.
 
 With `--stub` no model is asked anything: the files are described from the answer sheets, the content comparison
@@ -164,6 +168,27 @@ the file and folder calls, and a stub run with a library would have asked the co
 
 Every change of the truth is listed here with its reason. The truth follows what is right for the
 user, never what the program happens to answer.
+
+### Version 6 (14.11.2026, https://github.com/crack666/smart_file_organizer/issues/85)
+
+Nothing of version 5 changed. The first real run of `sfo findings targets` proposed loose pictures for film folders
+because of one everyday word, and files for episode, cache and program folders. The library `ablage` gets these closed
+units (`Filme/Sommer am See (2009)` and a second film with poster and fanart, `Serien/Beispielserie/Staffel 1` with two
+episodes, `Spiele/Beispielspiel` with `cache`, `Programme/Bildbetrachter` with sample pictures), and `Import` gets eight
+files of exactly their time:
+
+| Path in `Import` | Category | Belongs to | Why |
+|---|---|---|---|
+| `Sommer am Teich 1.jpg`, `2.jpg` (evening of the first film's date) | `photo` | a new folder or none | Trap: one everyday word (`Sommer`) and the time in common with a film folder. |
+| two photos of 05.03.2022, 18:15 and 18:20 | `photo` | a new folder or none | Trap: same time as the game cache. |
+| two clips of 10.05.2020, 21:15 and 21:20 | `video` | a new folder or none | Trap: same evening as the season folder. |
+| two photos of 01.09.2018, 12:05 and 12:10 | `photo` | a new folder or none | Trap: same time as the sample pictures of the program. |
+| the folder `Import`, against a library that is gone | | `library_unreachable` | Trap: a share that is not connected must be a named failure, not an answer. |
+
+`findings.json` expects one more finding: `in_noise` `videos` at `Import`. Measured 14.11.2026 with the perfect stub
+(temporary database, model address on a dead port): `directory_verdict` 72/72, `file_category` 98/98, `finding` 24/24
+and 0 superfluous, `target` 10/10. With `LibraryMatch.RequireContent` off, `target` is 9/10: the photos of the cache's
+time go into `Spiele/Beispielspiel` (`uncertain`, the content unclear).
 
 ### Version 5 (13.11.2026, https://github.com/crack666/smart_file_organizer/issues/56)
 
@@ -369,6 +394,22 @@ what changed (model, prompts, version, each setting), the score per kind before 
 items fixed and the new failures.
 
 ## Measured
+
+### Scripted answers after issue 85 (14.11.2026)
+
+_Scripted answers (`--stub truth.json`) on small v6 seed 36, on the branch of
+https://github.com/crack666/smart_file_organizer/issues/85, temporary directory and database, model address on a dead
+port._
+
+| Kind | Result |
+|---|---|
+| `directory_verdict` | 72/72 |
+| `file_category` | 98/98 |
+| `sensitive` | 192/193 (the deliberate `.ssh/id_ed25519.pub`) |
+| `finding` | 24/24, 0 superfluous |
+| `target` | 10/10 |
+
+The wiring of the traps, not a model: a run with a real model on version 6 has not been made.
 
 ### Scripted answers after issue 56 (13.11.2026)
 
