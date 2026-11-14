@@ -114,6 +114,12 @@ public enum FileFactKey
     /// <summary>The kind the losing side named when the model and a sure fact disagree: the sure fact stays in <c>video_kind</c>.</summary>
     [JsonStringEnumMemberName("video_kind_disputed")] VideoKindDisputed,
 
+    /// <summary>
+    /// Why the rules read the kind as they did, one sentence with the deciding field and value (<c>make and model 'Example
+    /// X1' in the container</c>), so that a wrong conclusion can be traced (free text, at most 200 characters).
+    /// </summary>
+    [JsonStringEnumMemberName("video_kind_reason")] VideoKindReason,
+
     // ── Description by the model (stage 1, https://github.com/crack666/smart_file_organizer/issues/37) ──
     // Asked in the same call as the category, stored with source model, never for a marked file.
 
@@ -179,11 +185,17 @@ public enum VideoKind
     /// <summary>A recording of a screen or a game, by a recording program.</summary>
     [JsonStringEnumMemberName("screen_recording")] ScreenRecording,
 
-    /// <summary>A clip downloaded from a website or video platform, or received through a messenger.</summary>
+    /// <summary>A clip downloaded from a website, a video platform or a social network.</summary>
     [JsonStringEnumMemberName("web_clip")] WebClip,
 
     /// <summary>The video of a piece of music.</summary>
     [JsonStringEnumMemberName("music_video")] MusicVideo,
+
+    /// <summary>
+    /// A clip received or forwarded through a messenger, by the naming scheme of the messenger: neither an own camera file
+    /// nor a download. Only the name tells this, never the frames, so the model is not asked for it.
+    /// </summary>
+    [JsonStringEnumMemberName("received")] Received,
 
     /// <summary>Neither the facts nor the model could tell.</summary>
     [JsonStringEnumMemberName("unknown")] Unknown
@@ -323,7 +335,7 @@ public static class FileFactKeys
     /// </summary>
     public static bool IsFreeText(this FileFactKey key) =>
         key is FileFactKey.Title or FileFactKey.Author or FileFactKey.Artist or FileFactKey.Album
-            or FileFactKey.Scene or FileFactKey.Activity or FileFactKey.Issuer or FileFactKey.VideoTitle;
+            or FileFactKey.Scene or FileFactKey.Activity or FileFactKey.Issuer or FileFactKey.VideoTitle or FileFactKey.VideoKindReason;
 
     /// <summary>Facts the model describes in stage 1 (scene, occasion, document kind, ...), always with source model.</summary>
     public static bool IsDescription(this FileFactKey key) => key >= FileFactKey.Scene;
@@ -333,5 +345,5 @@ public static class FileFactKeys
     /// refresh replaces exactly these and keeps every other fact. <c>video_kind</c> and <c>video_kind_disputed</c> from the
     /// model are kept by a refresh as long as the metadata still leave the kind open.
     /// </summary>
-    public static bool IsVideoOrigin(this FileFactKey key) => key is >= FileFactKey.VideoKind and <= FileFactKey.VideoKindDisputed;
+    public static bool IsVideoOrigin(this FileFactKey key) => key is >= FileFactKey.VideoKind and <= FileFactKey.VideoKindReason;
 }

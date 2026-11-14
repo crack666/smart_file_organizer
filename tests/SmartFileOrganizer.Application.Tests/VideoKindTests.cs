@@ -38,7 +38,7 @@ public class VideoKindTests : IDisposable
     [InlineData("Screen Recording 2024-05-01 at 18.30.12.mov", "screen_recording", null, "likely")]
     [InlineData("2024-05-01 18-30-12.mkv", "screen_recording", null, "likely")]
     [InlineData("Example Game 2024.05.01 - 18.30.12.02.DVR.mp4", "screen_recording", null, "likely")]
-    [InlineData("VID-20230716-WA0003.mp4", "web_clip", null, "likely")]
+    [InlineData("VID-20230716-WA0003.mp4", "received", null, "likely")]
     [InlineData("How to fold a paper boat [aB3dE5fG7hJ].webm", "web_clip", null, "likely")]
     [InlineData("Example Band - Example Song (Official Video).mp4", "music_video", null, "likely")]
     [InlineData("Some.Invented.Film.2009.1080p.BluRay.x264-GROUP.mkv", "movie", null, "certain")]
@@ -110,6 +110,147 @@ public class VideoKindTests : IDisposable
         var origin = VideoKindRules.Decide(new VideoContainerInfo { Make = make, Model = model }, "clip.mp4", "", VideoCompanions.None);
         Assert.Equal((VideoKind.OwnRecording, FactSource.Metadata, ResultCertainty.Certain), (origin.Kind, origin.KindSource, origin.KindCertainty));
         Assert.Equal(device, origin.Device?.ToCode());
+    }
+
+    // ── issue 103, second round: names of downloads, messengers and phones ──
+
+    [Theory]
+    [InlineData("WhatsApp Video 2024-05-01 at 18.30.12.mp4", "received", null, "likely")]
+    [InlineData("WhatsApp Video 2024-05-01 um 18.30.12 (1).mp4", "received", null, "likely")]
+    [InlineData("VID20240501183000.m4v", "own_recording", "phone", "likely")]
+    [InlineData("VID20240501183000 (1).m4v", "own_recording", "phone", "likely")]
+    [InlineData("GX010042 - Kopie.MP4", "own_recording", "action_cam", "certain")]
+    [InlineData("GX010042 - Copy (2).MP4", "own_recording", "action_cam", "certain")]
+    [InlineData("Ten garden tricks (1080p_30fps_H264-128kbit_AAC).mp4", "web_clip", null, "likely")]
+    [InlineData("20240501_examplechannel_a short trick_7301234567890123456.mp4", "web_clip", null, "likely")]
+    [InlineData("exampleaccount - C5xYz12AbCd.mp4", "web_clip", null, "likely")]
+    [InlineData("exampleaccount - 7301234567890123456.mp4", "web_clip", null, "likely")]
+    [InlineData("123456789012345_987654321098765.mp4", "web_clip", null, "likely")]
+    [InlineData("123456789012345_987654321098765_n.mp4", "web_clip", null, "likely")]
+    [InlineData("HLS_3_v2 (720p).mp4", "web_clip", null, "likely")]
+    [InlineData("▶ Example Artist - Example Track.mp4", "web_clip", null, "likely")]
+    [InlineData("▶ Example Artist - Example Track (Extended Mix).mpeg", "music_video", null, "likely")]
+    [InlineData("Example Artist - Example Track (Radio Edit).mp4", "music_video", null, "likely")]
+    [InlineData("Example Band - Example Song (Official Video) (1080p_30fps_H264-128kbit_AAC).mp4", "music_video", null, "likely")]
+    // No scheme: a title with a channel name stays for the model, and so does an artist with a song title.
+    [InlineData("Example Band - Example Song.mp4", "unknown", null, "uncertain")]
+    [InlineData("Example Channel - garden tricks.mp4", "unknown", null, "uncertain")]
+    [InlineData("Holiday - Summertime.mp4", "unknown", null, "uncertain")]
+    [InlineData("20240501_183000.mp4", "own_recording", "phone", "likely")]
+    public void Name_DownloadMessengerAndPhoneSchemes(string name, string kind, string? device, string certainty)
+    {
+        var origin = VideoKindRules.Decide(null, name, "Videos", VideoCompanions.None);
+        Assert.Equal(kind, origin.Kind.ToCode());
+        Assert.Equal(device, origin.Device?.ToCode());
+        Assert.Equal(certainty, origin.KindCertainty.ToCode());
+    }
+
+    [Fact]
+    public void MusicDownload_GivesTheTitleWithoutTheDownloadScheme()
+    {
+        var origin = VideoKindRules.Decide(null, "Example Band - Example Song (Official Video) (1080p_30fps_H264-128kbit_AAC).mp4", "", VideoCompanions.None);
+        Assert.Equal("Example Band - Example Song", origin.Title);
+        Assert.Contains("download program", origin.Reason);
+        var mix = VideoKindRules.Decide(null, "▶ Example Artist - Example Track (Extended Mix).mpeg", "", VideoCompanions.None);
+        Assert.Equal("Example Artist - Example Track", mix.Title);
+    }
+
+    [Theory]
+    [InlineData("Example (1)", "Example")]
+    [InlineData("Example - Kopie", "Example")]
+    [InlineData("Example - Copy (3)", "Example")]
+    [InlineData("Example_copy", "Example")]
+    [InlineData("Example (2) (1)", "Example")]
+    [InlineData("Some Film (2009)", "Some Film (2009)")]
+    [InlineData("(1)", "(1)")]
+    public void CopySuffix_IsRemoved_ButNoYear(string stem, string expected) =>
+        Assert.Equal(expected, VideoKindRules.WithoutCopySuffix(stem));
+
+    [Fact]
+    public void Received_IsNeverOfferedToTheModel() =>
+        Assert.DoesNotContain(VideoKind.Received, VideoKindRules.RemainingKinds(null));
+
+    // ── issue 103, second round: what the container says about a device ──
+
+    /// <summary>
+    /// The false "phone" of the measurement on 14.11.2026: a video platform writes "ISO Media file produced by Google Inc."
+    /// as the handler name of its tracks; "google" is a phone maker word, and a maker word in a track name counted as a
+    /// camera track. Reproduced with a container that carries exactly that handler name and nothing else.
+    /// </summary>
+    [Theory]
+    [InlineData("ISO Media file produced by Google Inc.")]
+    [InlineData("Apple Video Media Handler")]
+    [InlineData("Samsung video handler")]
+    public void MakerWordInAHandlerName_IsNoDevice(string handler)
+    {
+        var download = Node(Write("Example Band - Example Song (Official Video) (1080p_30fps_H264-128kbit_AAC).mp4",
+            SyntheticVideo.Mp4(new SyntheticVideoSpec { VideoTrackName = handler, DurationSeconds = 200 })));
+        var reading = new VideoOriginReader().Read(download)!;
+        Assert.Equal(handler, reading.Container!.Tracks[0].Name);
+        Assert.NotEqual(VideoKind.OwnRecording, reading.Origin.Kind);
+        Assert.Null(reading.Origin.Device);
+        Assert.Equal(VideoKind.MusicVideo, reading.Origin.Kind);
+        Assert.Contains(reading.Origin.Evidence!, e => e.Field == "track_name" && e.Value == handler && e.Effect.StartsWith("ignored"));
+
+        // Without a name scheme the kind stays open for the model, and no device is claimed.
+        var bare = Node(Write("clip.mp4", SyntheticVideo.Mp4(new SyntheticVideoSpec { VideoTrackName = handler, DurationSeconds = 40 })));
+        var open = new VideoOriginReader().Read(bare)!.Origin;
+        Assert.Equal((VideoKind.Unknown, (RecordingDevice?)null), (open.Kind, open.Device));
+        Assert.False(open.IsSettled);
+    }
+
+    [Fact]
+    public void CameraTrackName_StillNamesTheCamera()
+    {
+        var origin = VideoKindRules.Decide(new VideoContainerInfo { Tracks = [new VideoTrack("video", null, "GoPro AVC")] }, "clip.mp4", "", VideoCompanions.None);
+        Assert.Equal((VideoKind.OwnRecording, RecordingDevice.ActionCam, ResultCertainty.Certain), (origin.Kind, origin.Device, origin.KindCertainty));
+    }
+
+    [Theory]
+    [InlineData("Apple", null, "clip.mp4", "likely")]
+    [InlineData(null, "iPhone 15", "clip.mp4", "likely")]
+    [InlineData("GoPro", null, "GX010042.MP4", "certain")] // a scheme unique to the camera confirms the maker
+    public void MakeOrModelAlone_IsLikely_UnlessTheNameConfirms(string? make, string? model, string name, string certainty)
+    {
+        var origin = VideoKindRules.Decide(new VideoContainerInfo { Make = make, Model = model }, name, "", VideoCompanions.None);
+        Assert.Equal(VideoKind.OwnRecording, origin.Kind);
+        Assert.Equal(certainty, origin.KindCertainty.ToCode());
+        Assert.Equal(certainty, origin.DeviceCertainty?.ToCode());
+    }
+
+    [Theory]
+    [InlineData("Ten garden tricks (1080p_30fps_H264-128kbit_AAC).mp4")]
+    [InlineData("How to fold a paper boat [aB3dE5fG7hJ].mp4")]
+    [InlineData("WhatsApp Video 2024-05-01 at 18.30.12.mp4")]
+    public void DeviceInTheContainer_AgainstADownloadName_NeitherWins(string name)
+    {
+        var origin = VideoKindRules.Decide(new VideoContainerInfo { Make = "Apple", Model = "iPhone 15", DurationSeconds = 60 }, name, "", VideoCompanions.None);
+        Assert.Equal((VideoKind.OwnRecording, ResultCertainty.Uncertain), (origin.Kind, origin.KindCertainty));
+        Assert.Equal((RecordingDevice.Phone, ResultCertainty.Uncertain), (origin.Device, origin.DeviceCertainty));
+        Assert.False(origin.IsSettled);
+        Assert.NotNull(origin.Remaining);
+        Assert.Contains(origin.Evidence!, e => e.Effect.Contains("contradicts"));
+
+        // The same with a download info file next to it.
+        var info = VideoKindRules.Decide(new VideoContainerInfo { Make = "Apple", Model = "iPhone 15" }, "clip.mp4", "", new VideoCompanions(["clip.info.json"], DownloadInfo: true));
+        Assert.Equal(ResultCertainty.Uncertain, info.KindCertainty);
+    }
+
+    [Fact]
+    public void DownloadFolder_LowersAnOwnRecording_ButDoesNotRuleItOut()
+    {
+        var phone = VideoKindRules.Decide(null, "VID_20230716_183001.mp4", "Downloads", VideoCompanions.None);
+        Assert.Equal((VideoKind.OwnRecording, ResultCertainty.Uncertain), (phone.Kind, phone.KindCertainty));
+        Assert.False(phone.IsSettled);
+        Assert.Contains(phone.Evidence!, e => e.Field == "folder" && e.Value == "Downloads");
+
+        var sure = VideoKindRules.Decide(new VideoContainerInfo { Make = "Apple", Model = "iPhone 15" }, "clip.mp4", "Stick/Download/old", VideoCompanions.None);
+        Assert.Equal((VideoKind.OwnRecording, ResultCertainty.Likely, ResultCertainty.Likely), (sure.Kind, sure.KindCertainty, sure.DeviceCertainty));
+
+        // Elsewhere nothing changes, and a folder that only contains the word is no download folder.
+        Assert.Equal(ResultCertainty.Likely, VideoKindRules.Decide(null, "VID_20230716_183001.mp4", "Videos/Download-Party", VideoCompanions.None).KindCertainty);
+        // A download in a download folder stays what it is.
+        Assert.Equal(VideoKind.WebClip, VideoKindRules.Decide(null, "HLS_3_v2 (720p).mp4", "Downloads", VideoCompanions.None).Kind);
     }
 
     // ── containers ───────────────────────────────────────────────────────
