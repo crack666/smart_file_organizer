@@ -32,12 +32,14 @@ public sealed record SensitiveFileRef(string RelativePath, SensitiveMarker Marke
 
 /// <summary>One finding with the facts a controlling model decides from.</summary>
 /// <param name="Examples">A few unmarked files of the finding (relative paths).</param>
-/// <param name="SensitiveFiles">The marked files of the finding: path and markers only.</param>
+/// <param name="SensitiveFiles">The marked files of the finding (marked themselves or in a marked folder): path and markers only.</param>
+/// <param name="Marked">Ids of the marked files; their names are never listed as examples.</param>
 public sealed record FindingCandidateItem(
     Finding Finding,
     UnitCandidates Candidates,
     IReadOnlyList<string> Examples,
-    IReadOnlyList<SensitiveFileRef> SensitiveFiles);
+    IReadOnlyList<SensitiveFileRef> SensitiveFiles,
+    IReadOnlySet<long> Marked);
 
 /// <summary>The answer of <c>sfo findings candidates</c>.</summary>
 public sealed record FindingCandidateRun(
@@ -98,10 +100,11 @@ public sealed class FindingCandidateService
         for (var i = 0; i < todo.Count; i++)
         {
             var (finding, nodes) = todo[i];
-            var marked = nodes.Select(n => (Node: n, Markers: SensitiveOutputGuard.GetMarkers(n))).ToList();
+            var marked = nodes.Select(n => (Node: n, Markers: answer.Marked.GetValueOrDefault(n.Id) | SensitiveOutputGuard.GetMarkers(n))).ToList();
             items.Add(new FindingCandidateItem(finding, answer.Units[i],
                 marked.Where(m => m.Markers == SensitiveMarker.None).Select(m => Rel(m.Node)).Take(Math.Max(0, query.Names)).ToList(),
-                marked.Where(m => m.Markers != SensitiveMarker.None).Select(m => new SensitiveFileRef(Rel(m.Node), m.Markers)).ToList()));
+                marked.Where(m => m.Markers != SensitiveMarker.None).Select(m => new SensitiveFileRef(Rel(m.Node), m.Markers)).ToList(),
+                answer.Marked.Keys.ToHashSet()));
         }
         return new FindingCandidateRun(report.Job, StorageStatus.Known, null, answer.Libraries, items);
     }

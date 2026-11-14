@@ -254,7 +254,7 @@ public static class ControllerCommands
         var u = item.Candidates;
         var groups = u.Groups.Select(g =>
         {
-            var unmarked = g.Files.Where(x => SensitiveOutputGuard.GetMarkers(x) == SensitiveMarker.None).ToList();
+            var unmarked = g.Files.Where(x => !item.Marked.Contains(x.Id) && SensitiveOutputGuard.GetMarkers(x) == SensitiveMarker.None).ToList();
             return new GroupView(
                 g.Index, g.Files.Count, g.Files.Sum(x => x.Size), g.Label, ByType(g.Unit.Types),
                 new PeriodView(BundlesCommand.Local(g.Unit.From), BundlesCommand.Local(g.Unit.To), g.Unit.TimeSource.ToCode()),

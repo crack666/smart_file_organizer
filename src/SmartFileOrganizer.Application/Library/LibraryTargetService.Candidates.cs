@@ -62,7 +62,9 @@ public sealed record UnitCandidates(string Key, MatchUnit Unit, string? Excluded
 public sealed record LibraryRootFacts(ScanJob Library, long? FreeBytes, string InboxFolder);
 
 /// <summary>The answer of <see cref="LibraryTargetService.CandidatesAsync"/>.</summary>
-public sealed record CandidateAnswer(ScanJob Source, IReadOnlyList<LibraryRootFacts> Libraries, IReadOnlyList<UnitCandidates> Units);
+/// <param name="Marked">The marked files of the units: marked themselves or lying in a marked folder of the source.</param>
+public sealed record CandidateAnswer(
+    ScanJob Source, IReadOnlyList<LibraryRootFacts> Libraries, IReadOnlyList<UnitCandidates> Units, IReadOnlyDictionary<long, SensitiveMarker> Marked);
 
 /// <summary>One library folder in detail: its facts, its subfolders and one page of its own files.</summary>
 public sealed record FolderDetail(
@@ -119,6 +121,18 @@ public sealed partial class LibraryTargetService
         var roots = libraries.Select(l => new LibraryRootFacts(l, _freeSpace?.AvailableBytes(l.RootPath), _options.InboxFolderOf(l.RootPath))).ToList();
         var folders = new Dictionary<(long, string), FolderFacts>();
 
+        // A file counts as marked when it is marked itself or lies in a marked folder of the source: neither gives a name
+        // or a description.
+        var sourceDirMarkers = await DirectoryMarkersAsync(source.Id, ct);
+        var marked = new Dictionary<long, SensitiveMarker>();
+        foreach (var file in query.Units.SelectMany(u => u.Files))
+        {
+            var m = SensitiveOutputGuard.GetMarkers(file);
+            for (var dir = file.ParentPath; !string.IsNullOrEmpty(dir); dir = Path.GetDirectoryName(dir))
+                m |= sourceDirMarkers.GetValueOrDefault(dir);
+            if (m != SensitiveMarker.None) marked[file.Id] = m;
+        }
+
         var answers = new List<UnitCandidates>(query.Units.Count);
         foreach (var unitQuery in query.Units)
         {
@@ -154,17 +168,21 @@ public sealed partial class LibraryTargetService
             }
             answers.Add(new UnitCandidates(unitQuery.Key, unit, null, groups));
         }
-        return new CandidateAnswer(source, roots, answers);
+        return new CandidateAnswer(source, roots, answers, marked);
 
         string Label(IReadOnlyList<FileNode> files)
         {
             var described = Describe(files);
-            return described.IsEmpty ? $"{files[0].Name}{(files.Count > 1 ? $" and {files.Count - 1} more" : string.Empty)} (not described)" : described.Gist();
+            if (!described.IsEmpty) return described.Gist();
+            var named = files.FirstOrDefault(f => !marked.ContainsKey(f.Id));
+            return named is null
+                ? $"{files.Count} marked file(s) (not described)"
+                : $"{named.Name}{(files.Count > 1 ? $" and {files.Count - 1} more" : string.Empty)} (not described)";
         }
 
         // What the unmarked files show; a marked file never adds to a description.
         ContentDescription Describe(IReadOnlyList<FileNode> files) => ContentDescription.From(files
-            .Where(f => SensitiveOutputGuard.GetMarkers(f) == SensitiveMarker.None)
+            .Where(f => !marked.ContainsKey(f.Id))
             .Select(f => facts.TryGetValue(f.Id, out var x) ? x : (IReadOnlyList<FileFact>)[])
             .ToList());
 
