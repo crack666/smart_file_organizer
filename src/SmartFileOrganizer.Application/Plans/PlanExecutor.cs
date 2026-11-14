@@ -28,7 +28,15 @@ public sealed class PlanExecutionHooks
 /// <summary>Which actions a run is about, and whether it changes anything.</summary>
 /// <param name="ActionIds">Only these actions; empty for every action of the plan. A sensitive action runs only when named.</param>
 /// <param name="Execute">False: a dry run that reads, checks and reports, and writes nothing.</param>
-public sealed record PlanRunOptions(IReadOnlyList<long> ActionIds, bool Execute);
+/// <param name="Notices">Step 2 leaves a move notice in every folder whose originals went (default); false: none is written
+/// in this run. Undo corrects existing notices either way.</param>
+public sealed record PlanRunOptions(IReadOnlyList<long> ActionIds, bool Execute, bool Notices = true);
+
+/// <summary>What a run did with the move notice of one source folder.</summary>
+/// <param name="Outcome"><c>written</c> (created or changed), <c>removed</c> (no entry left), <c>would_write</c> (dry run),
+/// <c>skipped</c> (a file that is not a notice carries the name; it is left alone) or <c>failed</c>.</param>
+/// <param name="Entries">Entries in the notice afterwards, of every plan.</param>
+public sealed record PlanNoticeItem(string Path, string Outcome, int Entries, string? Detail);
 
 /// <summary>What a run did with one action.</summary>
 /// <param name="Outcome"><c>done</c>, <c>would_run</c> (dry run), <c>skipped</c> (left as it was, see reasons),
@@ -47,7 +55,8 @@ public sealed record PlanRunReport(
     bool KeepSource,
     IReadOnlyList<PlanRunItem> Items,
     PlanRemovalSummary Removal,
-    IReadOnlyList<string> EmptyFolders);
+    IReadOnlyList<string> EmptyFolders,
+    IReadOnlyList<PlanNoticeItem>? Notices = null);
 
 /// <summary>
 /// Executes and takes back a plan (https://github.com/crack666/smart_file_organizer/issues/12). Only confirmed actions
@@ -364,7 +373,8 @@ public sealed class PlanExecutor
             }
             items.Add(await RemoveActionAsync(run, a, emptied, ct));
         }
-        return Report(run, "remove_sources", items, emptied.ToList());
+        var notices = await UpdateNoticesAsync(run, create: options.Notices, ct);
+        return Report(run, "remove_sources", items, emptied.ToList(), notices);
     }
 
     private async Task<PlanRunItem> RemoveActionAsync(RunState run, PlanAction a, ISet<string> emptied, CancellationToken ct)
@@ -440,9 +450,10 @@ public sealed class PlanExecutor
             if (!run.Steps.Any(s => s.ActionId == a.Id && s.State == PlanStepState.Done)) continue;
             items.Add(await UndoActionAsync(run, a, ct));
         }
+        var notices = await UpdateNoticesAsync(run, create: false, ct);
         if (run.Execute)
             CleanHoldFolder(run);
-        return Report(run, "undo", items, []);
+        return Report(run, "undo", items, [], notices);
     }
 
     private async Task<PlanRunItem> UndoActionAsync(RunState run, PlanAction a, CancellationToken ct)
@@ -773,10 +784,18 @@ public sealed class PlanExecutor
                 PlanStepKind.RemoveFolder => !Directory.Exists(s.SourcePath)
                     ? (PlanStepState.Done, "Finished after an interruption.")
                     : (PlanStepState.Failed, "Interrupted; the folder is still there."),
+                // The notice is written whole under a temporary name; the next run brings it in line with the journal.
+                PlanStepKind.Notice => RecoverNotice(s),
                 _ => (PlanStepState.Failed, "Interrupted before the step was written.")
             };
             await FinishAsync(run, s, state, detail, ct);
         }
+    }
+
+    private static (PlanStepState, string) RecoverNotice(PlanStep s)
+    {
+        TryDeleteFile(s.SourcePath + PartialSuffix);
+        return (PlanStepState.Failed, "Interrupted while the move notice was written; it is written again by the next run.");
     }
 
     private async Task<(PlanStepState, string)> RecoverCopyAsync(PlanStep s, CancellationToken ct)
@@ -856,7 +875,8 @@ public sealed class PlanExecutor
                 {
                     if (entry.Attributes.HasFlag(FileAttributes.ReparsePoint)) return ([], PlanRunReason.SourceHasLink);
                     if (entry is DirectoryInfo sub) stack.Push(sub);
-                    else if (entry is FileInfo f)
+                    // A move notice is the tool's own note, not content; the scan leaves it out as well.
+                    else if (entry is FileInfo f && !IsNotice(f.FullName))
                         files.Add(new SourceFile(f.FullName, Path.GetRelativePath(root.FullName, f.FullName), f.Length, f.LastWriteTimeUtc.Ticks));
                 }
             }
@@ -936,12 +956,12 @@ public sealed class PlanExecutor
     private static bool SameVolume(string a, string b) =>
         string.Equals(Path.GetPathRoot(Path.GetFullPath(a)), Path.GetPathRoot(Path.GetFullPath(b)), StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>Source folders left empty are only reported, never removed.</summary>
+    /// <summary>Source folders left empty are only reported, never removed. A move notice in them does not count.</summary>
     private static void NoteEmptyFolders(RunState run, string folder, ISet<string> emptied)
     {
         for (var dir = folder; dir is not null && PlanChecks.IsAtOrBelow(dir, run.Job.RootPath); dir = Path.GetDirectoryName(dir))
         {
-            if (!Directory.Exists(dir) || Directory.EnumerateFileSystemEntries(dir).Any()) break;
+            if (!Directory.Exists(dir) || Directory.EnumerateFileSystemEntries(dir).Any(e => !IsNotice(e))) break;
             emptied.Add(dir);
         }
     }
@@ -1029,12 +1049,120 @@ public sealed class PlanExecutor
 
     private static string? Join(IReadOnlyCollection<string> parts) => parts.Count == 0 ? null : string.Join("; ", parts);
 
-    private static PlanRunReport Report(RunState run, string mode, IReadOnlyList<PlanRunItem> items, IReadOnlyList<string> emptied)
+    private static PlanRunReport Report(RunState run, string mode, IReadOnlyList<PlanRunItem> items, IReadOnlyList<string> emptied,
+        IReadOnlyList<PlanNoticeItem>? notices = null)
     {
         // What --remove-sources would take away now: the originals of every verified action not yet held.
         var waiting = run.Actions.Where(a => a.State == PlanActionState.Verified).ToList();
         var files = waiting.SelectMany(a => run.Checked(a.Id).Where(s => run.ActiveHold(a.Id, s.SourcePath) is null)).ToList();
         return new PlanRunReport(run.Plan.Id, mode, run.Execute, run.KeepSource, items,
-            new PlanRemovalSummary(waiting.Count, files.Count, files.Sum(s => s.Bytes)), emptied);
+            new PlanRemovalSummary(waiting.Count, files.Count, files.Sum(s => s.Bytes)), emptied, notices ?? []);
     }
+
+    // ------------------------------------------------------------------ move notices
+
+    /// <summary>
+    /// Brings the move notice of every source folder this plan took originals from in line with the journal
+    /// (https://github.com/crack666/smart_file_organizer/issues/86): it lists the originals of this plan that are away
+    /// (held or purged, not put back), beside the entries of other plans, which stay as they are. A notice without
+    /// entries is removed. With <paramref name="create"/> false only existing notices are changed (undo; a run
+    /// without notices). A file with the notice name that is not a notice is never touched. Each change is a journal
+    /// step, written as a temporary file and then named, so a cut-off run leaves the old notice or the new one.
+    /// </summary>
+    private async Task<IReadOnlyList<PlanNoticeItem>> UpdateNoticesAsync(RunState run, bool create, CancellationToken ct)
+    {
+        var result = new List<PlanNoticeItem>();
+        var holds = run.Steps.Where(s => s.Kind == PlanStepKind.Hold && s.State == PlanStepState.Done).ToList();
+        foreach (var folder in holds.Select(h => Path.GetDirectoryName(h.SourcePath)!).Distinct(PathComparer).Order(StringComparer.Ordinal))
+        {
+            var path = Path.Combine(folder, MoveNotice.FileName);
+            var away = holds
+                .Where(h => PathComparer.Equals(Path.GetDirectoryName(h.SourcePath), folder) && run.ActiveHold(h.ActionId, h.SourcePath)?.Id == h.Id)
+                .Select(h => new MoveNoticeEntry(h.FinishedAt ?? h.StartedAt, run.Plan.Id, h.ActionId, Path.GetFileName(h.SourcePath),
+                    h.TargetPath ?? string.Empty))
+                .ToList();
+
+            MoveNoticeDocument? existing = null;
+            var exists = File.Exists(path);
+            if (Directory.Exists(path))
+            {
+                result.Add(new PlanNoticeItem(path, "skipped", 0, "A folder carries the name of the notice."));
+                continue;
+            }
+            if (exists)
+            {
+                existing = ReadNotice(path);
+                if (existing is not { Readable: true })
+                {
+                    result.Add(new PlanNoticeItem(path, "skipped", 0,
+                        existing is null ? "A file that is not a move notice carries its name; it is left alone."
+                                         : $"A move notice of format {existing.Version} lies there; it is left alone."));
+                    continue;
+                }
+            }
+            else if (!create || away.Count == 0 || !Directory.Exists(folder))
+            {
+                continue;
+            }
+
+            var others = existing?.Entries.Where(e => e.PlanId != run.Plan.Id) ?? [];
+            var entries = MoveNotice.Order(others.Concat(away)).ToList();
+            var text = MoveNotice.Render(entries);
+            if (existing is not null && MoveNotice.Render(existing.Entries) == text)
+                continue;
+            if (!run.Execute)
+            {
+                result.Add(new PlanNoticeItem(path, entries.Count == 0 ? "removed" : "would_write", entries.Count, null));
+                continue;
+            }
+
+            var actionId = away.Select(e => e.ActionId).Concat(existing?.Entries.Where(e => e.PlanId == run.Plan.Id).Select(e => e.ActionId) ?? [])
+                .Concat(holds.Where(h => PathComparer.Equals(Path.GetDirectoryName(h.SourcePath), folder)).Select(h => h.ActionId))
+                .First();
+            var step = await StartAsync(run, run.Actions.Single(a => a.Id == actionId), PlanStepKind.Notice, path, null, null, entries.Count, null, ct);
+            try
+            {
+                if (entries.Count == 0)
+                {
+                    File.Delete(path);
+                    await FinishAsync(run, step, PlanStepState.Done, "No entry left; the notice was removed.", ct);
+                    result.Add(new PlanNoticeItem(path, "removed", 0, null));
+                    continue;
+                }
+                var partial = path + PartialSuffix;
+                TryDeleteFile(partial);
+                await File.WriteAllTextAsync(partial, text, new System.Text.UTF8Encoding(encoderShouldEmitUTF8Identifier: false), ct);
+                // Replaced only when what lies there is the notice read above; a new file is never put over another.
+                File.Move(partial, path, overwrite: exists);
+                await FinishAsync(run, step, PlanStepState.Done, $"{entries.Count} entries.", ct);
+                result.Add(new PlanNoticeItem(path, "written", entries.Count, null));
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                TryDeleteFile(path + PartialSuffix);
+                await FinishAsync(run, step, PlanStepState.Failed, $"{PlanRunReason.IoError.ToCode()}: {ex.Message}", ct);
+                result.Add(new PlanNoticeItem(path, "failed", existing?.Entries.Count ?? 0, ex.Message));
+            }
+        }
+        return result;
+    }
+
+    /// <summary>Reads a file that carries the notice name; null when it is not a notice or cannot be read.</summary>
+    private static MoveNoticeDocument? ReadNotice(string path)
+    {
+        try
+        {
+            var info = new FileInfo(path);
+            if (!info.Exists || info.Length > MoveNotice.MaxBytes || info.Attributes.HasFlag(FileAttributes.ReparsePoint))
+                return null;
+            return MoveNotice.Parse(File.ReadAllText(path));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Whether <paramref name="path"/> is a move notice (by name and first line), which is never content.</summary>
+    private static bool IsNotice(string path) => MoveNotice.HasNoticeName(path) && ReadNotice(path) is not null;
 }

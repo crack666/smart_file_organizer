@@ -84,6 +84,11 @@ First that applies wins:
 7. From `shallow_from` on, the folder's own files decide: any user file → scanned;
    program files and no user file → shallow; neither → scanned.
 
+Before every rule: the hold folder of `sfo plan apply` (`.sfo-hold` directly below the root) is skipped, since the
+originals in it already left the source. A move notice (`_moved-files.txt`, [move-notice.md](move-notice.md)) is no
+file of the scan; its entries are stored as origin
+(https://github.com/crack666/smart_file_organizer/issues/86).
+
 A skipped folder is marked sensitive by its name when it typically holds keys,
 logins or private messages (`.ssh`, `.gnupg`, `.aws`, `.azure`, `.kube`,
 `.docker`, `.password-store`, `.config`, `.mozilla`, `.thunderbird`, wallets,

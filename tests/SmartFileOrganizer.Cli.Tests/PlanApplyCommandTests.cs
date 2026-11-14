@@ -5,6 +5,7 @@ using SmartFileOrganizer.Application.Evaluation;
 using SmartFileOrganizer.Application.Plans;
 using SmartFileOrganizer.Cli.Contract;
 using SmartFileOrganizer.Domain.Interfaces;
+using SmartFileOrganizer.Domain.Models;
 using SmartFileOrganizer.Tests.Support;
 
 namespace SmartFileOrganizer.Cli.Tests;
@@ -142,6 +143,110 @@ public class PlanApplyCommandTests : IDisposable
         await OkAsync("plan", "undo", plan, "--execute");
         Assert.Equal(tree, Snapshot(_tree));
         Assert.Equal(library, Snapshot(_library));
+    }
+
+    // ── Umzugsnotiz und sfo where (Issue 86) ─────────────────────────────
+
+    [Fact]
+    public async Task RemoveSources_LeavesAMoveNotice_WhereNamesTheNewPlace_AndUndoRemovesTheNotice()
+    {
+        var plan = await ApprovedPlanAsync();
+        var tree = Snapshot(_tree);
+        var source = Path.Combine(_tree, "Downloads", "Rechnung_Strom.pdf");
+        var target = Path.Combine(_library, "Dokumente", "Rechnung_Strom.pdf");
+        await OkAsync("plan", "apply", plan, "--execute");
+        var removed = await OkAsync("plan", "apply", plan, "--remove-sources", "--execute");
+
+        // The notice lies in the source folder, readable without sfo: names and new places, nothing about the content.
+        var notice = Path.Combine(_tree, "Downloads", MoveNotice.FileName);
+        Assert.True(File.Exists(notice));
+        var text = File.ReadAllText(notice);
+        Assert.StartsWith("# sfo-move-notice 1\n", text);
+        var doc = MoveNotice.Parse(text);
+        Assert.NotNull(doc);
+        Assert.Equal(3, doc.Entries.Count);
+        var entry = doc.Entries.Single(e => e.Name == "Rechnung_Strom.pdf");
+        Assert.Equal(target, entry.Target);
+        Assert.Equal(long.Parse(plan), entry.PlanId);
+        Assert.DoesNotContain("power", text);
+        Assert.Contains(removed.GetProperty("notices").EnumerateArray(), n => Str(n, "path") == notice && Str(n, "outcome") == "written");
+        // The emptied folder stays, holds only its notice and is still reported as left empty.
+        var holiday = Path.Combine(_tree, "Urlaub Kroatien 2021");
+        Assert.Equal([MoveNotice.FileName], Directory.GetFileSystemEntries(holiday).Select(Path.GetFileName));
+        Assert.Contains(holiday, Strings(removed, "empty_folders"));
+
+        // sfo where: by the old path and by the checksum.
+        var where = await OkAsync("where", source);
+        Assert.Equal(target, Str(where.GetProperty("now").EnumerateArray().First(), "path"));
+        var step = Assert.Single(where.GetProperty("history").EnumerateArray());
+        Assert.Equal("moved", Str(step, "state"));
+        Assert.Equal(long.Parse(plan), step.GetProperty("plan_id").GetInt64());
+        Assert.Equal(target, Str(step, "to"));
+        var byHash = await OkAsync("where", Hash(target));
+        Assert.Contains(byHash.GetProperty("now").EnumerateArray(), p => Str(p, "path") == target);
+        Assert.DoesNotContain(byHash.GetProperty("now").EnumerateArray(), p => Str(p, "path") == source);
+
+        // Undo takes the notices back with the originals: the source tree is as before.
+        var undone = await OkAsync("plan", "undo", plan, "--execute");
+        Assert.False(File.Exists(notice));
+        Assert.Contains(undone.GetProperty("notices").EnumerateArray(), n => Str(n, "path") == notice && Str(n, "outcome") == "removed");
+        Assert.Equal(tree, Snapshot(_tree));
+        var back = await OkAsync("where", source);
+        Assert.Equal("returned", Str(Assert.Single(back.GetProperty("history").EnumerateArray()), "state"));
+        Assert.Equal(source, Str(back.GetProperty("now").EnumerateArray().First(), "path"));
+    }
+
+    [Fact]
+    public async Task AFileWithTheNoticeName_IsNeverTouched_AndNoNoticeWritesNone()
+    {
+        var plan = await ApprovedPlanAsync();
+        var foreign = Path.Combine(_tree, "Downloads", MoveNotice.FileName);
+        await OkAsync("plan", "apply", plan, "--execute");
+        // Written after the scan, so the plan does not know it; a person's own file that carries the name.
+        File.WriteAllText(foreign, "my own list");
+
+        var actions = await ActionsAsync(plan);
+        var holiday = Id(actions.Single(a => Str(a, "source_kind") == "folder")).ToString();
+        var invoice = Id(actions.Single(a => Str(a, "relative_path") == "Downloads/Rechnung_Strom.pdf")).ToString();
+        var run = await OkAsync("plan", "apply", plan, "--remove-sources", "--execute", "--action", invoice);
+        Assert.Equal("my own list", File.ReadAllText(foreign));
+        Assert.Contains(run.GetProperty("notices").EnumerateArray(), n => Str(n, "path") == foreign && Str(n, "outcome") == "skipped");
+
+        await OkAsync("plan", "apply", plan, "--remove-sources", "--execute", "--no-notice", "--action", holiday);
+        Assert.False(File.Exists(Path.Combine(_tree, "Urlaub Kroatien 2021", MoveNotice.FileName)));
+        await OkAsync("plan", "undo", plan, "--execute");
+        Assert.Equal("my own list", File.ReadAllText(foreign));
+    }
+
+    [Fact]
+    public async Task TheScanSkipsNoticeAndHoldFolder_ReadsTheNoticeAsOrigin_AndARefreshNamesTheTargets()
+    {
+        var plan = await ApprovedPlanAsync();
+        await OkAsync("plan", "apply", plan, "--execute");
+        await OkAsync("plan", "apply", plan, "--remove-sources", "--execute");
+        Assert.True(File.Exists(Path.Combine(_tree, "Downloads", MoveNotice.FileName)));
+
+        var scan = await OkAsync("scan", _tree, "--refresh");
+        var job = scan.GetProperty("job").GetProperty("id").GetInt64();
+        // Left in the tree: the sensitive file only. Neither the notices nor the held originals count as content.
+        Assert.Equal(1, scan.GetProperty("job").GetProperty("files_total").GetInt64());
+        var refresh = scan.GetProperty("refresh");
+        Assert.Equal(6, refresh.GetProperty("moved").GetInt64());
+        Assert.Equal(0, refresh.GetProperty("new").GetInt64());
+        Assert.Equal(0, refresh.GetProperty("missing").GetInt64());
+        var moved = refresh.GetProperty("changes").EnumerateArray().Single(c => Str(c, "path") == Path.Combine(_tree, "Downloads", "Rechnung_Strom.pdf"));
+        Assert.Equal("moved", Str(moved, "change"));
+        Assert.Equal(Path.Combine(_library, "Dokumente", "Rechnung_Strom.pdf"), Str(moved, "target"));
+
+        await using var conn = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={_dbPath};Pooling=False");
+        await conn.OpenAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = $"SELECT (SELECT COUNT(*) FROM file_nodes WHERE job_id = {job} AND name = '{MoveNotice.FileName}'), " +
+                          $"(SELECT COUNT(*) FROM notice_entries WHERE job_id = {job})";
+        await using var reader = await cmd.ExecuteReaderAsync();
+        Assert.True(await reader.ReadAsync());
+        Assert.Equal(0, reader.GetInt64(0));
+        Assert.Equal(6, reader.GetInt64(1));
     }
 
     // ── Löschregel (Nachtrag 12.11.2026) ─────────────────────────────────

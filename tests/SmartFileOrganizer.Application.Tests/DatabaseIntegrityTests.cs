@@ -21,8 +21,12 @@ public class DatabaseIntegrityTests : IDisposable
     private static readonly HashSet<string> NotPerJob =
         ["sqlite_sequence", "db_version", "content_fingerprints", "content_assessments", "content_corrections"];
 
-    /// <summary>Tables whose rows outlive the job and only lose the reference to it.</summary>
-    private static readonly HashSet<string> Detached = ["eval_cases", "eval_runs"];
+    /// <summary>
+    /// Tables whose rows outlive the job and only lose the reference to it. Places and the move history (Issue 86) on
+    /// purpose: a place stays listed with its last numbers when its job is deleted, and sfo where still knows where a
+    /// file went. A move names no job at all, only paths, the plan id and the checksum.
+    /// </summary>
+    private static readonly HashSet<string> Detached = ["eval_cases", "eval_runs", "places", "moves"];
 
     private const string T = "2026-11-13T10:00:00.0000000Z";
 
@@ -254,6 +258,11 @@ public class DatabaseIntegrityTests : IDisposable
                 VALUES ('file_category', 'review_override', @job, @file, @root || '/d/f.txt', 'documents', @T, @T);
             INSERT INTO eval_runs (mode, started_at, finished_at, subject, job_id, settings_json, report_json)
                 VALUES ('cases', @T, @T, 's', @job, '{}', '{}');
+            INSERT INTO places (root_path, role, last_job_id, last_scan_at, first_seen_at) VALUES (@root, 'source', @job, @T, @T);
+            INSERT INTO moves (plan_id, action_id, source_path, target_path, moved_at) VALUES (1, 1, @root || '/d/f.txt', '/lib/f.txt', @T);
+            INSERT INTO scan_changes (job_id, previous_job_id, full_path, change) VALUES (@job, @job, @root || '/d/g.txt', 'missing');
+            INSERT INTO notice_entries (job_id, notice_path, source_path, target_path, plan_id, moved_at)
+                VALUES (@job, @root || '/d/_moved-files.txt', @root || '/d/g.txt', '/lib/g.txt', 1, @T);
             """, new { job, dir, file, comparison, bundle, root, T });
 
         return new SeededJob(job, dir, file);

@@ -88,6 +88,8 @@ public class ScanJobRepository : IScanJobRepository
         // Children before parents: foreign keys are enforced, and most references were declared without
         // ON DELETE CASCADE. One transaction, so a failure leaves the job whole. Test cases and evaluation runs
         // outlive the job and only lose their reference to it; content_fingerprints belongs to paths, not jobs.
+        // Places and the move history (moves) outlive the job on purpose (Issue 86): a place keeps its last numbers and
+        // points at its newest other job, and sfo where still knows where a file went.
         // A table added later with a job, file or folder reference belongs in this list
         // (ScanJobDeletionTests seeds every table and fails otherwise).
         const string sql = BundleRepository.DeleteForJobSql + """
@@ -116,6 +118,12 @@ public class ScanJobRepository : IScanJobRepository
             UPDATE plan_actions SET file_node_id = NULL WHERE file_node_id IN (SELECT id FROM file_nodes WHERE job_id = @id);
             UPDATE plan_actions SET directory_node_id = NULL WHERE directory_node_id IN (SELECT id FROM directory_nodes WHERE job_id = @id);
             DELETE FROM model_server_waits  WHERE job_id = @id;
+            DELETE FROM scan_changes        WHERE job_id = @id;
+            UPDATE scan_changes SET previous_job_id = NULL WHERE previous_job_id = @id;
+            DELETE FROM notice_entries      WHERE job_id = @id;
+            UPDATE places SET last_job_id = (SELECT MAX(j.id) FROM scan_jobs j
+                                             WHERE j.id <> @id AND j.root_path = places.root_path AND j.completed_at IS NOT NULL)
+                WHERE last_job_id = @id;
             DELETE FROM file_nodes          WHERE job_id = @id;
             DELETE FROM file_links          WHERE job_id = @id;
             DELETE FROM directory_nodes     WHERE job_id = @id;
