@@ -24,7 +24,8 @@ public static class FactsCommand
     {
         var job = JobArguments.Create("Job id (see sfo jobs): a source or a library scan.");
         var command = new Command("refresh",
-            "Read video kind, device, title, year, season and episode again from container, name and companion files. No model call.") { job };
+            "Read video kind, device, title, year, season and episode again from container, name and companion files. No model call. " +
+            "With --verbose, each video with the evidence the rules looked at (field, value, effect).") { job };
         CommandRunner.SetHandler(command, host, globals, async (ctx, ct) =>
         {
             var services = await ctx.GetServicesAsync(ct);
@@ -32,13 +33,35 @@ public static class FactsCommand
             if (await services.GetRequiredService<IScanJobRepository>().GetByIdAsync(id, ct) is null)
                 throw new CliFailureException(ExitCodes.Failure, ErrorCodes.JobNotFound, $"Job {id} not found.");
 
-            var result = await services.GetRequiredService<VideoFactRefreshService>().RefreshAsync(id, ct);
-            return CommandOutcome.Success(result, () =>
-                $"job {result.JobId}: {result.Read} of {result.Videos} video(s) read, {result.Missing} missing" +
-                (result.Kinds.Count == 0 ? string.Empty : " - " + string.Join(", ", result.Kinds.Select(k => $"{k.Key} {k.Value}"))) +
-                (result.ModelKindsKept > 0 ? $"; {result.ModelKindsKept} kind(s) kept from the model" : string.Empty) +
-                (result.Disputed > 0 ? $"; {result.Disputed} disputed" : string.Empty));
+            var verbose = ctx.ParseResult.GetValue(globals.Verbose);
+            var result = await services.GetRequiredService<VideoFactRefreshService>().RefreshAsync(id, verbose, ct);
+            return CommandOutcome.Success(result, () => Text(result));
         });
         return command;
+    }
+
+    private static string Text(VideoFactRefreshResult result)
+    {
+        string Kind(KeyValuePair<string, int> k) =>
+            result.Certainty?.GetValueOrDefault(k.Key) is { Count: > 0 } c
+                ? $"{k.Key} {k.Value} ({string.Join(", ", c.Select(x => $"{x.Value} {x.Key}"))})"
+                : $"{k.Key} {k.Value}";
+        var text = $"job {result.JobId}: {result.Read} of {result.Videos} video(s) read, {result.Missing} missing" +
+            (result.Kinds.Count == 0 ? string.Empty : " - " + string.Join(", ", result.Kinds.Select(Kind))) +
+            (result.ModelKindsKept > 0 ? $"; {result.ModelKindsKept} kind(s) kept from the model" : string.Empty) +
+            (result.Disputed > 0 ? $"; {result.Disputed} disputed" : string.Empty);
+        if (result.Files is null) return text;
+
+        var sb = new System.Text.StringBuilder(text);
+        foreach (var f in result.Files)
+        {
+            sb.AppendLine().Append($"{f.RelativePath}: {f.Kind} ({f.Source}{(f.Certainty is null ? string.Empty : ", " + f.Certainty)})");
+            if (f.Device is not null) sb.Append($" {f.Device}{(f.DeviceCertainty is null ? string.Empty : $" ({f.DeviceCertainty})")}");
+            if (f.RuleKind is not null) sb.Append($", rules read {f.RuleKind}");
+            if (f.Reason is not null) sb.Append($" - {f.Reason}");
+            foreach (var e in f.Evidence)
+                sb.AppendLine().Append($"  {e.Field}{(e.Value is null ? string.Empty : $" '{e.Value}'")}: {e.Effect}");
+        }
+        return sb.ToString();
     }
 }

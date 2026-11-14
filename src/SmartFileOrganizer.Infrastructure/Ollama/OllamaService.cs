@@ -413,7 +413,8 @@ public class OllamaService : IOllamaService
         if (input.Facts.Count > 0)
         {
             sb.AppendLine("Facts read from the file without a model (reliable; prefer them over your own impression):");
-            foreach (var fact in input.Facts)
+            // video_kind_reason is stored for people; the model reads the reason once, in the evidence lines below.
+            foreach (var fact in input.Facts.Where(f => f.Key != FileFactKey.VideoKindReason))
                 sb.AppendLine($"  {fact.Key.ToCode()}: {fact.Value} ({fact.Source.ToCode()})");
             sb.AppendLine();
         }

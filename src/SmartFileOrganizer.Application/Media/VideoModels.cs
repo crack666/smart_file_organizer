@@ -127,6 +127,7 @@ public sealed record VideoOrigin(
         if (Year is { } y) facts.Add(new FileFact(FileFactKey.ReleaseYear, Int(y), work, KindCertainty));
         if (Season is { } s) facts.Add(new FileFact(FileFactKey.SeasonNumber, Int(s), work, KindCertainty));
         if (Episode is { } e) facts.Add(new FileFact(FileFactKey.EpisodeNumber, Int(e), work, KindCertainty));
+        if (!string.IsNullOrWhiteSpace(Reason)) facts.Add(new FileFact(FileFactKey.VideoKindReason, Clip(Reason, 200), KindSource));
 
         if (info is not null)
         {

@@ -970,11 +970,14 @@ sfo files 7 --dir photos --max-confidence 0.5 --json
 from the stored facts, else `null`. `kind` is a video kind code, `source` a fact source code (`metadata`, `name`,
 `companion`, `model`), `certainty` a result certainty code; `device` a recording device code, `title`, `year`, `season`
 and `episode` of a published work (the title is `null` for a protected file), `disputed` the kind the model named against
-a sure one. Codes in [glossary.md](glossary.md#video-kind-videokind).
+a sure one, `reason` (since 14.11.2026, second round of Issue 103) why the rules read the kind as they did, from the fact `video_kind_reason`
+(`null` for a protected file and for videos read before; [`sfo facts refresh`](#sfo-facts-refresh-job) adds it). Codes in
+[glossary.md](glossary.md#video-kind-videokind).
 
 ```json
 { "kind": "series_episode", "source": "name", "certainty": "certain", "device": null,
-  "title": "Example Show", "year": null, "season": 2, "episode": 5, "disputed": null }
+  "title": "Example Show", "year": null, "season": 2, "episode": 5, "disputed": null,
+  "reason": "season and episode in the name" }
 ```
 
 `category_source` is an origin code (see [glossary.md](glossary.md)): `model`, `human` (an override), `rule` (forced to review by a marker; until 12.11.2026 `ai`, `user` and `sensitive`) or
@@ -1626,7 +1629,8 @@ folders of the rules (time, names, kinds of files, the same files already there)
                        "sensitive": false,
                        "origin": { "videos": 50, "kinds": { "own_recording": 50 }, "devices": { "phone": 41, "action_cam": 9 },
                                    "works": [], "certain": 47, "disputed": 0,
-                                   "text": "50 video(s): 50 own_recording (phone 41, action_cam 9)" } } ] } ],
+                                   "text": "50 video(s): 50 own_recording (phone 41, action_cam 9)",
+                                   "reasons": [ { "reason": "make and model 'Example X1' in the container", "videos": 41 } ] } } ] } ],
   "inbox_name": "Holiday stick - DCIM",
   "total": 1, "offset": 0, "next_offset": null, "truncated": false,
   "items": [
@@ -1693,8 +1697,10 @@ folders of the rules (time, names, kinds of files, the same files already there)
   the videos, from the stored facts of the source scan or of the library scan, `null` without a video with a kind.
   `kinds` counts videos per video kind code, `devices` own recordings per recording device code, `works` names films,
   series and music videos by title (`Example Show S01-S02`, `Some Film (2009)`, at most 5), `certain` the videos whose
-  kind is certain, `disputed` those where the model named another kind; `text` is the same in one line. A marked file
-  adds what the disclosure shows of it (no title for access data; nothing with `restricted`). Read the kinds of a job
+  kind is certain, `disputed` those where the model named another kind; `text` is the same in one line. `reasons`
+  (since 14.11.2026, second round of Issue 103) lists why the rules read the kinds, each `reason` (fact `video_kind_reason`) with the number of
+  `videos`, most first, at most 5; the text form prints them as a `because:` line under a group. A marked file
+  adds what the disclosure shows of it (no title and no reason for access data; nothing with `restricted`). Read the kinds of a job
   stored before that date with [`sfo facts refresh`](#sfo-facts-refresh-job).
 - `candidates[].folder`: the folder as the scan holds it, a few `file_names` (direct files first) and `subfolders`, and
   its stored description (`described`, `description`, `described_at`) from `folder_descriptions`. Nothing is described
@@ -1871,11 +1877,46 @@ descriptions stay.
 ```json
 { "job_id": 4, "videos": 120, "read": 118, "missing": 2,
   "kinds": { "movie": 12, "series_episode": 64, "own_recording": 30, "unknown": 12 },
-  "model_kinds_kept": 9, "disputed": 1 }
+  "model_kinds_kept": 9, "disputed": 1,
+  "certainty": { "movie": { "certain": 10, "likely": 2 }, "own_recording": { "certain": 21, "likely": 6, "uncertain": 3 },
+                 "series_episode": { "certain": 64 }, "unknown": { "uncertain": 12 } },
+  "files": null }
 ```
 
 `missing` counts videos gone or unreadable (their facts stay as they were), `model_kinds_kept` earlier model kinds that stayed, `disputed` sure kinds
-against which the model had named another. Errors: `job_not_found` (1), `usage` (2).
+against which the model had named another. `certainty` (since 14.11.2026, second round of Issue 103) counts per kind how many videos have their
+kind as `certain`, `likely` or `uncertain` (result certainty codes).
+
+With `--verbose`, `files` lists every read video with the evidence of the rules, so that a wrong conclusion can be
+traced; the text form prints one line per video and one per piece of evidence. Without it `files` is `null`.
+
+```json
+"files": [
+  { "file_id": 17, "relative_path": "Downloads/Ten garden tricks (1080p_30fps_H264-128kbit_AAC).mp4",
+    "kind": "web_clip", "source": "name", "certainty": "likely", "device": null, "device_certainty": null,
+    "rule_kind": null,
+    "reason": "naming scheme of a download program (resolution, frame rate and codecs in brackets)",
+    "evidence": [
+      { "field": "track_name", "value": "ISO Media file produced by Google Inc.",
+        "effect": "ignored: platforms, encoders and editing programs write maker names here" },
+      { "field": "name", "value": "naming scheme of a download program (resolution, frame rate and codecs in brackets)",
+        "effect": "downloaded: web clip" },
+      { "field": "folder", "value": "Downloads", "effect": "download folder: no own recording expected" } ] } ]
+```
+
+`kind`, `source` and `certainty` are the stored kind; `rule_kind` is what the rules alone read when an earlier model
+answer is stored instead (else `null`); `reason` is stored as the fact `video_kind_reason`. `evidence` names a video
+evidence field code (`make`, `model`, `track_name`, `software`, `location`, `name`, `folder`, `info_file`,
+`companion`, [glossary.md](glossary.md#video-evidence-field)), the value read and what the rules made of it. For a
+`name` the matched scheme stands there, not the name. For a marked file `reason` is `null` and the values are left
+out. Errors: `job_not_found` (1), `usage` (2).
+
+What decides a device (since 14.11.2026, second round of Issue 103): make and model together in the container are sure; one of them alone is
+likely, and sure only with a naming scheme unique to a camera, a camera track name or side files. A track name counts
+only in the form a camera firmware writes it (`GoPro AVC`, `DJI.AVC`); a maker word in another handler name is
+ignored, since video platforms, encoders and editing programs write such names. A device in the container against a
+download or messenger name wins nothing: the kind becomes `uncertain` and the model decides. A download folder on
+the way to the file lowers an own recording by one step.
 
 ## Content store
 

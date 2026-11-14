@@ -4,6 +4,9 @@ using SmartFileOrganizer.Domain.Models;
 
 namespace SmartFileOrganizer.Application.Media;
 
+/// <summary>One reason of the rules for the kind of a video, with the number of videos it decided.</summary>
+public sealed record VideoReasonCount(string Reason, int Videos);
+
 /// <summary>
 /// Kind and origin of the videos of a finding, a part or a library folder, condensed
 /// (https://github.com/crack666/smart_file_organizer/issues/103): how many videos of each kind, from which kind of device,
@@ -15,15 +18,19 @@ namespace SmartFileOrganizer.Application.Media;
 /// <param name="Works">Films, series and music videos by title: <c>Example Show S01-S02</c>, <c>Some Film (2009)</c>; at most <see cref="MaxWorks"/>.</param>
 /// <param name="Certain">Videos whose kind is certain.</param>
 /// <param name="Disputed">Videos where the model named another kind than the file says.</param>
+/// <param name="Reasons">Why the rules read the kinds as they did: each <c>video_kind_reason</c> with the number of videos,
+/// most first, at most <see cref="MaxReasons"/>; empty for videos analysed before the reason was stored.</param>
 public sealed record VideoOriginMix(
     int Videos,
     IReadOnlyDictionary<string, int> Kinds,
     IReadOnlyDictionary<string, int> Devices,
     IReadOnlyList<string> Works,
     int Certain,
-    int Disputed)
+    int Disputed,
+    IReadOnlyList<VideoReasonCount>? Reasons = null)
 {
     public const int MaxWorks = 5;
+    public const int MaxReasons = 5;
 
     /// <summary>
     /// The mix of the given videos' facts, or null when none has a kind. The caller passes the facts as they may be shown:
@@ -33,6 +40,7 @@ public sealed record VideoOriginMix(
     {
         var kinds = new Dictionary<string, int>(StringComparer.Ordinal);
         var devices = new Dictionary<string, int>(StringComparer.Ordinal);
+        var reasons = new Dictionary<string, int>(StringComparer.Ordinal);
         var works = new Dictionary<string, (VideoKind Kind, int? Year, SortedSet<int> Seasons)>(StringComparer.OrdinalIgnoreCase);
         int videos = 0, certain = 0, disputed = 0;
         foreach (var list in facts)
@@ -42,6 +50,7 @@ public sealed record VideoOriginMix(
             videos++;
             kinds[origin.Kind] = kinds.GetValueOrDefault(origin.Kind) + 1;
             if (origin.Device is { } device) devices[device] = devices.GetValueOrDefault(device) + 1;
+            if (origin.Reason is { Length: > 0 } reason) reasons[reason] = reasons.GetValueOrDefault(reason) + 1;
             if (origin.Certainty == ResultCertainty.Certain.ToCode()) certain++;
             if (origin.Disputed is not null) disputed++;
             if (origin.Title is { Length: > 0 } title && VerdictCodes.ParseNullable<VideoKind>(origin.Kind) is { } kind
@@ -56,7 +65,7 @@ public sealed record VideoOriginMix(
 
         return new VideoOriginMix(videos, Ordered(kinds), Ordered(devices),
             works.OrderBy(w => w.Key, StringComparer.OrdinalIgnoreCase).Take(MaxWorks).Select(w => Work(w.Key, w.Value.Kind, w.Value.Year, w.Value.Seasons)).ToList(),
-            certain, disputed);
+            certain, disputed, Ordered(reasons).Take(MaxReasons).Select(r => new VideoReasonCount(r.Key, r.Value)).ToList());
     }
 
     /// <summary>The dominant kind: more than half of the videos; null when they are mixed or unknown.</summary>

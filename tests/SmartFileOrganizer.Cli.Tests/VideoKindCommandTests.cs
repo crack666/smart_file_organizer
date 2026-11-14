@@ -171,6 +171,74 @@ public class VideoKindCommandTests : IDisposable
         Assert.False(shown.GetProperty("truncated").GetBoolean());
     }
 
+    /// <summary>
+    /// Done when (second round of Issue 103): a download whose container carries a platform's handler name is no own phone
+    /// recording; <c>facts refresh</c> counts per kind how many are certain, likely and uncertain, and with <c>--verbose</c>
+    /// shows each video with the evidence (field, value, effect); <c>show</c> carries the reason, and the groups of
+    /// <c>findings candidates</c> the reasons with their counts.
+    /// </summary>
+    [Fact]
+    public async Task Refresh_CountsCertaintyPerKind_AndShowsTheEvidencePerFile()
+    {
+        const string platform = "ISO Media file produced by Google Inc.";
+        const string trap = "Downloads/Ten garden tricks (1080p_30fps_H264-128kbit_AAC).mp4";
+        var root = Path.Combine(_dir, "stick2");
+        Write(root, trap, SyntheticVideo.Mp4(new SyntheticVideoSpec { VideoTrackName = platform, MediaBytes = 5001 }));
+        Write(root, "Downloads/Example Band - Example Song (Official Video) (1080p_30fps_H264-128kbit_AAC).mp4",
+            SyntheticVideo.Mp4(new SyntheticVideoSpec { VideoTrackName = platform, DurationSeconds = 200, MediaBytes = 5002 }));
+        Write(root, "Phone/VID20240501183000 (1).m4v", SyntheticVideo.Mp4(new SyntheticVideoSpec { MediaBytes = 5003 }));
+        Write(root, "Phone/WhatsApp Video 2024-05-01 at 18.30.12.mp4", SyntheticVideo.Mp4(new SyntheticVideoSpec { MediaBytes = 5004 }));
+        Write(root, "Phone/clip_d.mp4", SyntheticVideo.Mp4(new SyntheticVideoSpec { Make = "Apple", Model = "iPhone 15", AsMetadataKeys = true, MediaBytes = 5005 }));
+        var job = await ScanAsync(root);
+
+        var plain = await OkAsync("facts", "refresh", job.ToString());
+        Assert.Equal(JsonValueKind.Null, plain.GetProperty("files").ValueKind);
+        var certainty = plain.GetProperty("certainty");
+        int Count(string kind, string sure) => certainty.TryGetProperty(kind, out var k) && k.TryGetProperty(sure, out var n) ? n.GetInt32() : 0;
+        Assert.Equal((1, 1), (Count("own_recording", "certain"), Count("own_recording", "likely")));
+        Assert.Equal((1, 1, 1), (Count("web_clip", "likely"), Count("music_video", "likely"), Count("received", "likely")));
+        Assert.Equal(0, Count("own_recording", "uncertain"));
+
+        var verbose = await OkAsync("facts", "refresh", job.ToString(), "--verbose");
+        var files = verbose.GetProperty("files").EnumerateArray().ToList();
+        Assert.Equal(5, files.Count);
+        var download = files.Single(f => Str(f, "relative_path")!.Replace('\\', '/') == trap);
+        Assert.Equal(("web_clip", "name", "likely"), (Str(download, "kind"), Str(download, "source"), Str(download, "certainty")));
+        Assert.Null(Str(download, "device"));
+        var evidence = download.GetProperty("evidence").EnumerateArray().ToList();
+        Assert.Contains(evidence, e => Str(e, "field") == "track_name" && Str(e, "value") == platform && Str(e, "effect")!.StartsWith("ignored"));
+        Assert.Contains(evidence, e => Str(e, "field") == "folder" && Str(e, "value") == "Downloads");
+        var phone = files.Single(f => Str(f, "relative_path")!.EndsWith("clip_d.mp4"));
+        Assert.Equal(("own_recording", "phone", "certain"), (Str(phone, "kind"), Str(phone, "device"), Str(phone, "device_certainty")));
+        Assert.Contains(phone.GetProperty("evidence").EnumerateArray(), e => Str(e, "field") == "model" && Str(e, "value") == "iPhone 15");
+
+        // The text form names the evidence too.
+        var text = await SfoAsync("facts", "refresh", job.ToString(), "--verbose");
+        Assert.Contains($"track_name '{platform}': ignored", text.Stdout);
+        Assert.Contains("own_recording 2 (1 certain, 1 likely)", text.Stdout);
+
+        // The reason stays with the file.
+        var shown = (await OkAsync("show", job.ToString(), trap)).GetProperty("file").GetProperty("origin");
+        Assert.Contains("download program", Str(shown, "reason"));
+    }
+
+    [Fact]
+    public async Task Candidates_NameTheReasonsPerGroup()
+    {
+        var (source, _) = await PrepareAsync();
+        var candidates = await OkAsync("findings", "candidates", source.ToString());
+        var item = candidates.GetProperty("items").EnumerateArray().Single(i => Str(i, "kind") == "not_backed_up");
+        var reasons = item.GetProperty("groups").EnumerateArray().Select(g => g.GetProperty("origin"))
+            .Where(o => o.ValueKind == JsonValueKind.Object)
+            .SelectMany(o => o.GetProperty("reasons").EnumerateArray()).ToDictionary(r => Str(r, "reason")!, r => r.GetProperty("videos").GetInt32());
+        Assert.Equal(1, reasons["make and model 'GoPro HERO12 Black' in the container"]);
+        Assert.Equal(1, reasons["season and episode in the name"]);
+        Assert.Contains(reasons.Keys, r => r.StartsWith("recording program", StringComparison.Ordinal));
+
+        var text = await SfoAsync("findings", "candidates", source.ToString());
+        Assert.Contains("because: ", text.Stdout);
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────
 
     /// <summary>Source and library scanned, compared, bundled, and the video facts of both read without a model.</summary>
