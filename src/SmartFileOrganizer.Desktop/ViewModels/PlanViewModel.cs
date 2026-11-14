@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using Avalonia.Media.Imaging;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using SmartFileOrganizer.Application.Library;
 using SmartFileOrganizer.Application.Plans;
 using SmartFileOrganizer.Application.Sensitivity;
 using SmartFileOrganizer.Application.Services;
@@ -15,9 +16,16 @@ namespace SmartFileOrganizer.Desktop.ViewModels;
 
 /// <summary>
 /// The plan of a job in the GUI (https://github.com/crack666/smart_file_organizer/issues/15): the same plan the CLI and a
-/// steering agent work on, read, changed and confirmed by the person, then executed in the two steps of the CLI.
+/// steering agent work on, read, changed and released by the person, then executed in the two steps of the CLI.
 /// Every change, check and file operation is done by <see cref="PlanService"/> and <see cref="PlanExecutor"/>; this
 /// class only chooses what to ask them and shows their answers.
+/// <para>
+/// Since https://github.com/crack666/smart_file_organizer/issues/102 the person answers one question per action, what
+/// happens to the file (<see cref="PlanOutcome"/>: Umziehen, In den Papierkorb, Hier lassen), and then releases
+/// (<c>approved</c>) all, a group or a selection at once. The view never rejects: "Hier lassen" sets the kind
+/// <c>leave</c>. A rejected action (from the CLI or an agent) shows as "Hier lassen" with the state "Abgelehnt"; a
+/// release passes over it, and choosing an outcome for it decides it anew.
+/// </para>
 /// </summary>
 public partial class PlanViewModel : ViewModelBase
 {
@@ -25,6 +33,7 @@ public partial class PlanViewModel : ViewModelBase
 
     private readonly PlanService _plans;
     private readonly PlanExecutor _executor;
+    private readonly LibraryTargetService _libraries;
     private readonly ScanJobService _jobs;
     private readonly FileQueryService _files;
     private readonly IFileFactRepository _facts;
@@ -42,6 +51,7 @@ public partial class PlanViewModel : ViewModelBase
     public PlanViewModel(
         PlanService plans,
         PlanExecutor executor,
+        LibraryTargetService libraries,
         ScanJobService jobs,
         FileQueryService files,
         IFileFactRepository facts,
@@ -52,6 +62,7 @@ public partial class PlanViewModel : ViewModelBase
     {
         _plans = plans;
         _executor = executor;
+        _libraries = libraries;
         _jobs = jobs;
         _files = files;
         _facts = facts;
@@ -88,9 +99,17 @@ public partial class PlanViewModel : ViewModelBase
     // ------------------------------------------------------------------ summary
 
     [ObservableProperty] private string _moveText = string.Empty;
-    [ObservableProperty] private string _removeText = string.Empty;
+    [ObservableProperty] private string _binText = string.Empty;
     [ObservableProperty] private string _stayText = string.Empty;
+    [ObservableProperty] private string _releasedText = string.Empty;
     [ObservableProperty] private string _statesText = string.Empty;
+
+    public string MoveColor => PlanDisplay.OutcomeTile(PlanOutcome.Move);
+    public string BinColor => PlanDisplay.OutcomeTile(PlanOutcome.Bin);
+    public string StayColor => PlanDisplay.OutcomeTile(PlanOutcome.Stay);
+    public string MoveHint => PlanDisplay.OutcomeHint(PlanOutcome.Move);
+    public string BinHint => PlanDisplay.OutcomeHint(PlanOutcome.Bin);
+    public string StayHint => PlanDisplay.OutcomeHint(PlanOutcome.Stay);
     [ObservableProperty] private string _agentText = string.Empty;
     [ObservableProperty] private bool _hasAgentDecisions;
     [ObservableProperty] private string _problemsText = string.Empty;
@@ -123,6 +142,12 @@ public partial class PlanViewModel : ViewModelBase
     [ObservableProperty] private string _detailDescription = string.Empty;
     [ObservableProperty] private string _detailMarker = string.Empty;
     [ObservableProperty] private string _detailFacts = string.Empty;
+    [ObservableProperty] private string _detailMedia = string.Empty;
+    [ObservableProperty] private string _detailConsequence = string.Empty;
+    [ObservableProperty] private string _detailOutcomeColor = PlanDisplay.OutcomeColor(PlanOutcome.Stay);
+    [ObservableProperty] private string _detailRelease = string.Empty;
+    [ObservableProperty] private string _detailReleaseColor = PlanDisplay.StateColor(PlanActionState.Proposed);
+    [ObservableProperty] private IReadOnlyList<PlanOutcomeChoice> _outcomeChoices = [];
     [ObservableProperty] private PlanKindOption? _selectedKind;
     [ObservableProperty] private Bitmap? _imagePreview;
     [ObservableProperty] private string _textPreview = string.Empty;
@@ -132,6 +157,18 @@ public partial class PlanViewModel : ViewModelBase
     public bool HasImagePreview => ImagePreview is not null;
     public bool HasTextPreview => !string.IsNullOrWhiteSpace(TextPreview);
     public bool HasPreviewMessage => !string.IsNullOrWhiteSpace(PreviewMessage);
+    public bool HasMedia => !string.IsNullOrWhiteSpace(DetailMedia);
+
+    partial void OnDetailMediaChanged(string value) => OnPropertyChanged(nameof(HasMedia));
+
+    // ------------------------------------------------------------------ target picker
+
+    /// <summary>"Ziel ändern" while it is open.</summary>
+    [ObservableProperty] private PlanTargetPickerViewModel? _targetPicker;
+
+    public bool HasTargetPicker => TargetPicker is not null;
+
+    partial void OnTargetPickerChanged(PlanTargetPickerViewModel? value) => OnPropertyChanged(nameof(HasTargetPicker));
 
     // ------------------------------------------------------------------ run
 
@@ -264,6 +301,8 @@ public partial class PlanViewModel : ViewModelBase
     private async Task SetKeepSourceAsync(long jobId, bool keep)
     {
         await _executor.SetKeepSourceAsync(jobId, keep);
+        // The lines and the detail say what executing does, which depends on the switch.
+        Apply(State);
         StatusText = keep
             ? "Quelle bleibt unberührt: Umziehen kopiert nur, nichts wird entfernt."
             : "Quelle darf wieder entfernt werden (Schritt 2).";
@@ -281,7 +320,9 @@ public partial class PlanViewModel : ViewModelBase
             r.PropertyChanged -= OnRowPropertyChanged;
 
         var roots = state?.Libraries.Select(l => l.RootPath).ToList() ?? [];
-        var rows = (state?.Actions ?? []).Select(s => new PlanActionRowViewModel(s, roots) { IsChecked = checkedIds.Contains(s.Action.Id) }).ToList();
+        var rows = (state?.Actions ?? [])
+            .Select(s => new PlanActionRowViewModel(s, roots, KeepSource) { IsChecked = checkedIds.Contains(s.Action.Id) })
+            .ToList();
         foreach (var r in rows)
             r.PropertyChanged += OnRowPropertyChanged;
 
@@ -325,15 +366,16 @@ public partial class PlanViewModel : ViewModelBase
     private void UpdateSummary()
     {
         var actions = State?.Actions.Select(s => s.Action).ToList() ?? [];
-        var live = actions.Where(a => a.State != PlanActionState.Rejected).ToList();
-        string Tally(IEnumerable<PlanAction> of)
+        string Tally(PlanOutcome outcome)
         {
-            var list = of.ToList();
-            return $"{list.Count} · {PlanDisplay.Files(list.Sum(a => a.Files))} · {PlanDisplay.Size(list.Sum(a => a.Bytes))}";
+            var list = actions.Where(a => PlanDisplay.OutcomeOf(a) == outcome).ToList();
+            return $"{PlanDisplay.OutcomeLabel(outcome)}: {list.Count} · {PlanDisplay.Files(list.Sum(a => a.Files))} · {PlanDisplay.Size(list.Sum(a => a.Bytes))}";
         }
-        MoveText = "Zieht um: " + Tally(live.Where(a => a.Kind is PlanActionKind.Move or PlanActionKind.Copy));
-        RemoveText = "Wird entfernt: " + Tally(live.Where(a => a.Kind is PlanActionKind.Quarantine or PlanActionKind.DeleteSource));
-        StayText = "Bleibt: " + Tally(actions.Where(a => a.Kind == PlanActionKind.Leave || a.State == PlanActionState.Rejected));
+        MoveText = Tally(PlanOutcome.Move);
+        BinText = Tally(PlanOutcome.Bin);
+        StayText = Tally(PlanOutcome.Stay);
+        var open = actions.Where(a => a.State is PlanActionState.Proposed or PlanActionState.Approved).ToList();
+        ReleasedText = open.Count == 0 ? string.Empty : $"Freigegeben: {open.Count(a => a.State == PlanActionState.Approved)} von {open.Count}";
         StatesText = string.Join(" · ", Enum.GetValues<PlanActionState>()
             .Select(s => (s, n: actions.Count(a => a.State == s)))
             .Where(x => x.n > 0)
@@ -393,32 +435,37 @@ public partial class PlanViewModel : ViewModelBase
             r.IsChecked = false;
     }
 
-    private IReadOnlyList<long> CheckedIds() => AllActions.Where(r => r.IsChecked).Select(r => r.Id).ToList();
 
-    /// <summary>One action named is a decision on its own; several are a selection, which passes over sensitive ones.</summary>
-    private static PlanSelection Selection(IReadOnlyList<long> ids) => new(ids, AsBatch: ids.Count > 1);
+    private IReadOnlyList<PlanActionRowViewModel> CheckedRows() => AllActions.Where(r => r.IsChecked).ToList();
 
-    // ================================================================== decide
+    private IReadOnlyList<PlanActionRowViewModel> SelectedRows() => SelectedAction is { } r ? [r] : [];
 
-    [RelayCommand] private Task ApproveSelectedAsync() => DecideAsync(SelectedAction is { } r ? new PlanSelection([r.Id]) : null, approve: true);
-    [RelayCommand] private Task RejectSelectedAsync() => DecideAsync(SelectedAction is { } r ? new PlanSelection([r.Id]) : null, approve: false);
-    [RelayCommand] private Task ApproveCheckedAsync() => DecideAsync(CheckedSelection(), approve: true);
-    [RelayCommand] private Task RejectCheckedAsync() => DecideAsync(CheckedSelection(), approve: false);
-    [RelayCommand] private Task ApproveGroupAsync(PlanGroupViewModel group) => DecideAsync(new PlanSelection(group.Actions.Select(r => r.Id).ToList(), AsBatch: true), approve: true);
-    [RelayCommand] private Task RejectGroupAsync(PlanGroupViewModel group) => DecideAsync(new PlanSelection(group.Actions.Select(r => r.Id).ToList(), AsBatch: true), approve: false);
-    [RelayCommand] private Task ApproveAllAsync() => DecideAsync(new PlanSelection([], All: true), approve: true);
-    [RelayCommand] private Task RejectAllAsync() => DecideAsync(new PlanSelection([], All: true), approve: false);
+    // ================================================================== release
 
-    private PlanSelection? CheckedSelection() => CheckedIds() is { Count: > 0 } ids ? Selection(ids) : null;
+    // One action named is released on its own (the only way for a sensitive one); several are a selection, which passes
+    // over sensitive actions as `sfo plan approve --all` does. A rejected action is never released: it shows as
+    // "Hier lassen", and a release must not make it move. Choosing an outcome for it decides it anew.
 
-    private async Task DecideAsync(PlanSelection? selection, bool approve)
+    [RelayCommand] private Task ReleaseSelectedAsync() => ReleaseAsync(SelectedRows(), asBatch: false);
+    [RelayCommand] private Task ReleaseCheckedAsync() => ReleaseAsync(CheckedRows(), asBatch: CheckedCount > 1);
+    [RelayCommand] private Task ReleaseGroupAsync(PlanGroupViewModel group) => ReleaseAsync(group.Actions, asBatch: true);
+    [RelayCommand] private Task ReleaseAllAsync() => ReleaseAsync(AllActions.ToList(), asBatch: true);
+
+    private async Task ReleaseAsync(IReadOnlyList<PlanActionRowViewModel> rows, bool asBatch)
     {
-        if (SelectedPlan is not { } p || selection is null) return;
+        if (SelectedPlan is not { } p || rows.Count == 0) return;
+        var rejected = rows.Count(r => r.Action.State == PlanActionState.Rejected);
+        var ids = rows.Where(r => r.Action.State != PlanActionState.Rejected).Select(r => r.Id).ToList();
+        if (ids.Count == 0)
+        {
+            StatusText = $"Nichts freigegeben: {rejected} abgelehnt; erst einen Ausgang wählen.";
+            return;
+        }
         try
         {
-            var result = await _plans.DecideAsync(p.Plan.Id, selection, approve, Person);
+            var result = await _plans.DecideAsync(p.Plan.Id, new PlanSelection(ids, AsBatch: asBatch), approve: true, Person);
             Apply(result.State);
-            StatusText = $"{result.Changed.Count} {(approve ? "bestätigt" : "abgelehnt")}" + Skipped(result.Skipped);
+            StatusText = $"{result.Changed.Count} freigegeben" + Skipped(result.Skipped, rejected);
         }
         catch (Exception ex) when (ex is PlanException or JobReadException)
         {
@@ -426,41 +473,108 @@ public partial class PlanViewModel : ViewModelBase
         }
     }
 
-    /// <summary>Sets what a steering agent confirmed or rejected back to proposed, so the person decides it.</summary>
+    /// <summary>Takes the release of the ticked actions (or the selected one) back: they are open again.</summary>
+    [RelayCommand]
+    private async Task RevokeReleaseAsync()
+    {
+        if (SelectedPlan is not { } p) return;
+        var rows = CheckedCount > 0 ? CheckedRows() : SelectedRows();
+        // Only a release is taken back; a rejection is decided anew by choosing an outcome.
+        var ids = rows.Where(r => r.Action.State == PlanActionState.Approved).Select(r => r.Id).ToList();
+        if (ids.Count == 0)
+        {
+            StatusText = "Nichts freigegeben in der Auswahl.";
+            return;
+        }
+        var result = await _plans.ResetDecisionsAsync(p.Plan.Id, new PlanSelection(ids), decidedBy: null);
+        Apply(result.State);
+        StatusText = $"Freigabe von {result.Changed.Count} zurückgenommen" + Skipped(result.Skipped, 0);
+    }
+
+    /// <summary>Sets what a steering agent released or rejected back to open, so the person decides it.</summary>
     [RelayCommand]
     private async Task ResetAgentDecisionsAsync()
     {
         if (SelectedPlan is not { } p) return;
         var result = await _plans.ResetDecisionsAsync(p.Plan.Id, new PlanSelection([], All: true), PlanActionOrigin.Agent);
         Apply(result.State);
-        StatusText = $"{result.Changed.Count} Entscheidungen des Agenten auf „Vorgeschlagen“ zurückgesetzt.";
+        StatusText = $"{result.Changed.Count} Entscheidungen des Agenten auf „Offen“ zurückgesetzt.";
     }
 
-    /// <summary>Sets the ticked actions (or the selected one) back to proposed, whoever decided them.</summary>
-    [RelayCommand]
-    private async Task ResetCheckedAsync()
+    private static string Skipped(IReadOnlyList<SkippedAction> skipped, int rejected)
     {
-        if (SelectedPlan is not { } p) return;
-        var ids = CheckedIds() is { Count: > 0 } c ? c : SelectedAction is { } r ? [r.Id] : [];
-        if (ids.Count == 0) return;
-        var result = await _plans.ResetDecisionsAsync(p.Plan.Id, new PlanSelection(ids), decidedBy: null);
-        Apply(result.State);
-        StatusText = $"{result.Changed.Count} auf „Vorgeschlagen“ zurückgesetzt" + Skipped(result.Skipped);
+        var parts = skipped.SelectMany(s => s.Reasons).GroupBy(r => r).Select(g => $"{g.Key}: {g.Count()}").ToList();
+        if (rejected > 0) parts.Add($"abgelehnt: {rejected}");
+        var count = skipped.Count + rejected;
+        return count == 0 ? "." : $", {count} übersprungen ({string.Join(", ", parts)}).";
     }
 
-    private static string Skipped(IReadOnlyList<SkippedAction> skipped) => skipped.Count == 0
-        ? "."
-        : $", {skipped.Count} übersprungen ({string.Join(", ", skipped.SelectMany(s => s.Reasons).GroupBy(r => r).Select(g => $"{g.Key}: {g.Count()}"))}).";
+    // ================================================================== outcome
 
-    // ================================================================== kind
+    [RelayCommand] private Task SetSelectedOutcomeAsync(PlanOutcome outcome) => SetOutcomeAsync(SelectedRows(), outcome);
+    [RelayCommand] private Task MoveCheckedAsync() => SetOutcomeAsync(CheckedRows(), PlanOutcome.Move);
+    [RelayCommand] private Task BinCheckedAsync() => SetOutcomeAsync(CheckedRows(), PlanOutcome.Bin);
+    [RelayCommand] private Task StayCheckedAsync() => SetOutcomeAsync(CheckedRows(), PlanOutcome.Stay);
 
-    [RelayCommand] private Task MarkSelectedForRemovalAsync() => RetypeAsync(SelectedAction is { } r ? [r.Id] : [], kind: null);
-    [RelayCommand] private Task MarkCheckedForRemovalAsync() => RetypeAsync(CheckedIds(), kind: null);
-    [RelayCommand] private Task LeaveSelectedAsync() => RetypeAsync(SelectedAction is { } r ? [r.Id] : [], PlanActionKind.Leave);
-    [RelayCommand] private Task LeaveCheckedAsync() => RetypeAsync(CheckedIds(), PlanActionKind.Leave);
-    [RelayCommand] private Task MoveCheckedAsync() => RetypeAsync(CheckedIds(), PlanActionKind.Move);
+    /// <summary>
+    /// What happens to the files of <paramref name="rows"/>: <see cref="PlanOutcome.Move"/> sets <c>move</c> (out of
+    /// quarantine with its old target), <see cref="PlanOutcome.Bin"/> asks the plan for <c>delete_source</c> where a
+    /// library holds the content, else <c>quarantine</c> (<see cref="PlanService.MarkForRemovalAsync"/>), and
+    /// <see cref="PlanOutcome.Stay"/> sets <c>leave</c>. A rejected action whose kind already has the outcome is only
+    /// opened again. Every change goes through the plan's checks and must be released anew; a sensitive action is changed
+    /// only on its own.
+    /// </summary>
+    public async Task SetOutcomeAsync(IReadOnlyList<PlanActionRowViewModel> rows, PlanOutcome outcome)
+    {
+        if (SelectedPlan is not { } p || rows.Count == 0) return;
+        var label = PlanDisplay.OutcomeLabel(outcome);
+        var change = rows.Where(r => r.Outcome != outcome).ToList();
+        if (change.Count == 0)
+        {
+            StatusText = rows.Count == 1 ? $"Schon „{label}“." : $"Alle {rows.Count} schon „{label}“.";
+            return;
+        }
+        var single = rows.Count > 1 ? change.Where(r => r.Action.SingleDecision).ToList() : [];
+        change = change.Except(single).ToList();
+        var reopen = change.Where(r => r.Action.State == PlanActionState.Rejected && PlanDisplay.OutcomeOf(r.Action.Kind) == outcome)
+            .Select(r => r.Id).ToList();
+        var retype = change.Select(r => r.Id).Except(reopen).ToList();
+        try
+        {
+            var changed = 0;
+            var refused = new List<string>();
+            PlanState? state = null;
+            if (reopen.Count > 0)
+            {
+                var result = await _plans.ResetDecisionsAsync(p.Plan.Id, new PlanSelection(reopen), decidedBy: null);
+                changed += result.Changed.Count;
+                state = result.State;
+            }
+            if (retype.Count > 0)
+            {
+                var result = outcome switch
+                {
+                    PlanOutcome.Move => await _plans.SetKindAsync(p.Plan.Id, retype, PlanActionKind.Move, Person),
+                    PlanOutcome.Bin => await _plans.MarkForRemovalAsync(p.Plan.Id, retype, Person),
+                    _ => await _plans.SetKindAsync(p.Plan.Id, retype, PlanActionKind.Leave, Person)
+                };
+                changed += result.Changed.Count;
+                refused.AddRange(result.Refused.Select(r => r.Message));
+                state = result.State;
+            }
+            refused.AddRange(single.Select(r => $"Action {r.Id}: single_decision (a sensitive action is changed on its own)"));
+            if (state is not null) Apply(state);
+            StatusText = $"{changed} auf „{label}“ gestellt, neu freizugeben"
+                         + (refused.Count == 0 ? "." : $"; abgewiesen: {string.Join("; ", refused)}");
+        }
+        catch (Exception ex) when (ex is PlanException or JobReadException)
+        {
+            StatusText = ex.Message;
+            Apply(State);
+        }
+    }
 
-    /// <summary>Sets the kind of the selected action through the switch in the detail panel.</summary>
+    /// <summary>Sets the exact kind of the selected action through the finer switch in the detail panel.</summary>
     public Task SetSelectedKindAsync(PlanActionKind kind) =>
         RetypeAsync(SelectedAction is { } r ? [r.Id] : [], kind);
 
@@ -470,18 +584,15 @@ public partial class PlanViewModel : ViewModelBase
         _ = SetSelectedKindAsync(value.Kind);
     }
 
-    /// <summary>A new kind for the actions (null: remove as clutter), with the target the plan service gives it.</summary>
-    private async Task RetypeAsync(IReadOnlyList<long> ids, PlanActionKind? kind)
+    /// <summary>A new kind for the actions, with the target the plan service gives it.</summary>
+    private async Task RetypeAsync(IReadOnlyList<long> ids, PlanActionKind kind)
     {
         if (SelectedPlan is not { } p || ids.Count == 0) return;
         try
         {
-            var result = kind is { } k
-                ? await _plans.SetKindAsync(p.Plan.Id, ids, k, Person)
-                : await _plans.MarkForRemovalAsync(p.Plan.Id, ids, Person);
+            var result = await _plans.SetKindAsync(p.Plan.Id, ids, kind, Person);
             Apply(result.State);
-            var what = kind is { } w ? PlanDisplay.KindLabel(w) : "Entfernen";
-            StatusText = $"{result.Changed.Count} auf „{what}“ gestellt (neu zu bestätigen)"
+            StatusText = $"{result.Changed.Count} auf „{PlanDisplay.KindLabel(kind)}“ gestellt, neu freizugeben"
                          + (result.Refused.Count == 0 ? "." : $"; abgewiesen: {string.Join("; ", result.Refused.Select(r => r.Message))}");
         }
         catch (Exception ex) when (ex is PlanException or JobReadException)
@@ -489,6 +600,95 @@ public partial class PlanViewModel : ViewModelBase
             StatusText = ex.Message;
             Apply(State);
         }
+    }
+
+    // ================================================================== target
+
+    [RelayCommand] private Task ChangeTargetSelectedAsync() => PickTargetAsync(SelectedRows());
+    [RelayCommand] private Task ChangeTargetCheckedAsync() => PickTargetAsync(CheckedRows());
+
+    /// <summary>Opens the folder tree of the plan's libraries for the rows and waits until it is closed.</summary>
+    public async Task PickTargetAsync(IReadOnlyList<PlanActionRowViewModel> rows)
+    {
+        if (State is not { } s || rows.Count == 0 || TargetPicker is not null) return;
+        if (s.Libraries.Count == 0)
+        {
+            StatusText = "Der Plan hat keine Bibliothek, also kein Ziel (sfo compare --against).";
+            return;
+        }
+        var ids = rows.Select(r => r.Id).ToList();
+        var picker = new PlanTargetPickerViewModel(rows, s.Libraries, _libraries, folder => SetTargetAsync(ids, folder));
+        TargetPicker = picker;
+        try
+        {
+            await picker.LoadAsync();
+            await picker.Closed;
+        }
+        finally
+        {
+            TargetPicker = null;
+        }
+    }
+
+    /// <summary>
+    /// Sets the target of the actions to <paramref name="folder"/> plus their own name, through
+    /// <see cref="PlanService.ChangeAsync"/> and its checks; an action that does not move yet becomes <c>move</c>.
+    /// The plan stores all or none, so a refused action is dropped and the rest is tried again. In a selection a
+    /// sensitive action is passed over. Returns why nothing was set, or null when at least one target was set.
+    /// </summary>
+    public async Task<string?> SetTargetAsync(IReadOnlyList<long> ids, string folder)
+    {
+        if (SelectedPlan is not { } p || State is not { } s) return "Kein Plan offen.";
+        var byId = s.Actions.ToDictionary(a => a.Action.Id, a => a.Action);
+        var refused = new List<string>();
+        var changes = new List<PlanChange>();
+        foreach (var id in ids)
+        {
+            if (!byId.TryGetValue(id, out var a)) continue;
+            if (ids.Count > 1 && a.SingleDecision)
+            {
+                refused.Add($"{Path.GetFileName(a.SourcePath)}: sensibel, nur einzeln");
+                continue;
+            }
+            var name = Path.GetFileName(Path.TrimEndingDirectorySeparator(a.SourcePath));
+            var kind = PlanDisplay.OutcomeOf(a.Kind) == PlanOutcome.Move ? (PlanActionKind?)null : PlanActionKind.Move;
+            changes.Add(new PlanChange(id, kind, PlanChecks.Join(folder, name)));
+        }
+
+        var changed = 0;
+        while (changes.Count > 0)
+        {
+            try
+            {
+                Apply(await _plans.ChangeAsync(p.Plan.Id, changes, Person));
+                changed = changes.Count;
+                break;
+            }
+            catch (PlanException ex) when (ex.Failure == PlanFailure.ChangeRefused && ex.Refused.Count > 0)
+            {
+                var bad = ex.Refused.Select(r => r.ActionId).ToHashSet();
+                refused.AddRange(ex.Refused.Select(r =>
+                    (byId.TryGetValue(r.ActionId, out var a) ? Path.GetFileName(Path.TrimEndingDirectorySeparator(a.SourcePath)) : $"Aktion {r.ActionId}")
+                    + ": " + (r.Problems.Count > 0 ? string.Join(", ", r.Problems.Select(PlanDisplay.ProblemLabel)) : r.Message)));
+                changes = changes.Where(c => !bad.Contains(c.ActionId)).ToList();
+            }
+            catch (Exception ex) when (ex is PlanException or JobReadException)
+            {
+                refused.Add(ex.Message);
+                break;
+            }
+        }
+
+        var where = PlanActionRowViewModel.ShortTarget(folder, s.Libraries.Select(l => l.RootPath).ToList());
+        if (changed == 0)
+        {
+            var why = "Abgewiesen: " + string.Join("; ", refused);
+            StatusText = why;
+            return why;
+        }
+        StatusText = $"Ziel {where} für {changed} gesetzt, neu freizugeben"
+                     + (refused.Count == 0 ? "." : $"; abgewiesen: {string.Join("; ", refused)}");
+        return null;
     }
 
     // ================================================================== detail
@@ -525,7 +725,9 @@ public partial class PlanViewModel : ViewModelBase
         if (row is null)
         {
             DetailTitle = DetailSource = DetailTarget = DetailRecommended = DetailReason = DetailNote = string.Empty;
-            DetailProblems = DetailDecision = DetailDescription = DetailMarker = DetailFacts = string.Empty;
+            DetailProblems = DetailDecision = DetailDescription = DetailMarker = DetailFacts = DetailMedia = string.Empty;
+            DetailConsequence = DetailRelease = string.Empty;
+            OutcomeChoices = [];
             return;
         }
 
@@ -533,14 +735,19 @@ public partial class PlanViewModel : ViewModelBase
         DetailTitle = row.Name;
         DetailSource = a.SourcePath;
         DetailTarget = a.TargetPath ?? "kein Ziel";
-        DetailRecommended = $"Empfohlen: {PlanDisplay.KindLabel(a.Recommended)}" + (a.Kind != a.Recommended ? " (geändert)" : string.Empty);
+        DetailRecommended = $"Vorschlag: {PlanDisplay.KindLabel(a.Recommended)}" + (a.Kind != a.Recommended ? " (geändert)" : string.Empty);
         DetailReason = a.Reason;
         DetailNote = a.Note ?? string.Empty;
         DetailProblems = row.HasProblems ? "Probleme: " + row.ProblemsText : string.Empty;
-        DetailDecision = $"{PlanDisplay.StateLabel(a.State)} · Herkunft {PlanDisplay.OriginLabel(a.Origin)}"
+        DetailDecision = $"Herkunft {PlanDisplay.OriginLabel(a.Origin)}"
                          + (a.DecidedBy is { } by ? $" · entschieden von {PlanDisplay.OriginLabel(by)}" : string.Empty)
                          + (a.DecidedAt is { } at ? $" am {at.ToLocalTime():dd.MM.yyyy HH:mm}" : string.Empty);
-        DetailDescription = DetailMarker = DetailFacts = string.Empty;
+        DetailConsequence = row.Consequence;
+        DetailOutcomeColor = row.OutcomeColor;
+        DetailRelease = PlanDisplay.StateLabel(a.State) + (a.Sensitive && a.State == PlanActionState.Proposed ? " · sensibel: nur hier einzeln freizugeben" : string.Empty);
+        DetailReleaseColor = row.StateColor;
+        OutcomeChoices = PlanDisplay.Outcomes.Select(o => new PlanOutcomeChoice(o, o == row.Outcome)).ToList();
+        DetailDescription = DetailMarker = DetailFacts = DetailMedia = string.Empty;
 
         try
         {
@@ -576,6 +783,7 @@ public partial class PlanViewModel : ViewModelBase
                 $"{file.FileType} · {PlanDisplay.Size(file.Size)} · geändert {file.LastWriteTime:dd.MM.yyyy HH:mm}"
             }
             .Concat(facts.Where(f => shows || !f.Key.IsFreeText()).Select(f => $"{f.Key.ToCode()}: {f.Value}")));
+        DetailMedia = MediaLine(file, facts, shows);
 
         if (!shows)
         {
@@ -608,6 +816,27 @@ public partial class PlanViewModel : ViewModelBase
         var preview = await _preview.BuildAsync(first, ct);
         if (ct.IsCancellationRequested) { preview.ImagePreview?.Dispose(); return; }
         SetPreview(preview.ImagePreview, preview.TextPreview, preview.Message);
+    }
+
+    /// <summary>
+    /// The key facts of a video or audio file in one line, large enough to tell clutter at a glance (duration, size of
+    /// the picture, device, date; artist, title, album). From the stored facts; empty for other files.
+    /// </summary>
+    public static string MediaLine(FileNode file, IReadOnlyList<FileFact> facts, bool showsFreeText)
+    {
+        if (file.FileType is not (FileType.Video or FileType.Audio)) return string.Empty;
+        string? Fact(FileFactKey key) => facts.FirstOrDefault(f => f.Key == key && (showsFreeText || !f.Key.IsFreeText()))?.Value;
+        var parts = new List<string> { file.FileType == FileType.Video ? "Video" : "Audio" };
+        if (Fact(FileFactKey.DurationSeconds) is { } d
+            && double.TryParse(d, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var seconds))
+            parts.Add(TimeSpan.FromSeconds(Math.Round(seconds)).ToString(seconds >= 3600 ? @"h\:mm\:ss" : @"m\:ss"));
+        if (Fact(FileFactKey.Width) is { } w && Fact(FileFactKey.Height) is { } h)
+            parts.Add($"{w} × {h}");
+        foreach (var key in new[] { FileFactKey.Artist, FileFactKey.Title, FileFactKey.Album, FileFactKey.Device })
+            if (Fact(key) is { Length: > 0 } v) parts.Add(v);
+        if (Fact(FileFactKey.TakenAt) is { Length: >= 10 } taken) parts.Add(taken[..10]);
+        parts.Add(PlanDisplay.Size(file.Size));
+        return string.Join(" · ", parts);
     }
 
     private void SetPreview(Bitmap? image, string text, string message)
@@ -643,18 +872,20 @@ public partial class PlanViewModel : ViewModelBase
         var run = dry.Items.Where(i => i.Outcome == "would_run").ToList();
         if (run.Count == 0)
         {
-            StatusText = "Schritt 1: nichts zu tun (keine bestätigte Aktion ohne Problem).";
+            StatusText = "Schritt 1: nichts zu tun (keine freigegebene Aktion ohne Problem).";
             return;
         }
-        var lines = new List<string>
+        var lines = new List<string>(PlanOutcomeSummary.BeforeApply(
+            State?.Actions.Select(s => s.Action).ToList() ?? [],
+            run.Select(i => i.ActionId).ToHashSet(),
+            State?.Libraries.Select(l => l.RootPath).ToList() ?? [],
+            State?.Job.RootPath ?? string.Empty,
+            dry.KeepSource))
         {
-            $"{run.Count} Aktionen, {PlanDisplay.Files(run.Sum(i => i.Files))}, {PlanDisplay.Size(run.Sum(i => i.Bytes))} werden in die Bibliothek kopiert und per voller Prüfsumme geprüft.",
-            "Kein Original wird in diesem Schritt angefasst.",
+            $"Jetzt, Schritt 1: {PlanDisplay.Files(run.Sum(i => i.Files))} ({PlanDisplay.Size(run.Sum(i => i.Bytes))}) werden in die Bibliothek kopiert "
+            + "und per voller Prüfsumme geprüft. Kein Original wird in diesem Schritt angefasst."
         };
-        var skipped = dry.Items.Count - run.Count;
-        if (skipped > 0) lines.Add($"{skipped} Aktionen werden übersprungen (siehe Liste unten).");
-        if (dry.KeepSource) lines.Add("Quelle bleibt unberührt (keep_source): Umziehen kopiert nur.");
-        if (!await ConfirmAsync("Schritt 1 ausführen?", lines, "Kopieren und prüfen", isDanger: false)) return;
+        if (!await ConfirmAsync("Ausführen, Schritt 1 von 2", lines, "Kopieren und prüfen", isDanger: false)) return;
         await RunAsync("Schritt 1 · kopieren und prüfen", run.Count,
             (o, ct) => _executor.ApplyAsync(p.Plan.Id, o, ct));
     }
@@ -665,22 +896,22 @@ public partial class PlanViewModel : ViewModelBase
     {
         if (SelectedPlan is not { } p || IsRunning) return;
         var dry = await _executor.RemoveSourcesAsync(p.Plan.Id, new PlanRunOptions([], Execute: false));
-        ShowReport("Trockenlauf · Schritt 2 (Originale entfernen)", dry);
+        ShowReport("Trockenlauf · Schritt 2 (Originale in den Papierkorb)", dry);
         var run = dry.Items.Where(i => i.Outcome == "would_run").ToList();
         if (run.Count == 0)
         {
             StatusText = "Schritt 2: nichts zu tun (kein Original wartet; erst Schritt 1 ausführen).";
             return;
         }
-        var lines = new List<string>
+        var lines = new List<string>(PlanOutcomeSummary.BeforeRemove(
+            State?.Actions.Select(s => s.Action).ToList() ?? [],
+            run.Select(i => i.ActionId).ToHashSet(),
+            State?.Job.RootPath ?? string.Empty))
         {
-            $"Die Originale von {run.Count} Aktionen ({PlanDisplay.Files(run.Sum(i => i.Files))}) werden unmittelbar vorher noch einmal mit der Kopie verglichen "
-            + $"und dann in den Rückhalteordner {PlanExecutor.HoldFolderName} im Job-Ordner verschoben.",
-            $"Frei wird: {PlanDisplay.Size(run.Sum(i => i.Bytes))}.",
-            "„Zurücknehmen“ legt sie zurück. Endgültig gelöscht wird nichts (das kann nur sfo plan purge).",
+            $"Frei wird: {PlanDisplay.Size(run.Sum(i => i.Bytes))} ({PlanDisplay.Files(run.Sum(i => i.Files))})."
         };
-        if (!await ConfirmAsync("Schritt 2: Originale entfernen?", lines, "Originale entfernen", isDanger: true)) return;
-        await RunAsync("Schritt 2 · Originale entfernen", run.Count,
+        if (!await ConfirmAsync("Ausführen, Schritt 2 von 2: Originale in den Papierkorb?", lines, "In den Papierkorb", isDanger: true)) return;
+        await RunAsync("Schritt 2 · Originale in den Papierkorb", run.Count,
             (o, ct) => _executor.RemoveSourcesAsync(p.Plan.Id, o, ct));
     }
 
