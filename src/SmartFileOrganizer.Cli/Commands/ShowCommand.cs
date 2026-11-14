@@ -40,7 +40,9 @@ public static class ShowCommand
         string? Certainty,
         int? Attempts,
         string? PreviousError,
-        IReadOnlyList<CheckView> Checks)
+        IReadOnlyList<CheckView> Checks,
+        SmartFileOrganizer.Application.Media.VideoOriginSummary? Origin = null,
+        IReadOnlyList<FactItem>? Facts = null)
     {
         public static FileDetailView From(FileItem f)
         {
@@ -49,7 +51,7 @@ public static class ShowCommand
                 r.SizeBytes, r.LastWriteTime, ReadFormat.Snake(r.Status), ReadFormat.Snake(r.Category), r.CategorySource,
                 ReadFormat.Snake(r.Importance), r.Confidence, r.Summary, r.SuggestedTarget, r.ModelUsed, r.AnalyzedAt,
                 r.Error, r.RawResponse, r.Sensitive, r.SensitiveRule, r.Protected, f.DirectoryVerdict, f.DirectoryRetention,
-                r.Certainty, r.Attempts, r.PreviousError, f.Checks.Select(CheckView.From).ToList());
+                r.Certainty, r.Attempts, r.PreviousError, f.Checks.Select(CheckView.From).ToList(), f.Origin, f.Facts);
         }
     }
 
@@ -166,6 +168,7 @@ public static class ShowCommand
             sb.AppendLine(f.Path);
             Line(sb, "type", $"{f.FileType}, {ReadFormat.Size(f.SizeBytes)}");
             Line(sb, "status", f.Status);
+            Line(sb, "video", f.Origin?.ToText());
             Line(sb, "category", f.Category is null ? null : $"{f.Category} ({CodeLabels.LabelOfCode<ResultOrigin>(f.CategorySource, language)})");
             Line(sb, "confidence", f.Confidence?.ToString("0.00", CultureInfo.InvariantCulture));
             Line(sb, "certainty", f.Certainty);
@@ -182,6 +185,8 @@ public static class ShowCommand
             Line(sb, "sensitive", f.Sensitive.Count == 0 ? null : $"{CodeLabels.Markers(f.Sensitive, language)} ({f.SensitiveRule})");
             Line(sb, "directory", Verdict(f.DirVerdict));
             Line(sb, "error", f.Error);
+            foreach (var fact in f.Facts ?? [])
+                Line(sb, fact.Fact, $"{fact.Value} ({fact.Source}{(fact.Certainty is null ? "" : ", " + fact.Certainty)})");
         }
         else if (result.Directory is { } d)
         {
