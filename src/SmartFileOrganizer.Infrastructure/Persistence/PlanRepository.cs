@@ -70,6 +70,17 @@ public class PlanRepository : IPlanRepository
         return rows.Select(r => r.ToPlan()).ToList();
     }
 
+    public async Task<IReadOnlyList<string>> GetWrittenForwardSourcesAsync(long planId, CancellationToken ct = default)
+    {
+        await using var conn = _db.CreateConnection();
+        await conn.OpenAsync(ct);
+        return (await conn.QueryAsync<string>(new CommandDefinition(
+            """
+            SELECT s.source_path FROM library_entries e JOIN plan_steps s ON s.id = e.step_id
+            WHERE e.plan_id = @planId AND e.undone_at IS NULL AND e.comparison_id IS NOT NULL
+            """, new { planId }, cancellationToken: ct))).ToList();
+    }
+
     public async Task<IReadOnlyList<PlanAction>> GetActionsAsync(long planId, CancellationToken ct = default)
     {
         await using var conn = _db.CreateConnection();

@@ -69,6 +69,12 @@ public class PlanJournalRepository : IPlanJournal
             };
             if (sql is not null)
                 await conn.ExecuteAsync(new CommandDefinition(sql, Params(step), tx, cancellationToken: ct));
+
+            // The holding of the library is written forward with the copy and taken back with it.
+            if (step.Kind is PlanStepKind.Copy or PlanStepKind.Present)
+                await LibraryLedger.RecordAsync(conn, tx, step, ct);
+            else if (step.Kind == PlanStepKind.Uncopy)
+                await LibraryLedger.RevertAsync(conn, tx, step, ct);
         }
         await tx.CommitAsync(ct);
     }

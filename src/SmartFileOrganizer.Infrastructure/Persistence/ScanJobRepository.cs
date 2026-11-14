@@ -94,7 +94,13 @@ public class ScanJobRepository : IScanJobRepository
         // (ScanJobDeletionTests seeds every table and fails otherwise).
         const string sql = BundleRepository.DeleteForJobSql + """
 
-            DELETE FROM comparison_files    WHERE comparison_id IN (SELECT id FROM comparisons WHERE source_job_id = @id OR against_job_id = @id);
+            DELETE FROM library_entries     WHERE library_job_id = @id
+                                               OR plan_id IN (SELECT id FROM plans WHERE job_id = @id)
+                                               OR comparison_id IN (SELECT id FROM comparisons WHERE source_job_id = @id OR against_job_id = @id)
+                                               OR file_node_id IN (SELECT id FROM file_nodes WHERE job_id = @id)
+                                               OR source_file_node_id IN (SELECT id FROM file_nodes WHERE job_id = @id)
+                                               OR prev_match_file_node_id IN (SELECT id FROM file_nodes WHERE job_id = @id);
+            DELETE FROM comparison_files   WHERE comparison_id IN (SELECT id FROM comparisons WHERE source_job_id = @id OR against_job_id = @id);
             DELETE FROM comparisons         WHERE source_job_id = @id OR against_job_id = @id;
             DELETE FROM user_overrides      WHERE file_node_id IN (SELECT id FROM file_nodes WHERE job_id = @id);
             DELETE FROM ai_results          WHERE file_node_id IN (SELECT id FROM file_nodes WHERE job_id = @id);

@@ -18,6 +18,12 @@ public interface IPlanRepository
 
     /// <summary>Writes kind, target, reason, note, origin, state and decision of the actions in one transaction.</summary>
     Task UpdateActionsAsync(IReadOnlyList<PlanAction> actions, CancellationToken ct = default);
+
+    /// <summary>
+    /// Source files this plan's own checked copies made <c>backed_up</c> in a comparison (<c>library_entries</c>, not
+    /// taken back). Their being in the library is the plan's doing, not a reason to refuse its next steps.
+    /// </summary>
+    Task<IReadOnlyList<string>> GetWrittenForwardSourcesAsync(long planId, CancellationToken ct = default);
 }
 
 /// <summary>

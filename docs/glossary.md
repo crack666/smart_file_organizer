@@ -167,6 +167,10 @@ With several libraries (`--against` more than once, https://github.com/crack666/
 states of the single comparisons are joined per file: `backed_up` in any library wins, then `error` (another root
 might hold it), then `differs`, then `new`. `match_library_job_id` names the library that holds the content.
 
+A checked copy that `sfo plan apply --execute` wrote into a library makes its source file `backed_up` in the newest
+comparison against that library, without a new scan (written forward, `library_entries`,
+https://github.com/crack666/smart_file_organizer/issues/86); `sfo plan undo` puts the earlier state back.
+
 ## Duplicates
 
 https://github.com/crack666/smart_file_organizer/issues/87: `sfo duplicates <job> [<job> ...]` reports files and folders

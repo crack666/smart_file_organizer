@@ -260,6 +260,78 @@ public class PlanApplyCommandTests : IDisposable
         Assert.Equal(6, reader.GetInt64(1));
     }
 
+    // ── Bestand der Library fortschreiben (Issue 86) ─────────────────────
+
+    [Fact]
+    public async Task AfterApply_TheLibraryHoldsTheCopies_WithoutANewScan_AndUndoTakesThemBack()
+    {
+        var (job, library) = await PrepareAsync();
+        var plan = (await OkAsync("plan", "create", job)).GetProperty("plan_id").GetInt64().ToString();
+        await OkAsync("plan", "approve", plan, "--all");
+        var before = BackedUp(await OkAsync("findings", job, "--summary"));
+        var libraryFiles = await ScalarAsync($"SELECT COUNT(*) FROM file_nodes WHERE job_id = {library}");
+        var copy = Path.Combine(_library, "Dokumente", "Rechnung_Strom.pdf");
+
+        await OkAsync("plan", "apply", plan, "--execute");
+        // Step 2 runs although the source now counts as backed up: that is the plan's own copy.
+        var removed = await OkAsync("plan", "apply", plan, "--remove-sources", "--execute");
+        Assert.All(Items(removed), i => Assert.Equal("executed", Str(i, "state")));
+
+        // The library was not scanned again, and still holds the six copies, each with its checksum.
+        Assert.Equal(libraryFiles + 6, await ScalarAsync($"SELECT COUNT(*) FROM file_nodes WHERE job_id = {library}"));
+        Assert.Equal(1, await ScalarAsync($"SELECT COUNT(*) FROM scan_jobs WHERE role = 'library'"));
+        Assert.Equal(1, await ScalarAsync(
+            $"SELECT COUNT(*) FROM file_nodes n JOIN content_fingerprints f ON f.full_path = n.full_path " +
+            $"WHERE n.job_id = {library} AND n.full_path = '{copy}' AND f.full_hash = '{Hash(copy)}'"));
+        var after = BackedUp(await OkAsync("findings", job, "--summary"));
+        Assert.Equal(before + 6, after);
+
+        // The undo takes the copies out of the library again, and the source is as unsafe as before.
+        await OkAsync("plan", "undo", plan, "--execute");
+        Assert.Equal(libraryFiles, await ScalarAsync($"SELECT COUNT(*) FROM file_nodes WHERE job_id = {library}"));
+        Assert.Equal(0, await ScalarAsync($"SELECT COUNT(*) FROM content_fingerprints WHERE full_path = '{copy}'"));
+        Assert.Equal(before, BackedUp(await OkAsync("findings", job, "--summary")));
+        Assert.Equal(0, await ScalarAsync("SELECT COUNT(*) FROM library_entries WHERE undone_at IS NULL"));
+    }
+
+    [Fact]
+    public async Task ALaterScanOfTheLibrary_ListsEachCopyOnce()
+    {
+        var (job, library) = await PrepareAsync();
+        var plan = (await OkAsync("plan", "create", job)).GetProperty("plan_id").GetInt64().ToString();
+        await OkAsync("plan", "approve", plan, "--all");
+        await OkAsync("plan", "apply", plan, "--execute");
+        var held = await ScalarAsync($"SELECT COUNT(*) FROM file_nodes WHERE job_id = {library}");
+
+        // The written-forward rows are the files a scan finds: a refresh sees nothing new, nothing changed.
+        var scan = await OkAsync("scan", _library, "--role", "library", "--refresh");
+        var again = scan.GetProperty("job").GetProperty("id").GetInt64();
+        var refresh = scan.GetProperty("refresh");
+        Assert.Equal(0, refresh.GetProperty("new").GetInt64());
+        Assert.Equal(0, refresh.GetProperty("changed").GetInt64());
+        Assert.Equal(0, refresh.GetProperty("missing").GetInt64());
+        Assert.Equal(held, await ScalarAsync($"SELECT COUNT(*) FROM file_nodes WHERE job_id = {again}"));
+        Assert.Equal(held, await ScalarAsync($"SELECT COUNT(DISTINCT full_path) FROM file_nodes WHERE job_id = {again}"));
+
+        // Compared with the new library job, the source is backed up once per file, not twice.
+        await OkAsync("compare", job, "--against", again.ToString());
+        var summary = await OkAsync("findings", job, "--summary");
+        var byLibrary = summary.GetProperty("overview").GetProperty("backed_up").GetProperty("by_library").EnumerateArray().ToList();
+        Assert.Equal(6, byLibrary.Single(l => l.GetProperty("library_job_id").GetInt64() == again).GetProperty("files").GetInt64());
+    }
+
+    private static long BackedUp(JsonElement summary) =>
+        summary.GetProperty("overview").GetProperty("backed_up").GetProperty("files").GetInt64();
+
+    private async Task<long> ScalarAsync(string sql)
+    {
+        await using var conn = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={_dbPath};Pooling=False");
+        await conn.OpenAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        return Convert.ToInt64(await cmd.ExecuteScalarAsync());
+    }
+
     // ── Löschregel (Nachtrag 12.11.2026) ─────────────────────────────────
 
     [Fact]

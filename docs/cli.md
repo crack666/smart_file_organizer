@@ -1752,6 +1752,13 @@ sfo plan purge 1                              # dry run of removing the held ori
   touched. `--no-notice` writes none.
 - `sfo plan keep-source <job>` leaves every source of the job untouched: a move only copies, nothing is removed.
 
+**The library knows its copies.** Each checked copy of step 1 is written into the stored holding of the library job
+right away: it is a file of that job with its checksum, and the source file counts as `backed_up` in the newest
+comparison against that library (`sfo findings`, `--summary`, `sfo plan create`), without scanning the library again.
+`undo` takes that back with the copy. A later scan of the library lists each copy once; `sfo scan <library> --refresh`
+reports none of them as new (since https://github.com/crack666/smart_file_organizer/issues/86; until then the copy
+counted only after the library was scanned again).
+
 Every step is journalled before it touches a file (`plan_steps`); a run cut off by a crash or Ctrl+C is finished by
 running the same command again, which first settles the step it finds open.
 
