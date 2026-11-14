@@ -182,8 +182,12 @@ public partial class FindingTargetsCommandTests
             ["findings", "show", job, sensitiveKey], ["findings", "show", job, sensitiveKey, "--include-sensitive"],
             ["findings", "candidates", job], ["library", "folder", library.ToString(), "Zugang"],
             ["duplicates", job, library.ToString()],
-            ["export", job, "--csv", csv], ["export", job, "--csv", csv + ".all", "--include-sensitive"]
+            ["export", job, "--csv", csv], ["export", job, "--csv", csv + ".all", "--include-sensitive"],
+            ["compare", job, "--against", library.ToString(), "--files", "all"]
         ];
+        // The full checksum of a short secret would confirm a guess of it: it is withheld like the text.
+        var checksum = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(
+            System.Text.Encoding.UTF8.GetBytes($"GITHUB_TOKEN={Secret}")));
         foreach (var command in commands)
         {
             var stdout = new StringWriter();
@@ -198,7 +202,10 @@ public partial class FindingTargetsCommandTests
         if (File.Exists(debugLog)) outputs.Add(await File.ReadAllTextAsync(debugLog));
 
         foreach (var output in outputs)
+        {
             Assert.DoesNotContain(Secret, output);
+            Assert.DoesNotContain(checksum, output, StringComparison.OrdinalIgnoreCase);
+        }
 
         // Marker and name are shown; so is the classification, unless restricted.
         var files = outputs[1];
