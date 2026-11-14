@@ -69,6 +69,25 @@ public class PlanJournalRepository : IPlanJournal
             };
             if (sql is not null)
                 await conn.ExecuteAsync(new CommandDefinition(sql, Params(step), tx, cancellationToken: ct));
+
+            // The holding of the library is written forward with the copy and taken back with it. The journal never
+            // depends on it: should that fail, only its own changes are rolled back and the step is finished as it is.
+            if (step.Kind is PlanStepKind.Copy or PlanStepKind.Present or PlanStepKind.Uncopy)
+            {
+                await conn.ExecuteAsync(new CommandDefinition("SAVEPOINT library_ledger", transaction: tx, cancellationToken: ct));
+                try
+                {
+                    if (step.Kind == PlanStepKind.Uncopy)
+                        await LibraryLedger.RevertAsync(conn, tx, step, ct);
+                    else
+                        await LibraryLedger.RecordAsync(conn, tx, step, ct);
+                }
+                catch (Exception ex) when (ex is Microsoft.Data.Sqlite.SqliteException or IOException or UnauthorizedAccessException)
+                {
+                    await conn.ExecuteAsync(new CommandDefinition("ROLLBACK TO library_ledger", transaction: tx, cancellationToken: ct));
+                }
+                await conn.ExecuteAsync(new CommandDefinition("RELEASE library_ledger", transaction: tx, cancellationToken: ct));
+            }
         }
         await tx.CommitAsync(ct);
     }

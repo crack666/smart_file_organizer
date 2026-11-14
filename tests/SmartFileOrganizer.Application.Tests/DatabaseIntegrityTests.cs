@@ -252,6 +252,10 @@ public class DatabaseIntegrityTests : IDisposable
             INSERT INTO plan_steps (plan_id, action_id, kind, state, source_path, target_path, started_at)
                 VALUES ((SELECT MAX(id) FROM plans WHERE job_id = @job), last_insert_rowid(), 'copy', 'done',
                         @root || '/d/f.txt', '/lib/f.txt', @T);
+            INSERT INTO library_entries (plan_id, action_id, step_id, library_job_id, target_path, file_node_id, node_added,
+                                         comparison_id, source_file_node_id, prev_match_file_node_id, recorded_at)
+                VALUES ((SELECT MAX(id) FROM plans WHERE job_id = @job), 1, last_insert_rowid(), @job, '/lib/f.txt', @file, 1,
+                        @comparison, @file, @file, @T);
             INSERT INTO file_links (job_id, full_path, name, parent_path, link_kind, scanned_at)
                 VALUES (@job, @root || '/l', 'l', @root, 'symlink', @T);
             INSERT INTO eval_cases (kind, origin, job_id, file_node_id, subject_path, expected, created_at, updated_at)

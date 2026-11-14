@@ -9,6 +9,7 @@ namespace SmartFileOrganizer.Domain.Interfaces;
 /// <param name="Results">Unchanged files whose analysis result was carried over: no model is asked for them again.</param>
 /// <param name="Facts">Facts carried over (rows of <c>file_facts</c>).</param>
 /// <param name="Corrections">Corrections of a person carried over (rows of <c>user_overrides</c>).</param>
+/// <param name="Folders">What happened to the folders: carried over or to be judged anew.</param>
 public sealed record RefreshCounts(
     long PreviousJobId,
     long Unchanged,
@@ -19,7 +20,16 @@ public sealed record RefreshCounts(
     long Checksums,
     long Results,
     long Facts,
-    long Corrections);
+    long Corrections,
+    RefreshFolders? Folders = null);
+
+/// <summary>Folders of a refresh. A folder is unchanged when every file at or below it is.</summary>
+/// <param name="Kept">Unchanged folders that kept what the previous job said about them.</param>
+/// <param name="Verdicts">Folder verdicts carried over (rows of <c>directory_verdicts</c>).</param>
+/// <param name="Summaries">Pre-assessments and summaries carried over (rows of <c>ai_directory_results</c>).</param>
+/// <param name="Samples">Samples carried over (rows of <c>directory_samples</c>).</param>
+/// <param name="ToJudge">Folders that changed (or are new) and that the next <c>sfo analyze</c> judges anew, by path.</param>
+public sealed record RefreshFolders(long Kept, long Verdicts, long Summaries, long Samples, IReadOnlyList<string> ToJudge);
 
 /// <summary>
 /// The memory of the tool (https://github.com/crack666/smart_file_organizer/issues/86): known places, what a refresh

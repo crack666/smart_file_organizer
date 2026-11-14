@@ -347,7 +347,13 @@ public sealed class PlanService
             ? (await LibraryComparisonSet.LoadAsync(_comparisons, job.Id, libraries.Select(l => l.Id).ToList(), ct)).Set
             : null;
         var actions = await _plans.GetActionsAsync(planId, ct);
-        return (plan, job, libraries, actions, await ContextAsync(job, libraries, set, ct));
+        var ctx = await ContextAsync(job, libraries, set, ct);
+        // What this plan copied counts as backed up in the library (written forward after step 1); that is the plan's own
+        // doing and no reason to refuse its remaining steps.
+        var own = await _plans.GetWrittenForwardSourcesAsync(planId, ct);
+        if (own.Count > 0)
+            ctx = ctx with { BackedUp = ctx.BackedUp.Except(own).ToHashSet(StringComparer.Ordinal) };
+        return (plan, job, libraries, actions, ctx);
     }
 
     private async Task<PlanCheckContext> ContextAsync(ScanJob job, IReadOnlyList<ScanJob> libraries, LibraryComparisonSet? set, CancellationToken ct)

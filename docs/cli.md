@@ -60,23 +60,33 @@ and the structure-only setting of the previous job of the place (unless `--rules
 compares the two by path, size and modification time without reading a file. An unchanged file keeps its analysis
 result, its facts and a person's correction (copied to the new job), and its stored checksum still holds, so no model
 is asked and no checksum is computed again for it; `sfo compare` of the new job only reads new and changed files.
-Directory verdicts and summaries are not carried over. New, changed and missing files are listed; a missing file that
+A folder whose files at and below it are all unchanged (and whose scan status is the same) keeps its verdict, its
+pre-assessment and summary, its sample and the status of its files, so `sfo analyze` asks no model about it either;
+a folder with a new, changed, missing or moved file below it, and a new folder, is judged anew and listed in
+`folders.paths` (until this was built, verdicts and summaries were not carried over and every folder was judged
+again). New, changed and missing files are listed; a missing file that
 a plan moved (see the move history of `sfo where`) is `moved` and names its target. Without an earlier completed scan
 of the root the scan runs in full and `refresh` is `null`.
 
 ```json
 "refresh": {
   "previous_job_id": 7, "unchanged": 1826, "new": 3, "changed": 1, "missing": 0, "moved": 6,
-  "carried": { "checksums": 412, "results": 1790, "facts": 2201, "corrections": 2 },
+  "carried": { "checksums": 412, "results": 1790, "facts": 2201, "corrections": 2,
+               "verdicts": 140, "summaries": 280, "samples": 3 },
   "changes": [ { "path": "/media/usb-stick/DCIM/IMG_0001.jpg", "change": "moved", "size": 18234,
                  "target": "/mnt/nas/library/Fotos/IMG_0001.jpg", "plan_id": 1, "moved_at": "2026-11-14T10:00:00Z" } ],
-  "changes_truncated": false
+  "changes_truncated": false,
+  "folders": { "unchanged": 140, "to_judge": 2, "paths": [ "/media/usb-stick", "/media/usb-stick/DCIM" ],
+               "paths_truncated": false }
 }
 ```
 
 `change` is a `FileChange` code ([glossary.md, Places](glossary.md#places)); `changes` lists at most 200 files by path,
 `changes_truncated` says whether there are more. `carried.checksums` counts unchanged files with a stored checksum,
-`carried.results` those whose analysis result was taken over.
+`carried.results` those whose analysis result was taken over; `carried.verdicts`, `summaries` (pre-assessments and
+summaries) and `samples` count the rows of unchanged folders taken over. `folders.unchanged` counts the folders that
+kept what the previous job said about them, `folders.to_judge` the folders the next analysis judges anew; `paths`
+lists at most 200 of them.
 
 A directory the scan cannot read (access denied, network path gone) is stored with that error
 and counted in `error_count` instead of looking empty; the scan itself continues and completes.
@@ -1752,6 +1762,13 @@ sfo plan purge 1                              # dry run of removing the held ori
   touched. `--no-notice` writes none.
 - `sfo plan keep-source <job>` leaves every source of the job untouched: a move only copies, nothing is removed.
 
+**The library knows its copies.** Each checked copy of step 1 is written into the stored holding of the library job
+right away: it is a file of that job with its checksum, and the source file counts as `backed_up` in the newest
+comparison against that library (`sfo findings`, `--summary`, `sfo plan create`), without scanning the library again.
+`undo` takes that back with the copy. A later scan of the library lists each copy once; `sfo scan <library> --refresh`
+reports none of them as new (since https://github.com/crack666/smart_file_organizer/issues/86; until then the copy
+counted only after the library was scanned again).
+
 Every step is journalled before it touches a file (`plan_steps`); a run cut off by a crash or Ctrl+C is finished by
 running the same command again, which first settles the step it finds open.
 
@@ -1784,7 +1801,8 @@ original stays) or `partial` (undo and purge: not all of it). `reasons` are `Pla
 or the state of an action named by `--action` that cannot run. `removal` is what step 2 would take away now: the
 originals of every `verified` action and the bytes they free. `mode` is `apply`, `remove_sources`, `undo` or `purge`.
 `notices` (step 2 and undo) lists the move notices the run wrote (`written`), removed (`removed`) or left alone because
-a file that is not a notice carries the name (`skipped`), or could not write (`failed`); a folder whose notice needed
+a file that is not a notice carries the name (`skipped`), or could not write (`failed`); a dry run says what it would
+do (`would_write`, `would_remove`), counting the originals it would take away or put back. A folder whose notice needed
 no change is not listed. A folder that holds only its notice counts as left empty.
 
 Errors: `plan_run_incomplete` (1, with the result: an action failed or an undo or purge was partial), `plan_not_found`
