@@ -19,6 +19,42 @@ public sealed class Plan
     public IReadOnlyList<string> Notes { get; set; } = [];
 }
 
+/// <summary>
+/// One journal step of the execution (<c>plan_steps</c>, https://github.com/crack666/smart_file_organizer/issues/12):
+/// written as <see cref="PlanStepState.Started"/> before the file system is touched, finished afterwards.
+/// </summary>
+public sealed class PlanStep
+{
+    public long Id { get; set; }
+    public long PlanId { get; set; }
+    public long ActionId { get; set; }
+    public PlanStepKind Kind { get; set; }
+    public PlanStepState State { get; set; } = PlanStepState.Started;
+
+    /// <summary>The original file (for folder steps: the folder).</summary>
+    public string SourcePath { get; set; } = string.Empty;
+
+    /// <summary>The file at the target: the copy, or for <c>delete_source</c> the file in the library that holds the content.</summary>
+    public string? TargetPath { get; set; }
+
+    /// <summary>Where the original lies in the hold folder.</summary>
+    public string? HoldPath { get; set; }
+
+    public long Bytes { get; set; }
+
+    /// <summary>Full SHA-256 of the content the step was checked with.</summary>
+    public string? Hash { get; set; }
+
+    /// <summary>Why a step failed, or what a person should know.</summary>
+    public string? Detail { get; set; }
+
+    public DateTime StartedAt { get; set; }
+    public DateTime? FinishedAt { get; set; }
+}
+
+/// <summary>A file of the source as the scan saw it.</summary>
+public sealed record ScannedFile(string FullPath, long Size, DateTime LastWriteTime);
+
 /// <summary>One action of a plan (<c>plan_actions</c>).</summary>
 public sealed class PlanAction
 {

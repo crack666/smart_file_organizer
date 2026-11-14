@@ -243,6 +243,9 @@ public class DatabaseIntegrityTests : IDisposable
                                       library_job_id, reason, origin, state, updated_at)
                 VALUES (last_insert_rowid(), 'k', 'not_backed_up', 'u', 'file', @root || '/d/f.txt', 'd/f.txt',
                         @file, @dir, 1, 1, 'move', 'move', '/lib/f.txt', @job, 'r', 'rule', 'proposed', @T);
+            INSERT INTO plan_steps (plan_id, action_id, kind, state, source_path, target_path, started_at)
+                VALUES ((SELECT MAX(id) FROM plans WHERE job_id = @job), last_insert_rowid(), 'copy', 'done',
+                        @root || '/d/f.txt', '/lib/f.txt', @T);
             INSERT INTO file_links (job_id, full_path, name, parent_path, link_kind, scanned_at)
                 VALUES (@job, @root || '/l', 'l', @root, 'symlink', @T);
             INSERT INTO eval_cases (kind, origin, job_id, file_node_id, subject_path, expected, created_at, updated_at)
