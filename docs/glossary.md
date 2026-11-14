@@ -956,6 +956,23 @@ execution (https://github.com/crack666/smart_file_organizer/issues/12, `sfo plan
 | `agent` | A steering agent, through `sfo plan set` or `sfo plan import` with `--by agent`. |
 | `human` | A person. |
 
+### The plan view: outcomes and release
+
+Words of the GUI plan view since 14.11.2026 (https://github.com/crack666/smart_file_organizer/issues/102); no codes
+of their own, they name the codes above. Until then the view showed the kinds ("Quarantäne", "Löschen", "Belassen")
+and offered "Bestätigen", "Ablehnen" and "Als Ballast".
+
+| Word | Codes | What executing does |
+|---|---|---|
+| Umziehen | `move`, `copy` | Copied to the target and checked (step 1); for `move` the original then goes into the Papierkorb (step 2). |
+| Papierkorb ("In den Papierkorb") | `quarantine`, `delete_source` | The original goes into the hold folder `.sfo-hold` in the job folder (step 2); `quarantine` first puts a checked copy into the quarantine folder of the library. "Zurücknehmen" puts it back; deleted for good only by `sfo plan purge`. |
+| Hier lassen | `leave`, or any `rejected` action | Nothing. |
+| Offen | `proposed` | Not released; does not run. |
+| Freigegeben ("Freigeben") | `approved` | Released; runs in the next step. |
+| Abgelehnt | `rejected` | Set by the CLI or an agent; shown as "Hier lassen", never released by a release. Choosing an outcome sets it to `proposed` with that outcome. |
+
+"Löschen" in the sense of deleting for good is only `sfo plan purge`, which the GUI does not offer.
+
 ### Source of an action (`PlanSourceKind`)
 
 | Code | Meaning |

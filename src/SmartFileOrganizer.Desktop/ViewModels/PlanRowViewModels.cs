@@ -5,29 +5,47 @@ using SmartFileOrganizer.Domain.Models;
 
 namespace SmartFileOrganizer.Desktop.ViewModels;
 
-/// <summary>One action of the plan as a row: what, where to, how, why, who, and where it stands.</summary>
+/// <summary>One action of the plan as a row: what happens to it, where to, why, who, and whether it is released.</summary>
 public partial class PlanActionRowViewModel : ViewModelBase
 {
     /// <param name="libraryRoots">Roots of the plan's libraries: a target is shown below the name of its library.</param>
-    public PlanActionRowViewModel(PlanActionStatus status, IReadOnlyCollection<string>? libraryRoots = null)
+    /// <param name="keepSource">The job's switch "leave the source untouched": no original goes into the hold folder.</param>
+    public PlanActionRowViewModel(PlanActionStatus status, IReadOnlyCollection<string>? libraryRoots = null, bool keepSource = false)
     {
         Status = status;
         var a = status.Action;
+        var roots = libraryRoots ?? [];
         Name = a.SourceKind == PlanSourceKind.Folder
             ? Path.GetFileName(Path.TrimEndingDirectorySeparator(a.SourcePath)) + "/"
             : Path.GetFileName(a.SourcePath);
         RelativeFolder = Path.GetDirectoryName(a.RelativePath.Replace('/', Path.DirectorySeparatorChar)) is { Length: > 0 } folder
             ? folder.Replace(Path.DirectorySeparatorChar, '/')
             : ".";
-        TargetText = a.TargetPath is { } t ? "→ " + ShortTarget(t, libraryRoots ?? []) : "kein Ziel";
+        Outcome = PlanDisplay.OutcomeOf(a);
+        ShortTargetText = a.TargetPath is { } t ? ShortTarget(t, roots) : "kein Ziel";
+        TargetText = TargetLine(a, Outcome, ShortTargetText, keepSource);
+        Consequence = PlanDisplay.Consequence(a, keepSource, t => ShortTarget(t, roots));
         SizeText = $"{PlanDisplay.Files(a.Files)}, {PlanDisplay.Size(a.Bytes)}";
         // After step 1 the target holds the plan's own checked copy; the executor does not count that as a collision
         // either, so problems are shown only while an action is still to be decided or run.
         HasProblems = status.Problems.Count > 0 && a.State is PlanActionState.Proposed or PlanActionState.Approved or PlanActionState.Rejected;
-        ProblemsText = HasProblems ? string.Join(", ", status.Problems.Select(p => p.ToCode())) : string.Empty;
+        ProblemsText = HasProblems ? string.Join(", ", status.Problems.Select(PlanDisplay.ProblemLabel)) : string.Empty;
     }
 
-    private static string ShortTarget(string target, IReadOnlyCollection<string> roots)
+    /// <summary>The second line of a row: where the file is after executing, in the words of its outcome.</summary>
+    private static string TargetLine(PlanAction a, PlanOutcome outcome, string target, bool keepSource) => outcome switch
+    {
+        PlanOutcome.Move when a.Kind == PlanActionKind.Copy || keepSource => $"→ {target} · Original bleibt",
+        PlanOutcome.Move => "→ " + target,
+        PlanOutcome.Bin when keepSource => "bleibt (Quelle nicht anfassen)",
+        PlanOutcome.Bin when a.Kind == PlanActionKind.Quarantine => $"Papierkorb · Kopie nach {target}",
+        PlanOutcome.Bin => $"Papierkorb · liegt schon in {target}",
+        _ when a.State == PlanActionState.Rejected => "bleibt hier · abgelehnt",
+        _ => "bleibt hier"
+    };
+
+    /// <summary>A target below a library root as "library/rest"; any other path as it is.</summary>
+    public static string ShortTarget(string target, IReadOnlyCollection<string> roots)
     {
         var root = roots.FirstOrDefault(r => PlanChecks.IsAtOrBelow(target, r));
         return root is null
@@ -45,11 +63,27 @@ public partial class PlanActionRowViewModel : ViewModelBase
     public string RelativeFolder { get; }
 
     public string TargetText { get; }
+
+    /// <summary>The target as "library/rest", or "kein Ziel".</summary>
+    public string ShortTargetText { get; }
+
     public string SizeText { get; }
+
+    /// <summary>What happens to the file: the outcome of its kind, or <see cref="PlanOutcome.Stay"/> when rejected.</summary>
+    public PlanOutcome Outcome { get; }
+
+    public string OutcomeLabel => PlanDisplay.OutcomeLabel(Outcome);
+    public string OutcomeColor => PlanDisplay.OutcomeColor(Outcome);
+
+    /// <summary>What executing it does, where the file is afterwards and whether it can be taken back.</summary>
+    public string Consequence { get; }
 
     public string KindLabel => PlanDisplay.KindLabel(Action.Kind);
     public string KindColor => PlanDisplay.KindColor(Action.Kind);
-    public string KindTip => $"{Action.Kind.ToCode()} (empfohlen: {Action.Recommended.ToCode()})";
+    public string KindTip => $"{Consequence}{Environment.NewLine}Code: {Action.Kind.ToCode()}, {Action.State.ToCode()} (empfohlen: {Action.Recommended.ToCode()})";
+
+    /// <summary>Released (approved) for execution.</summary>
+    public bool IsReleased => Action.State == PlanActionState.Approved;
 
     public string StateLabel => PlanDisplay.StateLabel(Action.State);
     public string StateColor => PlanDisplay.StateColor(Action.State);
@@ -77,9 +111,11 @@ public partial class PlanGroupViewModel : ViewModelBase
         Title = title;
         Subtitle = subtitle;
         Actions = actions;
-        var counts = actions.GroupBy(r => r.Action.Kind).OrderBy(g => g.Key)
-            .Select(g => $"{g.Count()} {PlanDisplay.KindLabel(g.Key)}");
-        Summary = $"{(actions.Count == 1 ? "1 Aktion" : $"{actions.Count} Aktionen")} · {PlanDisplay.Size(actions.Sum(r => r.Action.Bytes))} · {string.Join(", ", counts)}";
+        var counts = actions.GroupBy(r => r.Outcome).OrderBy(g => g.Key)
+            .Select(g => $"{g.Count()} {PlanDisplay.OutcomeLabel(g.Key)}");
+        var released = actions.Count(r => r.IsReleased);
+        Summary = $"{(actions.Count == 1 ? "1 Aktion" : $"{actions.Count} Aktionen")} · {PlanDisplay.Size(actions.Sum(r => r.Action.Bytes))} · "
+                  + $"{string.Join(", ", counts)} · freigegeben {released} von {actions.Count}";
     }
 
     public string Key { get; }
@@ -95,12 +131,21 @@ public partial class PlanGroupViewModel : ViewModelBase
     partial void OnIsExpandedChanged(bool value) => OnPropertyChanged(nameof(ExpandGlyph));
 }
 
-/// <summary>A kind as the switch offers it.</summary>
+/// <summary>A kind as the finer switch of the detail offers it.</summary>
 public sealed record PlanKindOption(PlanActionKind Kind)
 {
     public string Label => PlanDisplay.KindLabel(Kind);
     public string Color => PlanDisplay.KindColor(Kind);
     public string Code => Kind.ToCode();
+}
+
+/// <summary>One of the three outcome buttons of the detail: filled in its colour when it is the action's outcome.</summary>
+public sealed record PlanOutcomeChoice(PlanOutcome Outcome, bool IsCurrent)
+{
+    public string Label => PlanDisplay.OutcomeButton(Outcome);
+    public string Hint => PlanDisplay.OutcomeHint(Outcome);
+    public string Background => IsCurrent ? PlanDisplay.OutcomeColor(Outcome) : "#333337";
+    public string Border => PlanDisplay.OutcomeColor(Outcome);
 }
 
 /// <summary>How the actions are grouped.</summary>

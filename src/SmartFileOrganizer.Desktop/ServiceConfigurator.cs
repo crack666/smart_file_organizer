@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using SmartFileOrganizer.Application.Library;
 using SmartFileOrganizer.Application.Plans;
 using SmartFileOrganizer.Application.Sensitivity;
 using SmartFileOrganizer.Application.Services;
@@ -64,10 +65,12 @@ public static class ServiceConfigurator
             sp.GetRequiredService<ReviewService>()));
         services.AddTransient<ScanProgressViewModel>();
         services.AddTransient<AiProgressViewModel>();
-        // The plan of a job (https://github.com/crack666/smart_file_organizer/issues/15): only the plan services.
+        // The plan of a job (https://github.com/crack666/smart_file_organizer/issues/15): only the plan services, and the
+        // folder view of the libraries for "Ziel ändern" (https://github.com/crack666/smart_file_organizer/issues/102).
         services.AddTransient<PlanViewModel>(sp => new PlanViewModel(
             sp.GetRequiredService<PlanService>(),
             sp.GetRequiredService<PlanExecutor>(),
+            sp.GetRequiredService<LibraryTargetService>(),
             sp.GetRequiredService<ScanJobService>(),
             sp.GetRequiredService<FileQueryService>(),
             sp.GetRequiredService<IFileFactRepository>(),

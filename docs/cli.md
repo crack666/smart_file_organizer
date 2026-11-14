@@ -1975,6 +1975,8 @@ again. Verified, executed, failed and undone actions are not changed. Result: `{
 The GUI plan view (since 14.11.2026) changes the same plan through the same `PlanService`, with the same checks. When
 it switches an action to `quarantine` without a target of its own, the target is
 `<library>/<Plan:QuarantineFolder>/<rest of the path>`; `Plan:QuarantineFolder` defaults to `_sfo-quarantine`.
+Since 14.11.2026 (Issue 102) the GUI names outcomes instead of kinds ("Umziehen", "In den Papierkorb", "Hier lassen";
+see [glossary](glossary.md#the-plan-view-outcomes-and-release)) and never sets `rejected` itself.
 
 ### `sfo plan import <plan> <file>`
 

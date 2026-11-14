@@ -186,6 +186,35 @@ yet against a real Ollama restart.
   `sfo plan apply --action`; `sfo plan purge` is CLI only; "Als Ballast" picks
   `delete_source` only when the library comparison shows the content is held
   there, otherwise quarantine.
+- Plan view, outcomes and release (since 14.11.2026,
+  [#102](https://github.com/crack666/smart_file_organizer/issues/102)). Until
+  then the buttons were "Bestätigen", "Ablehnen", "Als Ballast", "Belassen",
+  "Umziehen", "Zurücksetzen" per row, selection and group, plus "Alle
+  bestätigen" / "Alle ablehnen"; "Ablehnen" and "Belassen" both left the file
+  in place. Now one question per action, three outcomes in fixed colours:
+  "Umziehen" (`move`, `copy`), "In den Papierkorb" (`quarantine`,
+  `delete_source`: the original goes into `.sfo-hold` in the job folder in
+  step 2 and is deleted only by `sfo plan purge`), "Hier lassen" (`leave`).
+  Then "Freigeben" (`approved`) for one action, the ticked rows, a group or
+  "Alles freigeben"; "Freigabe zurücknehmen" sets `approved` back to
+  `proposed`. Every row (tooltip) and the detail say what executing does,
+  where the file is afterwards and how to take it back; step 1 asks with a
+  summary in the same words (what moves where, what goes into the bin, what
+  stays and why). The GUI never rejects: a `rejected` action (CLI, agent)
+  shows as "Hier lassen" with the state "Abgelehnt", is never released by a
+  release, and choosing an outcome opens it again. "Genauer" keeps every kind
+  reachable. "Ziel ändern" opens a tree of the plan's libraries from the
+  library folder view (`LibraryTargetService.FolderAsync`, as `sfo library
+  folder`), with the inbox folder and "Neuer Ordner hier"; `PlanService` and
+  its checks decide, a refused target keeps the picker open with the reason.
+  Videos get one still frame when `ffmpeg` is on the PATH (the extractor of
+  the analysis), video and audio their key facts in large type.
+  _Checked 14.11.2026: `SmartFileOrganizer.Desktop.Tests` 17 passed on Windows
+  and on Linux (Avalonia headless), one pass rendered
+  ([screenshots](images/01-plan-agent.png)); the real window was not driven by
+  hand._ Limits: the folder tree reads the library map anew for each opened
+  folder, which may be slow on a large library; no still frame without
+  `ffmpeg`; `sfo plan purge` (emptying the bin) is still CLI only.
 
 ### Command line
 

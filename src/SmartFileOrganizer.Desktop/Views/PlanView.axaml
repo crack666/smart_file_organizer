@@ -25,6 +25,13 @@
             <Setter Property="FontSize" Value="12" />
             <Setter Property="Margin" Value="0,0,4,0" />
         </Style>
+        <Style Selector="Button.outcome">
+            <Setter Property="BorderThickness" Value="0,0,0,3" />
+        </Style>
+        <Style Selector="Button.release">
+            <Setter Property="Background" Value="#1F5F2A" />
+            <Setter Property="Foreground" Value="White" />
+        </Style>
     </UserControl.Styles>
 
     <Grid RowDefinitions="Auto,Auto,Auto,*,Auto">
@@ -70,18 +77,19 @@
             </DockPanel>
         </Border>
 
-        <!-- ===== Summary ===== -->
+        <!-- ===== Summary: the three outcomes, then the release ===== -->
         <WrapPanel Grid.Row="1" Margin="8,6,8,2">
-            <Border Classes="tile" Background="#1C3A6B">
+            <Border Classes="tile" Background="{Binding MoveColor}" ToolTip.Tip="{Binding MoveHint}">
                 <TextBlock Text="{Binding MoveText}" Foreground="White" FontSize="12" />
             </Border>
-            <Border Classes="tile" Background="#6B2A22">
-                <TextBlock Text="{Binding RemoveText}" Foreground="White" FontSize="12" />
+            <Border Classes="tile" Background="{Binding BinColor}" ToolTip.Tip="{Binding BinHint}">
+                <TextBlock Text="{Binding BinText}" Foreground="White" FontSize="12" />
             </Border>
-            <Border Classes="tile" Background="#3A3F45">
+            <Border Classes="tile" Background="{Binding StayColor}" ToolTip.Tip="{Binding StayHint}">
                 <TextBlock Text="{Binding StayText}" Foreground="White" FontSize="12" />
             </Border>
-            <TextBlock Text="{Binding StatesText}" Classes="small" VerticalAlignment="Center" Margin="6,0,10,0" />
+            <TextBlock Text="{Binding ReleasedText}" Foreground="#4CC35A" FontSize="12" FontWeight="SemiBold" VerticalAlignment="Center" Margin="6,0,8,0" />
+            <TextBlock Text="{Binding StatesText}" Classes="small" VerticalAlignment="Center" Margin="0,0,10,0" />
             <Border Classes="tile" Background="#8957E5" IsVisible="{Binding HasAgentDecisions}">
                 <TextBlock Text="{Binding AgentText}" Foreground="White" FontSize="12" />
             </Border>
@@ -90,23 +98,26 @@
                       ToolTip.Tip="Für den ganzen Job: Umziehen kopiert nur, kein Original wird entfernt (sfo plan keep-source)" />
         </WrapPanel>
 
-        <!-- ===== Actions on the ticked rows and on the whole plan ===== -->
+        <!-- ===== The ticked rows: what happens to them, then release; and the whole plan ===== -->
         <WrapPanel Grid.Row="2" Margin="8,4,8,6">
-            <TextBlock Text="{Binding CheckedText}" Foreground="White" FontSize="12" VerticalAlignment="Center" Width="90" />
-            <Button Classes="compact" Content="Bestätigen" Command="{Binding ApproveCheckedCommand}" />
-            <Button Classes="compact" Content="Ablehnen" Command="{Binding RejectCheckedCommand}" />
-            <Button Classes="compact" Content="Als Ballast entfernen" Command="{Binding MarkCheckedForRemovalCommand}"
-                    ToolTip.Tip="Löschen, wo die Bibliothek den Inhalt schon hat, sonst Quarantäne; neu zu bestätigen" />
-            <Button Classes="compact" Content="Belassen" Command="{Binding LeaveCheckedCommand}" />
-            <Button Classes="compact" Content="Umziehen" Command="{Binding MoveCheckedCommand}" />
-            <Button Classes="compact" Content="Zurücksetzen" Command="{Binding ResetCheckedCommand}"
-                    ToolTip.Tip="Bestätigt oder abgelehnt wieder auf „Vorgeschlagen“" />
+            <TextBlock Text="{Binding CheckedText}" Foreground="White" FontSize="12" VerticalAlignment="Center" Width="92" />
+            <Button Classes="compact outcome" Content="Umziehen" Command="{Binding MoveCheckedCommand}"
+                    BorderBrush="#2F6FD6" ToolTip.Tip="{Binding MoveHint}" />
+            <Button Classes="compact outcome" Content="In den Papierkorb" Command="{Binding BinCheckedCommand}"
+                    BorderBrush="#C26A12" ToolTip.Tip="{Binding BinHint}" />
+            <Button Classes="compact outcome" Content="Hier lassen" Command="{Binding StayCheckedCommand}"
+                    BorderBrush="#5A626B" ToolTip.Tip="{Binding StayHint}" />
+            <Button Classes="compact" Content="Ziel ändern…" Command="{Binding ChangeTargetCheckedCommand}"
+                    ToolTip.Tip="Ordner in der Bibliothek wählen; jede Aktion behält ihren Namen" Margin="0,0,12,0" />
+            <Button Classes="compact release" Content="Freigeben" Command="{Binding ReleaseCheckedCommand}"
+                    ToolTip.Tip="Die Auswahl darf ausgeführt werden. Sensible und abgelehnte Aktionen nur einzeln." />
+            <Button Classes="compact" Content="Freigabe zurücknehmen" Command="{Binding RevokeReleaseCommand}" />
             <Button Classes="compact" Content="Auswahl leeren" Command="{Binding ClearChecksCommand}" Margin="0,0,16,0" />
-            <Button Classes="compact" Content="Alle bestätigen" Command="{Binding ApproveAllCommand}"
-                    ToolTip.Tip="Nur Aktionen ohne Problem; sensible Aktionen nur einzeln" />
-            <Button Classes="compact" Content="Alle ablehnen" Command="{Binding RejectAllCommand}" />
-            <Button Classes="compact" Content="Agent-Entscheidungen zurücksetzen" Command="{Binding ResetAgentDecisionsCommand}"
-                    IsEnabled="{Binding HasAgentDecisions}" />
+            <Button Classes="compact release" Content="Alles freigeben" Command="{Binding ReleaseAllCommand}"
+                    ToolTip.Tip="Alle Aktionen ohne Problem; sensible und abgelehnte nur einzeln" />
+            <Button Classes="compact" Content="Agent zurücksetzen" Command="{Binding ResetAgentDecisionsCommand}"
+                    IsEnabled="{Binding HasAgentDecisions}"
+                    ToolTip.Tip="Was ein Agent freigegeben oder abgelehnt hat, wieder auf „Offen“" />
         </WrapPanel>
 
         <!-- ===== List and detail ===== -->
@@ -141,27 +152,25 @@
                                 <Button Classes="compact" Content="Auswählen"
                                         Command="{Binding $parent[ListBox].((vm:PlanViewModel)DataContext).CheckGroupCommand}"
                                         CommandParameter="{Binding}" />
-                                <Button Classes="compact" Content="Bestätigen"
-                                        Command="{Binding $parent[ListBox].((vm:PlanViewModel)DataContext).ApproveGroupCommand}"
-                                        CommandParameter="{Binding}" />
-                                <Button Classes="compact" Content="Ablehnen"
-                                        Command="{Binding $parent[ListBox].((vm:PlanViewModel)DataContext).RejectGroupCommand}"
-                                        CommandParameter="{Binding}" />
+                                <Button Classes="compact release" Content="Freigeben"
+                                        Command="{Binding $parent[ListBox].((vm:PlanViewModel)DataContext).ReleaseGroupCommand}"
+                                        CommandParameter="{Binding}"
+                                        ToolTip.Tip="Die Gruppe darf ausgeführt werden; sensible und abgelehnte Aktionen nur einzeln" />
                             </StackPanel>
                         </Grid>
                     </DataTemplate>
 
                     <!-- One action -->
                     <DataTemplate x:DataType="vm:PlanActionRowViewModel">
-                        <Grid ColumnDefinitions="30,92,*,110,150" Margin="0,1" Background="Transparent">
+                        <Grid ColumnDefinitions="30,92,*,110,150" Margin="0,1" Background="Transparent" ToolTip.Tip="{Binding KindTip}">
                             <CheckBox Grid.Column="0" IsChecked="{Binding IsChecked, Mode=TwoWay}" Margin="8,0,0,0" MinWidth="0" />
-                            <Border Grid.Column="1" Background="{Binding KindColor}" CornerRadius="3" Padding="6,2"
-                                    VerticalAlignment="Center" HorizontalAlignment="Left" ToolTip.Tip="{Binding KindTip}">
-                                <TextBlock Text="{Binding KindLabel}" Foreground="White" FontSize="11" FontWeight="SemiBold" />
+                            <Border Grid.Column="1" Background="{Binding OutcomeColor}" CornerRadius="3" Padding="6,2"
+                                    VerticalAlignment="Center" HorizontalAlignment="Left">
+                                <TextBlock Text="{Binding OutcomeLabel}" Foreground="White" FontSize="11" FontWeight="SemiBold" />
                             </Border>
                             <StackPanel Grid.Column="2" Margin="6,3" Spacing="1">
                                 <TextBlock Text="{Binding Name}" Foreground="White" TextTrimming="CharacterEllipsis" />
-                                <TextBlock Classes="small" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding TargetText}">
+                                <TextBlock Classes="small" TextTrimming="CharacterEllipsis">
                                     <Run Text="{Binding RelativeFolder}" />
                                     <Run Text="  " />
                                     <Run Text="{Binding TargetText}" />
@@ -204,9 +213,54 @@
                                 <Button Classes="compact" Content="Ziel zeigen" Command="{Binding RevealTargetCommand}" />
                             </WrapPanel>
 
-                            <TextBlock Text="Art" Classes="label" />
-                            <StackPanel Orientation="Horizontal" Spacing="8">
-                                <ComboBox ItemsSource="{Binding KindOptions}" SelectedItem="{Binding SelectedKind, Mode=TwoWay}" Width="150">
+                            <TextBlock Text="Was soll damit geschehen?" Classes="label" />
+                            <ItemsControl ItemsSource="{Binding OutcomeChoices}">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <StackPanel Orientation="Horizontal" Spacing="4" />
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="vm:PlanOutcomeChoice">
+                                        <Button Content="{Binding Label}" Background="{Binding Background}" BorderBrush="{Binding Border}"
+                                                BorderThickness="0,0,0,3" Foreground="White" FontSize="12" Padding="10,4"
+                                                ToolTip.Tip="{Binding Hint}"
+                                                Command="{Binding $parent[ItemsControl].((vm:PlanViewModel)DataContext).SetSelectedOutcomeCommand}"
+                                                CommandParameter="{Binding Outcome}" />
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <Border BorderBrush="{Binding DetailOutcomeColor}" BorderThickness="3,0,0,0" Padding="8,4" Margin="0,6,0,0" Background="#1E1E1E">
+                                <TextBlock Text="{Binding DetailConsequence}" Foreground="White" FontSize="12" TextWrapping="Wrap" />
+                            </Border>
+
+                            <TextBlock Text="Ziel" Classes="label" />
+                            <DockPanel>
+                                <Button DockPanel.Dock="Right" Classes="compact" Content="Ziel ändern…" Command="{Binding ChangeTargetSelectedCommand}"
+                                        VerticalAlignment="Top" Margin="6,0,0,0"
+                                        ToolTip.Tip="Ordner in der Bibliothek wählen, auch neu oder den Eingangsordner" />
+                                <TextBlock Text="{Binding DetailTarget}" Foreground="White" FontSize="12" TextWrapping="Wrap" />
+                            </DockPanel>
+                            <TextBlock Text="Begründung des Vorschlags" Classes="label" />
+                            <TextBlock Text="{Binding DetailReason}" Foreground="White" FontSize="12" TextWrapping="Wrap" />
+                            <TextBlock Text="{Binding DetailNote}" Classes="small" TextWrapping="Wrap"
+                                       IsVisible="{Binding DetailNote, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                            <TextBlock Text="{Binding DetailProblems}" Foreground="#FF7B72" FontSize="12" TextWrapping="Wrap"
+                                       IsVisible="{Binding DetailProblems, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+
+                            <TextBlock Text="Freigabe" Classes="label" />
+                            <WrapPanel>
+                                <TextBlock Text="{Binding DetailRelease}" Foreground="{Binding DetailReleaseColor}" FontSize="12" FontWeight="SemiBold"
+                                           VerticalAlignment="Center" Margin="0,0,8,0" />
+                                <Button Classes="compact release" Content="Freigeben" Command="{Binding ReleaseSelectedCommand}"
+                                        ToolTip.Tip="Diese Aktion darf ausgeführt werden (auch eine sensible)" />
+                                <Button Classes="compact" Content="Freigabe zurücknehmen" Command="{Binding RevokeReleaseCommand}" />
+                            </WrapPanel>
+                            <TextBlock Text="{Binding DetailDecision}" Classes="small" TextWrapping="Wrap" Margin="0,2,0,0" />
+                            <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,4,0,0">
+                                <TextBlock Text="Genauer:" Classes="small" VerticalAlignment="Center" />
+                                <ComboBox ItemsSource="{Binding KindOptions}" SelectedItem="{Binding SelectedKind, Mode=TwoWay}" Width="230" FontSize="12"
+                                          ToolTip.Tip="Die Art der Aktion, wie die CLI sie kennt">
                                     <ComboBox.ItemTemplate>
                                         <DataTemplate x:DataType="vm:PlanKindOption">
                                             <StackPanel Orientation="Horizontal" Spacing="6" ToolTip.Tip="{Binding Code}">
@@ -216,26 +270,12 @@
                                         </DataTemplate>
                                     </ComboBox.ItemTemplate>
                                 </ComboBox>
-                                <TextBlock Text="{Binding DetailRecommended}" Classes="small" VerticalAlignment="Center" />
+                                <TextBlock Text="{Binding DetailRecommended}" Classes="small" VerticalAlignment="Center" TextWrapping="Wrap" MaxWidth="150" />
                             </StackPanel>
-                            <WrapPanel Margin="0,6,0,0">
-                                <Button Classes="compact" Content="Bestätigen" Command="{Binding ApproveSelectedCommand}" />
-                                <Button Classes="compact" Content="Ablehnen" Command="{Binding RejectSelectedCommand}" />
-                                <Button Classes="compact" Content="Als Ballast" Command="{Binding MarkSelectedForRemovalCommand}" />
-                                <Button Classes="compact" Content="Belassen" Command="{Binding LeaveSelectedCommand}" />
-                            </WrapPanel>
-
-                            <TextBlock Text="Ziel" Classes="label" />
-                            <TextBlock Text="{Binding DetailTarget}" Foreground="White" FontSize="12" TextWrapping="Wrap" />
-                            <TextBlock Text="Begründung" Classes="label" />
-                            <TextBlock Text="{Binding DetailReason}" Foreground="White" FontSize="12" TextWrapping="Wrap" />
-                            <TextBlock Text="{Binding DetailNote}" Classes="small" TextWrapping="Wrap"
-                                       IsVisible="{Binding DetailNote, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
-                            <TextBlock Text="{Binding DetailProblems}" Foreground="#FF7B72" FontSize="12" TextWrapping="Wrap"
-                                       IsVisible="{Binding DetailProblems, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
-                            <TextBlock Text="{Binding DetailDecision}" Classes="small" TextWrapping="Wrap" Margin="0,4,0,0" />
 
                             <TextBlock Text="Datei" Classes="label" />
+                            <TextBlock Text="{Binding DetailMedia}" Foreground="White" FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap"
+                                       IsVisible="{Binding HasMedia}" Margin="0,0,0,4" />
                             <TextBlock Text="{Binding DetailMarker}" Foreground="#E3B341" FontSize="12" TextWrapping="Wrap"
                                        IsVisible="{Binding DetailMarker, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
                             <TextBlock Text="{Binding DetailDescription}" Foreground="White" FontSize="12" TextWrapping="Wrap"
@@ -274,7 +314,8 @@
                         <Button Classes="compact" Content="Trockenlauf" Command="{Binding DryRunCommand}"
                                 ToolTip.Tip="Schritt 1 ohne Änderung: was kopiert würde, was übersprungen würde, Kollisionen" />
                         <Button Classes="compact" Content="1 · Kopieren und prüfen" Command="{Binding ApplyCommand}" />
-                        <Button Classes="compact" Content="2 · Originale entfernen" Command="{Binding RemoveSourcesCommand}" />
+                        <Button Classes="compact" Content="2 · Originale in den Papierkorb" Command="{Binding RemoveSourcesCommand}"
+                                ToolTip.Tip="Originale nach .sfo-hold im Job-Ordner; „Zurücknehmen“ legt sie zurück, geleert wird nur mit sfo plan purge" />
                         <Button Classes="compact" Content="Zurücknehmen" Command="{Binding UndoCommand}" Margin="0,0,12,0" />
                         <TextBlock Text="{Binding StatusText}" Foreground="White" FontSize="12" VerticalAlignment="Center"
                                    TextTrimming="CharacterEllipsis" MaxWidth="640" ToolTip.Tip="{Binding StatusText}" />
@@ -312,7 +353,7 @@
         <!-- ===== Confirmation before a step that changes files ===== -->
         <Grid Grid.Row="0" Grid.RowSpan="5" Background="#B0000000" IsVisible="{Binding HasConfirmation}">
             <Border Background="#2D2D30" BorderBrush="#5A626B" BorderThickness="1" CornerRadius="6" Padding="20,16"
-                    MaxWidth="640" HorizontalAlignment="Center" VerticalAlignment="Center">
+                    MaxWidth="760" HorizontalAlignment="Center" VerticalAlignment="Center">
                 <StackPanel Spacing="8">
                     <TextBlock Text="{Binding Confirmation.Title}" FontSize="16" FontWeight="SemiBold" Foreground="White" />
                     <ItemsControl ItemsSource="{Binding Confirmation.Lines}">
@@ -328,6 +369,55 @@
                                 Background="{Binding Confirmation.ConfirmColor}" Foreground="White" />
                     </StackPanel>
                 </StackPanel>
+            </Border>
+        </Grid>
+
+        <!-- ===== Ziel ändern: a folder of the plan's libraries ===== -->
+        <Grid Grid.Row="0" Grid.RowSpan="5" Background="#B0000000" IsVisible="{Binding HasTargetPicker}">
+            <Border Background="#2D2D30" BorderBrush="#5A626B" BorderThickness="1" CornerRadius="6" Padding="20,16"
+                    Width="760" HorizontalAlignment="Center" VerticalAlignment="Center">
+                <Grid RowDefinitions="Auto,Auto,Auto,*,Auto,Auto,Auto,Auto" ColumnDefinitions="*" MaxHeight="680">
+                    <TextBlock Grid.Row="0" Text="{Binding TargetPicker.Title}" FontSize="16" FontWeight="SemiBold" Foreground="White"
+                               TextTrimming="CharacterEllipsis" />
+                    <TextBlock Grid.Row="1" Text="{Binding TargetPicker.CurrentText}" Classes="small" Margin="0,4,0,0" TextWrapping="Wrap" />
+                    <StackPanel Grid.Row="2" Margin="0,6,0,6" Spacing="1">
+                        <TextBlock Text="Begründung des Vorschlags" Classes="label" Margin="0" />
+                        <TextBlock Text="{Binding TargetPicker.ReasonText}" Foreground="#D0D0D0" FontSize="12" TextWrapping="Wrap" />
+                    </StackPanel>
+                    <Border Grid.Row="3" BorderBrush="#3E3E42" BorderThickness="1" CornerRadius="3" Background="#1E1E1E" MinHeight="300">
+                        <TreeView ItemsSource="{Binding TargetPicker.Roots}"
+                                  SelectedItem="{Binding TargetPicker.SelectedFolder, Mode=TwoWay}">
+                            <TreeView.Styles>
+                                <Style Selector="TreeViewItem" x:DataType="vm:PlanTargetFolderNode">
+                                    <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" />
+                                    <Setter Property="MinHeight" Value="26" />
+                                </Style>
+                            </TreeView.Styles>
+                            <TreeView.ItemTemplate>
+                                <TreeDataTemplate x:DataType="vm:PlanTargetFolderNode" ItemsSource="{Binding Children}">
+                                    <StackPanel Orientation="Horizontal" Spacing="8">
+                                        <TextBlock Text="{Binding Label}" Foreground="White" FontSize="13" />
+                                        <TextBlock Text="{Binding Note}" Foreground="#E3B341" FontSize="11" VerticalAlignment="Center"
+                                                   IsVisible="{Binding HasNote}" />
+                                    </StackPanel>
+                                </TreeDataTemplate>
+                            </TreeView.ItemTemplate>
+                        </TreeView>
+                    </Border>
+                    <DockPanel Grid.Row="4" Margin="0,8,0,0">
+                        <Button DockPanel.Dock="Right" Classes="compact" Content="Neuer Ordner hier" Command="{Binding TargetPicker.AddFolderCommand}"
+                                Margin="6,0,0,0" ToolTip.Tip="Unter dem gewählten Ordner; angelegt wird er erst beim Ausführen" />
+                        <TextBox Text="{Binding TargetPicker.NewFolderName, Mode=TwoWay}" Watermark="Name des neuen Ordners" FontSize="12" />
+                    </DockPanel>
+                    <TextBlock Grid.Row="5" Text="{Binding TargetPicker.PreviewText}" Foreground="White" FontSize="12" Margin="0,8,0,0" TextWrapping="Wrap" />
+                    <TextBlock Grid.Row="6" Text="{Binding TargetPicker.ErrorText}" Foreground="#FF7B72" FontSize="12" TextWrapping="Wrap" Margin="0,4,0,0"
+                               IsVisible="{Binding TargetPicker.HasError}" />
+                    <StackPanel Grid.Row="7" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8" Margin="0,10,0,0">
+                        <Button Content="Abbrechen" Command="{Binding TargetPicker.CancelCommand}" />
+                        <Button Content="Ziel übernehmen" Command="{Binding TargetPicker.AcceptCommand}" Background="#2F6FD6" Foreground="White"
+                                ToolTip.Tip="Die Regeln des Plans prüfen das Ziel; danach ist die Aktion neu freizugeben" />
+                    </StackPanel>
+                </Grid>
             </Border>
         </Grid>
     </Grid>
