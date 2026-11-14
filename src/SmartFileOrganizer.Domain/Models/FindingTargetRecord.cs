@@ -49,6 +49,13 @@ public sealed class FindingTargetRecord
     public DateTime MatchedAt { get; set; }
 
     /// <summary>
+    /// Who decided (https://github.com/crack666/smart_file_organizer/issues/95): the rules, the local model, or the
+    /// controller through <c>sfo findings place</c>. A controller decision is never replaced by <c>sfo findings targets</c>.
+    /// For a split finding: <c>controller</c> as soon as the controller decided one of its parts.
+    /// </summary>
+    public TargetDecidedBy DecidedBy { get; set; }
+
+    /// <summary>
     /// For <see cref="FindingTargetStatus.Split"/>: the parts of the finding by content, each with its own target or why
     /// none (<c>finding_target_parts</c>, Issue 85). Empty otherwise.
     /// </summary>
@@ -77,4 +84,7 @@ public sealed class FindingTargetPart
     public ResultCertainty? Certainty { get; set; }
     public TargetContentCheck ContentCheck { get; set; }
     public string Reason { get; set; } = string.Empty;
+
+    /// <summary>Who decided the place of this part (Issue 95).</summary>
+    public TargetDecidedBy DecidedBy { get; set; }
 }
