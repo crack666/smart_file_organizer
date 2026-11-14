@@ -42,15 +42,51 @@ public static partial class VideoKindRules
 
     /// <summary>
     /// The decision for one video. <paramref name="info"/> is null when the container could not be read; <paramref name="relativeDir"/>
-    /// is the folder relative to the scan root, used for a folder named like a film (<c>Title (2009)</c>).
+    /// is the folder relative to the scan root, used for a folder named like a film (<c>Title (2009)</c>) and for a
+    /// download folder, which speaks against an own recording without ruling it out.
     /// </summary>
     public static VideoOrigin Decide(VideoContainerInfo? info, string fileName, string relativeDir, VideoCompanions companions)
     {
-        var stem = Path.GetFileNameWithoutExtension(fileName);
+        var evidence = new List<VideoEvidence>();
+        var origin = DecideCore(info, fileName, relativeDir, companions, evidence);
+
+        // A download folder is a weak sign against an own recording: one step less sure, never excluded.
+        if (DownloadFolder(relativeDir) is { } downloads)
+        {
+            if (origin.Kind == VideoKind.OwnRecording)
+            {
+                origin = origin with
+                {
+                    KindCertainty = Lower(origin.KindCertainty),
+                    DeviceCertainty = origin.DeviceCertainty is { } dc ? Lower(dc) : null,
+                    Reason = $"{origin.Reason}; lies in a download folder",
+                    Remaining = Lower(origin.KindCertainty) == ResultCertainty.Uncertain ? origin.Remaining ?? RemainingKinds(info) : origin.Remaining
+                };
+                evidence.Add(new VideoEvidence("folder", downloads, "download folder: own recording one step less sure"));
+            }
+            else
+            {
+                evidence.Add(new VideoEvidence("folder", downloads, "download folder: no own recording expected"));
+            }
+        }
+        return origin with { Evidence = evidence };
+    }
+
+    private static ResultCertainty Lower(ResultCertainty c) =>
+        c == ResultCertainty.Certain ? ResultCertainty.Likely : ResultCertainty.Uncertain;
+
+    private static VideoOrigin DecideCore(VideoContainerInfo? info, string fileName, string relativeDir, VideoCompanions companions,
+        List<VideoEvidence> evidence)
+    {
+        var fullStem = Path.GetFileNameWithoutExtension(fileName);
+        // A copy suffix (" (1)", " - Kopie", " - Copy") is no part of any naming scheme.
+        var stem = WithoutCopySuffix(fullStem);
+        if (stem != fullStem) evidence.Add(new VideoEvidence("name", "copy suffix", "removed before the naming schemes are matched"));
         var ext = Path.GetExtension(fileName).ToLowerInvariant();
         var folder = LastFolder(relativeDir);
 
         // 1. An info file of a media library names the kind.
+        if (companions.InfoRoot is { } root) evidence.Add(new VideoEvidence("info_file", $"<{root}>", "names the kind"));
         switch (companions.InfoRoot)
         {
             case "movie":
@@ -72,24 +108,32 @@ public static partial class VideoKindRules
         {
             var programs = $"{info.Software} {info.MuxingApp} {string.Join(" ", info.Tracks.Select(t => t.Name))}";
             if (ScreenRecorders.FirstOrDefault(r => programs.Contains(r, StringComparison.OrdinalIgnoreCase)) is { } recorder)
-                return new VideoOrigin(VideoKind.ScreenRecording, FactSource.Metadata, ResultCertainty.Certain, $"recording program '{recorder}' in the container");
-
-            var trackNames = string.Join(" ", info.Tracks.Select(t => t.Name));
-            if (info.Make is not null || info.Model is not null)
             {
-                var device = DeviceOf($"{info.Make} {info.Model} {trackNames}", ext) ?? CameraName(stem, ext)?.Device;
-                return new VideoOrigin(VideoKind.OwnRecording, FactSource.Metadata, ResultCertainty.Certain, $"device '{info.Device}' in the container",
-                    device, FactSource.Metadata, device is null ? null : ResultCertainty.Certain);
+                evidence.Add(new VideoEvidence(info.Software?.Contains(recorder, StringComparison.OrdinalIgnoreCase) == true ? "software" : "track_name",
+                    recorder, "recording program: screen recording"));
+                return new VideoOrigin(VideoKind.ScreenRecording, FactSource.Metadata, ResultCertainty.Certain, $"recording program '{recorder}' in the container");
             }
-            // Some cameras name only their tracks (GoPro AVC, DJI.AVC, Insta360).
-            if (DeviceOf(trackNames, ext) is { } byTrack)
-                return new VideoOrigin(VideoKind.OwnRecording, FactSource.Metadata, ResultCertainty.Certain, "camera track name in the container",
-                    byTrack, FactSource.Metadata, ResultCertainty.Certain);
+            if (info.Software is { } software) evidence.Add(new VideoEvidence("software", software, "no recording program; not evidence of a device"));
+
+            if (ContainerDevice(info, stem, ext, companions, evidence) is { } claim)
+            {
+                // A name that says "downloaded" against a device in the container: neither wins, the model decides.
+                if (OtherOrigin(stem, companions) is { } other)
+                {
+                    evidence.Add(new VideoEvidence(other.Field, other.Scheme, "contradicts the device in the container: certainty lowered, the model decides"));
+                    return new VideoOrigin(VideoKind.OwnRecording, FactSource.Metadata, ResultCertainty.Uncertain,
+                        $"{claim.Reason}, but {other.Scheme}: the model decides",
+                        claim.Device, FactSource.Metadata, claim.Device is null ? null : ResultCertainty.Uncertain, Remaining: RemainingKinds(info));
+                }
+                return new VideoOrigin(VideoKind.OwnRecording, FactSource.Metadata, claim.Certainty, claim.Reason,
+                    claim.Device, FactSource.Metadata, claim.Device is null ? null : claim.Certainty);
+            }
         }
 
         // 3. The name.
         if (Episode(stem) is { } episode)
         {
+            evidence.Add(new VideoEvidence("name", "season and episode", "series episode"));
             return new VideoOrigin(VideoKind.SeriesEpisode, FactSource.Name, ResultCertainty.Certain, "season and episode in the name",
                 Title: episode.Title ?? FolderTitle(relativeDir), Year: episode.Year, Season: episode.Season, Episode: episode.Episode,
                 WorkSource: FactSource.Name);
@@ -100,6 +144,8 @@ public static partial class VideoKindRules
             // A side file of the camera or telemetry next to it confirms the scheme.
             var confirmed = companions.CameraSideFiles || companions.TelemetrySubtitles;
             var device = camera.Device ?? (companions.TelemetrySubtitles ? RecordingDevice.Drone : null);
+            evidence.Add(new VideoEvidence("name", $"naming scheme of {camera.Scheme}", camera.Sure ? "own recording, unique to the camera" : "own recording"));
+            if (confirmed) evidence.Add(new VideoEvidence("companion", companions.TelemetrySubtitles ? "telemetry subtitles" : "side files of the camera", "confirms the camera"));
             return new VideoOrigin(VideoKind.OwnRecording, confirmed ? FactSource.Companion : FactSource.Name,
                 camera.Sure || confirmed ? ResultCertainty.Certain : ResultCertainty.Likely,
                 $"naming scheme of {camera.Scheme}{(confirmed ? " with side files of the camera" : string.Empty)}",
@@ -108,23 +154,40 @@ public static partial class VideoKindRules
         }
 
         if (ScreenRecordingName().IsMatch(stem))
-            return new VideoOrigin(VideoKind.ScreenRecording, FactSource.Name, ResultCertainty.Likely, "naming scheme of a screen recording");
+            return Named(evidence, VideoKind.ScreenRecording, "naming scheme of a screen recording");
         if (GameRecordingName().IsMatch(stem))
-            return new VideoOrigin(VideoKind.ScreenRecording, FactSource.Name, ResultCertainty.Likely, "naming scheme of a game recording program (date and time with dashes)");
+            return Named(evidence, VideoKind.ScreenRecording, "naming scheme of a game recording program (date and time with dashes)");
 
         if (MessengerName().IsMatch(stem))
-            return new VideoOrigin(VideoKind.WebClip, FactSource.Name, ResultCertainty.Likely, "naming scheme of a messenger");
-        if (companions.DownloadInfo)
-            return new VideoOrigin(VideoKind.WebClip, FactSource.Companion, ResultCertainty.Certain, "download info file next to it");
-        if (DownloadName().IsMatch(stem))
-            return new VideoOrigin(VideoKind.WebClip, FactSource.Name, ResultCertainty.Likely, "video id of a platform in brackets");
+            return Named(evidence, VideoKind.Received, "naming scheme of a messenger");
 
-        if (MusicVideoName().IsMatch(stem))
-            return new VideoOrigin(VideoKind.MusicVideo, FactSource.Name, ResultCertainty.Likely, "'official video' in the name",
-                Title: Tidy(MusicVideoName().Replace(stem, " ")), WorkSource: FactSource.Name);
+        // A music marker names what the video is; a download scheme next to it only says where it came from.
+        var played = PlayerSymbol().Match(stem);
+        var bare = played.Success ? stem[played.Length..] : stem;
+        if (played.Success) evidence.Add(new VideoEvidence("name", "player symbol in front", "the name was copied from a player or browser tab"));
+        var download = OtherOrigin(bare, companions);
+        if (MusicVideoName().IsMatch(bare) || MusicMixName().IsMatch(bare))
+        {
+            var marker = MusicVideoName().IsMatch(bare) ? "'official video' in the name" : "a mix or edit of a track in the name";
+            var title = Tidy(MusicMixName().Replace(MusicVideoName().Replace(DownloadProgramName().Replace(bare, " "), " "), " "));
+            evidence.Add(new VideoEvidence("name", marker, "music video"));
+            if (download is not null) evidence.Add(new VideoEvidence(download.Field, download.Scheme, "downloaded"));
+            return new VideoOrigin(VideoKind.MusicVideo, FactSource.Name, ResultCertainty.Likely,
+                download is null ? marker : $"{marker}, {download.Scheme}", Title: title, WorkSource: FactSource.Name);
+        }
+        if (download is not null)
+        {
+            evidence.Add(new VideoEvidence(download.Field, download.Scheme, "downloaded: web clip"));
+            return new VideoOrigin(VideoKind.WebClip, download.Field == "companion" ? FactSource.Companion : FactSource.Name,
+                download.Field == "companion" ? ResultCertainty.Certain : ResultCertainty.Likely, download.Scheme);
+        }
+        if (played.Success)
+            return new VideoOrigin(VideoKind.WebClip, FactSource.Name, ResultCertainty.Likely, "a player symbol in front of the name, as a tab title carries it");
 
         var release = Release(stem);
         var folderRelease = release is null ? Release(folder) : null;
+        if ((release ?? folderRelease) is not null)
+            evidence.Add(new VideoEvidence(release is null ? "folder" : "name", release is { Tagged: true } ? "release name with year and tags" : "title with year", "film"));
         if (release is { Tagged: true })
         {
             return new VideoOrigin(VideoKind.Movie, FactSource.Name, ResultCertainty.Certain, "release name with year and source or resolution",
@@ -145,6 +208,7 @@ public static partial class VideoKindRules
         // 4. Weak signs: a location without a device.
         if (info?.HasLocation == true)
         {
+            evidence.Add(new VideoEvidence("location", "present", "weak sign of an own recording"));
             return new VideoOrigin(VideoKind.OwnRecording, FactSource.Metadata, ResultCertainty.Uncertain, "a location in the container, no device",
                 Remaining: RemainingKinds(info));
         }
@@ -155,11 +219,12 @@ public static partial class VideoKindRules
 
     /// <summary>
     /// The kinds the model may still choose from: all known kinds, less those the duration rules out (no film under
-    /// 20 minutes, no music video over 15 minutes, no episode under 2 minutes).
+    /// 20 minutes, no music video over 15 minutes, no episode under 2 minutes). <see cref="VideoKind.Received"/> is never
+    /// offered: only the name of a messenger tells it, the frames do not.
     /// </summary>
     public static IReadOnlyList<VideoKind> RemainingKinds(VideoContainerInfo? info)
     {
-        var kinds = Enum.GetValues<VideoKind>().Where(k => k != VideoKind.Unknown).ToList();
+        var kinds = Enum.GetValues<VideoKind>().Where(k => k is not (VideoKind.Unknown or VideoKind.Received)).ToList();
         if (info?.DurationSeconds is { } d)
         {
             if (d < 20 * 60) kinds.Remove(VideoKind.Movie);
@@ -169,7 +234,97 @@ public static partial class VideoKindRules
         return kinds;
     }
 
+    private static VideoOrigin Named(List<VideoEvidence> evidence, VideoKind kind, string scheme)
+    {
+        evidence.Add(new VideoEvidence("name", scheme, kind.ToCode()));
+        return new VideoOrigin(kind, FactSource.Name, ResultCertainty.Likely, scheme);
+    }
+
     // ------------------------------------------------------------------ device
+
+    private sealed record DeviceClaim(RecordingDevice? Device, ResultCertainty Certainty, string Reason);
+
+    /// <summary>
+    /// What the container says about a recording device. Make and model together are sure; one of them alone is likely,
+    /// and sure only with a naming scheme unique to a camera or its side files. A track name counts only in the form a
+    /// camera firmware writes it (<c>GoPro AVC</c>, <c>DJI.AVC</c>); a maker word in a handler name (<c>ISO Media file produced
+    /// by Google Inc.</c>, <c>Apple Video Media Handler</c>) is no evidence: platforms, encoders and editing programs write it.
+    /// </summary>
+    private static DeviceClaim? ContainerDevice(VideoContainerInfo info, string stem, string ext, VideoCompanions companions, List<VideoEvidence> evidence)
+    {
+        if (info.Make is { } make) evidence.Add(new VideoEvidence("make", make, info.Model is null ? "device maker without a model" : "device maker"));
+        if (info.Model is { } model) evidence.Add(new VideoEvidence("model", model, info.Make is null ? "device model without a maker" : "device model"));
+
+        string? cameraTrack = null;
+        foreach (var name in info.Tracks.Select(t => t.Name).Where(n => !string.IsNullOrWhiteSpace(n)).Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            if (cameraTrack is null && CameraTrackName().IsMatch(name!)) cameraTrack = name;
+            else if (DeviceOf(name!, string.Empty) is not null)
+                evidence.Add(new VideoEvidence("track_name", name, "ignored: platforms, encoders and editing programs write maker names here"));
+        }
+
+        if (info.Make is not null && info.Model is not null)
+        {
+            var device = DeviceOf($"{info.Make} {info.Model}", ext) ?? (cameraTrack is null ? null : DeviceOf(cameraTrack, ext)) ?? CameraName(stem, ext)?.Device;
+            return new DeviceClaim(device, ResultCertainty.Certain, $"make and model '{info.Device}' in the container");
+        }
+        if (info.Make is not null || info.Model is not null)
+        {
+            var camera = CameraName(stem, ext);
+            var confirmed = camera is { Sure: true } || companions.CameraSideFiles || companions.TelemetrySubtitles || cameraTrack is not null;
+            var device = DeviceOf($"{info.Make} {info.Model}", ext) ?? (cameraTrack is null ? null : DeviceOf(cameraTrack, ext)) ?? camera?.Device;
+            return new DeviceClaim(device, confirmed ? ResultCertainty.Certain : ResultCertainty.Likely,
+                $"only the {(info.Make is null ? "model" : "make")} '{info.Device}' in the container" +
+                (confirmed ? ", confirmed by a camera's naming scheme, track name or side files" : string.Empty));
+        }
+        if (cameraTrack is not null)
+        {
+            evidence.Add(new VideoEvidence("track_name", cameraTrack, "written by a camera firmware"));
+            return new DeviceClaim(DeviceOf(cameraTrack, ext), ResultCertainty.Certain, $"camera track name '{cameraTrack}' in the container");
+        }
+        return null;
+    }
+
+    /// <summary>A sign in the name or next to the file that a video was downloaded, not recorded: the scheme and its field.</summary>
+    private sealed record OtherSign(string Field, string Scheme);
+
+    private static OtherSign? OtherOrigin(string stem, VideoCompanions companions)
+    {
+        if (companions.DownloadInfo) return new OtherSign("companion", "download info file next to it");
+        if (DownloadName().IsMatch(stem)) return new OtherSign("name", "video id of a platform in brackets");
+        if (DownloadProgramName().IsMatch(stem)) return new OtherSign("name", "naming scheme of a download program (resolution, frame rate and codecs in brackets)");
+        if (StreamName().IsMatch(stem)) return new OtherSign("name", "naming scheme of a saved stream segment (HLS)");
+        if (SocialName().IsMatch(stem)) return new OtherSign("name", "naming scheme of a social network download (date, channel, title, post id)");
+        if (AccountIdName().Match(stem) is { Success: true } a && IsPostId(a.Groups["id"].Value))
+            return new OtherSign("name", "naming scheme of a social network download (account and post id)");
+        if (IdPairName().IsMatch(stem)) return new OtherSign("name", "naming scheme of a social network download (numeric ids)");
+        if (MessengerName().IsMatch(stem)) return new OtherSign("name", "naming scheme of a messenger");
+        return null;
+    }
+
+    /// <summary>A post id: 15 to 20 digits, or eleven letters and digits with both in it (not a word).</summary>
+    private static bool IsPostId(string id) =>
+        id.All(char.IsAsciiDigit) ? id.Length is >= 15 and <= 20 : id.Length == 11 && id.Any(char.IsAsciiDigit) && id.Any(char.IsAsciiLetter);
+
+    /// <summary>The name without a copy suffix: <c> (1)</c>, <c> - Kopie</c>, <c> - Copy (2)</c>, <c>_copy</c>.</summary>
+    public static string WithoutCopySuffix(string stem)
+    {
+        var s = stem;
+        for (var i = 0; i < 3; i++)
+        {
+            var next = CopySuffix().Replace(s, string.Empty);
+            if (next == s || next.Length == 0) break;
+            s = next;
+        }
+        return s;
+    }
+
+    private static readonly string[] DownloadFolders = ["download", "downloads", "herunterladen", "heruntergeladen", "téléchargements", "descargas", "scaricati"];
+
+    /// <summary>The name of a download folder on the way to the file, or null.</summary>
+    private static string? DownloadFolder(string relativeDir) =>
+        relativeDir.Replace('\\', '/').Split('/', StringSplitOptions.RemoveEmptyEntries)
+            .FirstOrDefault(p => DownloadFolders.Contains(p.Trim(), StringComparer.OrdinalIgnoreCase));
 
     /// <summary>The kind of device that make, model or track names name; null when they name none this table knows.</summary>
     public static RecordingDevice? DeviceOf(string text, string ext = "")
@@ -333,7 +488,7 @@ public static partial class VideoKindRules
     [GeneratedRegex(@"^(?:VID_\d{8}_\d{6}_\d{2}_\d{3}|LRV_\d{8}_\d{6}_\d{2}_\d{3})$", RegexOptions.IgnoreCase)]
     private static partial Regex Insta360Name();
 
-    [GeneratedRegex(@"^(?:VID_\d{8}_\d{6}(?:_\d+)?|PXL_\d{8}_\d{9}(?:\.[A-Z_]+)?|\d{8}_\d{6}|IMG_\d{4}|IMG_\d{8}_\d{6}|video_\d{8}_\d{6}|MOV_\d{4})$", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"^(?:VID_\d{8}_\d{6}(?:_\d+)?|VID\d{14}|PXL_\d{8}_\d{9}(?:\.[A-Z_]+)?|\d{8}_\d{6}|IMG_\d{4}|IMG_\d{8}_\d{6}|video_\d{8}_\d{6}|MOV_\d{4})$", RegexOptions.IgnoreCase)]
     private static partial Regex PhoneName();
 
     [GeneratedRegex(@"^(?:MVI_\d{4}|DSC[_N]?\d{4,5}|_DSC\d{4}|C\d{4}|MAH\d{5}|P\d{7}|DSCF\d{4}|P\d{3}\d{4}|M2U\d{5}|MOV\d{5})$", RegexOptions.IgnoreCase)]
@@ -351,14 +506,43 @@ public static partial class VideoKindRules
     [GeneratedRegex(@"(?:^|\s)\d{4}-\d{2}-\d{2} \d{2}-\d{2}-\d{2}$|\d{4}\.\d{2}\.\d{2} - \d{2}\.\d{2}\.\d{2}(?:\.\d{2})?(?:\.DVR)?$", RegexOptions.IgnoreCase)]
     private static partial Regex GameRecordingName();
 
-    [GeneratedRegex(@"^(?:VID-\d{8}-WA\d{4}|signal-\d{4}-\d{2}-\d{2}-\d{6}|telegram-cloud-|video_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2})", RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"^(?:VID-\d{8}-WA\d{4}|WhatsApp Video \d{4}-\d{2}-\d{2} \p{L}+ \d{1,2}\.\d{2}\.\d{2}|signal-\d{4}-\d{2}-\d{2}-\d{6}|telegram-cloud-|video_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2})", RegexOptions.IgnoreCase)]
     private static partial Regex MessengerName();
 
     [GeneratedRegex(@"\[[A-Za-z0-9_-]{11}\]$")]
     private static partial Regex DownloadName();
 
+    /// <summary>Resolution, frame rate, codec and bitrate in brackets at the end, as a download program writes them.</summary>
+    [GeneratedRegex(@"\s*\(\d{3,4}p(?:\d{2})?_\d{1,3}fps_[A-Za-z0-9.]+-\d+kbit_[A-Za-z0-9]+\)\s*$", RegexOptions.IgnoreCase)]
+    private static partial Regex DownloadProgramName();
+
+    [GeneratedRegex(@"^HLS_\d+_v\d+(?:\s*\(\d{3,4}p\))?$", RegexOptions.IgnoreCase)]
+    private static partial Regex StreamName();
+
+    /// <summary>Date, channel, title and a long post id with underscores.</summary>
+    [GeneratedRegex(@"^(?:19|20)\d{6}_[^_]+_.+_\d{15,20}$")]
+    private static partial Regex SocialName();
+
+    [GeneratedRegex(@"^\S.{0,80}? - (?<id>[A-Za-z0-9_-]{11,20})$")]
+    private static partial Regex AccountIdName();
+
+    [GeneratedRegex(@"^\d{9,}_\d{9,}(?:_\d+)*(?:_n)?$", RegexOptions.IgnoreCase)]
+    private static partial Regex IdPairName();
+
+    [GeneratedRegex(@"^\s*[▶►▷⏵]️?\s*")]
+    private static partial Regex PlayerSymbol();
+
+    [GeneratedRegex(@"\s*(?:\(\d{1,3}\)|-\s+(?:Kopie|Copy|Copie|Copia)(?:\s*\(\d{1,3}\))?|[ _](?:copy|kopie)(?:[ _]?\d{1,3})?)\s*$", RegexOptions.IgnoreCase)]
+    private static partial Regex CopySuffix();
+
+    [GeneratedRegex(@"^(?:GoPro|DJI|Insta360)(?:[ .]|$)", RegexOptions.IgnoreCase)]
+    private static partial Regex CameraTrackName();
+
     [GeneratedRegex(@"[(\[]?\b(?:official\s+(?:music\s+)?video|official\s+clip|music\s+video|lyric\s+video|offizielles\s+musikvideo)\b[)\]]?", RegexOptions.IgnoreCase)]
     private static partial Regex MusicVideoName();
+
+    [GeneratedRegex(@"[(\[]?\b(?:extended|original|club|radio|dub)\s+(?:mix|edit|version)\b[)\]]?", RegexOptions.IgnoreCase)]
+    private static partial Regex MusicMixName();
 
     [GeneratedRegex(@"iphone\s*\d|ipad", RegexOptions.IgnoreCase)]
     private static partial Regex IPhoneModel();

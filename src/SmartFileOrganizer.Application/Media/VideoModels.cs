@@ -76,8 +76,20 @@ public sealed record VideoCompanions(
 }
 
 /// <summary>
+/// One thing the rules looked at for the kind of a video, and what it did to the decision
+/// (https://github.com/crack666/smart_file_organizer/issues/103): <c>track_name 'ISO Media file produced by ...'</c>,
+/// <c>ignored: platforms and encoders write it</c>.
+/// </summary>
+/// <param name="Field">A video evidence field code: <c>make</c>, <c>model</c>, <c>track_name</c>, <c>software</c>,
+/// <c>location</c>, <c>name</c>, <c>folder</c>, <c>info_file</c> or <c>companion</c>.</param>
+/// <param name="Value">The value read; for <c>name</c> and <c>folder</c> the scheme that matched, never the file name itself.</param>
+/// <param name="Effect">What the rules made of it, in a few words.</param>
+public sealed record VideoEvidence(string Field, string? Value, string Effect);
+
+/// <summary>
 /// The kind and origin of one video as the rules decided them, with where each statement came from and how sure it is.
-/// <see cref="Remaining"/> are the kinds the model may still choose from when the rules are not sure.
+/// <see cref="Remaining"/> are the kinds the model may still choose from when the rules are not sure; <see cref="Evidence"/>
+/// lists what was looked at, also what was ignored or lowered the certainty.
 /// </summary>
 public sealed record VideoOrigin(
     VideoKind Kind,
@@ -92,7 +104,8 @@ public sealed record VideoOrigin(
     int? Season = null,
     int? Episode = null,
     FactSource? WorkSource = null,
-    IReadOnlyList<VideoKind>? Remaining = null)
+    IReadOnlyList<VideoKind>? Remaining = null,
+    IReadOnlyList<VideoEvidence>? Evidence = null)
 {
     /// <summary>The kind needs no model: known, and at least likely.</summary>
     public bool IsSettled => Kind != VideoKind.Unknown && KindCertainty != ResultCertainty.Uncertain;
@@ -114,6 +127,7 @@ public sealed record VideoOrigin(
         if (Year is { } y) facts.Add(new FileFact(FileFactKey.ReleaseYear, Int(y), work, KindCertainty));
         if (Season is { } s) facts.Add(new FileFact(FileFactKey.SeasonNumber, Int(s), work, KindCertainty));
         if (Episode is { } e) facts.Add(new FileFact(FileFactKey.EpisodeNumber, Int(e), work, KindCertainty));
+        if (!string.IsNullOrWhiteSpace(Reason)) facts.Add(new FileFact(FileFactKey.VideoKindReason, Clip(Reason, 200), KindSource));
 
         if (info is not null)
         {

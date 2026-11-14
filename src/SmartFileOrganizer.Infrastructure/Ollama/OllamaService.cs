@@ -370,7 +370,8 @@ public class OllamaService : IOllamaService
             JsonSerializer.Serialize(BuildClassificationSchema(askKeepHint: true)),
             JsonSerializer.Serialize(BuildClassificationSchema(askKeepHint: false, DescriptionKind.Picture)),
             JsonSerializer.Serialize(BuildClassificationSchema(askKeepHint: false, DescriptionKind.Document)),
-            JsonSerializer.Serialize(BuildClassificationSchema(askKeepHint: false, DescriptionKind.Picture, Enum.GetValues<VideoKind>())),
+            // The kinds the model can be offered at most (never received, which only a messenger's name tells).
+            JsonSerializer.Serialize(BuildClassificationSchema(askKeepHint: false, DescriptionKind.Picture, SmartFileOrganizer.Application.Media.VideoKindRules.RemainingKinds(null))),
             JsonSerializer.Serialize(BuildPreAssessmentSchema()),
             JsonSerializer.Serialize(BuildSummarySchema())
         ]);
@@ -413,7 +414,8 @@ public class OllamaService : IOllamaService
         if (input.Facts.Count > 0)
         {
             sb.AppendLine("Facts read from the file without a model (reliable; prefer them over your own impression):");
-            foreach (var fact in input.Facts)
+            // video_kind_reason is stored for people; the model reads the reason once, in the evidence lines below.
+            foreach (var fact in input.Facts.Where(f => f.Key != FileFactKey.VideoKindReason))
                 sb.AppendLine($"  {fact.Key.ToCode()}: {fact.Value} ({fact.Source.ToCode()})");
             sb.AppendLine();
         }

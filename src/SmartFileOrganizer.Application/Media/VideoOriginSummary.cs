@@ -14,8 +14,9 @@ namespace SmartFileOrganizer.Application.Media;
 /// <param name="Device">A recording device code.</param>
 /// <param name="Title">Title of a film, series or music video; null for a protected file.</param>
 /// <param name="Disputed">A kind the model named against the sure one.</param>
+/// <param name="Reason">Why the rules read the kind as they did (fact <c>video_kind_reason</c>); null for a protected file.</param>
 public sealed record VideoOriginSummary(string Kind, string? Source, string? Certainty, string? Device = null, string? Title = null,
-    int? Year = null, int? Season = null, int? Episode = null, string? Disputed = null)
+    int? Year = null, int? Season = null, int? Episode = null, string? Disputed = null, string? Reason = null)
 {
     /// <summary>The summary of the stored facts of one video, or null when it has no video kind fact.</summary>
     public static VideoOriginSummary? From(IReadOnlyList<FileFact>? facts, bool withholdTitle = false)
@@ -28,7 +29,7 @@ public sealed record VideoOriginSummary(string Kind, string? Source, string? Cer
         return new VideoOriginSummary(kind.Value, kind.Source.ToCode(), kind.Certainty?.ToCode(),
             Value(FileFactKey.RecordingDevice), withholdTitle ? null : Value(FileFactKey.VideoTitle),
             Number(FileFactKey.ReleaseYear), Number(FileFactKey.SeasonNumber), Number(FileFactKey.EpisodeNumber),
-            Value(FileFactKey.VideoKindDisputed));
+            Value(FileFactKey.VideoKindDisputed), withholdTitle ? null : Value(FileFactKey.VideoKindReason));
     }
 
     /// <summary>One line: <c>series_episode S02E05 "Example Show" (name, certain)</c>.</summary>

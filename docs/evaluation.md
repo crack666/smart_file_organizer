@@ -31,7 +31,7 @@ reference and JSON shapes: [cli.md](cli.md#sfo-eval-corpus).
 
 `sfo eval generate <dir> [--seed n]` writes `<dir>/tree/` (the folder that is scanned) and
 `<dir>/truth.json`. The generator is `SmallCorpusGenerator` (Infrastructure/Evaluation); the same
-seed gives the same bytes and timestamps. Version 8 has 84 folders and 212 files (version 7: 77 and 203, version 6: 74 and 193, version 5: 74 and 185, version 4: 73 and 174, version 3: 62 and
+seed gives the same bytes and timestamps. Version 9 has 84 folders and 221 files (version 8: 84 and 212, version 7: 77 and 203, version 6: 74 and 193, version 5: 74 and 185, version 4: 73 and 174, version 3: 62 and
 160, version 2: 42 and 100, version 1: 41 and 97; the changes are listed under [Truth changes](#truth-changes)):
 
 | Kind | Example | Truth |
@@ -49,7 +49,7 @@ seed gives the same bytes and timestamps. Version 8 has 84 folders and 212 files
 | Traps of closed units (version 6) | `Import`: pictures named with an everyday word of a film title, pictures and clips of the time of a game cache, an episode folder and a program in the library | where none of them belongs is in `targets.json` |
 | Traps of the second real run (version 7) | `Import/Neuer Ordner` (sunflowers and a crack in a wall), `Import/c7e2a9f4` (photos nobody described), `Import/Kontobilder` (account pictures, `system`), photos of a kitchen evening in the week of the library folder `Bilder/Lena` | `split`, `no_target`, `excluded`, and no existing folder: in `targets.json` |
 | Media | `Musik`, `Videos`, `Screenshots` | `uniform` |
-| Videos of every kind (version 8) | `Videos` (phone, action cam, one clip without anything), `Filme`, `Serien/Beispielserie/Staffel 2`, `Aufnahmen` (screen and game recordings), `Clips` (messenger, download, music video) | `uniform`; each video has a `video_kind` |
+| Videos of every kind (version 8, 9) | `Videos` (phone, action cam, one clip without anything, a phone name with a copy suffix), `Filme`, `Serien/Beispielserie/Staffel 2`, `Aufnahmen` (screen and game recordings), `Clips` (messenger, downloads of platforms and social networks, a stream segment, music videos, two downloads with a platform's handler name in the container) | `uniform`; each video has a `video_kind` |
 | Placeholder | `Neuer Ordner` (empty) | `empty` |
 | Hidden tool folder | `.ssh` | `system` |
 | Sensitive dummies | password list, recovery codes, `.kdbx`, `.pfx`, `.env`, private key, bank statement, tax papers, doctor letter, ID scan, private letter | markers |
@@ -180,6 +180,32 @@ the file and folder calls, and a stub run with a library would have asked the co
 
 Every change of the truth is listed here with its reason. The truth follows what is right for the
 user, never what the program happens to answer.
+
+### Version 9 (14.11.2026, https://github.com/crack666/smart_file_organizer/issues/103, second round)
+
+A measurement on a real collection the same day found downloads from a video platform read as own phone recordings,
+certain, and several clear name schemes left `unknown`. The cause: the platform writes `ISO Media file produced by
+Google Inc.` as the handler name of its tracks, and a phone maker word in a track name counted as a camera. The corpus
+gets exactly these cases, all in `Clips` (or `Videos` for the phone), with invented titles:
+
+| Path | Kind | Read from |
+|---|---|---|
+| `Clips/Zehn Gartentricks (1080p_30fps_H264-128kbit_AAC).mp4` | `web_clip` | the trap: the platform handler name in the container is ignored; the download program scheme |
+| `Clips/Beispielband - Zweites Lied (Official Video) (1080p_30fps_H264-128kbit_AAC).mp4` | `music_video` | the same trap with a music marker; no device |
+| `Clips/WhatsApp Video 2023-07-16 at 18.30.12.mp4` | `received` | messenger name scheme |
+| `Clips/20230901_beispielkanal_Kurzer Trick_7301234567890123456.mp4` | `web_clip` | social network download: date, channel, title, post id |
+| `Clips/beispielkonto - C5xYz12AbCd.mp4` | `web_clip` | social network download: account and post id |
+| `Clips/123456789012345_987654321098765.mp4` | `web_clip` | social network download: numeric ids |
+| `Clips/HLS_3_v2 (720p).mp4` | `web_clip` | saved stream segment |
+| `Clips/▶ Beispielkuenstler - Beispieltitel (Extended Mix).mpeg` | `music_video` | player symbol in front and a mix marker |
+| `Videos/VID20200102183000 (1).m4v` | `own_recording` | phone name scheme after removing the copy suffix |
+
+Changed: `Clips/VID-20230716-WA0003.mp4` is `received` now (was `web_clip`), the new kind for clips received through a
+messenger. 84 folders and 221 files. `findings.json` and `targets.json` are unchanged; the prompts are unchanged
+(fingerprint `82facdfc7958dfcc` on Windows, as before). Measured 14.11.2026 with the perfect stub (temporary database, model address
+on a dead port): `directory_verdict` 82/82, `file_category` 124/124, `sensitive` 220/221 (the deliberate
+`.ssh/id_ed25519.pub`), `finding` 25/25 and 0 superfluous, `target` 14/14, `video_kind` 24/24. Before the fix the two
+traps read `own_recording` with device `phone`, certain, which the stub cannot override.
 
 ### Version 8 (14.11.2026, https://github.com/crack666/smart_file_organizer/issues/103)
 
@@ -449,6 +475,24 @@ what changed (model, prompts, version, each setting), the score per kind before 
 items fixed and the new failures.
 
 ## Measured
+
+### Scripted answers after issue 103, second round (14.11.2026)
+
+_Scripted answers (`--stub truth.json`) on small v9 seed 36, on the branch `feat/103-video-origin-evidence`, temporary
+directory and database, model address on a dead port, prompts `82facdfc7958dfcc` on Windows (the same scores on Linux,
+where the fingerprint differs by the line ends)._
+
+| Kind | Result |
+|---|---|
+| `directory_verdict` | 82/82 |
+| `file_category` | 124/124 |
+| `sensitive` | 220/221 (the deliberate `.ssh/id_ed25519.pub`) |
+| `finding` | 25/25, 0 superfluous |
+| `target` | 14/14 |
+| `video_kind` | 24/24 |
+
+23 of the 24 kinds come from container, name or companion files; the stub answers only
+`Videos/Schulauffuehrung_2019.mp4`. A run with a real model on version 9 has not been made.
 
 ### Scripted answers after issue 103 (14.11.2026)
 

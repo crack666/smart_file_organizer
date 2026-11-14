@@ -38,14 +38,15 @@ public static class ControllerCommands
 
     /// <summary>
     /// Kind and origin of the videos of a finding, a part or a library folder (Issue 103): videos per video kind code,
-    /// own recordings per recording device code, the films and series by title, and how many kinds are certain or disputed.
+    /// own recordings per recording device code, the films and series by title, how many kinds are certain or disputed,
+    /// and the reasons of the rules with the number of videos.
     /// </summary>
     public sealed record OriginView(
         int Videos, IReadOnlyDictionary<string, int> Kinds, IReadOnlyDictionary<string, int> Devices, IReadOnlyList<string> Works,
-        int Certain, int Disputed, string Text)
+        int Certain, int Disputed, string Text, IReadOnlyList<SmartFileOrganizer.Application.Media.VideoReasonCount>? Reasons = null)
     {
         public static OriginView? From(SmartFileOrganizer.Application.Media.VideoOriginMix? m) =>
-            m is null ? null : new OriginView(m.Videos, m.Kinds, m.Devices, m.Works, m.Certain, m.Disputed, m.Gist());
+            m is null ? null : new OriginView(m.Videos, m.Kinds, m.Devices, m.Works, m.Certain, m.Disputed, m.Gist(), m.Reasons);
     }
 
     /// <summary>What a person wrote about a library in its hints file (Issue 103).</summary>
@@ -416,7 +417,12 @@ public static class ControllerCommands
             {
                 var prefix = g.Part is { } part ? $"   part {part}: {g.Files} files, {g.Label}" : "   ";
                 if (g.Part is not null) sb.AppendLine(prefix);
-                if (g.Origin is { } origin) sb.AppendLine($"     videos: {origin.Text}");
+                if (g.Origin is { } origin)
+                {
+                    sb.AppendLine($"     videos: {origin.Text}");
+                    if (origin.Reasons is { Count: > 0 } reasons)
+                        sb.AppendLine($"     because: {string.Join("; ", reasons.Select(r => $"{r.Videos}x {r.Reason}"))}");
+                }
                 if (!g.Described.Text.Equals(string.Empty)) sb.AppendLine($"     shows: {g.Described.Text}");
                 if (g.NotMatched is { } nm) sb.AppendLine($"     {nm}");
                 foreach (var c in g.Candidates)

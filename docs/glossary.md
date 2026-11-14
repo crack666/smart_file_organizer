@@ -371,6 +371,7 @@ Counted per run in `model_calls` of `sfo analyze --json`, `sfo eval --json` and 
 | `subtitle_languages` | Languages of the subtitle tracks or subtitle files of the same name, comma separated. |
 | `chapter_count` | Number of chapters in the container. |
 | `video_kind_disputed` | A video kind the model named against a sure kind from the container, name or companion files. The sure kind stays in `video_kind`; this keeps the contradiction visible. |
+| `video_kind_reason` | Why the rules read the kind as they did, one sentence with the deciding field and value (`make and model 'Example X1' in the container`). Free text, at most 200 characters. |
 | `scene` | What a picture shows, in a few words of the summary language (`beach with sea`); source `model`. Free text, at most 40 characters. |
 | `activity` | What the people in a picture do, in a few words (`skiing`); source `model`. Free text, at most 40 characters. |
 | `setting` | Indoors or outdoors, as a scene setting code; source `model`. |
@@ -386,9 +387,9 @@ model gives them in the same call as the category, only for pictures it sees (`s
 documents (`document_kind` to `year`). An answer `unknown`, an empty text or a year 0 is not stored. A file marked
 sensitive is not described: no description is asked for a file the rules marked, and none is stored for a file
 the model marks, so the marker stays the only statement about its content. Free-text facts (`title`, `author`,
-`artist`, `album`, `scene`, `activity`, `issuer`, `video_title`) are never stored for a marked file.
+`artist`, `album`, `scene`, `activity`, `issuer`, `video_title`, `video_kind_reason`) are never stored for a marked file.
 
-The video facts from `video_kind` to `video_kind_disputed`
+The video facts from `video_kind` to `video_kind_reason`
 (https://github.com/crack666/smart_file_organizer/issues/103) carry a certainty (a result certainty code: `certain`,
 `likely`, `uncertain`) next to the source. They are read without a model and can be read again for a stored job with
 `sfo facts refresh`.
@@ -411,9 +412,27 @@ The video facts from `video_kind` to `video_kind_disputed`
 | `series_episode` | An episode of a series. |
 | `own_recording` | Recorded with an own camera, phone, action cam or drone. |
 | `screen_recording` | A recording of a screen or a game. |
-| `web_clip` | A clip downloaded from the web or received in a messenger. |
+| `web_clip` | A clip downloaded from a website, a video platform or a social network. |
 | `music_video` | A music video. |
+| `received` | A clip received or forwarded through a messenger, by the messenger's naming scheme. Only the name tells it, so the model is never offered this kind. |
 | `unknown` | Neither the file nor the model settle the kind. |
+
+### Video evidence field
+
+What the rules looked at for the kind of a video (`sfo facts refresh --verbose`, Issue 103). Each piece of evidence
+names the field, the value read and what the rules made of it.
+
+| Code | Meaning |
+|---|---|
+| `make` | The maker of the recording device in the container. |
+| `model` | The model of the recording device in the container. |
+| `track_name` | The name of a track (handler name in MP4). Counts for a device only in the form a camera firmware writes it (`GoPro AVC`, `DJI.AVC`); a maker word in it is ignored. |
+| `software` | The recording or encoding program in the container. |
+| `location` | A location in the container (only that there is one). |
+| `name` | A naming scheme the file name follows; the scheme is shown, not the name. |
+| `folder` | A folder on the way to the file: a film folder with its year, or a download folder. |
+| `info_file` | The root element of an info file of a media library. |
+| `companion` | A file next to it: side files or telemetry of a camera, a download info file. |
 
 ### Recording device (`RecordingDevice`)
 
