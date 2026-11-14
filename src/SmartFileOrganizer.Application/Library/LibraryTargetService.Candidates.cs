@@ -235,7 +235,8 @@ public sealed partial class LibraryTargetService
     private async Task<IReadOnlyDictionary<string, SensitiveMarker>> DirectoryMarkersAsync(long libraryJobId, CancellationToken ct) =>
         (await _reads.GetDirectoriesAsync(libraryJobId, ct))
         .Where(d => d.SensitiveMarkers != SensitiveMarker.None)
-        .ToDictionary(d => d.FullPath, d => d.SensitiveMarkers, PathComparer);
+        .GroupBy(d => d.FullPath, PathKey.Comparer)
+        .ToDictionary(g => g.Key, g => g.Aggregate(SensitiveMarker.None, (m, d) => m | d.SensitiveMarkers), PathKey.Comparer);
 
     /// <summary>
     /// What a library folder holds, from the scan: whether it is sensitive, a few names of its own unmarked files and of
