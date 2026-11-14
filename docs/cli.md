@@ -1221,7 +1221,9 @@ the name of the rules, `advice.status` says `unavailable`.
 ### `sfo library folder <job> <path>`
 
 One folder of a library as the scan holds it, for a controller that wants to look closer before it decides
-(Issue 95). **No model call.** `path` is relative to the library root (with `/`) or a full path.
+(Issue 95). **No model call.** `path` is relative to the library root (with `/`) or a full path; `""`, `.` or `/` is
+the root. The top level is listed whether the root was scanned with a trailing separator or without (until Issue 97 a
+root scanned as `\\server\share\` or `D:\Photos\` listed no subfolders).
 
 ```json
 { "folder": { "library_job_id": 1, "relative_path": "Photos", "role": "...", "files": 6, "subdirs": 2,
@@ -1571,7 +1573,12 @@ folders of the rules (time, names, kinds of files, the same files already there)
 {
   "job_id": 2, "status": "known", "message": null,
   "libraries": [ { "library_job_id": 1, "root_path": "/nas/photos", "reachable": true,
-                   "free_bytes": 93616517120, "inbox_folder": "_Inbox" } ],
+                   "free_bytes": 93616517120, "inbox_folder": "_Inbox", "root_sensitive": false,
+                   "top_level": [
+                     { "name": "Photos", "relative_path": "Photos", "role": "collection", "files": 1250, "subdirs": 14,
+                       "bytes": 3221225472, "by_file_type": { "image": 1200, "video": 50 },
+                       "period": { "from": "2009-07-04T10:12:00", "to": "2024-12-26T18:40:00", "time_source": "mixed" },
+                       "sensitive": false } ] } ],
   "total": 1, "offset": 0, "next_offset": null, "truncated": false,
   "items": [
     { "key": "not_backed_up-09b9879a63", "kind": "not_backed_up", "state": "open",
@@ -1596,6 +1603,10 @@ folders of the rules (time, names, kinds of files, the same files already there)
                           "sensitive": false, "markers": [], "file_names": [ "IMG_20150201_100000.jpg" ],
                           "subfolders": [], "described": false, "description": null, "described_at": null } }
           ],
+          "weak_candidates": [
+            { "library_job_id": 1, "placement": "into_existing", "destination_relative": "Photos", "score": 0.4,
+              "agrees": [ "period", "file_type" ], "files": 1250, "period": { "...": "" } }
+          ],
           "new_folder": { "library_job_id": 1, "parent_relative": "Photos", "name": "2015-02 {occasion}",
                           "name_complete": false, "pattern": "{yyyy}-{mm} {occasion}" },
           "not_matched": null }
@@ -1607,12 +1618,23 @@ folders of the rules (time, names, kinds of files, the same files already there)
 - `libraries`: every library with `reachable` (the root exists now), `free_bytes` (`null` when it cannot be told) and
   its `inbox_folder` (below the root; [Inbox](#the-inbox-of-a-library)). A root that cannot be read is the error
   `library_unreachable`, as in `findings targets`.
+- `libraries[].top_level` (since Issue 97): the folders directly below the root, once per library, with `role`, counts,
+  `by_file_type` and `period`, so the controller sees the order of the library without asking `library folder` for
+  each one. A sensitive folder is listed with `sensitive` true and its counts only. When the root itself is sensitive
+  (marked, or it holds a marked file) `root_sensitive` is true and `top_level` is empty, as in `library folder`.
 - `groups`: one for the finding as a whole, or one per part when its files do not belong together by content
   (`split` true, `part` = the index `sfo findings place --part` takes). `described` condenses the stored description
   facts of the files (`described` of `sampled` carried one); a part lists `examples` of its own files.
 - `candidates[].folder`: the folder as the scan holds it, a few `file_names` (direct files first) and `subfolders`, and
   its stored description (`described`, `description`, `described_at`) from `folder_descriptions`. Nothing is described
   here; [`sfo library describe`](#sfo-library-describe-job-path) describes one folder on demand.
+- `weak_candidates` (since Issue 97): candidates that agree by `period` and `file_type` only, and whose period is not a
+  specific one (the folder spans more than 366 days, or the times of the files are modification times). For loose
+  files they name the same broad folders of the right years again and again; they are kept out of `candidates` and
+  listed apart, best first, at most `--limit`, without what the folder holds (that is in `top_level` or
+  `library folder`). A folder of a short period (an occasion, a year) that holds the times of the files from their
+  names or capture dates stays in `candidates` even with period and kind alone. Before Issue 97 every such candidate
+  stood in `candidates`.
 - `new_folder`: where the rules would put a new folder and the name of its siblings' pattern; `name_complete` false
   means the rules cannot fill in the name (an occasion): the controller names it.
 - `stored`: a target stored earlier (`status`, `decided_by`, `library_job_id`, `relative_path`); `null` when none.

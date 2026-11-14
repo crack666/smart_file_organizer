@@ -42,6 +42,10 @@ public sealed record NewFolderHint(ScanJob Library, LibraryMapEntry Parent, stri
 /// <param name="Index">Index of the part (as <c>sfo findings place --part</c> names it); null for the unit as a whole.</param>
 /// <param name="Described">What the files show, from the stored description facts of all their unmarked files.</param>
 /// <param name="NotMatched">Why the part got no candidates (more parts than <c>MaxUnitParts</c>); null otherwise.</param>
+/// <param name="Weak">
+/// Candidates that fit by period and kind of files only (<see cref="LibraryTargetService.IsWeak"/>), best first, kept
+/// apart from <see cref="Candidates"/>: for loose files they name the same few folders again and again (Issue 97).
+/// </param>
 public sealed record CandidateGroup(
     int? Index,
     MatchUnit Unit,
@@ -50,7 +54,11 @@ public sealed record CandidateGroup(
     ContentDescription Described,
     IReadOnlyList<FolderCandidate> Candidates,
     NewFolderHint? NewFolder,
-    string? NotMatched = null);
+    string? NotMatched = null,
+    IReadOnlyList<WeakCandidate>? Weak = null);
+
+/// <summary>A candidate of the rules that fits by period and kind of files only, with its library.</summary>
+public sealed record WeakCandidate(MatchCandidate Candidate, ScanJob Library);
 
 /// <summary>The candidates of one unit: none when it is excluded, one group when it is one whole, else one per part.</summary>
 public sealed record UnitCandidates(string Key, MatchUnit Unit, string? Excluded, IReadOnlyList<CandidateGroup> Groups)
@@ -58,8 +66,10 @@ public sealed record UnitCandidates(string Key, MatchUnit Unit, string? Excluded
     public bool Split => Groups.Count > 1;
 }
 
-/// <summary>A library root: free space and its inbox folder.</summary>
-public sealed record LibraryRootFacts(ScanJob Library, long? FreeBytes, string InboxFolder);
+/// <summary>A library root: free space, its inbox folder and its top level.</summary>
+/// <param name="Root">The root folder; when it is sensitive, <paramref name="TopLevel"/> is empty, as in <c>sfo library folder</c>.</param>
+/// <param name="TopLevel">The folders directly below the root (Issue 97), so a controller sees the order of the library at once.</param>
+public sealed record LibraryRootFacts(ScanJob Library, long? FreeBytes, string InboxFolder, FolderFacts? Root = null, IReadOnlyList<FolderFacts>? TopLevel = null);
 
 /// <summary>The answer of <see cref="LibraryTargetService.CandidatesAsync"/>.</summary>
 /// <param name="Marked">The marked files of the units: marked themselves or lying in a marked folder of the source.</param>
@@ -118,8 +128,21 @@ public sealed partial class LibraryTargetService
             await PatternsAsync(library, map, reset: false, ct);
             maps.Add(new LibrarySide(library, map, await DirectoryMarkersAsync(library.Id, ct)));
         }
-        var roots = libraries.Select(l => new LibraryRootFacts(l, _freeSpace?.AvailableBytes(l.RootPath), _options.InboxFolderOf(l.RootPath))).ToList();
         var folders = new Dictionary<(long, string), FolderFacts>();
+        var roots = new List<LibraryRootFacts>(maps.Count);
+        foreach (var side in maps)
+        {
+            // The top level once per library instead of the same broad folders as a candidate of nearly every unit.
+            var root = await FolderFactsAsync(side.Library, side.Map, side.Map.Root, side.Markers, 0, ct);
+            var top = new List<FolderFacts>();
+            if (!root.Sensitive)
+            {
+                foreach (var child in side.Map.Root.Children)
+                    top.Add(await FolderFactsAsync(side.Library, side.Map, child, side.Markers, 0, ct));
+            }
+            roots.Add(new LibraryRootFacts(side.Library, _freeSpace?.AvailableBytes(side.Library.RootPath),
+                _options.InboxFolderOf(side.Library.RootPath), root, top));
+        }
 
         // A file counts as marked when it is marked itself or lies in a marked folder of the source: neither gives a name
         // or a description.
@@ -192,11 +215,13 @@ public sealed partial class LibraryTargetService
             if (notMatched is not null)
                 return new CandidateGroup(index, unit, files, label, described, [], null, notMatched);
 
-            var ranked = maps
+            var all = maps
                 .SelectMany((m, order) => LibraryMatcher.Preselect(m.Map, unit, _options, words).Select(c => (Candidate: c, Side: m, Order: order)))
                 .OrderByDescending(x => x.Candidate.Score).ThenBy(x => x.Order)
-                .Take(Math.Max(0, query.Limit))
                 .ToList();
+            var limit = Math.Max(0, query.Limit);
+            var ranked = all.Where(x => !IsWeak(x.Candidate)).Take(limit).ToList();
+            var weak = all.Where(x => IsWeak(x.Candidate)).Take(limit).Select(x => new WeakCandidate(x.Candidate, x.Side.Library)).ToList();
             var candidates = new List<FolderCandidate>(ranked.Count);
             foreach (var (candidate, side, _) in ranked)
             {
@@ -218,9 +243,32 @@ public sealed partial class LibraryTargetService
                 best = share;
                 hint = new NewFolderHint(side.Library, proposal.Parent, proposal.Pattern, proposal.Name, proposal.NameComplete);
             }
-            return new CandidateGroup(index, unit, files, label, described, candidates, hint);
+            return new CandidateGroup(index, unit, files, label, described, candidates, hint, Weak: weak);
         }
     }
+
+    /// <summary>
+    /// A candidate that agrees by period and kind of files only (Issue 97): no name, no siblings, no same files there and
+    /// no content fit, and its period is not a specific one. For loose material such a candidate is noise; it names a
+    /// broad folder of the right years, the same few for nearly every unit. A folder whose own period is short
+    /// (<see cref="SpecificPeriodDays"/>, an occasion or a year) and holds the times of the files exactly (a strong period
+    /// signal) is no such folder: there the period does say something.
+    /// </summary>
+    public static bool IsWeak(MatchCandidate candidate)
+    {
+        if (candidate.Signals.Any(s => s.Agrees && s.Signal is not (MatchSignal.Period or MatchSignal.FileType)))
+            return false;
+        var period = candidate.Signals.FirstOrDefault(s => s.Signal == MatchSignal.Period && s.Agrees);
+        return period is not { Strong: true } || SpanDays(candidate.Target) is not <= SpecificPeriodDays;
+    }
+
+    /// <summary>A folder period up to this many days (an occasion, a month, a year) is specific enough to count alone.</summary>
+    public const double SpecificPeriodDays = 366;
+
+    private static double? SpanDays(LibraryMapEntry e) =>
+        e.From is { } from && e.To is { } to ? (to - from).TotalDays
+        : e.NamePeriod is { } np ? (np.To - np.From).TotalDays
+        : null;
 
     /// <summary>The library job and its target map, from the scan alone (no model, nothing written).</summary>
     public async Task<(ScanJob Library, LibraryMap Map)> MapAsync(long libraryJobId, CancellationToken ct = default)

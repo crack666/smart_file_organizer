@@ -39,4 +39,52 @@ public partial class FindingTargetsCommandTests
         var photos = await OkAsync("library", "folder", library, "Fotos");
         Assert.Equal(["Grillen 2016", "Skifahrt 2015"], Names(photos.GetProperty("subfolders")));
     }
+
+    /// <summary>
+    /// Done when: a candidate that fits only by period and kind of files (a broad folder of photos from many years) is no
+    /// candidate of equal rank but listed apart under <c>weak_candidates</c>, without what the folder holds; the ski trip
+    /// folder, whose short period holds the photos exactly, stays a candidate. The top level of the library, with counts,
+    /// kinds of files and period, is in the head of the answer once.
+    /// </summary>
+    [Fact]
+    public async Task Candidates_KeepPeriodAndKindOnlyCandidatesApart_AndListTheTopLevelOfEachLibrary()
+    {
+        // A broad folder: photos from 2010 to 2020, one per year.
+        for (var year = 2010; year <= 2020; year++)
+            Write(_library, $"Bilder/IMG_{year}0601_120000.jpg", $"lib {year}", new DateTime(year, 6, 1, 12, 0, 0));
+        var (library, source) = await PrepareAsync();
+        var job = source.ToString();
+        var key = Str(PhotoBrief(await OkAsync("findings", job, "--summary")), "key");
+
+        var candidates = await OkAsync("findings", "candidates", job, "--limit", "20");
+        var group = Candidate(candidates, key).GetProperty("groups")[0];
+        var strong = group.GetProperty("candidates").EnumerateArray().ToList();
+        var weak = group.GetProperty("weak_candidates").EnumerateArray().ToList();
+
+        Assert.Contains(strong, c => Str(c, "destination_relative") == "Fotos/Skifahrt 2015");
+        Assert.DoesNotContain(strong, c => Str(c, "destination_relative").StartsWith("Bilder", StringComparison.Ordinal));
+        Assert.All(strong, c => Assert.Contains(c.GetProperty("agrees").EnumerateArray(),
+            a => a.GetString() is not ("period" or "file_type") || Str(c, "destination_relative") == "Fotos/Skifahrt 2015"));
+        var broad = weak.Single(c => Str(c, "destination_relative") == "Bilder");
+        Assert.Equal(library, broad.GetProperty("library_job_id").GetInt64());
+        Assert.Equal(11, broad.GetProperty("files").GetInt64());
+        Assert.All(broad.GetProperty("agrees").EnumerateArray(), a => Assert.Contains(a.GetString(), new[] { "period", "file_type" }));
+        Assert.False(broad.TryGetProperty("folder", out _));
+        Assert.DoesNotContain(weak, c => Str(c, "destination_relative") == "Fotos/Skifahrt 2015");
+
+        // The top level, once per library.
+        var head = candidates.GetProperty("libraries").EnumerateArray().Single();
+        Assert.False(head.GetProperty("root_sensitive").GetBoolean());
+        var top = head.GetProperty("top_level").EnumerateArray().ToList();
+        Assert.Equal(["Bilder", "Dokumente", "Fotos"], top.Select(t => Str(t, "name")).ToList());
+        var pictures = top.Single(t => Str(t, "name") == "Bilder");
+        Assert.Equal(11, pictures.GetProperty("files").GetInt64());
+        Assert.Equal(11, pictures.GetProperty("by_file_type").GetProperty("image").GetInt64());
+        Assert.StartsWith("2010-06-01", Str(pictures.GetProperty("period"), "from"));
+        Assert.StartsWith("2020-06-01", Str(pictures.GetProperty("period"), "to"));
+        var fotos = top.Single(t => Str(t, "name") == "Fotos");
+        Assert.Equal(2, fotos.GetProperty("subdirs").GetInt32());
+        Assert.Equal(9, fotos.GetProperty("files").GetInt64());
+        Assert.False(fotos.GetProperty("sensitive").GetBoolean());
+    }
 }
