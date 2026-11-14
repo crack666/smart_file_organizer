@@ -246,6 +246,11 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IFindingTargetRepository, FindingTargetRepository>();
         services.AddSingleton<FindingTargetService>();
 
+        // Facts for a controlling model and its decisions (https://github.com/crack666/smart_file_organizer/issues/95):
+        // candidates without a model call, decisions checked like plan targets and stored with decided_by controller.
+        services.AddSingleton<FindingCandidateService>();
+        services.AddSingleton<FindingPlacementService>();
+
         // Stage 2, deciding (https://github.com/crack666/smart_file_organizer/issues/37): rules over stored facts and
         // results; no model service is injected.
         services.AddSingleton<IFileDecisionRepository, FileDecisionRepository>();

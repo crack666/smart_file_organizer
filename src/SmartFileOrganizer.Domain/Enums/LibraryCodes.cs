@@ -238,7 +238,13 @@ public enum ContentCheckStatus
     [JsonStringEnumMemberName("no_candidates")] NoCandidates,
 
     /// <summary>The model gave no usable answer.</summary>
-    [JsonStringEnumMemberName("failed")] Failed
+    [JsonStringEnumMemberName("failed")] Failed,
+
+    /// <summary>
+    /// No check by the local model: the controller decided the place from the facts
+    /// (<c>sfo findings place</c>, https://github.com/crack666/smart_file_organizer/issues/95).
+    /// </summary>
+    [JsonStringEnumMemberName("controller")] Controller
 }
 
 /// <summary>Where the description of a library folder comes from.</summary>

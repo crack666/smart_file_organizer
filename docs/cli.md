@@ -1218,6 +1218,37 @@ cannot be read; the message names each library, its root and why), `usage` (2, b
 neither of `path` and `--bundle`). An unreachable model is not an error here: the new folder keeps
 the name of the rules, `advice.status` says `unavailable`.
 
+### `sfo library folder <job> <path>`
+
+One folder of a library as the scan holds it, for a controller that wants to look closer before it decides
+(Issue 95). **No model call.** `path` is relative to the library root (with `/`) or a full path.
+
+```json
+{ "folder": { "library_job_id": 1, "relative_path": "Photos", "role": "...", "files": 6, "subdirs": 2,
+              "sensitive": false, "markers": [], "file_names": [ "..." ], "subfolders": [ "Barbecue 2016", "Ski trip 2015" ],
+              "described": false, "description": null, "...": "" },
+  "subfolders": [ "Barbecue 2016", "Ski trip 2015" ],
+  "total": 0, "limit": 50, "offset": 0, "next_offset": null,
+  "files": [ { "name", "relative_path", "size_bytes", "file_type", "modified", "markers" } ] }
+```
+
+`folder` has the fields of a candidate folder in `findings candidates`; `files` is one page (`--limit` 1 to 1000,
+default 50, `--offset`) of the folder's own files. A sensitive folder lists no subfolders and only its marked files
+(path and markers); `total` then counts those. Errors: `job_not_found` (1), `wrong_role` (1),
+`path_not_found` (1, no folder of the scan), `usage` (2).
+
+### `sfo library describe <job> <path>`
+
+Lets the local model describe this one folder (Issue 95): a small sample of its own files (`LibraryMatch:FolderSampleSize`,
+spread over its period), stored in `folder_descriptions`, so `findings candidates` and `library folder` show it from
+then on. No other folder is described; candidate folders are never described ahead. A stored description is returned
+without a model call unless `--refresh` is given.
+
+`{ "folder": {...}, "described", "stored", "sample": [ "<relative path>", ... ], "model", "refused" }`: `described`
+false with `refused` saying why when the folder is sensitive (exit 0, the model is not asked) or nothing in it could be
+described. Errors: `ollama_unavailable` (3, the model server is not reachable; nothing is described),
+`library_unreachable` (1), `job_not_found` (1), `wrong_role` (1), `path_not_found` (1), `usage` (2).
+
 ## Bundles
 
 ### `sfo bundles build <job>`
@@ -1307,8 +1338,11 @@ One page of bundles (paging as in [Lists and paging](#lists-and-paging)): the to
 
 The short list a job ends in (https://github.com/crack666/smart_file_organizer/issues/26). Rules, certainty,
 ranking and thresholds: [architecture.md, Findings flow](architecture.md#findings-flow). No model call, no
-scanned file opened; decisions change only their row. The one exception is `sfo findings targets`, the target match,
-which asks the model as `sfo library match` does and stores its answer per finding.
+scanned file opened; decisions change only their row. The one exception is `sfo findings targets --local-model`,
+which asks the local model as `sfo library match` does and stores its answer per finding. Since Issue 95 the target
+decision belongs to a controlling model outside sfo: [`sfo findings candidates`](#sfo-findings-candidates-job) gives
+it the facts, [`sfo findings place`](#sfo-findings-place-job-key) records its decision; the workflow is in
+[controller-guide.md](controller-guide.md).
 
 ### `sfo findings <job>`
 
@@ -1363,9 +1397,13 @@ which asks the model as `sfo library match` does and stores its answer per findi
   target of the rules alone (`not_checked`). A target lies inside a library root or there is none: a proposed place
   outside every root is dropped with a note, and without a library no finding has a target.
 - `target_status` (for `not_backed_up`, `in_noise`, `misplaced`; `null` for the others): what the target match found,
-  `existing_folder`, `new_folder`, or why there is no target: `not_matched`, `no_fitting_folder`, `content_unclear`,
-  `no_model`, `no_target`, `excluded`, `split` ([glossary](glossary.md#target-match-of-a-finding-findingtargetstatus)).
-  The text list ends a line with `-> <target>` or `-> none (<code>)`.
+  `existing_folder`, `new_folder`, `inbox`, or why there is no target: `not_matched`, `no_fitting_folder`,
+  `content_unclear`, `no_model`, `no_target`, `excluded`, `split`
+  ([glossary](glossary.md#target-match-of-a-finding-findingtargetstatus)). The text list ends a line with
+  `-> <target>` or `-> none (<code>)`.
+- `target_decided_by`: who decided the target, `rules`, `local_model` or `controller`
+  ([glossary](glossary.md#who-decided-a-target-targetdecidedby)); `null` while not matched. A decision of the
+  controller stays when the files or their descriptions change later (a note says so) until it is withdrawn.
 - `target_parts` (for `split`; `null` otherwise): `[ { "index", "files", "label", "status", "library_job_id", "path",
   "relative_path", "certainty", "content_check", "reason" } ]`, one per part of the finding by content (Issue 85).
   `sfo plan create` moves each file with its part.
@@ -1447,25 +1485,33 @@ there). Errors: `job_not_found` (1), `finding_not_found` (1).
 The step between overview and recommendation: where each finding should go
 (https://github.com/crack666/smart_file_organizer/issues/83). For every open or accepted finding of the kinds
 `not_backed_up`, `in_noise` and `misplaced` it runs the match of [`sfo library match`](#sfo-library-match-job-path)
-with exactly the files of the finding, over all libraries of the comparison: time, names, kinds of files, the files
-already there, and the content check (unit description against a sample of each candidate folder,
-`fits|contradicts|unclear`). A named folder or device copy keeps its name, as with `library match --bundle`. The answer
-is stored per finding (`finding_targets`): the best existing folder, else a new folder in the style of the library with
-a complete name, else why there is none. `sfo findings`, `findings show`, `--summary` and `sfo plan create` read it from
+with exactly the files of the finding, over all libraries of the comparison: time, names, kinds of files and the files
+already there. A named folder or device copy keeps its name, as with `library match --bundle`. The answer is stored
+per finding (`finding_targets`): the best existing folder, else a new folder in the style of the library with a
+complete name, else why there is none. `sfo findings`, `findings show`, `--summary` and `sfo plan create` read it from
 there. Sensitive findings never get a target. Nothing on disk is changed.
+
+**Rules only by default** (Issue 95). Without an option no model is asked: an existing folder is the target only when
+the same files already lie there, every other finding stays `no_model` for the controller to decide
+([`sfo findings candidates`](#sfo-findings-candidates-job), [`sfo findings place`](#sfo-findings-place-job-key)).
+With `--local-model` the local model judges as before Issue 95: it describes samples of candidate folders, checks the
+content (`fits|contradicts|unclear`) and names new folders. A decision recorded with `sfo findings place`
+(`decided_by` `controller`) is never replaced, not even by `--local-model --refresh`; such an item is listed as
+`reused`.
 
 | Option | Meaning |
 |---|---|
 | `--against <job>` | Library job to look in. Repeatable. Default: the libraries of the newest `sfo compare`. |
 | `--key <key>` | Only this finding. Repeatable. Default: every open or accepted finding of the three kinds. |
-| `--no-model` | Rules only: no content check, no model name for a new folder. An existing folder is then the target only when the same files already lie there (Issue 85), as with `library match --no-model`. |
-| `--model <name>` | Ollama model for this run. |
-| `--refresh` | Match every finding again and ask the model again, even where a stored match still fits. |
+| `--local-model` | Let the local model judge as well: folder descriptions, content check, names of new folders. |
+| `--no-model` | Rules only; the default since Issue 95, kept for older calls. Excludes `--local-model`. |
+| `--model <name>` | Ollama model for this run (with `--local-model`). |
+| `--refresh` | Match every finding again (with `--local-model` ask the model again), even where a stored match still fits. Decisions of the controller stay. |
 
 **Resumable and cheap the second time.** Each answer is stored as soon as it is there; a run cut off (Ctrl+C) goes on
 where it stopped. A finding whose stored match rests on the same files, the same descriptions of them and the same
 libraries is not matched again (`reused`), unless this run may ask the model and the stored match could not
-(`--no-model` before, model away). Below that, folder descriptions (`folder_descriptions`) and the model's answers
+(rules only before, model away). Below that, folder descriptions (`folder_descriptions`) and the model's answers
 (`library_advice`) are stored as in `library match`. Progress goes to stderr, one line per finding.
 
 ```json
@@ -1478,7 +1524,7 @@ libraries is not matched again (`reused`), unless this run may ask the model and
       "title": "4 images (72 B) worth keeping, not in the library: loose files in Neuer Ordner",
       "status": "existing_folder", "reused": false, "library_job_id": 8, "path": "/nas/photos/Fotos/Skifahrt 2015",
       "relative_path": "Fotos/Skifahrt 2015", "certainty": "certain", "content_check": "fits", "content_status": "checked",
-      "reason": "Into Fotos/Skifahrt 2015: the content fits: snowy slope, skiing, holiday; ..." }
+      "reason": "Into Fotos/Skifahrt 2015: the content fits: snowy slope, skiing, holiday; ...", "decided_by": "local_model" }
   ],
   "model_calls": [ { "kind": "content_fit", "calls": 2, "prompt_tokens": 0, "...": "" } ]
 }
@@ -1494,13 +1540,159 @@ libraries is not matched again (`reused`), unless this run may ask the model and
   `target_parts` of `sfo findings`. `excluded` items name why they were left out (system clutter, worth unclear).
 - Since Issue 85 an existing folder is stored only when content confirms it (the same files there, or `fits`); else a
   new folder in the library that holds this kind of content, else `no_target` with the reason
-  ([library-match.md](library-match.md#for-every-finding-sfo-findings-targets)). With `--no-model` that means: no
-  existing folder without the same files there.
+  ([library-match.md](library-match.md#for-every-finding-sfo-findings-targets)). Without `--local-model` that means:
+  no existing folder without the same files there.
+- `items[].decided_by`: `rules`, `local_model` or `controller` (also per part).
 
 Errors: `job_not_found` (1), `wrong_role` (1, a library), `comparison_not_found` (1, `--against` names a library the
 job was not compared with), `finding_not_found` (1, `--key`), `library_patterns_invalid` (1), `settings_invalid` (1),
 `library_unreachable` (1, a library root cannot be read: checked before any finding is matched, nothing is stored),
 `usage` (2).
+
+### `sfo findings candidates <job>`
+
+The facts a controlling model decides from (https://github.com/crack666/smart_file_organizer/issues/95). For every
+open or accepted finding of the kinds `not_backed_up`, `in_noise` and `misplaced`: what it is, and the candidate
+folders of the rules (time, names, kinds of files, the same files already there) in every library, with what they hold.
+**No model call**, nothing described, nothing stored (only the patterns file next to the database may be written, as by
+`library match`). The decision is recorded with [`sfo findings place`](#sfo-findings-place-job-key); the workflow is in
+[controller-guide.md](controller-guide.md).
+
+| Option | Meaning |
+|---|---|
+| `--against <job>` | Library job whose folders are candidates. Repeatable. Default: the libraries of the newest `sfo compare`. |
+| `--key <key>` | Only this finding. Repeatable. |
+| `--limit <n>` | Candidate folders per finding, or per part of a mixed finding, 0 to 20, default 5. |
+| `--names <n>` | File names listed per finding, part and folder, 0 to 20, default 5. |
+| `--offset <n>` | Findings to skip (see `next_offset`). |
+| `--max-kb <kb>` | Cap of the listed findings in kB of JSON, 1 to 4096, default 256; the rest follows with `--offset`. At least one finding is listed. |
+
+```json
+{
+  "job_id": 2, "status": "known", "message": null,
+  "libraries": [ { "library_job_id": 1, "root_path": "/nas/photos", "reachable": true,
+                   "free_bytes": 93616517120, "inbox_folder": "_Inbox" } ],
+  "total": 1, "offset": 0, "next_offset": null, "truncated": false,
+  "items": [
+    { "key": "not_backed_up-09b9879a63", "kind": "not_backed_up", "state": "open",
+      "title": "3 images (9 B) worth keeping, not in the library: loose files in New folder",
+      "relative_path": "New folder", "bundle_kind": null, "files": 3, "bytes": 9, "by_file_type": { "image": 3 },
+      "period": { "from": "2015-02-01T12:00:00", "to": "2015-02-03T12:00:00", "time_source": "file_name" },
+      "unit_name": "IMG_20150201_120000.jpg", "keep_whole": false,
+      "examples": [ "New folder/IMG_20150201_120000.jpg" ], "sensitive_files": [],
+      "stored": null, "excluded": null, "split": false,
+      "groups": [
+        { "part": null, "files": 3, "bytes": 9, "label": null, "by_file_type": { "image": 3 }, "period": { "...": "" },
+          "examples": [],
+          "described": { "sampled": 3, "described": 3, "values": { "activity": [ { "value": "skiing", "count": 3 } ] },
+                         "text": "activity: skiing (3); ..." },
+          "candidates": [
+            { "rank": 1, "placement": "into_existing", "destination_relative": "Photos/Ski trip 2015", "score": 0.4,
+              "certainty": "uncertain", "reason": "Into Photos/Ski trip 2015: taken 2015-02-01 to 2015-02-03, ...",
+              "agrees": [ "period", "file_type" ], "contradicts": [],
+              "folder": { "library_job_id": 1, "path": "...", "relative_path": "Photos/Ski trip 2015",
+                          "role": "occasion", "purpose": "...", "files": 3, "direct_files": 3, "subdirs": 0, "bytes": 9,
+                          "by_file_type": { "image": 3 }, "period": { "...": "" }, "pattern": null,
+                          "sensitive": false, "markers": [], "file_names": [ "IMG_20150201_100000.jpg" ],
+                          "subfolders": [], "described": false, "description": null, "described_at": null } }
+          ],
+          "new_folder": { "library_job_id": 1, "parent_relative": "Photos", "name": "2015-02 {occasion}",
+                          "name_complete": false, "pattern": "{yyyy}-{mm} {occasion}" },
+          "not_matched": null }
+      ] }
+  ]
+}
+```
+
+- `libraries`: every library with `reachable` (the root exists now), `free_bytes` (`null` when it cannot be told) and
+  its `inbox_folder` (below the root; [Inbox](#the-inbox-of-a-library)). A root that cannot be read is the error
+  `library_unreachable`, as in `findings targets`.
+- `groups`: one for the finding as a whole, or one per part when its files do not belong together by content
+  (`split` true, `part` = the index `sfo findings place --part` takes). `described` condenses the stored description
+  facts of the files (`described` of `sampled` carried one); a part lists `examples` of its own files.
+- `candidates[].folder`: the folder as the scan holds it, a few `file_names` (direct files first) and `subfolders`, and
+  its stored description (`described`, `description`, `described_at`) from `folder_descriptions`. Nothing is described
+  here; [`sfo library describe`](#sfo-library-describe-job-path) describes one folder on demand.
+- `new_folder`: where the rules would put a new folder and the name of its siblings' pattern; `name_complete` false
+  means the rules cannot fill in the name (an occasion): the controller names it.
+- `stored`: a target stored earlier (`status`, `decided_by`, `library_job_id`, `relative_path`); `null` when none.
+- **Marked files and folders.** A marked file of a finding, or a file in a marked folder of the source, is listed in
+  `sensitive_files` with path and markers only: never an example, never part of a description or label. A library
+  folder that is marked, lies below a marked folder or holds a marked file has `sensitive` true with its `markers`, and
+  no `file_names`, `subfolders`, `purpose` or description.
+- `status` `no_library` with a `message` and no items: without a library there are no candidates.
+
+Errors: `job_not_found` (1), `wrong_role` (1), `comparison_not_found` (1), `finding_not_found` (1, `--key`),
+`library_unreachable` (1), `library_patterns_invalid` (1), `settings_invalid` (1), `usage` (2).
+
+### `sfo findings place <job> [key]`
+
+Records where a finding goes, as the controlling model decided (Issue 95). Nothing on disk changes; `sfo plan create`
+takes the decision like any target.
+
+| Option | Meaning |
+|---|---|
+| `--status <code>` | `existing_folder`, `new_folder`, `inbox` or `no_target`. |
+| `--library <job>` | Library of the target. Needed when there are several and `--folder` is relative; for `inbox`, the library whose inbox it is. |
+| `--folder <path>` | `existing_folder`: a folder of the library scan. `new_folder`: the folder to create, directly below an existing one, not existing yet. Relative to the library root with `/`, or a full path below it. |
+| `--part <n>` | Only this part of a mixed finding (`part` in `findings candidates`); the other parts keep their target. |
+| `--reason <text>` | Why. Required; kept as the reason of the target. |
+| `--withdraw` | Remove the stored target of the finding: it is `not_matched` again, and the next `findings targets` matches it by the rules. |
+| `--file <path>` | Many decisions at once (instead of a key and the options above). |
+| `--against <job>` | Libraries a target may lie in. Default: the libraries of the newest `sfo compare`. |
+
+```bash
+sfo findings place 2 not_backed_up-09b9879a63 --status existing_folder --library 1 \
+    --folder "Photos/Ski trip 2015" --reason "Same trip, the day after." --json
+sfo findings place 2 --file decisions.json --json
+```
+
+```json
+{ "decisions": [
+    { "key": "not_backed_up-1a2b3c4d5e", "status": "new_folder", "folder": "Photos/2018 Day trip", "reason": "..." },
+    { "key": "in_noise-6f7a8b9c0d", "part": 1, "status": "inbox", "library_job_id": 1, "reason": "..." },
+    { "key": "misplaced-0d1e2f3a4b", "status": "no_target", "reason": "..." },
+    { "key": "not_backed_up-5e6f7a8b9c", "withdraw": true }
+] }
+```
+
+Result: `{ "job_id", "stored", "withdrawn", "items": [ { "key", "part", "status", "library_job_id", "path",
+"relative_path", "reason", "withdrawn", "decided_by": "controller" } ] }`.
+
+Every decision is checked before anything is stored: the target lies below a root of the libraries of the comparison
+(not the root itself), never in a protected place (user profile, system drive, `Plan:ProtectedPlaces`, as for plan
+targets), each level is a valid folder name (no `.` or `..`), an existing folder is one of the scan, a new folder does
+not exist yet and its parent does. A refused decision refuses the whole call: **nothing is stored**, the error is
+`placement_refused` (1) with `{ "job_id", "stored": 0, "refused": [ { "index", "key", "part", "problems", "message" } ] }`
+(`index` counts from 0 in the file); `problems` are `PlacementProblem` codes
+([glossary](glossary.md#why-a-decision-was-refused-placementproblem)).
+
+The stored decision has `decided_by` `controller`, certainty `likely`, `content_check` `not_checked` and
+`content_status` `controller`. It stays until it is withdrawn or replaced by another `place`: `findings targets` keeps
+it (also with `--local-model --refresh`), and it stays when the files or their descriptions change (a note in
+`sfo findings` says so). `no_target` keeps the finding out of the plan (the action says why); `inbox` puts the files
+into `<root>/<inbox folder>/<name of the source root>`.
+
+Errors: `placement_refused` (1), `import_invalid` (1, the file cannot be read, is not JSON, has no `decisions` list,
+or an entry has no `key` or a wrong type; nothing is stored), `job_not_found` (1), `wrong_role` (1),
+`comparison_not_found` (1), `usage` (2, neither a key nor `--file`, or both, or a key without `--status`).
+
+### The inbox of a library
+
+For files without a fitting home a library has an inbox folder (target status `inbox`, Issue 95): by default `_Inbox`
+below the root, one subfolder per source named after the folder name of the source root (`source-<job>` for a drive
+root). Settings, section `LibraryMatch`:
+
+```json
+"LibraryMatch": {
+  "InboxFolder": "_Inbox",
+  "Inboxes": [ { "Root": "/nas/photos", "Folder": "Unsorted/Incoming" } ]
+}
+```
+
+`Inboxes` sets another folder for single libraries, by root path as scanned. A folder must be relative to the root
+without `..`; otherwise `settings_invalid`. Only `sfo findings place --status inbox` puts files there; the plan moves
+them like any target, and the move notice names the inbox folder as the new place.
 
 ### `sfo findings accept|reject|wrong|reopen <job> <key>...`
 
@@ -1935,7 +2127,7 @@ lines when it starts or stops waiting for the model server (see `sfo analyze`); 
 | Code | Meaning | `error.code` |
 |---|---|---|
 | 0 | Done | |
-| 1 | The command ran but could not do its job | `job_not_found`, `path_not_found`, `scan_failed`, `scan_not_completed`, `wrong_role`, `compare_incomplete`, `comparison_not_found`, `database_error`, `model_missing`, `rules_invalid`, `words_invalid`, `output_inside_job`, `export_failed`, `truth_invalid`, `run_not_found`, `output_not_empty`, `bundle_not_found`, `patterns_invalid`, `library_patterns_invalid`, `settings_invalid`, `finding_not_found`, `targets_invalid`, `plan_not_found`, `action_not_found`, `plan_change_refused`, `library_invalid`, `import_invalid`, `plan_run_incomplete`, `library_unreachable`, `internal_error` |
+| 1 | The command ran but could not do its job | `job_not_found`, `path_not_found`, `scan_failed`, `scan_not_completed`, `wrong_role`, `compare_incomplete`, `comparison_not_found`, `database_error`, `model_missing`, `rules_invalid`, `words_invalid`, `output_inside_job`, `export_failed`, `truth_invalid`, `run_not_found`, `output_not_empty`, `bundle_not_found`, `patterns_invalid`, `library_patterns_invalid`, `settings_invalid`, `finding_not_found`, `targets_invalid`, `plan_not_found`, `action_not_found`, `plan_change_refused`, `library_invalid`, `import_invalid`, `plan_run_incomplete`, `library_unreachable`, `placement_refused`, `internal_error` |
 | 2 | Wrong invocation: unknown command or option, missing or invalid value | `usage` |
 | 3 | Ollama not reachable | `ollama_unavailable` |
 | 4 | The model server went away during `sfo analyze` and did not come back within `ModelServer.MaxWaitMinutes`; open items stay open, run the command again | `model_server_lost` |

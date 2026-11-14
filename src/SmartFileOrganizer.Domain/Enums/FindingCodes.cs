@@ -125,7 +125,79 @@ public enum FindingTargetStatus
     /// Not matched on purpose (https://github.com/crack666/smart_file_organizer/issues/85): the files are system clutter
     /// (a folder judged <c>system</c>) or their worth is unclear (a folder judged as a whole with retention <c>review</c>).
     /// </summary>
-    [JsonStringEnumMemberName("excluded")] Excluded
+    [JsonStringEnumMemberName("excluded")] Excluded,
+
+    /// <summary>
+    /// The inbox of a library (https://github.com/crack666/smart_file_organizer/issues/95): the files have no fitting home
+    /// yet, so they go into the inbox folder of the library, one subfolder per source, instead of a guessed target.
+    /// </summary>
+    [JsonStringEnumMemberName("inbox")] Inbox
+}
+
+/// <summary>
+/// Who decided the stored target of a finding (https://github.com/crack666/smart_file_organizer/issues/95):
+/// <c>finding_targets.decided_by</c>. A decision of the controller is never replaced by a later
+/// <c>sfo findings targets</c>; only another decision or its withdrawal changes it.
+/// </summary>
+public enum TargetDecidedBy
+{
+    /// <summary>The rules of the target match alone (time, names, kinds of files, the same files already there).</summary>
+    [JsonStringEnumMemberName("rules")] Rules,
+
+    /// <summary>The target match with the local model (<c>sfo findings targets --local-model</c>): content check and folder names.</summary>
+    [JsonStringEnumMemberName("local_model")] LocalModel,
+
+    /// <summary>A steering model or a person decided through <c>sfo findings place</c>, from the facts of <c>sfo findings candidates</c>.</summary>
+    [JsonStringEnumMemberName("controller")] Controller
+}
+
+/// <summary>
+/// Why <c>sfo findings place</c> refused a decision (https://github.com/crack666/smart_file_organizer/issues/95). A
+/// refused decision, and with it every decision of the same call, is not stored.
+/// </summary>
+public enum PlacementProblem
+{
+    /// <summary>The key is not a finding of the job (or its data changed).</summary>
+    [JsonStringEnumMemberName("finding_not_found")] FindingNotFound,
+
+    /// <summary>The finding is of a kind that gets no target (only <c>not_backed_up</c>, <c>in_noise</c> and <c>misplaced</c> do).</summary>
+    [JsonStringEnumMemberName("not_placeable")] NotPlaceable,
+
+    /// <summary>The part named does not exist: the finding is not split by content, or has fewer parts.</summary>
+    [JsonStringEnumMemberName("part_not_found")] PartNotFound,
+
+    /// <summary>The library named is not one of the libraries the job was compared with, or there is none.</summary>
+    [JsonStringEnumMemberName("library_not_found")] LibraryNotFound,
+
+    /// <summary>Several libraries could hold the target and none was named (<c>--library</c>).</summary>
+    [JsonStringEnumMemberName("library_ambiguous")] LibraryAmbiguous,
+
+    /// <summary>The target lies outside every library root, or is a library root itself.</summary>
+    [JsonStringEnumMemberName("outside_library")] OutsideLibrary,
+
+    /// <summary>The target lies in the user profile, on the system drive or in a place of <c>Plan:ProtectedPlaces</c>.</summary>
+    [JsonStringEnumMemberName("target_protected")] TargetProtected,
+
+    /// <summary>The path cannot be a folder: empty, characters a folder name cannot have, <c>..</c>, or a name of only dots or spaces.</summary>
+    [JsonStringEnumMemberName("invalid_path")] InvalidPath,
+
+    /// <summary>The status needs a folder (<c>existing_folder</c>, <c>new_folder</c>) and none was given.</summary>
+    [JsonStringEnumMemberName("folder_missing")] FolderMissing,
+
+    /// <summary><c>existing_folder</c> names a folder the scan of the library does not hold.</summary>
+    [JsonStringEnumMemberName("folder_not_found")] FolderNotFound,
+
+    /// <summary><c>new_folder</c> names a folder that exists already (use <c>existing_folder</c>).</summary>
+    [JsonStringEnumMemberName("folder_exists")] FolderExists,
+
+    /// <summary><c>new_folder</c> names a folder whose parent is no folder of the library: one new level at a time.</summary>
+    [JsonStringEnumMemberName("parent_not_found")] ParentNotFound,
+
+    /// <summary>The status is not one a decision can set (<c>existing_folder</c>, <c>new_folder</c>, <c>inbox</c>, <c>no_target</c>).</summary>
+    [JsonStringEnumMemberName("status_invalid")] StatusInvalid,
+
+    /// <summary>No reason was given; every decision carries one.</summary>
+    [JsonStringEnumMemberName("reason_missing")] ReasonMissing
 }
 
 /// <summary>Whether a kind of finding could be computed from the stored steps of a job.</summary>

@@ -576,6 +576,7 @@ under its own name may go into it. Dumps are closed as well, through their role 
 | `no_description` | The unit's files are not described yet (`sfo analyze` describes them). |
 | `no_candidates` | No candidate reached `MinScore`; nothing to compare. |
 | `failed` | The comparison call failed or its answer did not parse. |
+| `controller` | No check by the local model: the controller decided the place from the facts (`sfo findings place`, Issue 95). Only in `finding_targets`. |
 
 ### Source of a folder description (`FolderDescriptionSource`)
 
@@ -758,7 +759,7 @@ nothing yet.
 
 | Code | Meaning |
 |---|---|
-| `not_checked` | Not compared: the target rests on period, names and file types. A target of the rules alone, of `sfo findings targets --no-model`, or a new folder. `sfo library match` and `sfo findings targets` check content (`ContentFit`); until 14.11.2026 every target of a finding said `not_checked`. |
+| `not_checked` | Not compared: the target rests on period, names and file types. A target of the rules alone, of `sfo findings targets` without `--local-model`, of a decision of the controller, or a new folder. `sfo library match` and `sfo findings targets` check content (`ContentFit`); until 14.11.2026 every target of a finding said `not_checked`. |
 | `fits` | The content of the unit fits what the target holds. |
 | `contradicts` | The content contradicts the target; the target is dropped. |
 | `unclear` | Compared, without a clear answer. |
@@ -777,10 +778,45 @@ https://github.com/crack666/smart_file_organizer/issues/83). Stored per finding 
 | `not_matched` | No stored match fits the finding as it is now: never matched, or its files, their descriptions or the libraries changed. Not stored. |
 | `no_fitting_folder` | No folder of any library fits, and no complete name for a new one was found. |
 | `content_unclear` | No folder fits by time, name or kind of files, and the files are not described, so their content cannot choose one. |
-| `no_model` | A new folder needs a name the rules cannot complete, and no model was used (`--no-model`) or reachable. |
+| `no_model` | A new folder needs a name the rules cannot complete, and no model was used (the default of `sfo findings targets` since Issue 95; before, `--no-model`) or reachable. The controller decides it with `sfo findings place`. |
 | `no_target` | No target on purpose: no existing folder is confirmed by content, and no library holds this kind of content (own photos and videos, documents, films), so a new folder would be a guess as well (Issue 85). |
 | `split` | The files of the finding show different things (a ski trip and a crack in a wall), so the finding as a whole gets no target; each part by content is matched on its own and carries its own target or reason in `target_parts` (`finding_target_parts`). `sfo plan create` moves each file with its part (Issue 85). A part never has this status. |
 | `excluded` | Left out of the target match on purpose, with the reason named: most files lie in a folder judged system clutter (`system`), or in a folder judged as a whole (`uniform`, `unit`) whose worth is unclear (retention `review`). No model is asked. The setting `LibraryMatch:MatchUnclearWorth` matches them anyway (Issue 85). |
+| `inbox` | The inbox of a library: no folder is a fitting home yet, so the files go into the inbox folder of the library (`LibraryMatch:InboxFolder`), one subfolder per source, instead of a guessed target. Set only by a decision (`sfo findings place`, Issue 95); `sfo plan create` moves there like to any other target. |
+
+### Who decided a target (`TargetDecidedBy`)
+
+`decided_by` of a stored target (`finding_targets.decided_by`, `finding_target_parts.decided_by`), shown as
+`target_decided_by` by `sfo findings` and as `decided_by` by `sfo findings targets` and `sfo findings candidates`
+(https://github.com/crack666/smart_file_organizer/issues/95).
+
+| Code | Meaning |
+|---|---|
+| `rules` | The rules of the target match alone: time, names, kinds of files, the same files already there. The default of `sfo findings targets`. |
+| `local_model` | The target match with the local model (`sfo findings targets --local-model`): content check and names of new folders. |
+| `controller` | A steering model or a person decided through `sfo findings place`. Never replaced by `sfo findings targets`; only another decision or `--withdraw` changes it. For a split finding: as soon as one part was decided so. |
+
+### Why a decision was refused (`PlacementProblem`)
+
+`problems` of a refused decision of `sfo findings place` (error `placement_refused`). One refused decision refuses the
+whole call: nothing of it is stored (Issue 95).
+
+| Code | Meaning |
+|---|---|
+| `finding_not_found` | The key is not a finding of the job, or the data it rested on changed. |
+| `not_placeable` | The finding is of a kind that gets no target; only `not_backed_up`, `in_noise` and `misplaced` do. |
+| `part_not_found` | The part named does not exist: the finding is not split by content, or has fewer parts. |
+| `library_not_found` | The library named is not one the job was compared with, or the job was compared with none. |
+| `library_ambiguous` | Several libraries could hold the target and none was named (`--library`). |
+| `outside_library` | The target lies outside every library root of the comparison, or is a library root itself. |
+| `target_protected` | The target lies in the user profile, on the system drive or in a place of `Plan:ProtectedPlaces`. |
+| `invalid_path` | The path cannot be a folder: empty, `..`, characters a folder name cannot have, or a name of dots or spaces only. |
+| `folder_missing` | `existing_folder` and `new_folder` need `--folder`. |
+| `folder_not_found` | `existing_folder` names a folder the scan of the library does not hold. |
+| `folder_exists` | `new_folder` names a folder that exists already; use `existing_folder`. |
+| `parent_not_found` | `new_folder` names a folder whose parent is no folder of the library: one new level at a time. |
+| `status_invalid` | Not a status a decision can set: `existing_folder`, `new_folder`, `inbox` or `no_target`. |
+| `reason_missing` | No reason was given; every decision carries one. |
 
 ### Kind of a shared feature (`SharedFeatureKind`)
 
