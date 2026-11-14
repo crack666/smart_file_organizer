@@ -254,7 +254,7 @@ Per finding one answer is stored in `finding_targets` (step 26):
 1. the best existing folder of all libraries (`existing_folder`), with its certainty, reason and content check;
 2. else a new folder whose name is complete (`new_folder`), in the library that holds this kind of content (above);
 3. else no target, with the reason: `no_target` (no library holds this kind of content, so a new folder would be a
-   guess; step 27, Issue 85), `no_model` (a new folder needs a name the rules cannot complete and no model was
+   guess; step 28, Issue 85), `no_model` (a new folder needs a name the rules cannot complete and no model was
    used or reachable), `content_unclear` (no candidate, and the files are not described), `no_fitting_folder`
    (anything else).
 
