@@ -202,7 +202,7 @@ gets exactly these cases, all in `Clips` (or `Videos` for the phone), with inven
 
 Changed: `Clips/VID-20230716-WA0003.mp4` is `received` now (was `web_clip`), the new kind for clips received through a
 messenger. 84 folders and 221 files. `findings.json` and `targets.json` are unchanged; the prompts are unchanged
-(fingerprint `82facdfc7958dfcc` as before). Measured 14.11.2026 with the perfect stub (temporary database, model address
+(fingerprint `82facdfc7958dfcc` on Windows, as before). Measured 14.11.2026 with the perfect stub (temporary database, model address
 on a dead port): `directory_verdict` 82/82, `file_category` 124/124, `sensitive` 220/221 (the deliberate
 `.ssh/id_ed25519.pub`), `finding` 25/25 and 0 superfluous, `target` 14/14, `video_kind` 24/24. Before the fix the two
 traps read `own_recording` with device `phone`, certain, which the stub cannot override.
@@ -479,7 +479,8 @@ items fixed and the new failures.
 ### Scripted answers after issue 103, second round (14.11.2026)
 
 _Scripted answers (`--stub truth.json`) on small v9 seed 36, on the branch `feat/103-video-origin-evidence`, temporary
-directory and database, model address on a dead port, prompts `82facdfc7958dfcc`._
+directory and database, model address on a dead port, prompts `82facdfc7958dfcc` on Windows (the same scores on Linux,
+where the fingerprint differs by the line ends)._
 
 | Kind | Result |
 |---|---|
