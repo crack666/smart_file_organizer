@@ -19,12 +19,17 @@ public static class ScanCommand
     /// <summary>A refresh against the previous job of the same place (https://github.com/crack666/smart_file_organizer/issues/86).</summary>
     /// <param name="Carried">What was taken over for unchanged files instead of being worked out again.</param>
     /// <param name="Changes">The files that are new, changed, missing or moved, by path; at most <see cref="MaxChanges"/>.</param>
+    /// <param name="Folders">Folders carried over and folders to be judged anew.</param>
     public sealed record RefreshView(long PreviousJobId, long Unchanged, long New, long Changed, long Missing, long Moved,
-        CarriedView Carried, IReadOnlyList<ChangeView> Changes, bool ChangesTruncated);
+        CarriedView Carried, IReadOnlyList<ChangeView> Changes, bool ChangesTruncated, FoldersView Folders);
 
     /// <param name="Checksums">Unchanged files whose stored checksum still holds; no file is read again.</param>
     /// <param name="Results">Unchanged files whose analysis result was taken over; no model is asked for them.</param>
-    public sealed record CarriedView(long Checksums, long Results, long Facts, long Corrections);
+    public sealed record CarriedView(long Checksums, long Results, long Facts, long Corrections, long Verdicts, long Summaries, long Samples);
+
+    /// <param name="Unchanged">Folders whose files are all unchanged and that kept verdict, summary and sample.</param>
+    /// <param name="ToJudge">Changed or new folders the next <c>sfo analyze</c> judges anew; <c>paths</c> lists the first of them.</param>
+    public sealed record FoldersView(long Unchanged, long ToJudge, IReadOnlyList<string> Paths, bool PathsTruncated);
 
     public sealed record ChangeView(string Path, string Change, long Size, string? Target, long? PlanId, DateTime? MovedAt);
 
@@ -175,11 +180,16 @@ public static class ScanCommand
         return command;
     }
 
-    private static RefreshView View(RefreshReport r) => new(
-        r.Counts.PreviousJobId, r.Counts.Unchanged, r.Counts.New, r.Counts.Changed, r.Counts.Missing, r.Counts.Moved,
-        new CarriedView(r.Counts.Checksums, r.Counts.Results, r.Counts.Facts, r.Counts.Corrections),
-        r.Changes.Take(MaxChanges).Select(c => new ChangeView(c.FullPath, c.Change.ToCode(), c.Size, c.TargetPath, c.PlanId, c.MovedAt)).ToList(),
-        r.Changes.Count > MaxChanges);
+    private static RefreshView View(RefreshReport r)
+    {
+        var f = r.Counts.Folders ?? new RefreshFolders(0, 0, 0, 0, []);
+        return new RefreshView(
+            r.Counts.PreviousJobId, r.Counts.Unchanged, r.Counts.New, r.Counts.Changed, r.Counts.Missing, r.Counts.Moved,
+            new CarriedView(r.Counts.Checksums, r.Counts.Results, r.Counts.Facts, r.Counts.Corrections, f.Verdicts, f.Summaries, f.Samples),
+            r.Changes.Take(MaxChanges).Select(c => new ChangeView(c.FullPath, c.Change.ToCode(), c.Size, c.TargetPath, c.PlanId, c.MovedAt)).ToList(),
+            r.Changes.Count > MaxChanges,
+            new FoldersView(f.Kept, f.ToJudge.Count, f.ToJudge.Take(MaxChanges).ToList(), f.ToJudge.Count > MaxChanges));
+    }
 
     private static string Render(ScanResult result)
     {
@@ -189,7 +199,8 @@ public static class ScanCommand
         {
             result.Job.ToLine(),
             $"  against job {r.PreviousJobId}: {r.Unchanged} unchanged, {r.New} new, {r.Changed} changed, {r.Missing} missing, {r.Moved} moved",
-            $"  taken over: {r.Carried.Checksums} checksums, {r.Carried.Results} results, {r.Carried.Facts} facts, {r.Carried.Corrections} corrections"
+            $"  taken over: {r.Carried.Checksums} checksums, {r.Carried.Results} results, {r.Carried.Facts} facts, {r.Carried.Corrections} corrections",
+            $"  folders: {r.Folders.Unchanged} unchanged with {r.Carried.Verdicts} verdicts and {r.Carried.Summaries} summaries kept, {r.Folders.ToJudge} to judge anew"
         };
         lines.AddRange(r.Changes.Select(c => $"  {c.Change,-8} {c.Path}" + (c.Target is { } t ? $" -> {t}" : string.Empty)));
         if (r.ChangesTruncated)

@@ -178,12 +178,144 @@ public class PlaceRepository : IPlaceRepository
         var counts = (await conn.QueryAsync<(string Change, long Count)>(new CommandDefinition(
             "SELECT change, COUNT(*) FROM scan_changes WHERE job_id = @job GROUP BY change", p, tx, cancellationToken: ct)))
             .ToDictionary(c => c.Change, c => c.Count);
+        var folders = await CarryFoldersAsync(conn, tx, previousJobId, jobId, ct);
         await conn.ExecuteAsync(new CommandDefinition("DROP TABLE temp.refresh_pairs", transaction: tx, cancellationToken: ct));
         await tx.CommitAsync(ct);
 
         long Of(FileChange c) => counts.GetValueOrDefault(c.ToCode());
         return new RefreshCounts(previousJobId, unchanged, Of(FileChange.New), Of(FileChange.Changed), Of(FileChange.Missing), moved,
-            checksums, results, facts, corrections);
+            checksums, results, facts, corrections, folders);
+    }
+
+    /// <summary>
+    /// Folders whose files are all unchanged (no new, changed, missing or moved file at or below them, same scan status)
+    /// keep the verdict, the pre-assessment and summary and the sample of the previous job, and their files keep their
+    /// status (a file skipped under a folder judged whole stays skipped): <c>sfo analyze</c> asks no model for them
+    /// again. Every other folder of the new job that had a verdict or summary before, or is new, is to be judged anew.
+    /// File ids inside the carried rows (the members of a sample, the outliers of a pre-assessment) are moved to the
+    /// file with the same path.
+    /// </summary>
+    private static async Task<RefreshFolders> CarryFoldersAsync(SqliteConnection conn, System.Data.Common.DbTransaction tx,
+        long previousJobId, long jobId, CancellationToken ct)
+    {
+        var oldDirs = (await conn.QueryAsync<DirRow>(new CommandDefinition(
+                """
+                SELECT d.id, d.full_path, d.dir_status,
+                       EXISTS (SELECT 1 FROM directory_verdicts v WHERE v.directory_node_id = d.id)
+                       OR EXISTS (SELECT 1 FROM ai_directory_results a WHERE a.directory_node_id = d.id) AS judged
+                FROM directory_nodes d WHERE d.job_id = @previousJobId
+                """, new { previousJobId }, tx, cancellationToken: ct)))
+            .GroupBy(d => d.FullPath, StringComparer.Ordinal).ToDictionary(g => g.Key, g => g.First(), StringComparer.Ordinal);
+        var newDirs = (await conn.QueryAsync<DirRow>(new CommandDefinition(
+            "SELECT id, full_path, dir_status, 0 AS judged FROM directory_nodes WHERE job_id = @jobId", new { jobId }, tx, cancellationToken: ct))).ToList();
+
+        // Every folder above a changed file is changed; climbing stops at a folder already marked.
+        var changed = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var path in await conn.QueryAsync<string>(new CommandDefinition(
+                     "SELECT full_path FROM scan_changes WHERE job_id = @jobId", new { jobId }, tx, cancellationToken: ct)))
+        {
+            for (var dir = Path.GetDirectoryName(path); !string.IsNullOrEmpty(dir) && changed.Add(dir); dir = Path.GetDirectoryName(dir))
+            {
+            }
+        }
+
+        var kept = new List<(long NewId, long OldId)>();
+        var toJudge = new List<string>();
+        foreach (var d in newDirs)
+        {
+            if (oldDirs.TryGetValue(d.FullPath, out var old) && !changed.Contains(d.FullPath) && old.DirStatus == d.DirStatus)
+            {
+                if (old.Judged != 0) kept.Add((d.Id, old.Id));
+            }
+            else if (old is null || old.Judged != 0)
+            {
+                toJudge.Add(d.FullPath);
+            }
+        }
+
+        await conn.ExecuteAsync(new CommandDefinition(
+            """
+            DROP TABLE IF EXISTS temp.refresh_dirs;
+            CREATE TEMP TABLE refresh_dirs (new_id INTEGER PRIMARY KEY, old_id INTEGER NOT NULL);
+            """, transaction: tx, cancellationToken: ct));
+        foreach (var chunk in kept.Chunk(400))
+        {
+            await conn.ExecuteAsync(new CommandDefinition(
+                "INSERT INTO refresh_dirs (new_id, old_id) VALUES (@NewId, @OldId)",
+                chunk.Select(k => new { k.NewId, k.OldId }), tx, cancellationToken: ct));
+        }
+
+        var verdicts = await CopyFolderRowsAsync(conn, tx, "directory_verdicts", ct);
+        var assessments = await CopyFolderRowsAsync(conn, tx, "ai_directory_results", ct);
+        var samples = await CopyFolderRowsAsync(conn, tx, "directory_samples", ct);
+
+        // Files directly in a kept folder keep their status (skipped under a whole, deferred to a carried sample).
+        await conn.ExecuteAsync(new CommandDefinition(
+            """
+            UPDATE file_nodes SET status = (SELECT o.status FROM refresh_pairs r JOIN file_nodes o ON o.id = r.old_id WHERE r.new_id = file_nodes.id)
+            WHERE id IN (SELECT r.new_id FROM refresh_pairs r JOIN file_nodes n ON n.id = r.new_id
+                         JOIN directory_nodes d ON d.job_id = n.job_id AND d.full_path = n.parent_path
+                         JOIN refresh_dirs k ON k.new_id = d.id)
+            """, transaction: tx, cancellationToken: ct));
+
+        // File ids inside the carried rows point at the old job's files; they move to the new ones.
+        var fileIds = (await conn.QueryAsync<(long OldId, long NewId)>(new CommandDefinition(
+                "SELECT old_id, new_id FROM refresh_pairs", transaction: tx, cancellationToken: ct)))
+            .ToDictionary(r => r.OldId, r => r.NewId);
+        await RemapIdsAsync(conn, tx, "ai_directory_results", "anomalous_file_ids", "id", fileIds, ct);
+        await RemapIdsAsync(conn, tx, "directory_samples", "members_json", "file_node_id", fileIds, ct);
+
+        await conn.ExecuteAsync(new CommandDefinition("DROP TABLE temp.refresh_dirs", transaction: tx, cancellationToken: ct));
+        toJudge.Sort(StringComparer.Ordinal);
+        return new RefreshFolders(kept.Count, verdicts, assessments, samples, toJudge);
+    }
+
+    /// <summary>Copies the rows of a folder table from each kept old folder to its new folder; other folder references by path.</summary>
+    private static async Task<long> CopyFolderRowsAsync(SqliteConnection conn, System.Data.Common.DbTransaction tx, string table, CancellationToken ct)
+    {
+        var columns = (await conn.QueryAsync<string>(new CommandDefinition(
+                $"SELECT name FROM pragma_table_info('{table}') ORDER BY cid", transaction: tx, cancellationToken: ct)))
+            .Where(c => c is not "id" and not "directory_node_id")
+            .ToList();
+        var targets = string.Join(", ", columns.Select(c => $"\"{c}\""));
+        var values = string.Join(", ", columns.Select(c => c.EndsWith("directory_node_id", StringComparison.Ordinal)
+            ? $"(SELECT nd.id FROM directory_nodes od JOIN directory_nodes nd ON nd.full_path = od.full_path " +
+              $"AND nd.job_id = (SELECT job_id FROM directory_nodes WHERE id = r.new_id) WHERE od.id = t.\"{c}\")"
+            : $"t.\"{c}\""));
+        return await conn.ExecuteAsync(new CommandDefinition(
+            $"""
+            INSERT INTO {table} (directory_node_id, {targets})
+            SELECT r.new_id, {values} FROM refresh_dirs r JOIN {table} t ON t.directory_node_id = r.old_id
+            WHERE NOT EXISTS (SELECT 1 FROM {table} x WHERE x.directory_node_id = r.new_id)
+            """, transaction: tx, cancellationToken: ct));
+    }
+
+    /// <summary>Rewrites the file ids in a JSON list of objects of the carried rows; text that is no such list stays.</summary>
+    private static async Task RemapIdsAsync(SqliteConnection conn, System.Data.Common.DbTransaction tx, string table, string column,
+        string property, IReadOnlyDictionary<long, long> fileIds, CancellationToken ct)
+    {
+        var rows = await conn.QueryAsync<(long Id, string? Json)>(new CommandDefinition(
+            $"SELECT t.id, t.{column} FROM {table} t JOIN refresh_dirs r ON r.new_id = t.directory_node_id WHERE t.{column} IS NOT NULL",
+            transaction: tx, cancellationToken: ct));
+        foreach (var (id, json) in rows)
+        {
+            System.Text.Json.Nodes.JsonArray? list;
+            try { list = System.Text.Json.Nodes.JsonNode.Parse(json!) as System.Text.Json.Nodes.JsonArray; }
+            catch (System.Text.Json.JsonException) { continue; }
+            if (list is null) continue;
+            var touched = false;
+            foreach (var item in list.OfType<System.Text.Json.Nodes.JsonObject>())
+            {
+                if (item[property] is System.Text.Json.Nodes.JsonValue v && v.TryGetValue<long>(out var old) && fileIds.TryGetValue(old, out var now))
+                {
+                    item[property] = now;
+                    touched = true;
+                }
+            }
+            if (touched)
+                await conn.ExecuteAsync(new CommandDefinition(
+                    $"UPDATE {table} SET {column} = @json WHERE id = @id", new { id, json = list.ToJsonString() }, tx, cancellationToken: ct));
+        }
     }
 
     /// <summary>
@@ -350,6 +482,14 @@ public class PlaceRepository : IPlaceRepository
         public long Files { get; set; }
         public long Bytes { get; set; }
         public DateTime FirstSeenAt { get; set; }
+    }
+
+    private sealed class DirRow
+    {
+        public long Id { get; set; }
+        public string FullPath { get; set; } = string.Empty;
+        public long DirStatus { get; set; }
+        public long Judged { get; set; }
     }
 
     private sealed class GoneRow

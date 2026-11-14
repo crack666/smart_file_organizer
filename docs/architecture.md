@@ -471,6 +471,13 @@ Issue: https://github.com/crack666/smart_file_organizer/issues/86. Commands: `sf
   reference to a folder of the old job is moved to the folder with the same path); checksums need no copy, since
   `content_fingerprints` is keyed by path and holds while size and time match. The rest goes to `scan_changes`
   (`new`, `changed`, `missing`, or `moved` when the move history says a plan took the file away). No file is read.
+  Then the folders (`CarryFoldersAsync`): a folder of the new job whose path is in the old job, with the same scan
+  status and no change at or below it, keeps the rows of `directory_verdicts`, `ai_directory_results` (pre-assessment
+  and summary) and `directory_samples` of the old folder (folder references moved by path; the file ids in the members
+  of a sample and in the outliers of a pre-assessment moved to the file of the same path), and its direct files keep
+  their status (skipped under a whole, deferred to a sample). Phases 1 and 3 of `sfo analyze` find these folders done
+  and ask nothing. Every other folder that was judged before, or is new, is reported as to be judged anew
+  (`RefreshFolders.ToJudge`, not stored).
 - **Move history.** `moves` holds every original that went into the hold folder (from the `hold` step), with source,
   target, checksum and time, and when it came back or was purged. It names no job and outlives jobs and plans.
 - **Move notices.** `PlanExecutor` writes them (see Plan execution); `ScanEngine` leaves a notice and the hold folder

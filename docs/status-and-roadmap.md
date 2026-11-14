@@ -313,8 +313,16 @@ _Checked 14.11.2026 on the branch for https://github.com/crack666/smart_file_org
   carries results, facts and corrections of unchanged files over; `sfo where` answers from the move history, the scans
   and found notices. See [cli.md, Memory](cli.md#memory).
 - Step 2 of the execution leaves `_moved-files.txt` in emptied folders ([move-notice.md](move-notice.md)).
-- Not built: updating the library job in place after `plan apply` (the copy counts as backed up only after the library
-  is scanned again); carrying directory verdicts and summaries over in a refresh.
+- After `plan apply` the library job is written forward: the copy is a file of it with its checksum, the source file
+  `backed_up`, the undo takes it back (schema step 30). A refresh carries verdict, summary and sample of unchanged
+  folders over and lists the folders to judge anew. The dry run names a notice it would remove `would_remove`. (Until
+  then this line said: "Not built: updating the library job in place after `plan apply` ...; carrying directory
+  verdicts and summaries over in a refresh.")
+
+_Checked 14.11.2026 on the branch for the rest of https://github.com/crack666/smart_file_organizer/issues/86 (schema
+step 30): `dotnet test` 952 passed, 2 skipped; `PlanApplyCommandTests` (library written forward, later scan, dry-run
+notices) and `RefreshFolderJudgementTests` (no model call for unchanged folders, fake model server) on generated trees
+in a temp folder. No run on a real medium._
 
 ### Duplicates over a whole holding
 
