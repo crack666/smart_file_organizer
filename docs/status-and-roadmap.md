@@ -252,9 +252,9 @@ library 17, `not_backed_up` not computed), and a generated old Windows profile w
   decision, `wrong` also a test case. Rules: [architecture.md, Findings flow](architecture.md#findings-flow).
 - `misplaced` stays `uncertain` at most: no step checks the content of a target folder yet
   (https://github.com/crack666/smart_file_organizer/issues/56).
-- Accepted findings become plan actions (`sfo plan create`); nothing executes them yet
+- Accepted findings become plan actions (`sfo plan create`), which `sfo plan apply` executes once confirmed
   (https://github.com/crack666/smart_file_organizer/issues/12). (Until 13.11.2026: "Nothing executes an accepted
-  finding yet", pointing at the plan issue.)
+  finding yet", pointing at the plan issue; until 14.11.2026: "nothing executes them yet".)
 
 ### Describing and deciding
 
@@ -282,9 +282,24 @@ alone in `PlanChecksTests`. No run on a real medium or a real library._
   mixed folder one action per worth-keeping file, nothing for content a library holds, `leave` for sensitive files and
   for anything without a target in a library. `show`, `summary`, `set`, `import`, `approve`, `reject` read, change and
   confirm; see [cli.md, Planning](cli.md#planning).
-- Nothing is executed: moving, copying and removing is https://github.com/crack666/smart_file_organizer/issues/12.
+- Executing is `sfo plan apply|undo|purge`, see below. (Until 14.11.2026: "Nothing is executed: moving, copying and
+  removing is" Issue 12.)
 - Targets come from the findings (a place in a library) and from `sfo decide --targets` bound to a library root; the
   content check of target folders (https://github.com/crack666/smart_file_organizer/issues/56) is not part of it.
+
+### Executing a plan
+
+_Checked 14.11.2026 on the branch for https://github.com/crack666/smart_file_organizer/issues/12 (schema step 25):
+`dotnet test` 908 passed, 2 skipped; `sfo plan apply|undo|purge|keep-source` run in-process on a generated source and
+library in a temp folder (`PlanApplyCommandTests`), with runs cut off between the steps. No run on a real medium, a
+second drive or a network drive._
+
+- `sfo plan apply` copies and checks every confirmed action by full checksum (dry run unless `--execute`);
+  `--remove-sources`, confirmed on its own, moves originals into a hold folder on their own drive after reading both
+  files again; `undo` takes it back, `purge` removes held originals for good while their copy is intact. See
+  [cli.md, Executing a plan](cli.md#executing-a-plan).
+- Not built: renaming on the same drive instead of copying, the system recycle bin, reading a copy on a network drive
+  around the system cache, a name suffix on a collision (the action fails instead).
 
 ### Placing into the library
 
