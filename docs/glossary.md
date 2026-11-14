@@ -167,6 +167,43 @@ With several libraries (`--against` more than once, https://github.com/crack666/
 states of the single comparisons are joined per file: `backed_up` in any library wins, then `error` (another root
 might hold it), then `differs`, then `new`. `match_library_job_id` names the library that holds the content.
 
+## Duplicates
+
+https://github.com/crack666/smart_file_organizer/issues/87: `sfo duplicates <job> [<job> ...]` reports files and folders
+with the same content over one or more jobs of any role. It reads in stages: size (from the scan, nothing read), then
+the sample checksum (`sample_hash` in `content_fingerprints`: SHA-256 over size, first and last 64 KiB and six places
+of 4 KiB in between, at offsets that follow from the size; files up to 128 KiB whole), then, with `--verify`, the full
+SHA-256. It changes no file.
+
+### Certainty of a duplicate group (`DuplicateCertainty`)
+
+`certainty` of a group.
+
+| Code | Meaning |
+|---|---|
+| `likely` | Same size and same sample checksum; the whole files were not compared. Run with `--verify` before relying on it. |
+| `certain` | Every file of the group has the same full SHA-256 (read now or taken from `content_fingerprints`). |
+
+### What a duplicate group holds (`DuplicateScope`)
+
+`scope` of a group.
+
+| Code | Meaning |
+|---|---|
+| `files` | Files with the same content. |
+| `folders` | Folders that are wholly or mostly the same: at least half of the files of each folder have a copy in another folder of the group. Their identical files are counted, not listed one by one. |
+
+### What a duplicate group means (`DuplicateAdvice`)
+
+`advice` of a group. The command only reports; nothing in a library is ever proposed for removal.
+
+| Code | Meaning |
+|---|---|
+| `verify_first` | The group is `likely`: run again with `--verify` before acting on it. |
+| `library_only` | Every copy lies in a library: reported so the person knows, nothing is proposed. |
+| `source_copies_held` | Certain, a library holds the content and copies lie in sources: those may go the usual way (`sfo compare`, `sfo findings`, `sfo plan`), which reads both files again before anything is removed. |
+| `no_library_copy` | Certain, but copies lie in sources only: without a library nothing is removed; keep one copy. |
+
 ## Scan
 
 Links and read errors: https://github.com/crack666/smart_file_organizer/issues/57 and
