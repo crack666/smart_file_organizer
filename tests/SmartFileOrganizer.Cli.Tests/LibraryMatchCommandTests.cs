@@ -151,9 +151,11 @@ public class LibraryMatchCommandTests : IDisposable
         var candidates = Candidates(result);
         Assert.Equal(secondId, candidates[0].GetProperty("library_job_id").GetInt64());
         Assert.StartsWith(second, Str(candidates[0], "destination"));
-        Assert.Contains(candidates, c => c.GetProperty("library_job_id").GetInt64() == first);
+        // The ski trip of the first library fits by time only: listed, not proposed (Issue 85).
+        var unconfirmed = result.GetProperty("unconfirmed").EnumerateArray().ToList();
+        Assert.Contains(unconfirmed, c => c.GetProperty("library_job_id").GetInt64() == first && Str(c, "target_relative") == "Fotos/Skifahrt 2015");
         // Every proposal lies inside the root of its library.
-        foreach (var c in candidates)
+        foreach (var c in candidates.Concat(unconfirmed))
         {
             var root = c.GetProperty("library_job_id").GetInt64() == first ? _library : second;
             Assert.StartsWith(root, Str(c, "destination"));
@@ -194,13 +196,13 @@ public class LibraryMatchCommandTests : IDisposable
     // ------------------------------------------------------------------ done when
 
     /// <summary>
-    /// Loose photos from the days of an occasion find the occasion folder first, but without a look at the content only
-    /// as <c>uncertain</c>. Until https://github.com/crack666/smart_file_organizer/issues/56 this test asked for
-    /// <c>likely</c> from the period and file type alone, which made any photo of those days the trip's; the acceptance
-    /// test is now ContentMatchCommandTests (a birthday of the same days does not get the trip's folder).
+    /// Loose photos from the days of an occasion find the occasion folder first, but without a look at the content it is
+    /// no proposal: it is listed as unconfirmed and a new folder is proposed (Issue 85). Until Issue 56 this test asked for
+    /// <c>likely</c> from the period and file type alone, then for <c>uncertain</c>; the acceptance test for content is
+    /// ContentMatchCommandTests (a birthday of the same days does not get the trip's folder).
     /// </summary>
     [Fact]
-    public async Task LoosePhotos_OfTheSameDays_FindTheOccasionFolderFirst_OnlyUncertainWithoutContent()
+    public async Task LoosePhotos_OfTheSameDays_FindTheOccasionFolderFirst_ButWithoutContentItIsNoProposal()
     {
         var (library, source) = await PrepareAsync();
 
@@ -210,14 +212,16 @@ public class LibraryMatchCommandTests : IDisposable
         Assert.Equal(library, byPath.GetProperty("library").GetProperty("id").GetInt64());
         Assert.Equal("comparison", Str(byPath, "library_from"));
         Assert.False(byPath.GetProperty("unit").GetProperty("keep_whole").GetBoolean());
-        var first = Candidates(byPath)[0];
+        Assert.Empty(Candidates(byPath));
+        var first = byPath.GetProperty("unconfirmed")[0];
         Assert.Equal("into_existing", Str(first, "placement"));
         Assert.Equal("Fotos/Skifahrt 2015", Str(first, "target_relative"));
-        Assert.Equal("uncertain", Str(first, "certainty"));
         Assert.Contains("2015-02-08", Str(first, "reason"));
         Assert.Contains("the content was not checked", Str(first, "reason"));
         Assert.Contains(first.GetProperty("signals").EnumerateArray(), s => Str(s, "signal") == "period" && s.GetProperty("agrees").GetBoolean());
-        Assert.Equal(JsonValueKind.Null, byPath.GetProperty("new_folder").ValueKind);
+        var proposal = byPath.GetProperty("new_folder");
+        Assert.Equal("Fotos", Str(proposal, "parent_relative"));
+        Assert.Contains("Fotos/Skifahrt 2015 fits by time, name or kind of files only", Str(proposal, "reason"));
 
         // The same photos as an event bundle.
         var events = (await OkAsync("bundles", "list", source.ToString(), "--all", "--kind", "event", "--limit", "100"))
@@ -225,7 +229,7 @@ public class LibraryMatchCommandTests : IDisposable
         var ski = events.Single(e => e.GetProperty("period").GetProperty("from").GetString()!.StartsWith("2015-02-08", StringComparison.Ordinal));
         var byBundle = await OkAsync("library", "match", source.ToString(), "--bundle", ski.GetProperty("id").GetInt64().ToString(), "--no-model");
         Assert.Equal("bundle", Str(byBundle.GetProperty("unit"), "kind"));
-        Assert.Equal("Fotos/Skifahrt 2015", Str(Candidates(byBundle)[0], "target_relative"));
+        Assert.Equal("Fotos/Skifahrt 2015", Str(byBundle.GetProperty("unconfirmed")[0], "target_relative"));
     }
 
     /// <summary>A named folder keeps its name and goes whole next to its kind: no rename, no split.</summary>
@@ -281,18 +285,23 @@ public class LibraryMatchCommandTests : IDisposable
     }
 
     [Fact]
-    public async Task AnInvoice_FindsTheInvoices_ByItsName_AndTheCatchAllIsAWeakPlace()
+    public async Task AnInvoice_FindsTheInvoicesFirst_ButOneWordIsNoProposal_AndTheCatchAllIsAWeakPlace()
     {
         var (_, source) = await PrepareAsync();
 
+        // One word of the file name ("rechnung") chooses the folder for a content check, but never agrees on its own
+        // (Issue 85): without a model it is listed as unconfirmed, not proposed.
         var invoice = await OkAsync("library", "match", source.ToString(), "Kram/rechnung_strom.pdf", "--no-model");
-        var first = Candidates(invoice)[0];
+        Assert.Empty(Candidates(invoice));
+        var first = invoice.GetProperty("unconfirmed")[0];
         Assert.Equal("file", Str(invoice.GetProperty("unit"), "kind"));
         Assert.Equal("Dokumente/Rechnungen/2016", Str(first, "target_relative"));
-        Assert.Contains("rechnung", Str(first, "reason"));
+        var name = first.GetProperty("signals").EnumerateArray().Single(s => Str(s, "signal") == "name");
+        Assert.False(name.GetProperty("agrees").GetBoolean());
+        Assert.Contains("only one word in common with the folder's name ('rechnung')", Str(name, "detail"));
 
         var note = await OkAsync("library", "match", source.ToString(), "Kram/notiz_einkauf.txt", "--no-model");
-        var catchAll = Candidates(note).Single(c => Str(c, "target_relative") == "Archiv/Sonstiges");
+        var catchAll = note.GetProperty("unconfirmed").EnumerateArray().Single(c => Str(c, "target_relative") == "Archiv/Sonstiges");
         Assert.Contains(catchAll.GetProperty("weak_place").GetProperty("findings").EnumerateArray(), f => Str(f, "kind") == "placeholder_name");
         Assert.Contains(Str(catchAll, "certainty"), new[] { "uncertain", "review" });
     }

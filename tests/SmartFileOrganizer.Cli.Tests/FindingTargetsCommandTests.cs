@@ -190,6 +190,15 @@ public partial class FindingTargetsCommandTests : IDisposable
 
     private Task<JsonElement> OkAsync(params string[] args) => OkAsync(null, args);
 
+    private async Task<(int Exit, JsonElement Doc)> RunAsync(Action<IServiceCollection>? configure, params string[] args)
+    {
+        var stdout = new StringWriter();
+        var exit = await SfoApp.RunAsync([.. args, "--json", "--db", _dbPath],
+            new CliHost { Out = stdout, Error = new StringWriter(), ConfigureServices = configure });
+        using var doc = JsonDocument.Parse(stdout.ToString());
+        return (exit, doc.RootElement.Clone());
+    }
+
     private async Task<(long Library, long Source)> PrepareAsync()
     {
         var library = (await OkAsync("scan", _library, "--role", "library", "--structure-only")).GetProperty("job").GetProperty("id").GetInt64();
@@ -337,21 +346,87 @@ public partial class FindingTargetsCommandTests : IDisposable
         Assert.Equal([first, second], ids);
     }
 
-    /// <summary>Without a model a target is uncertain at most, as in sfo library match; a later run with a model checks it.</summary>
+    /// <summary>
+    /// Without a model no existing folder is the target (Issue 85; until then it was the ski trip folder as uncertain): the
+    /// new folder needs a name the rules cannot complete, so the finding says no_model. A later run with a model checks it.
+    /// </summary>
     [Fact]
-    public async Task WithoutAModel_TheTargetIsUncertainAtMost()
+    public async Task WithoutAModel_NoExistingFolderIsTheTarget()
     {
         var (_, source) = await PrepareAsync();
 
         var run = await OkAsync("findings", "targets", source.ToString(), "--no-model");
         var item = run.GetProperty("items").EnumerateArray().Single(i => Str(i, "kind") == "not_backed_up");
-        Assert.Equal("Fotos/Skifahrt 2015", Str(item, "relative_path"));
+        Assert.Equal("no_model", Str(item, "status"));
+        Assert.Equal(JsonValueKind.Null, item.GetProperty("relative_path").ValueKind);
         Assert.Equal("not_checked", Str(item, "content_check"));
-        Assert.Contains(Str(item, "certainty"), new[] { "uncertain", "review" });
 
         var (configure, _, judge) = WithModel();
         var withModel = await OkAsync(configure, "findings", "targets", source.ToString());
         Assert.Equal(1, withModel.GetProperty("matched").GetInt32());
         Assert.Contains(judge.Requests, r => r.Task == LibraryAdviceTask.Fit);
+    }
+
+    /// <summary>
+    /// Done when of Issue 85: a library that cannot be read (the share is not connected) gives a named failure, not targets.
+    /// Until then the run reported success with reasons such as "the folder's files could not be described". sfo doctor
+    /// names the root as well.
+    /// </summary>
+    [Fact]
+    public async Task ALibraryThatCannotBeRead_IsANamedFailure_NotTargets()
+    {
+        var (library, source) = await PrepareAsync();
+        // The share goes away after the scan: the folder is renamed, as if it were not connected.
+        Directory.Move(_library, _library + "-weg");
+        var (configure, model, judge) = WithModel();
+
+        var (exit, doc) = await RunAsync(configure, "findings", "targets", source.ToString());
+
+        Assert.Equal(ExitCodes.Failure, exit);
+        Assert.Equal("library_unreachable", doc.GetProperty("error").GetProperty("code").GetString());
+        Assert.Contains($"library {library}", doc.GetProperty("error").GetProperty("message").GetString());
+        Assert.Empty(judge.Requests);
+        Assert.Empty(model.Described);
+        // Nothing was stored: the findings still wait for a match.
+        var summary = await OkAsync("findings", source.ToString(), "--summary");
+        Assert.Equal("not_matched", Str(PhotoBrief(summary), "target_status"));
+
+        var (matchExit, match) = await RunAsync(configure, "library", "match", source.ToString(), "Neuer Ordner");
+        Assert.Equal(ExitCodes.Failure, matchExit);
+        Assert.Equal("library_unreachable", match.GetProperty("error").GetProperty("code").GetString());
+
+        var (_, doctor) = await RunAsync(configure, "doctor");
+        var checks = doctor.GetProperty("result").GetProperty("libraries").EnumerateArray().ToList();
+        var check = Assert.Single(checks);
+        Assert.Equal(library, check.GetProperty("job_id").GetInt64());
+        Assert.False(check.GetProperty("readable").GetBoolean());
+        Assert.False(doctor.GetProperty("result").GetProperty("ok").GetBoolean());
+
+        // Connected again: the run goes through.
+        Directory.Move(_library + "-weg", _library);
+        var run = await OkAsync(configure, "findings", "targets", source.ToString());
+        Assert.True(run.GetProperty("matched").GetInt32() > 0);
+    }
+
+    /// <summary>Loose photos and a library of papers only: no folder, and no new folder either, on purpose (Issue 85).</summary>
+    [Fact]
+    public async Task PhotosAndALibraryOfPapersOnly_GiveNoTarget()
+    {
+        var papers = Path.Combine(_dir, "papiere");
+        for (var m = 1; m <= 4; m++)
+            Write(papers, $"Vertraege/vertrag_{m}.pdf", $"Vertrag {m}", new DateTime(2020, m, 1));
+        var library = (await OkAsync("scan", papers, "--role", "library", "--structure-only")).GetProperty("job").GetProperty("id").GetInt64();
+        var source = (await OkAsync("scan", _source, "--role", "source")).GetProperty("job").GetProperty("id").GetInt64();
+        await OkAsync("compare", source.ToString(), "--against", library.ToString());
+        await OkAsync("bundles", "build", source.ToString());
+        await DescribeSourceAsync(source);
+        var (configure, _, _) = WithModel();
+
+        var run = await OkAsync(configure, "findings", "targets", source.ToString());
+
+        var item = run.GetProperty("items").EnumerateArray().Single(i => Str(i, "kind") == "not_backed_up");
+        Assert.Equal("no_target", Str(item, "status"));
+        Assert.Contains("holds no own photos and videos", Str(item, "reason"));
+        Assert.Equal(JsonValueKind.Null, item.GetProperty("path").ValueKind);
     }
 }

@@ -53,6 +53,12 @@ public sealed class LibraryWords
     public IReadOnlyList<VariantGroup> VariantGroups { get; private init; } = [];
     public IReadOnlySet<string> CommonChildNames { get; private init; } = new HashSet<string>();
     public IReadOnlySet<string> StopWords { get; private init; } = new HashSet<string>();
+
+    /// <summary>Everyday words that say little on their own; a name agrees only by other words (Issue 85).</summary>
+    public IReadOnlySet<string> CommonWords { get; private init; } = new HashSet<string>();
+
+    /// <summary>Folder names of technical parts (cache, thumbnails, css): closed for loose files (Issue 85).</summary>
+    public IReadOnlySet<string> TechnicalNames { get; private init; } = new HashSet<string>();
     public IReadOnlyList<string> SensitiveNameWords { get; private init; } = [];
     public IReadOnlySet<string> DeviceMarkers { get; private init; } = new HashSet<string>();
     public IReadOnlySet<string> ComputerMarkers { get; private init; } = new HashSet<string>();
@@ -157,6 +163,8 @@ public sealed class LibraryWords
         VariantGroups = [.. a.VariantGroups ?? [], .. b.VariantGroups ?? []],
         CommonChildNames = [.. a.CommonChildNames ?? [], .. b.CommonChildNames ?? []],
         StopWords = [.. a.StopWords ?? [], .. b.StopWords ?? []],
+        CommonWords = [.. a.CommonWords ?? [], .. b.CommonWords ?? []],
+        TechnicalNames = [.. a.TechnicalNames ?? [], .. b.TechnicalNames ?? []],
         SensitiveNameWords = [.. a.SensitiveNameWords ?? [], .. b.SensitiveNameWords ?? []],
         DeviceMarkers = [.. a.DeviceMarkers ?? [], .. b.DeviceMarkers ?? []],
         ComputerMarkers = [.. a.ComputerMarkers ?? [], .. b.ComputerMarkers ?? []],
@@ -194,6 +202,8 @@ public sealed class LibraryWords
                 .ToList(),
             CommonChildNames = Set(dto.CommonChildNames),
             StopWords = Set(dto.StopWords),
+            CommonWords = Set(dto.CommonWords),
+            TechnicalNames = Set(dto.TechnicalNames),
             SensitiveNameWords = (dto.SensitiveNameWords ?? []).Select(Normalize).Distinct().ToList(),
             DeviceMarkers = Set(dto.DeviceMarkers),
             ComputerMarkers = Set(dto.ComputerMarkers),
@@ -236,6 +246,8 @@ public sealed class LibraryWords
         public List<VariantGroupDto>? VariantGroups { get; set; }
         public List<string>? CommonChildNames { get; set; }
         public List<string>? StopWords { get; set; }
+        public List<string>? CommonWords { get; set; }
+        public List<string>? TechnicalNames { get; set; }
         public List<string>? SensitiveNameWords { get; set; }
         public List<string>? DeviceMarkers { get; set; }
         public List<string>? ComputerMarkers { get; set; }

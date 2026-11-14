@@ -319,6 +319,7 @@ public static class LibraryCommand
         LibraryFailure.BundleNotFound => new CliFailureException(ExitCodes.Failure, ErrorCodes.BundleNotFound, ex.Message),
         LibraryFailure.PatternsInvalid => new CliFailureException(ExitCodes.Failure, ErrorCodes.LibraryPatternsInvalid, ex.Message),
         LibraryFailure.OptionsInvalid => new CliFailureException(ExitCodes.Failure, ErrorCodes.SettingsInvalid, ex.Message),
+        LibraryFailure.LibraryUnreachable => new CliFailureException(ExitCodes.Failure, ErrorCodes.LibraryUnreachable, ex.Message),
         _ => new CliFailureException(ExitCodes.Failure, ErrorCodes.ScanNotCompleted, ex.Message)
     };
 

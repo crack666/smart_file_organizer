@@ -107,7 +107,13 @@ public enum FindingTargetStatus
     [JsonStringEnumMemberName("content_unclear")] ContentUnclear,
 
     /// <summary>A model was needed (content check or the name of a new folder) and none was used or reachable.</summary>
-    [JsonStringEnumMemberName("no_model")] NoModel
+    [JsonStringEnumMemberName("no_model")] NoModel,
+
+    /// <summary>
+    /// No target on purpose (https://github.com/crack666/smart_file_organizer/issues/85): no existing folder is confirmed by
+    /// content, and no library holds this kind of content, so a new folder would be a guess as well.
+    /// </summary>
+    [JsonStringEnumMemberName("no_target")] NoTarget
 }
 
 /// <summary>Whether a kind of finding could be computed from the stored steps of a job.</summary>

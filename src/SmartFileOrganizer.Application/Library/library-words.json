@@ -69,6 +69,28 @@
   // Words ignored when names are compared for similarity.
   "stop_words": ["und", "and", "the", "der", "die", "das", "von", "of", "in", "im", "mit", "with", "bei", "at", "zum", "zur", "fuer", "for", "ein", "eine", "a", "an"],
 
+  // Everyday words that say little on their own: a file and a folder sharing one of them are not related
+  // (Issue 85). The target match never counts them as a name that agrees.
+  "common_words": [
+    "neu", "neue", "neuer", "neues", "new", "alt", "alte", "alter", "altes", "old", "final", "kopie", "copy", "teil", "part",
+    "bild", "bilder", "picture", "pictures", "pics", "film", "filme", "movie", "movies", "clip", "clips", "datei", "dateien",
+    "file", "files", "ordner", "folder", "dokument", "dokumente", "document", "documents", "sommer", "summer", "winter",
+    "fruehling", "spring", "herbst", "autumn", "tag", "day", "nacht", "night", "zeit", "time", "haus", "home", "house",
+    "leben", "life", "love", "liebe", "welt", "world", "mein", "meine", "my", "unser", "unsere", "our", "best", "beste",
+    "schoen", "schoene", "good", "gut", "gute", "big", "gross", "klein", "small", "little", "erste", "first", "zweite",
+    "second", "letzte", "last", "privat", "private", "sonstige", "other", "misc", "test", "version"
+  ],
+
+  // Folder names of technical parts (caches, thumbnails, web page parts, build output). Such a folder, and
+  // everything below it, never takes in loose files from elsewhere (Issue 85).
+  "technical_names": [
+    "cache", "caches", "_cache", ".cache", "cache2", "gpucache", "code cache", "shadercache", "webcache", "cachestorage",
+    "thumbs", "thumbnails", ".thumbnails", "thumb", "@eadir", ".@__thumb", "previews", "temp", "tmp", ".tmp",
+    "css", "js", "scripts", "fonts", "assets", "static", "res", "resources", "lib", "libs", "bin", "obj", "build", "dist",
+    "logs", "log", "plugins", "locale", "locales", "shaders", "savegames", "saves", "screenshots_cache", "crashdumps",
+    "#recycle", ".trash", "$recycle.bin", ".trashes"
+  ],
+
   // Extra words in file names that mark access data, beyond the scan's sensitive-file rules.
   "sensitive_name_words": ["recovery", "wiederherstellung", "2fa", "backup codes", "backup-codes", "backupcodes", "mnemonic", "tan-liste", "tanliste", "puk"],
 

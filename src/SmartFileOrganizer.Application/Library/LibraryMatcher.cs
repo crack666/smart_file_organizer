@@ -112,12 +112,34 @@ public sealed record NewFolderProposal(
     string Reason,
     WeakPlace? Weak);
 
-/// <summary>The answer of the rules: the best existing folders, or a new one.</summary>
+/// <summary>The answer of the rules: the best existing folders, or a new one, or why there is none.</summary>
 /// <param name="Considered">Folders that were scored.</param>
 /// <param name="Rejected">Candidates the period or names chose but whose content contradicts the unit; never proposed.</param>
+/// <param name="Unconfirmed">
+/// Existing folders time, names and kinds of files chose but no content confirms (neither the same files there nor a
+/// content check that fits); never proposed (https://github.com/crack666/smart_file_organizer/issues/85).
+/// </param>
+/// <param name="NoTarget">Why neither an existing nor a new folder is proposed; null when there is a proposal.</param>
 public sealed record MatchResult(
     IReadOnlyList<MatchCandidate> Candidates, int Considered, NewFolderProposal? NewFolder,
-    IReadOnlyList<MatchCandidate>? Rejected = null, ContentCheck? Content = null);
+    IReadOnlyList<MatchCandidate>? Rejected = null, ContentCheck? Content = null,
+    IReadOnlyList<MatchCandidate>? Unconfirmed = null, string? NoTarget = null);
+
+/// <summary>
+/// What kind of content a unit is, for the choice of the library (https://github.com/crack666/smart_file_organizer/issues/85):
+/// own pictures and videos go to the library of photos, films to the one of videos, papers to the one of documents.
+/// Internal to the matching; the output says it in words.
+/// </summary>
+public enum ContentKind
+{
+    OwnRecordings,
+    ForeignMedia,
+    Documents,
+    Audio,
+    Archives,
+    Software,
+    Other
+}
 
 /// <summary>
 /// Finds the folders of a library a unit of a source belongs in (https://github.com/crack666/smart_file_organizer/issues/25).
@@ -161,12 +183,15 @@ public static partial class LibraryMatcher
 
         var fitting = new List<MatchCandidate>();
         var rejected = new List<MatchCandidate>();
+        var unconfirmed = new List<MatchCandidate>();
         foreach (var c in scored.Where(c => c.Score >= o.MinScore))
         {
             var judged = ApplyContent(c, unit, o, content);
             if (judged is null) rejected.Add(c with { Content = content.ByKey[ContentCheck.KeyOf(c.Placement, c.Target.RelativePath)] });
+            else if (o.RequireContent && !Confirmed(judged, unit)) unconfirmed.Add(judged);
             else fitting.Add(judged);
         }
+        unconfirmed = unconfirmed.OrderByDescending(c => c.Score).ThenBy(c => c.Target.RelativePath, StringComparer.Ordinal).ToList();
         fitting = fitting
             .OrderByDescending(c => c.Score)
             .ThenBy(c => (int)c.Certainty)
@@ -184,9 +209,84 @@ public static partial class LibraryMatcher
         }
 
         var top = fitting.Take(limit).ToList();
-        var newFolder = top.Count == 0 ? NewFolder(map, unit, o, words, rejected) : null;
-        return new MatchResult(top, considered, newFolder, rejected, content);
+        NewFolderProposal? newFolder = null;
+        string? noTarget = null;
+        if (top.Count == 0)
+        {
+            // A new folder only in a library that holds this kind of content; otherwise rather no target.
+            var share = KindShare(map, unit);
+            if (map.Root.Files > 0 && unit.Files > 0 && share < o.MinLibraryKindShare)
+                noTarget = $"No existing folder is confirmed by content, and the library holds no {KindWords(KindOf(unit))} "
+                           + $"({LibraryText.Percent(share)} of its files): a new folder there would be a guess as well.";
+            else
+                newFolder = NewFolder(map, unit, o, words, rejected, unconfirmed);
+        }
+        return new MatchResult(top, considered, newFolder, rejected, content, unconfirmed, noTarget);
     }
+
+    /// <summary>
+    /// Content confirms an existing folder: the same files already lie there, or the content check says it fits. A named
+    /// folder that goes into the library folder of the same name and years is the same folder, confirmed by its name.
+    /// A new subfolder under the unit's own name is no existing folder and needs no confirmation.
+    /// </summary>
+    private static bool Confirmed(MatchCandidate c, MatchUnit unit) =>
+        c.Placement != MatchPlacement.IntoExisting
+        || unit.KeepWhole
+        || c.Signals.Any(s => s.Signal == MatchSignal.ContentNeighbours && s.Strong)
+        || c.Signals.Any(s => s.Signal == MatchSignal.ContentFit && s.Agrees);
+
+    /// <summary>
+    /// What kind of content the unit is: documents, own pictures and videos (pictures, or videos with a capture date or a
+    /// date in the name, as cameras and phones write them), or videos from elsewhere such as films.
+    /// </summary>
+    public static ContentKind KindOf(MatchUnit unit)
+    {
+        switch (unit.Group)
+        {
+            case ContentGroup.Media:
+                var images = unit.Types[(int)FileType.Image];
+                var videos = unit.Types[(int)FileType.Video];
+                return images >= videos || unit.TimeSource is Domain.Enums.TimeSource.CaptureDate or Domain.Enums.TimeSource.FileName
+                    ? ContentKind.OwnRecordings
+                    : ContentKind.ForeignMedia;
+            case ContentGroup.Document: return ContentKind.Documents;
+            case ContentGroup.Audio: return ContentKind.Audio;
+            case ContentGroup.Archive: return ContentKind.Archives;
+            case ContentGroup.Software: return ContentKind.Software;
+            default: return ContentKind.Other;
+        }
+    }
+
+    /// <summary>
+    /// Share of the library's files that are of the unit's kind of content: for own recordings its pictures and the videos
+    /// outside film and episode folders, for films its videos, otherwise the files of the unit's group.
+    /// </summary>
+    public static double KindShare(LibraryMap map, MatchUnit unit)
+    {
+        var root = map.Root;
+        if (root.Files == 0) return 0;
+        var titleVideos = map.Entries.Where(e => e.Closed == ClosedUnitKind.SingleTitle && e.ClosedAt == e.RelativePath)
+            .Sum(e => e.Types[(int)FileType.Video]);
+        double count = KindOf(unit) switch
+        {
+            ContentKind.OwnRecordings => root.Types[(int)FileType.Image] + Math.Max(0, root.Types[(int)FileType.Video] - titleVideos),
+            ContentKind.ForeignMedia => root.Types[(int)FileType.Video],
+            _ when unit.Group is { } g => LibraryMap.Count(root.Types, g),
+            _ => 0
+        };
+        return count / root.Files;
+    }
+
+    public static string KindWords(ContentKind kind) => kind switch
+    {
+        ContentKind.OwnRecordings => "own photos and videos",
+        ContentKind.ForeignMedia => "films or other videos",
+        ContentKind.Documents => "documents",
+        ContentKind.Audio => "audio",
+        ContentKind.Archives => "archives",
+        ContentKind.Software => "programs and code",
+        _ => "files of this kind"
+    };
 
     private static (List<MatchCandidate> Candidates, int Considered) Scored(LibraryMap map, MatchUnit unit, LibraryMatchOptions o, LibraryWords words)
     {
@@ -197,6 +297,9 @@ public static partial class LibraryMatcher
         {
             if (e.Depth == 0 || e.Dump is not null) continue;
             if (unit.KeepWhole ? !SameFolderName(unit.Name, e.Name) : e.DirectFiles == 0) continue;
+            // A closed unit (a program, a cache, one film) never takes in loose files from elsewhere
+            // (https://github.com/crack666/smart_file_organizer/issues/85); only the same unit under its own name goes there.
+            if (e.Closed is not null && !(unit.KeepWhole && e.ClosedAt == e.RelativePath)) continue;
             considered++;
             if (Into(e, unit, o, words) is { } c) scored.Add(c);
         }
@@ -205,7 +308,7 @@ public static partial class LibraryMatcher
         {
             foreach (var e in map.Entries)
             {
-                if (e.Dump is not null || e.Role == FolderRole.CatchAll && e.Depth > 0) continue;
+                if (e.Dump is not null || e.Closed is not null || e.Role == FolderRole.CatchAll && e.Depth > 0) continue;
                 if (e.Depth > 0 && e.Children.Count == 0) continue;               // a leaf folder is no place for folders
                 if (e.Children.Any(c => SameFolderName(unit.Name, c.Name))) continue; // the same folder exists: into
                 considered++;
@@ -287,6 +390,13 @@ public static partial class LibraryMatcher
         var content = signals[0];
         // A type that does not fit at all rules a folder out, unless the same content already lies there.
         if (signals[3].Contradicts && !content.Agrees) return null;
+        // Names count only together with a second signal (https://github.com/crack666/smart_file_organizer/issues/85).
+        if (!unit.KeepWhole && signals[2].Value > 0 && !signals.Where((s, i) => i != 2).Any(s => s.Agrees))
+            signals[2] = signals[2] with
+            {
+                Value = 0, Agrees = false, Strong = false,
+                Detail = signals[2].Detail + "; nothing else agrees, so the name alone does not count"
+            };
 
         var weak = WeakAt(e, unit, MatchPlacement.IntoExisting);
         var certainty = Certainty(signals, weak.Cap);
@@ -339,11 +449,11 @@ public static partial class LibraryMatcher
     // ------------------------------------------------------------------ new folder
 
     private static NewFolderProposal NewFolder(LibraryMap map, MatchUnit unit, LibraryMatchOptions o, LibraryWords words,
-        IReadOnlyList<MatchCandidate>? rejected = null)
+        IReadOnlyList<MatchCandidate>? rejected = null, IReadOnlyList<MatchCandidate>? unconfirmed = null)
     {
-        // The parent: the folder whose subfolders are most like the unit; the root when none is.
+        // The parent: the folder whose subfolders are most like the unit; the root when none is. Never inside a closed unit.
         var parents = map.Entries
-            .Where(e => e.Dump is null && (e.Depth == 0 || e.Children.Count > 0 && e.Role != FolderRole.CatchAll))
+            .Where(e => e.Dump is null && e.Closed is null && (e.Depth == 0 || e.Children.Count > 0 && e.Role != FolderRole.CatchAll))
             .Select(e => (Entry: e, Signals: SubfolderSignals(e, unit, o)))
             .Where(x => !x.Signals.Single(s => s.Signal == MatchSignal.FileType).Contradicts)
             // Where the neighbours are named in several ways, the habit for a new name is unclear: a weaker home.
@@ -389,6 +499,9 @@ public static partial class LibraryMatcher
         // An occasion without a folder yet: say which folders the period chose and why their content does not fit.
         foreach (var r in (rejected ?? []).Take(2))
             reason = reason.TrimEnd('.') + $"; {r.Target.RelativePath} fits by time or name, not by content ({r.Content?.Reason.TrimEnd('.') ?? "another occasion"}).";
+        // Rather no existing folder than one only time and names chose (Issue 85).
+        foreach (var u in (unconfirmed ?? []).Take(2))
+            reason = reason.TrimEnd('.') + $"; {u.Target.RelativePath} fits by time, name or kind of files only, and no content confirms it.";
 
         return new NewFolderProposal(parent, name, AdviceOrigin.Rule, complete, pattern, Join(parent.RelativePath, name),
             certainty, reason, weak.Place);
@@ -516,11 +629,32 @@ public static partial class LibraryMatcher
             folderWords = LibraryMap.Words(parent.Name, words);
         var matched = unit.Words.Where(w => folderWords.Any(f => LibraryMap.SameWord(w, f))).ToList();
         var share = (double)matched.Count / unit.Words.Count;
-        var agrees = matched.Count > 0 && share >= o.MinNameShare;
-        var detail = matched.Count == 0
-            ? $"no word of '{string.Join(" ", unit.Words)}' in the folder's name"
-            : $"'{string.Join(" ", matched)}' in the folder's name";
-        return new SignalResult(MatchSignal.Name, share, weight, agrees, agrees, false, detail);
+
+        // A named folder that keeps its name is compared by its whole name; there one word is the name.
+        if (unit.KeepWhole)
+        {
+            var whole = matched.Count > 0 && share >= o.MinNameShare;
+            return new SignalResult(MatchSignal.Name, share, weight, whole, whole, false,
+                matched.Count == 0 ? $"no word of '{string.Join(" ", unit.Words)}' in the folder's name" : $"'{string.Join(" ", matched)}' in the folder's name");
+        }
+
+        // Loose files (https://github.com/crack666/smart_file_organizer/issues/85): everyday words do not count, and one word
+        // never agrees on its own: a photo called "Sommer ..." has nothing to do with a film called "Ein Sommer in ...".
+        // One rare word still helps to choose which folders the content check looks at, but never agrees: only content
+        // makes the folder a proposal.
+        var meaningful = matched.Where(w => !words.CommonWords.Contains(w)).ToList();
+        var meaningfulShare = (double)meaningful.Count / unit.Words.Count;
+        var agrees = meaningful.Count >= 2 && meaningfulShare >= o.MinNameShare;
+        string detail;
+        if (matched.Count == 0)
+            detail = $"no word of '{string.Join(" ", unit.Words)}' in the folder's name";
+        else if (agrees)
+            detail = $"'{string.Join(" ", meaningful)}' in the folder's name";
+        else if (meaningful.Count == 0)
+            detail = $"only everyday words in common with the folder's name ('{string.Join(" ", matched)}'), which say nothing";
+        else
+            detail = $"only one word in common with the folder's name ('{string.Join(" ", meaningful)}'), which alone says nothing";
+        return new SignalResult(MatchSignal.Name, meaningfulShare >= o.MinNameShare ? meaningfulShare : 0, weight, agrees, agrees, false, detail);
     }
 
     private static SignalResult Type(LibraryMapEntry e, MatchUnit unit, double weight)
