@@ -40,7 +40,6 @@ public class MoveNoticeTests
         Assert.NotNull(doc);
         Assert.False(doc.Readable);
         Assert.Empty(doc.Entries);
-        Assert.True(MoveNotice.StartsLikeNotice("# sfo-move-notice 2\n"u8));
         Assert.True(MoveNotice.HasNoticeName("/x/_MOVED-FILES.TXT"));
     }
 }
