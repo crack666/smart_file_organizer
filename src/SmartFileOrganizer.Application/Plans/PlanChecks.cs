@@ -15,6 +15,15 @@ public sealed class PlanOptions
 
     /// <summary>Further places no target may lie in, beside the user profile and the system drive.</summary>
     public List<string> ProtectedPlaces { get; set; } = [];
+
+    public const string DefaultQuarantineFolder = "_sfo-quarantine";
+
+    /// <summary>
+    /// Folder below the root of a library that <c>quarantine</c> targets lie in when a person marks an action as clutter
+    /// (<see cref="PlanService.MarkForRemovalAsync"/>); the rest of the target path is kept below it, so the action can be
+    /// taken out again. A plain folder of the library like any other, checked by the same rules.
+    /// </summary>
+    public string QuarantineFolder { get; set; } = DefaultQuarantineFolder;
 }
 
 /// <summary>What the checks of a plan look at.</summary>
