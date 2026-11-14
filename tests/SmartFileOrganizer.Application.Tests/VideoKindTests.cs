@@ -261,6 +261,53 @@ public class VideoKindTests : IDisposable
         Assert.DoesNotContain(facts, f => f.Key == FileFactKey.VideoTitle);
     }
 
+    // ── split and mix ────────────────────────────────────────────────────
+
+    [Fact]
+    public void Split_SeparatesKnownKinds_AndTheRestGoesWithTheOwnRecordings()
+    {
+        FileNode File(long id) => new() { Id = id, Name = $"f{id}" };
+        IReadOnlyList<FileFact> Kind(VideoKind k, ResultCertainty c = ResultCertainty.Certain) => [new(FileFactKey.VideoKind, k.ToCode(), FactSource.Name, c)];
+        var files = Enumerable.Range(1, 6).Select(i => File(i)).ToList();
+        var facts = new Dictionary<long, IReadOnlyList<FileFact>>
+        {
+            [1] = Kind(VideoKind.Movie), [2] = Kind(VideoKind.OwnRecording), [3] = Kind(VideoKind.OwnRecording, ResultCertainty.Likely),
+            [4] = Kind(VideoKind.SeriesEpisode), [5] = Kind(VideoKind.Unknown, ResultCertainty.Uncertain)
+            // 6: a picture, no kind
+        };
+
+        var parts = VideoKindSplit.Parts(files, facts);
+        Assert.Equal([[2, 3, 5, 6], [1], [4]], parts.Select(p => p.Select(f => f.Id).ToArray()));
+
+        // One known kind only: one part.
+        Assert.Single(VideoKindSplit.Parts(files, new Dictionary<long, IReadOnlyList<FileFact>> { [1] = Kind(VideoKind.Movie) }));
+    }
+
+    [Fact]
+    public void Mix_CountsKindsAndDevices_AndNamesTheWorks()
+    {
+        IReadOnlyList<FileFact> Ep(int season, int episode) =>
+        [
+            new(FileFactKey.VideoKind, "series_episode", FactSource.Name, ResultCertainty.Certain), new(FileFactKey.VideoTitle, "Example Show", FactSource.Name),
+            new(FileFactKey.SeasonNumber, season.ToString(), FactSource.Name), new(FileFactKey.EpisodeNumber, episode.ToString(), FactSource.Name)
+        ];
+        var mix = VideoOriginMix.From(
+        [
+            Ep(1, 1), Ep(1, 2), Ep(2, 1),
+            [new(FileFactKey.VideoKind, "own_recording", FactSource.Metadata, ResultCertainty.Certain), new(FileFactKey.RecordingDevice, "drone", FactSource.Metadata)],
+            [new(FileFactKey.VideoKind, "web_clip", FactSource.Model, ResultCertainty.Likely), new(FileFactKey.VideoKindDisputed, "own_recording", FactSource.Name, ResultCertainty.Uncertain)],
+            [new(FileFactKey.Width, "1920")]
+        ])!;
+        Assert.Equal(5, mix.Videos);
+        Assert.Equal(["series_episode", "own_recording", "web_clip"], mix.Kinds.Keys);
+        Assert.Equal(1, mix.Devices["drone"]);
+        Assert.Equal(["Example Show S01-S02"], mix.Works);
+        Assert.Equal((4, 1), (mix.Certain, mix.Disputed));
+        Assert.Equal("series_episode", mix.Dominant);
+        Assert.Equal("5 video(s): 3 series_episode, 1 own_recording, 1 web_clip (drone 1); Example Show S01-S02; 1 disputed by the model", mix.Gist());
+        Assert.Null(VideoOriginMix.From([[new(FileFactKey.Width, "1920")]]));
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────
 
     private string Write(string name, byte[] bytes)

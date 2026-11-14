@@ -18,7 +18,7 @@ public class LibraryRepository : ILibraryRepository
         await using var conn = _db.CreateConnection();
         await conn.OpenAsync(ct);
         const string sql = """
-            SELECT parent_path, name, size, file_type, extension, last_write_time, sensitive_markers
+            SELECT id, parent_path, name, size, file_type, extension, last_write_time, sensitive_markers
             FROM file_nodes
             WHERE job_id = @jobId
             """;

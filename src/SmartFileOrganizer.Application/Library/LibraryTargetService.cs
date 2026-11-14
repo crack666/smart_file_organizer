@@ -441,16 +441,25 @@ public sealed partial class LibraryTargetService
               + "a target is proposed once a person keeps them.";
     }
 
-    /// <summary>The parts of the unit by content (<see cref="ContentUnity"/>); one part when it is one whole or nothing is described.</summary>
+    /// <summary>
+    /// The parts of the unit: first by the kind of its videos (<see cref="Media.VideoKindSplit"/>, Issue 103), then each
+    /// kind by content (<see cref="ContentUnity"/>); one part when it is one whole or nothing is known.
+    /// </summary>
     private async Task<IReadOnlyList<IReadOnlyList<FileNode>>> SplitAsync(ScanJob source, IReadOnlyList<FileNode> files, CancellationToken ct)
     {
         if (_facts is null) return [files];
         var all = await _facts.GetByJobAsync(source.Id, ct);
-        if (!files.Any(f => all.TryGetValue(f.Id, out var x) && x.Any(y => y.Key.IsDescription()))) return [files];
+        var byKind = Media.VideoKindSplit.Parts(files, all);
+        if (!files.Any(f => all.TryGetValue(f.Id, out var x) && x.Any(y => y.Key.IsDescription()))) return byKind;
         var captures = await _captures.GetAsync(source.Id, ct);
-        var unity = files.Select(f => new UnityFile(f, EventGrouper.TimeOf(f, captures).Time,
-            all.TryGetValue(f.Id, out var facts) ? facts : [])).ToList();
-        return ContentUnity.Parts(unity, LibraryWords.Default, _options.UnitGapHours);
+        var parts = new List<IReadOnlyList<FileNode>>();
+        foreach (var kind in byKind)
+        {
+            var unity = kind.Select(f => new UnityFile(f, EventGrouper.TimeOf(f, captures).Time,
+                all.TryGetValue(f.Id, out var facts) ? facts : [])).ToList();
+            parts.AddRange(kind.Count >= 2 ? ContentUnity.Parts(unity, LibraryWords.Default, _options.UnitGapHours) : [kind]);
+        }
+        return parts;
     }
 
     /// <summary>
@@ -465,7 +474,11 @@ public sealed partial class LibraryTargetService
         string Label(IReadOnlyList<FileNode> files)
         {
             var described = ContentDescription.From(files.Where(f => all.ContainsKey(f.Id)).Select(f => all[f.Id]).Take(_options.UnitSampleSize).ToList());
-            return described.IsEmpty ? $"{files[0].Name}{(files.Count > 1 ? $" and {files.Count - 1} more" : string.Empty)} (not described)" : described.Gist();
+            if (!described.IsEmpty) return described.Gist();
+            if (Media.VideoOriginMix.From(files.Where(f => all.ContainsKey(f.Id)).Select(f => SensitiveOutputGuard.GetMarkers(f) == SensitiveMarker.None
+                    ? all[f.Id] : all[f.Id].Where(x => !x.Key.IsFreeText()).ToList())) is { } origin)
+                return origin.Gist();
+            return $"{files[0].Name}{(files.Count > 1 ? $" and {files.Count - 1} more" : string.Empty)} (not described)";
         }
 
         var matchedParts = split.OrderByDescending(p => p.Count).Take(_options.MaxUnitParts).ToHashSet();

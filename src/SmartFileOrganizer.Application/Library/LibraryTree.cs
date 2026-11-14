@@ -184,6 +184,7 @@ public sealed class LibraryTree
 
             var info = new DirectoryFileInfo
             {
+                Id = f.Id,
                 Name = f.Name,
                 Size = f.Size,
                 FileType = f.FileType,

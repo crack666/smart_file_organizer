@@ -37,6 +37,24 @@ public static class ControllerCommands
     public sealed record SensitiveFileView(string RelativePath, IReadOnlyList<string> Markers);
 
     /// <summary>
+    /// Kind and origin of the videos of a finding, a part or a library folder (Issue 103): videos per video kind code,
+    /// own recordings per recording device code, the films and series by title, and how many kinds are certain or disputed.
+    /// </summary>
+    public sealed record OriginView(
+        int Videos, IReadOnlyDictionary<string, int> Kinds, IReadOnlyDictionary<string, int> Devices, IReadOnlyList<string> Works,
+        int Certain, int Disputed, string Text)
+    {
+        public static OriginView? From(SmartFileOrganizer.Application.Media.VideoOriginMix? m) =>
+            m is null ? null : new OriginView(m.Videos, m.Kinds, m.Devices, m.Works, m.Certain, m.Disputed, m.Gist());
+    }
+
+    /// <summary>What a person wrote about a library in its hints file (Issue 103).</summary>
+    public sealed record HintsView(string File, IReadOnlyList<string> Lines, bool Truncated)
+    {
+        public static HintsView? From(LibraryHints? h) => h is null ? null : new HintsView(h.File, h.Lines, h.Truncated);
+    }
+
+    /// <summary>
     /// A library folder as the scan holds it. <c>sensitive</c> and <c>markers</c> are a hint; only with
     /// <c>Sensitive:Disclosure</c> <c>restricted</c> does a sensitive folder have no names and no description (<c>withheld</c>).
     /// </summary>
@@ -64,14 +82,16 @@ public static class ControllerCommands
         DescribedView? Description,
         DateTime? DescribedAt,
         bool Withheld,
-        IReadOnlyList<SensitiveFileView> MarkedFiles)
+        IReadOnlyList<SensitiveFileView> MarkedFiles,
+        OriginView? Origin = null)
     {
         public static FolderView From(FolderFacts f) => new(
             f.Library.Id, f.Entry.FullPath, f.Entry.RelativePath, f.Entry.Role.ToCode(), f.Withheld ? string.Empty : f.Entry.Purpose,
             f.Entry.Files, f.Entry.DirectFiles, f.Entry.Subdirs, f.Entry.Bytes, ByType(f.Entry.Types),
             new PeriodView(BundlesCommand.Local(f.Entry.From), BundlesCommand.Local(f.Entry.To), f.Entry.TimeSource.ToCode()),
             f.Entry.Pattern, f.Sensitive, SensitiveMarkerNames.ToTokens(f.Markers), f.FileNames, f.Subfolders,
-            f.Description is not null, f.Description is { } d ? DescribedView.From(d) : null, f.DescribedAt, f.Withheld, Marked(f));
+            f.Description is not null, f.Description is { } d ? DescribedView.From(d) : null, f.DescribedAt, f.Withheld, Marked(f),
+            OriginView.From(f.Origin));
 
         public static IReadOnlyList<SensitiveFileView> Marked(FolderFacts? f) =>
             (f?.MarkedFiles ?? []).Select(m => new SensitiveFileView(m.RelativePath, SensitiveMarkerNames.ToTokens(m.Markers))).ToList();
@@ -104,7 +124,8 @@ public static class ControllerCommands
         IReadOnlyList<CandidateFolderView> Candidates,
         IReadOnlyList<WeakCandidateView> WeakCandidates,
         NewFolderHintView? NewFolder,
-        string? NotMatched);
+        string? NotMatched,
+        OriginView? Origin = null);
 
     public sealed record StoredTargetView(string Status, string? DecidedBy, long? LibraryJobId, string? RelativePath);
 
@@ -132,11 +153,12 @@ public static class ControllerCommands
     /// <summary>A folder directly below a library root: name, counts, kinds of files and period, and whether it is sensitive (a hint).</summary>
     public sealed record TopLevelView(
         string Name, string RelativePath, string Role, long Files, int Subdirs, long Bytes, IReadOnlyDictionary<string, long> ByFileType,
-        PeriodView Period, bool Sensitive)
+        PeriodView Period, bool Sensitive, OriginView? Origin = null)
     {
         public static TopLevelView From(FolderFacts f) => new(
             f.Entry.Name, f.Entry.RelativePath, f.Entry.Role.ToCode(), f.Entry.Files, f.Entry.Subdirs, f.Entry.Bytes, ByType(f.Entry.Types),
-            new PeriodView(BundlesCommand.Local(f.Entry.From), BundlesCommand.Local(f.Entry.To), f.Entry.TimeSource.ToCode()), f.Sensitive);
+            new PeriodView(BundlesCommand.Local(f.Entry.From), BundlesCommand.Local(f.Entry.To), f.Entry.TimeSource.ToCode()), f.Sensitive,
+            OriginView.From(f.Origin));
     }
 
     /// <param name="RootSensitive">The root is marked or holds a marked file (a hint; the files are in <paramref name="RootMarkedFiles"/>).</param>
@@ -145,9 +167,10 @@ public static class ControllerCommands
     /// <c>top_level</c> stays empty because the root is sensitive and <c>Sensitive:Disclosure</c> is <c>restricted</c>, as in
     /// <c>sfo library folder</c>. Before 14.11.2026 this held for every sensitive root (https://github.com/crack666/smart_file_organizer/issues/99).
     /// </param>
+    /// <param name="Hints">What a person wrote about the library in its hints file (<c>LibraryMatch:HintsDirectory</c>, Issue 103).</param>
     public sealed record LibraryView(
         long LibraryJobId, string RootPath, bool Reachable, long? FreeBytes, string InboxFolder, bool RootSensitive, IReadOnlyList<TopLevelView> TopLevel,
-        bool TopLevelWithheld, IReadOnlyList<SensitiveFileView> RootMarkedFiles);
+        bool TopLevelWithheld, IReadOnlyList<SensitiveFileView> RootMarkedFiles, HintsView? Hints = null);
 
     /// <param name="InboxName">The subfolder this source gets in the inbox of a library (<c>inbox_folder/inbox_name</c>).</param>
     public sealed record CandidatesResult(
@@ -289,7 +312,7 @@ public static class ControllerCommands
             var result = new CandidatesResult(run.Job.Id, run.Status.ToCode(), run.Message,
                 run.Libraries.Select(l => new LibraryView(l.Library.Id, l.Library.RootPath, Directory.Exists(l.Library.RootPath), l.FreeBytes, l.InboxFolder,
                     l.Root?.Sensitive ?? false, (l.TopLevel ?? []).Select(TopLevelView.From).ToList(), l.Root?.Withheld ?? false,
-                    FolderView.Marked(l.Root))).ToList(),
+                    FolderView.Marked(l.Root), HintsView.From(l.Hints))).ToList(),
                 run.InboxName,
                 all.Count, start, next, next is not null, page);
             return CommandOutcome.Success(result, () => RenderCandidates(result));
@@ -345,7 +368,8 @@ public static class ControllerCommands
                     w.Candidate.Target.Files, new PeriodView(BundlesCommand.Local(w.Candidate.Target.From), BundlesCommand.Local(w.Candidate.Target.To),
                         w.Candidate.Target.TimeSource.ToCode()))).ToList(),
                 g.NewFolder is { } n ? new NewFolderHintView(n.Library.Id, n.Parent.RelativePath, n.Name, n.NameComplete, n.Pattern) : null,
-                g.NotMatched);
+                g.NotMatched,
+                OriginView.From(g.Origin));
         }).ToList();
 
         return new CandidateItemView(
@@ -367,13 +391,17 @@ public static class ControllerCommands
         foreach (var l in r.Libraries)
         {
             sb.AppendLine($"  library job {l.LibraryJobId}: {l.RootPath} ({(l.FreeBytes is { } free ? ReadFormat.Size(free) : "unknown")} free, inbox {l.InboxFolder}/{r.InboxName})");
+            if (l.Hints is { } hints)
+                foreach (var line in hints.Lines)
+                    sb.AppendLine($"    hint: {line}");
             if (l.TopLevelWithheld) sb.AppendLine("    top level not listed: the root is sensitive (Sensitive:Disclosure restricted)");
             foreach (var m in l.RootMarkedFiles)
                 sb.AppendLine($"    marked: {m.RelativePath} [{string.Join(",", m.Markers)}]");
             foreach (var t in l.TopLevel)
                 sb.AppendLine($"    {t.Name}/  {t.Files} files, {t.Subdirs} subfolders"
                               + (t.Period is { From.Length: >= 4, To.Length: >= 4 } p ? $", {p.From[..4]}-{p.To[..4]}" : string.Empty)
-                              + (t.Sensitive ? ", sensitive" : string.Empty));
+                              + (t.Sensitive ? ", sensitive" : string.Empty)
+                              + (t.Origin is { } o ? $"; {o.Text}" : string.Empty));
         }
         foreach (var i in r.Items)
         {
@@ -388,6 +416,7 @@ public static class ControllerCommands
             {
                 var prefix = g.Part is { } part ? $"   part {part}: {g.Files} files, {g.Label}" : "   ";
                 if (g.Part is not null) sb.AppendLine(prefix);
+                if (g.Origin is { } origin) sb.AppendLine($"     videos: {origin.Text}");
                 if (!g.Described.Text.Equals(string.Empty)) sb.AppendLine($"     shows: {g.Described.Text}");
                 if (g.NotMatched is { } nm) sb.AppendLine($"     {nm}");
                 foreach (var c in g.Candidates)
@@ -643,6 +672,7 @@ public static class ControllerCommands
                 var f = result.Folder;
                 sb.AppendLine($"{f.RelativePath} (library job {f.LibraryJobId}): {f.Files} files, {f.Subdirs} subfolders, {ReadFormat.Size(f.Bytes)}"
                               + (f.Sensitive ? $", sensitive [{string.Join(",", f.Markers)}]" : string.Empty));
+                if (f.Origin is { } o) sb.AppendLine($"  videos: {o.Text}");
                 if (f.Description is { } d) sb.AppendLine($"  shows: {d.Text}");
                 foreach (var s in result.Subfolders) sb.AppendLine($"  {s}/");
                 foreach (var x in result.Files)

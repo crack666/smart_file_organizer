@@ -94,6 +94,7 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<OllamaOptions>(),
             sp.GetRequiredService<VideoFrameExtractor>(),
             sp.GetRequiredService<IVideoOriginReader>()));
+        services.AddSingleton<VideoFactRefreshService>();
         services.AddSingleton<IContentHasher, ContentHasher>();
         services.TryAddSingleton<IFreeSpaceProbe, FreeSpaceProbe>();
         services.TryAddSingleton<ILibraryRootProbe>(SmartFileOrganizer.Application.Library.FileSystemLibraryRootProbe.Instance);
@@ -235,6 +236,8 @@ public static class ServiceCollectionExtensions
         {
             var match = sp.GetRequiredService<IConfiguration>().GetSection("LibraryMatch").Get<LibraryMatchOptions>() ?? new LibraryMatchOptions();
             match.PatternsDirectory ??= Path.Combine(Path.GetDirectoryName(paths.DatabasePath)!, "library-patterns");
+            // Hints of a person about a library (Issue 103), next to the database as well; only read, never written.
+            match.HintsDirectory ??= Path.Combine(Path.GetDirectoryName(paths.DatabasePath)!, "library-hints");
             return match;
         });
         // Content of targets (https://github.com/crack666/smart_file_organizer/issues/56): candidate folders are described

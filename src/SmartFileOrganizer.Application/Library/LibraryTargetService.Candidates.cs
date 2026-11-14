@@ -30,6 +30,10 @@ public sealed record CandidateQuery(long SourceJobId, IReadOnlyList<long> Librar
 /// Its own marked files with their markers (path relative to the library root, at most <see cref="LibraryTargetService.MaxMarkedListed"/>),
 /// the hint where something important lies; empty when <paramref name="Withheld"/>.
 /// </param>
+/// <param name="Origin">
+/// Kind and origin of the videos in the folder and below, from the stored facts of the library scan (Issue 103); null
+/// when it holds no video with a kind or when <paramref name="Withheld"/>.
+/// </param>
 public sealed record FolderFacts(
     ScanJob Library,
     LibraryMapEntry Entry,
@@ -40,7 +44,8 @@ public sealed record FolderFacts(
     IReadOnlyList<string> FileNames,
     IReadOnlyList<string> Subfolders,
     bool Withheld = false,
-    IReadOnlyList<SensitiveFileRef>? MarkedFiles = null);
+    IReadOnlyList<SensitiveFileRef>? MarkedFiles = null,
+    Media.VideoOriginMix? Origin = null);
 
 /// <summary>A candidate folder of the rules with what it holds.</summary>
 public sealed record FolderCandidate(MatchCandidate Candidate, FolderFacts Folder);
@@ -56,6 +61,7 @@ public sealed record NewFolderHint(ScanJob Library, LibraryMapEntry Parent, stri
 /// Candidates that fit by period and kind of files only (<see cref="LibraryTargetService.IsWeak"/>), best first, kept
 /// apart from <see cref="Candidates"/>: for loose files they name the same few folders again and again (Issue 97).
 /// </param>
+/// <param name="Origin">Kind and origin of its videos, from the stored facts as the disclosure shows them (Issue 103).</param>
 public sealed record CandidateGroup(
     int? Index,
     MatchUnit Unit,
@@ -65,7 +71,8 @@ public sealed record CandidateGroup(
     IReadOnlyList<FolderCandidate> Candidates,
     NewFolderHint? NewFolder,
     string? NotMatched = null,
-    IReadOnlyList<WeakCandidate>? Weak = null);
+    IReadOnlyList<WeakCandidate>? Weak = null,
+    Media.VideoOriginMix? Origin = null);
 
 /// <summary>A candidate of the rules that fits by period and kind of files only, with its library.</summary>
 public sealed record WeakCandidate(MatchCandidate Candidate, ScanJob Library);
@@ -79,7 +86,9 @@ public sealed record UnitCandidates(string Key, MatchUnit Unit, string? Excluded
 /// <summary>A library root: free space, its inbox folder and its top level.</summary>
 /// <param name="Root">The root folder; when it is withheld (<see cref="FolderFacts.Withheld"/>), <paramref name="TopLevel"/> is empty, as in <c>sfo library folder</c>.</param>
 /// <param name="TopLevel">The folders directly below the root (Issue 97), so a controller sees the order of the library at once.</param>
-public sealed record LibraryRootFacts(ScanJob Library, long? FreeBytes, string InboxFolder, FolderFacts? Root = null, IReadOnlyList<FolderFacts>? TopLevel = null);
+/// <param name="Hints">What a person wrote about the library in its hints file (Issue 103); null when there is none.</param>
+public sealed record LibraryRootFacts(ScanJob Library, long? FreeBytes, string InboxFolder, FolderFacts? Root = null, IReadOnlyList<FolderFacts>? TopLevel = null,
+    LibraryHints? Hints = null);
 
 /// <summary>The answer of <see cref="LibraryTargetService.CandidatesAsync"/>.</summary>
 /// <param name="Marked">The marked files of the units: marked themselves or lying in a marked folder of the source.</param>
@@ -136,22 +145,23 @@ public sealed partial class LibraryTargetService
         {
             var (_, map) = await LoadMapAsync(library.Id, words, ct);
             await PatternsAsync(library, map, reset: false, ct);
-            maps.Add(new LibrarySide(library, map, await DirectoryMarkersAsync(library.Id, ct)));
+            maps.Add(new LibrarySide(library, map, await DirectoryMarkersAsync(library.Id, ct), await LibraryFactsAsync(library, ct)));
         }
         var folders = new Dictionary<(long, string), FolderFacts>();
         var roots = new List<LibraryRootFacts>(maps.Count);
         foreach (var side in maps)
         {
             // The top level once per library instead of the same broad folders as a candidate of nearly every unit.
-            var root = await FolderFactsAsync(side.Library, side.Map, side.Map.Root, side.Markers, 0, ct);
+            var root = await FolderFactsAsync(side.Library, side.Map, side.Map.Root, side.Markers, 0, ct, side.Facts);
             var top = new List<FolderFacts>();
             if (!root.Withheld)
             {
                 foreach (var child in side.Map.Root.Children)
-                    top.Add(await FolderFactsAsync(side.Library, side.Map, child, side.Markers, 0, ct));
+                    top.Add(await FolderFactsAsync(side.Library, side.Map, child, side.Markers, 0, ct, side.Facts));
             }
             roots.Add(new LibraryRootFacts(side.Library, _freeSpace?.AvailableBytes(side.Library.RootPath),
-                _options.InboxFolderOf(side.Library.RootPath), root, top));
+                _options.InboxFolderOf(side.Library.RootPath), root, top,
+                LibraryHints.Read(_options.HintsFileOf(side.Library.RootPath), _options.MaxHintChars)));
         }
 
         // A file counts as marked when it is marked itself or lies in a marked folder of the source. The disclosure decides
@@ -207,6 +217,7 @@ public sealed partial class LibraryTargetService
         {
             var described = Describe(files);
             if (!described.IsEmpty) return described.Gist();
+            if (Media.VideoOriginMix.From(Shown(files)) is { } origin) return origin.Gist();
             var named = files.FirstOrDefault(f => _disclosure.ShowsStructure(marked.GetValueOrDefault(f.Id)));
             return named is null
                 ? $"{files.Count} marked file(s) (not described)"
@@ -215,16 +226,19 @@ public sealed partial class LibraryTargetService
 
         // What the files show. A marked file adds what the disclosure shows of it: with open all its facts, for access data
         // only the short ones (no free text); with restricted nothing, as before 14.11.2026.
-        ContentDescription Describe(IReadOnlyList<FileNode> files) => ContentDescription.From(files
+        ContentDescription Describe(IReadOnlyList<FileNode> files) => ContentDescription.From(Shown(files));
+
+        List<IReadOnlyList<FileFact>> Shown(IReadOnlyList<FileNode> files) => files
             .Where(f => _disclosure.ShowsClassification(marked.GetValueOrDefault(f.Id)))
             .Select(f => _disclosure.ShownFacts(marked.GetValueOrDefault(f.Id), facts.TryGetValue(f.Id, out var x) ? x : []))
-            .ToList());
+            .ToList();
 
         async Task<CandidateGroup> GroupAsync(int? index, MatchUnit unit, IReadOnlyList<FileNode> files, string? label, string? notMatched)
         {
             var described = Describe(files);
+            var origin = Media.VideoOriginMix.From(Shown(files));
             if (notMatched is not null)
-                return new CandidateGroup(index, unit, files, label, described, [], null, notMatched);
+                return new CandidateGroup(index, unit, files, label, described, [], null, notMatched, Origin: origin);
 
             var all = maps
                 .SelectMany((m, order) => LibraryMatcher.Preselect(m.Map, unit, _options, words).Select(c => (Candidate: c, Side: m, Order: order)))
@@ -238,7 +252,7 @@ public sealed partial class LibraryTargetService
             {
                 var key = (side.Library.Id, candidate.Target.RelativePath);
                 if (!folders.TryGetValue(key, out var folder))
-                    folders[key] = folder = await FolderFactsAsync(side.Library, side.Map, candidate.Target, side.Markers, query.Names, ct);
+                    folders[key] = folder = await FolderFactsAsync(side.Library, side.Map, candidate.Target, side.Markers, query.Names, ct, side.Facts);
                 candidates.Add(new FolderCandidate(candidate, folder));
             }
 
@@ -254,7 +268,7 @@ public sealed partial class LibraryTargetService
                 best = share;
                 hint = new NewFolderHint(side.Library, proposal.Parent, proposal.Pattern, proposal.Name, proposal.NameComplete);
             }
-            return new CandidateGroup(index, unit, files, label, described, candidates, hint, Weak: weak);
+            return new CandidateGroup(index, unit, files, label, described, candidates, hint, Weak: weak, Origin: origin);
         }
     }
 
@@ -288,7 +302,36 @@ public sealed partial class LibraryTargetService
         return await LoadMapAsync(libraryJobId, LibraryWords.Default, ct);
     }
 
-    private sealed record LibrarySide(ScanJob Library, LibraryMap Map, IReadOnlyDictionary<string, SensitiveMarker> Markers);
+    private sealed record LibrarySide(ScanJob Library, LibraryMap Map, IReadOnlyDictionary<string, SensitiveMarker> Markers,
+        IReadOnlyDictionary<long, IReadOnlyList<FileFact>> Facts);
+
+    /// <summary>The stored facts of the videos of a library job, by file id, once per call (for the origin of its folders).</summary>
+    private async Task<IReadOnlyDictionary<long, IReadOnlyList<FileFact>>> LibraryFactsAsync(ScanJob library, CancellationToken ct) =>
+        _facts is null ? new Dictionary<long, IReadOnlyList<FileFact>>() : await _facts.GetByJobAsync(library.Id, ct);
+
+    /// <summary>
+    /// Kind and origin of the videos in a folder and below, from the library's stored facts. A marked file adds what the
+    /// disclosure shows of it.
+    /// </summary>
+    private Media.VideoOriginMix? FolderOrigin(LibraryMap map, LibraryMapEntry entry, IReadOnlyDictionary<long, IReadOnlyList<FileFact>> facts)
+    {
+        if (facts.Count == 0) return null;
+        var markedFiles = new Dictionary<long, SensitiveMarker>();
+        foreach (var s in map.Tree.SensitiveFiles)
+            markedFiles[s.File.Id] = markedFiles.GetValueOrDefault(s.File.Id) | s.Markers;
+        var shown = new List<IReadOnlyList<FileFact>>();
+        foreach (var node in entry.Node.Descendants().Prepend(entry.Node))
+        {
+            foreach (var file in node.Files)
+            {
+                if (file.FileType != (int)FileType.Video || !facts.TryGetValue(file.Id, out var list)) continue;
+                var markers = markedFiles.GetValueOrDefault(file.Id);
+                if (_disclosure.ShowsClassification(markers))
+                    shown.Add(_disclosure.ShownFacts(markers, list));
+            }
+        }
+        return Media.VideoOriginMix.From(shown);
+    }
 
     /// <summary>The stored markers of the marked folders of a library job, by full path.</summary>
     private async Task<IReadOnlyDictionary<string, SensitiveMarker>> DirectoryMarkersAsync(long libraryJobId, CancellationToken ct) =>
@@ -303,7 +346,8 @@ public sealed partial class LibraryTargetService
     /// and no marked file is named.
     /// </summary>
     private async Task<FolderFacts> FolderFactsAsync(
-        ScanJob library, LibraryMap map, LibraryMapEntry entry, IReadOnlyDictionary<string, SensitiveMarker> dirMarkers, int names, CancellationToken ct)
+        ScanJob library, LibraryMap map, LibraryMapEntry entry, IReadOnlyDictionary<string, SensitiveMarker> dirMarkers, int names, CancellationToken ct,
+        IReadOnlyDictionary<long, IReadOnlyList<FileFact>>? libraryFacts = null)
     {
         var markers = SensitiveMarker.None;
         for (var n = entry.Node; n is not null; n = n.Parent)
@@ -353,7 +397,8 @@ public sealed partial class LibraryTargetService
             withheld ? [] : fileNames,
             withheld ? [] : entry.Children.Select(c => c.Name).Take(Math.Max(names, 1) * 2).ToList(),
             withheld,
-            withheld ? [] : markedFiles);
+            withheld ? [] : markedFiles,
+            withheld ? null : FolderOrigin(map, entry, libraryFacts ?? await LibraryFactsAsync(library, ct)));
     }
 
     /// <summary>Marked files listed per folder as a hint (<see cref="FolderFacts.MarkedFiles"/>).</summary>
