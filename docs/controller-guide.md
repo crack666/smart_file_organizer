@@ -27,7 +27,10 @@ All commands with `--json`. `<job>` is the source job, `<lib>` a library job.
    that fit by period and kind of files only, in a broad folder, are listed apart as `weak_candidates`: they are
    rarely the place for loose files. Large jobs: page with `--offset` (`next_offset`), or narrow with `--key`,
    `--limit`, `--names`, `--max-kb`. A finding that alone is over `--max-kb` comes cut (`candidates_kept` per part);
-   ask for it with `--key` and a larger cap before deciding it.
+   ask for it with `--key` and a larger cap before deciding it. Since 14.11.2026 (Issue 103) the head also carries
+   `hints`, what a person wrote about the library in its hints file
+   ([where it lies](cli.md#sfo-findings-candidates-job)), and videos carry `origin`: the kind (film, episode, own
+   recording, screen recording, web clip, music video), the recording device and the titles of films and series.
 3. **Look closer where needed.** `sfo library folder <lib> "<relative path>"` lists a folder's subfolders and files.
    `sfo library describe <lib> "<relative path>"` lets the local model describe that one folder from a few of its
    files and stores the description; it is the only step that calls a model. Describe only folders you are about to
@@ -43,6 +46,16 @@ All commands with `--json`. `<job>` is the source job, `<lib>` a library job.
 ## Rules for the decision
 
 The local model failed at these; the controller should not.
+
+- **Kind and device first, then the structure of the library, then decide.** For videos read `origin` before
+  anything else: a film, an episode of a series and an own recording of a phone or action camera belong to different
+  places even when period and size agree. Then read how the library orders that kind (`top_level[].origin`, the
+  `hints` of a person, the folders of a candidate with their `origin`), and only then decide. A series episode goes to
+  the series and season it names, a film to a folder of its own title and year in the style of its siblings. A kind
+  that is `certain` comes from metadata, name or companion files; a `likely` one from the model; `disputed` counts
+  videos where the model said otherwise, so look at them. A mixed finding is split by kind first.
+- **The hints of a person come before your reading of the structure.** They are what the owner wants; where the
+  folders say something else, follow the hints and say so in the reason.
 
 - **General features are no reason.** "Both show people", "both are indoors", "both are photos from winter" fit half
   a library. A fit needs a concrete shared thing: the same occasion, the same place, the same named people, the same

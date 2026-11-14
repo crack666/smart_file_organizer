@@ -31,7 +31,7 @@ reference and JSON shapes: [cli.md](cli.md#sfo-eval-corpus).
 
 `sfo eval generate <dir> [--seed n]` writes `<dir>/tree/` (the folder that is scanned) and
 `<dir>/truth.json`. The generator is `SmallCorpusGenerator` (Infrastructure/Evaluation); the same
-seed gives the same bytes and timestamps. Version 7 has 77 folders and 203 files (version 6: 74 and 193, version 5: 74 and 185, version 4: 73 and 174, version 3: 62 and
+seed gives the same bytes and timestamps. Version 8 has 84 folders and 212 files (version 7: 77 and 203, version 6: 74 and 193, version 5: 74 and 185, version 4: 73 and 174, version 3: 62 and
 160, version 2: 42 and 100, version 1: 41 and 97; the changes are listed under [Truth changes](#truth-changes)):
 
 | Kind | Example | Truth |
@@ -49,6 +49,7 @@ seed gives the same bytes and timestamps. Version 7 has 77 folders and 203 files
 | Traps of closed units (version 6) | `Import`: pictures named with an everyday word of a film title, pictures and clips of the time of a game cache, an episode folder and a program in the library | where none of them belongs is in `targets.json` |
 | Traps of the second real run (version 7) | `Import/Neuer Ordner` (sunflowers and a crack in a wall), `Import/c7e2a9f4` (photos nobody described), `Import/Kontobilder` (account pictures, `system`), photos of a kitchen evening in the week of the library folder `Bilder/Lena` | `split`, `no_target`, `excluded`, and no existing folder: in `targets.json` |
 | Media | `Musik`, `Videos`, `Screenshots` | `uniform` |
+| Videos of every kind (version 8) | `Videos` (phone, action cam, one clip without anything), `Filme`, `Serien/Beispielserie/Staffel 2`, `Aufnahmen` (screen and game recordings), `Clips` (messenger, download, music video) | `uniform`; each video has a `video_kind` |
 | Placeholder | `Neuer Ordner` (empty) | `empty` |
 | Hidden tool folder | `.ssh` | `system` |
 | Sensitive dummies | password list, recovery codes, `.kdbx`, `.pfx`, `.env`, private key, bank statement, tax papers, doctor letter, ID scan, private letter | markers |
@@ -58,7 +59,10 @@ The structure follows what a manual check of a real private archive found
 (https://github.com/crack666/smart_file_organizer/issues/29). Everything is invented: names,
 texts and pictures. Images are small painted PNGs (photos keep camera-style `.jpg` names, because
 the scan and the profile work on names and image decoders read the content); PDFs are minimal
-text pages or one scanned-looking image; media, programs and archives are a header plus filler.
+text pages or one scanned-looking image; programs, music and archives are a header plus filler.
+Since version 8 videos are small, structurally valid MP4 and Matroska containers (`SyntheticVideo`,
+Infrastructure/Evaluation) with the metadata a real file of their kind carries (make and model, the
+recording program, tracks with languages, chapters) and zeros as media data; no player shows them.
 Sensitive dummies carry a real header line and random filler, assembled at run time, so neither
 the repository nor the corpus contains a valid key or secret.
 
@@ -100,6 +104,9 @@ runs of different corpora are never compared as equal.
   inside a unit, and the noise of a dump (app data, caches), have no category, because they are not
   classified file by file. `sensitive: []`
   means the file must not be marked. `note` says why, for people.
+- `video_kind` (version 8) is the video kind code of a video ([glossary.md](glossary.md#video-kind-videokind));
+  missing or null means it is not measured. The stub answers it only where the rules leave the kind
+  open, because only there is a model asked.
 
 The same file shape serves as an answer sheet for `--stub`: the truth itself answers perfectly,
 a copy with changed entries answers wrong on purpose. Where the truth leaves a category open, the
@@ -173,6 +180,30 @@ the file and folder calls, and a stub run with a library would have asked the co
 
 Every change of the truth is listed here with its reason. The truth follows what is right for the
 user, never what the program happens to answer.
+
+### Version 8 (14.11.2026, https://github.com/crack666/smart_file_organizer/issues/103)
+
+The kind of a video became a result (`video_kind`), so the corpus needs a video of every kind. The five clips of
+version 7 (`Videos/*`, `Fotos/Sommerfest 2022/VID_*.mp4`, `Import/VID_*.mp4`) keep their paths, category and truth,
+but are now small real containers: phone metadata keys, phone make and model, a phone name scheme, and
+`Videos/Schulauffuehrung_2019.mp4` with nothing at all, where the model names the kind. New:
+
+| Path | Kind | Read from |
+|---|---|---|
+| `Videos/GX010042.MP4` | `own_recording` (action cam) | maker name scheme and make and model |
+| `Filme/Ein Beispielfilm (2015)/Ein.Beispielfilm.2015.1080p.BluRay.x264-GRP.mkv` | `movie` | release name; no model call |
+| `Serien/Beispielserie/Staffel 2/Beispielserie S02E01.mkv`, `S02E02.mkv` | `series_episode` | season and episode in the name; no model call |
+| `Aufnahmen/2023-03-04 20-15-33.mkv` | `screen_recording` | the recording program in the container |
+| `Aufnahmen/Screen Recording 2023-04-01 at 10.00.00.mov` | `screen_recording` | the name of a screen recorder |
+| `Clips/VID-20230716-WA0003.mp4`, `Clips/Papierboot falten [aB3dE5fG7hJ].webm` | `web_clip` | messenger name scheme, video id in brackets |
+| `Clips/Beispielband - Beispiellied (Official Video).mp4` | `music_video` | the name |
+
+All new folders are `uniform`: the film folder holds one file (rule `single-file`), and the season is a folder of
+episodes that each stand alone. A season as `unit` would also leave its episodes without a kind: the staged analysis
+skips the files of a unit, and `sfo facts refresh` would have to read them. `findings.json` and `targets.json` are
+unchanged. Measured 14.11.2026 with the perfect stub (temporary database, model address on a dead port):
+`directory_verdict` 82/82, `file_category` 115/115, `sensitive` 211/212 (the deliberate `.ssh/id_ed25519.pub`),
+`finding` 25/25 and 0 superfluous, `target` 14/14, `video_kind` 15/15.
 
 ### Version 7 (14.11.2026, https://github.com/crack666/smart_file_organizer/issues/85)
 
@@ -322,6 +353,7 @@ prompt, which was wrong. `.ssh/id_ed25519.pub` keeps `sensitive: []`, see the ne
 | `finding` | every expected finding of `findings.json` | the listed findings of the job; findings nobody expects count as `superfluous`, see [Expected findings](#expected-findings) |
 | `target` | every expected target of `targets.json` | the best place `sfo library match` proposes in the corpus library, or its new folder, see [Expected targets](#expected-targets) |
 | `sensitive` | every truth file | markers of the rules and of the model together; a hit needs exactly the expected set. A file inside a folder the scan skipped and marked (`.ssh`) carries the markers of that folder, see [below](#files-in-a-skipped-marked-folder) |
+| `video_kind` | every truth file with a `video_kind` (version 8) | the stored fact `video_kind`, whether container, name, companion files or the model decided; `unknown` counts as `missing`. The failure names the source and certainty, and a disputed kind |
 
 Each item is a `hit`, `wrong` (a different result) or `missing` (not scanned, not analysed, or a
 model error). For `sensitive` the score also counts files the truth marks, how many of them carry
@@ -417,6 +449,24 @@ what changed (model, prompts, version, each setting), the score per kind before 
 items fixed and the new failures.
 
 ## Measured
+
+### Scripted answers after issue 103 (14.11.2026)
+
+_Scripted answers (`--stub truth.json`) on small v8 seed 36, on the branch of
+https://github.com/crack666/smart_file_organizer/issues/103, temporary directory and database, model address on a dead
+port._
+
+| Kind | Result |
+|---|---|
+| `directory_verdict` | 82/82 |
+| `file_category` | 115/115 |
+| `sensitive` | 211/212 (the deliberate `.ssh/id_ed25519.pub`) |
+| `finding` | 25/25, 0 superfluous |
+| `target` | 14/14 |
+| `video_kind` | 15/15 |
+
+The wiring, not a model: 14 of the 15 kinds come from container, name or companion files; the stub answers only
+`Videos/Schulauffuehrung_2019.mp4`. A run with a real model on version 8 has not been made.
 
 ### Scripted answers after issue 85 (14.11.2026)
 
