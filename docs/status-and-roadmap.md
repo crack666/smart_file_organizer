@@ -227,7 +227,9 @@ yet against a real Ollama restart.
   that frees room on the drive of the source, which the summaries say. The
   move notice names a discarded file `removed`.
   _Checked 14.11.2026: `SmartFileOrganizer.Desktop.Tests` 18 passed on Windows
-  (Avalonia headless)._ Limits: a discarded file that was purged cannot be put
+  and on Linux (Avalonia headless), one pass rendered with the confirmation
+  of "Papierkorb leeren" ([screenshot](images/09-confirm-empty-bin.png)); the
+  real window was not driven by hand._ Limits: a discarded file that was purged cannot be put
   back; an older build that rewrites a move notice drops its `removed` lines.
 
 ### Command line
