@@ -61,7 +61,7 @@ the top one). Codes of `ClosedUnitKind` ([glossary.md](glossary.md#closed-unit-i
 | `closed` | When |
 |---|---|
 | `unit` | The structure review judged the folder a unit. |
-| `program` | A program or project tree: role `project`, or at least 3 files with a software share of at least half, with files of its own (or no subfolders); or unit markers. |
+| `program` | A program or project tree: role `project`, or at least 3 files with a software share of at least half, with files of its own (or no subfolders); or unit markers. Since the second round of Issue 85 also a game or program folder: a program directly in it (`.exe`, `.app`, ...) and nothing below it named like own recordings (`IMG_`, `DSC`, `VID_`, a date). |
 | `technical` | The name is a technical one of the word file (`technical_names`: `cache`, `thumbs`, `css`, `assets`, `bin`, `logs`, ...). |
 | `single_title` | The folder of one film or episode: one or two videos with at most 12 files, a video of its own, the rest companions (subtitles, `.nfo`, poster, fanart, folder or cover pictures), subfolders only technical or common ones, and a title name (`Title (2009)`, `S01E02`) or a companion. |
 
@@ -153,8 +153,13 @@ Run by `match` per library, after the scores and before the certainty:
 4. **The comparison.** One short model call per unit and library: the unit's description and one
    line per candidate (`id | placement | folder | period | description`); the fixed instructions
    are the system message, the answer is limited to a short JSON list of
-   `{id, fit, reason}` with `fit` one of `fits`, `contradicts`, `unclear`. Unknown ids and codes
-   are dropped.
+   `{id, fit, shared, shared_kind, reason}` with `fit` one of `fits`, `contradicts`, `unclear`. Unknown ids and codes
+   are dropped. **A fit needs a concrete shared feature** (Issue 85): `shared` names it (this birthday, this lake,
+   skiing, the issuer) and `shared_kind` says what it is (`occasion`, `person`, `place`, `topic`, `issuer`, `none`;
+   [glossary.md](glossary.md#kind-of-a-shared-feature-sharedfeaturekind)). After the answer the rules turn a `fits`
+   without such a feature, or with only general ones (indoor, everyday, a season, people; `general_features` of the
+   word file), into `unclear`. The second real run had a folder of one person "fit" photos that shared only
+   "everyday, indoor, winter" with it.
 5. **The result.** `fits` adds the signal `content_fit`. `contradicts` drops the candidate (it is
    listed under `rejected` with the reason), unless the same files already lie there. `unclear`
    leaves it unchanged, which caps it at `uncertain` without the same files.
@@ -174,8 +179,27 @@ same files at the target no existing folder is proposed.
 | `failed` | The model call failed or its answer did not parse. |
 
 In `sfo eval --stub` the comparison runs on fixed rules (`description-rules`: other occasion,
-document kind or issuer contradicts; shared scene or activity words, or the same occasion and
-season, fit), so the measurement runs without a model ([evaluation.md](evaluation.md)).
+document kind or issuer contradicts; shared scene or activity words that are no general ones, or the same occasion and
+season, fit and name that feature), so the measurement runs without a model ([evaluation.md](evaluation.md)).
+
+## Units that are no unit: matched part by part
+
+Before the unit is described, `match` checks whether its files belong together by content (Issue 85). Two files
+belong together when they share a concrete feature (a word of the scene or activity of four letters or more that is
+no general or stop word, or the same issuer), or when they were taken within `UnitGapHours` of each other and one of
+them is not described or both show the same occasion that is no general one. When this gives two or more groups with
+described files, the unit is **split**: the mixture as a whole gets no target (`no_target` names the parts), and each
+part, up to `MaxUnitParts`, the largest first, is matched on its own, with its own content check and new folder.
+`parts` in the output lists them (files, label, examples, status, destination, certainty, reason); parts beyond the
+limit say they were not matched. A kept-whole folder is never split, and files nobody described never split a unit:
+without a description nothing says they differ.
+
+## Left out on purpose: system clutter and unclear worth
+
+Files that mostly (at least half) lie in a folder the analysis judged `system` (account pictures, templates of a
+program), or in a folder judged as a whole (`uniform`, `unit`) whose retention is `review`, are not matched: the
+answer has no candidate and no new folder, and `excluded` names the reason (Issue 85). No model is asked. A mixed
+folder does not count: the analysis gives almost every mixed folder `review`. `MatchUnclearWorth` matches them anyway.
 
 ## Weak places
 
@@ -191,15 +215,29 @@ weak place, so the match does not continue a weak order blindly.
 When no candidate reaches `MinScore`, `new_folder` names a parent and a name:
 
 - The parent is the folder whose subfolders are most like the unit (siblings, type, period),
-  with 0.10 off for parents whose subfolders are named in several ways. It needs agreeing
-  siblings or file type; otherwise the library root. A closed unit is never the parent.
+  with 0.10 off for parents whose subfolders are named in several ways. Since Issue 85 it needs
+  **agreeing siblings**: a level where the library itself keeps folders like the unit side by side
+  (occasions next to occasions); the root only when its own subfolders agree. Never a closed unit,
+  a catch-all, or foreign material: a folder named like `foreign_names` of the word file (films,
+  series, downloads, games, programs, wallpapers, ...) or anything below one. Without such a level
+  there is no new folder, and `no_target` says so; until 14.11.2026 the root was taken, or a parent
+  where only the file type agreed.
+- A folder with a program directly in it (`.exe`, `.app`, ...) and nothing below it that looks like
+  own recordings (`IMG_`, `DSC`, `VID_`, a date as name) is a game or program folder: closed
+  (`program`), so neither it nor its subfolders take own pictures (Issue 85).
 - A kept-whole unit keeps its name. Other units get the parent's pattern filled from what is
   known: `{year}`, `{date}`, `{month}` from the unit's period, `{occasion}`/`{name}` from a
-  meaningful source name. What is not known stays as a placeholder (`{occasion} 2021`) and
-  `name_complete` is `false`. A name that exists at the parent gets a number.
-- With a model, an incomplete name is offered to the model with the neighbours' names, the
-  pattern and the unit's counters. Its answer is refused when it holds a placeholder or an
-  invalid character, is longer than 80 characters, repeats a neighbour or lacks the unit's year.
+  meaningful source name (no placeholder, no storage word, no foreign name, no random string such
+  as `c7e2a9f4`; a folder under a random string is not kept whole either). What is not known stays
+  as a placeholder (`{occasion} 2021`) and `name_complete` is `false`. A name that exists at the
+  parent gets a number.
+- **The name comes from the content** (Issue 85). When the name stays incomplete and the files are
+  not described, nothing can name the folder: there is no new folder and `no_target` says so
+  (`sfo analyze` describes the files). Described files go to the model with the neighbours' names,
+  the pattern, the unit's counters and what the files show (scene, activity, occasion, ...). Its
+  answer is refused when it holds a placeholder or an invalid character, is longer than 80
+  characters, repeats a neighbour, lacks the unit's year, is a random string or is a storage word
+  (`Neuer Ordner`, `Downloads`, ...). Without a model the incomplete name stays (`no_model`).
 - The certainty is `uncertain` beside fitting siblings, otherwise `review`, capped by a weak
   parent.
 
@@ -253,10 +291,15 @@ Per finding one answer is stored in `finding_targets` (step 26):
 
 1. the best existing folder of all libraries (`existing_folder`), with its certainty, reason and content check;
 2. else a new folder whose name is complete (`new_folder`), in the library that holds this kind of content (above);
-3. else no target, with the reason: `no_target` (no library holds this kind of content, so a new folder would be a
-   guess; step 28, Issue 85), `no_model` (a new folder needs a name the rules cannot complete and no model was
-   used or reachable), `content_unclear` (no candidate, and the files are not described), `no_fitting_folder`
-   (anything else).
+3. else no target, with the reason: `no_target` (no library holds this kind of content, no level keeps such folders
+   side by side, or nothing names a new folder, so a new folder would be a guess; step 28, Issue 85), `no_model` (a
+   new folder needs a name the rules cannot complete and no model was used or reachable), `content_unclear` (no
+   candidate, and the files are not described), `no_fitting_folder` (anything else);
+4. `excluded`: left out on purpose (system clutter, worth unclear; above), with the reason;
+5. `split`: the files do not belong together by content. The finding as a whole has no target; each part is stored
+   in `finding_target_parts` (step 31) with its files and its own answer (one of 1 to 4), and shown under
+   `target_parts`. `sfo plan create` moves each file with its part: files of a part without a place stay, and a
+   whole-folder move is never made for a folder whose files lie in several parts.
 
 Since Issue 85 an existing folder is only stored when content confirms it (`RequireContent` above); without a model
 that means the same files already lie there. A library that cannot be read ends the run with `library_unreachable`
@@ -299,9 +342,10 @@ rules. A file that does not parse ends the command with `library_patterns_invali
 ## Settings (`LibraryMatch`)
 
 Starting values, not measured against a real library. The evaluation corpus has a small library
-with known truth since version 5, and since version 6 the traps of Issue 85 (closed units, an everyday word, a library
-that is gone); with the stub, every target there is hit (measured 14.11.2026 by `EvalCliTests`, `sfo eval --stub`),
-which checks the wiring, not the model.
+with known truth since version 5, since version 6 the traps of Issue 85 (closed units, an everyday word, a library
+that is gone), and since version 7 its second round (a folder of two things, a random name without descriptions,
+system clutter, a folder of a person that shares only general features); with the stub, every target there is hit
+(measured 14.11.2026 by `EvalCliTests`, `sfo eval --stub`), which checks the wiring, not the model.
 
 | Setting | Default | Reason |
 |---|---|---|
@@ -323,6 +367,9 @@ which checks the wiring, not the model.
 | `SubfolderWeight*` | 0.35 / 0.30 / 0.15 / 0.10 / 0.10 | For a whole folder the neighbours count most after content: a new occasion goes next to occasions. |
 | `RequireContent` | `true` | Time, name and kind of files only say a folder *could* fit; the first real run filled film, episode and cache folders that way (Issue 85). Off: the earlier behaviour, an `uncertain` existing folder. |
 | `MinLibraryKindShare` | 0.10 | Below a tenth of its files of the unit's kind, a library is no place for it; a new folder there is no better than a guess. |
+| `UnitGapHours` | 3 | Photos within three hours of each other belong together unless both are described as different occasions; a ski morning and a birthday evening are further apart (Issue 85). |
+| `MaxUnitParts` | 12 | A split unit is matched part by part; more parts than that are rather a heap of single things, the rest is listed unmatched. |
+| `MatchUnclearWorth` | `false` | System clutter and folders of unclear worth get no target (Issue 85). On: they are matched like anything else. |
 | `PatternsDirectory` | `library-patterns` next to the database | One file per library job, beside the data it was made from. |
 
 An invalid value ends `show` and `match` with `settings_invalid`, naming every problem.

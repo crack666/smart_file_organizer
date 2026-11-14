@@ -31,7 +31,7 @@ reference and JSON shapes: [cli.md](cli.md#sfo-eval-corpus).
 
 `sfo eval generate <dir> [--seed n]` writes `<dir>/tree/` (the folder that is scanned) and
 `<dir>/truth.json`. The generator is `SmallCorpusGenerator` (Infrastructure/Evaluation); the same
-seed gives the same bytes and timestamps. Version 6 has 74 folders and 193 files (version 5: 74 and 185, version 4: 73 and 174, version 3: 62 and
+seed gives the same bytes and timestamps. Version 7 has 77 folders and 203 files (version 6: 74 and 193, version 5: 74 and 185, version 4: 73 and 174, version 3: 62 and
 160, version 2: 42 and 100, version 1: 41 and 97; the changes are listed under [Truth changes](#truth-changes)):
 
 | Kind | Example | Truth |
@@ -47,6 +47,7 @@ seed gives the same bytes and timestamps. Version 6 has 74 folders and 193 files
 | Archive known by its entries (version 4) | `max/Documents/20190312.zip` with bank and card statements | `finance`, category open |
 | Things waiting for a place (version 5) | `Import`: a ski trip and a birthday of the same day, a lake outing, two invoices of two providers | `mixed`; where each belongs is in `targets.json` |
 | Traps of closed units (version 6) | `Import`: pictures named with an everyday word of a film title, pictures and clips of the time of a game cache, an episode folder and a program in the library | where none of them belongs is in `targets.json` |
+| Traps of the second real run (version 7) | `Import/Neuer Ordner` (sunflowers and a crack in a wall), `Import/c7e2a9f4` (photos nobody described), `Import/Kontobilder` (account pictures, `system`), photos of a kitchen evening in the week of the library folder `Bilder/Lena` | `split`, `no_target`, `excluded`, and no existing folder: in `targets.json` |
 | Media | `Musik`, `Videos`, `Screenshots` | `uniform` |
 | Placeholder | `Neuer Ordner` (empty) | `empty` |
 | Hidden tool folder | `.ssh` | `system` |
@@ -156,7 +157,11 @@ best proposal is that folder, or a new folder or `no_target` where `null` is exp
 a wrong one); anything else is `wrong`, named with what was proposed, its certainty and its reason, and no proposal at
 all is `missing`. `outcome: "library_unreachable"` (since version 6) expects a named failure instead of an answer:
 `sfo eval` scans an empty temporary folder as a second library, deletes it, and matches the unit against that one; the
-failure `library_unreachable` is the hit, any answer is `wrong`. Files of the source that the truth
+failure `library_unreachable` is the hit, any answer is `wrong`. Since version 7 three more outcomes: `split` (the
+unit holds different things and must be matched part by part, never as a whole), `excluded` (left out of the match on
+purpose: system clutter, worth unclear) and `no_target` (neither an existing nor a new folder: only no target is the
+hit). A `bundle` that the match splits is judged by the answer for the part that holds the file named at `path`.
+Files of the source that the truth
 describes (`description` in `truth.json`) get these facts from the stub, so the unit has a description.
 
 With `--stub` no model is asked anything: the files are described from the answer sheets, the content comparison
@@ -168,6 +173,24 @@ the file and folder calls, and a stub run with a library would have asked the co
 
 Every change of the truth is listed here with its reason. The truth follows what is right for the
 user, never what the program happens to answer.
+
+### Version 7 (14.11.2026, https://github.com/crack666/smart_file_organizer/issues/85)
+
+Nothing of version 6 changed. The second real run of `sfo findings targets` showed four more ways to a wrong target: a
+unit of different things (it "fits" everywhere a little), a folder of one person that shared only general features
+with the photos, new folders named after nothing, and system clutter matched like photos. The library gets
+`Bilder/Lena` (four photos: sofa by the window, reading, indoor, winter, everyday), and `Import` gets ten files:
+
+| Path in `Import` | Category | Belongs to | Why |
+|---|---|---|---|
+| `Neuer Ordner/`: two photos of a sunflower field (15.06.2019, morning), two of a cracked wall (afternoon) | `photo` | `split` | Trap: two different things under a placeholder name; the mixture as a whole fits nothing. |
+| `c7e2a9f4/`: two photos of 03.03.2013, not described | `photo` | `no_target` | Trap: a random string and no description name nothing; a new folder `{occasion} 2013` would be a guess. |
+| `Kontobilder/user1.png`, `user2.png` (folder verdict `system`) | none | `excluded` | Trap: account pictures of a program are system clutter, not a thing to place. |
+| two photos of 12.01.2019, kitchen table, cooking | `photo` | a new folder or none | Trap: everyday, indoor and winter in common with `Bilder/Lena`; that folder is wrong. |
+
+`findings.json` expects one more finding: `in_noise` `images` at `Import/Neuer Ordner`. Measured 14.11.2026 with the
+perfect stub (temporary database, model address on a dead port): `directory_verdict` 75/75, `file_category` 106/106,
+`sensitive` 202/203 (the deliberate `.ssh/id_ed25519.pub`), `finding` 25/25 and 0 superfluous, `target` 14/14.
 
 ### Version 6 (14.11.2026, https://github.com/crack666/smart_file_organizer/issues/85)
 
@@ -396,6 +419,22 @@ items fixed and the new failures.
 ## Measured
 
 ### Scripted answers after issue 85 (14.11.2026)
+
+_Scripted answers (`--stub truth.json`) on small v7 seed 36, on the second branch of
+https://github.com/crack666/smart_file_organizer/issues/85, temporary directory and database, model address on a dead
+port._
+
+| Kind | Result |
+|---|---|
+| `directory_verdict` | 75/75 |
+| `file_category` | 106/106 |
+| `sensitive` | 202/203 (the deliberate `.ssh/id_ed25519.pub`) |
+| `finding` | 25/25, 0 superfluous |
+| `target` | 14/14 |
+
+The wiring of the traps, not a model: a run with a real model on version 7 has not been made.
+
+### Scripted answers on version 6 (14.11.2026)
 
 _Scripted answers (`--stub truth.json`) on small v6 seed 36, on the branch of
 https://github.com/crack666/smart_file_organizer/issues/85, temporary directory and database, model address on a dead

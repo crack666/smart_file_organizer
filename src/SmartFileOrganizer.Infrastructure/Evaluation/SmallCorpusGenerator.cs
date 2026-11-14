@@ -47,8 +47,12 @@ public static class SmallCorpusGenerator
     /// occasions of one day, a lake outing and two invoices, and a library next to the tree with <c>targets.json</c>.
     /// Version 6 (https://github.com/crack666/smart_file_organizer/issues/85): closed units in the library (a film
     /// folder under an everyday word, a season, a game cache, a program) with own pictures and clips of their time in
-    /// <c>Import</c> that belong into none of them, and a library that is gone.</remarks>
-    public const int GeneratorVersion = 6;
+    /// <c>Import</c> that belong into none of them, and a library that is gone.
+    /// Version 7 (https://github.com/crack666/smart_file_organizer/issues/85): a folder of two different things (split
+    /// by content), a folder under a random string with photos nobody described (no target), account pictures in a
+    /// system folder (left out of the match), and the folder of a person in the library that shares only general
+    /// features (everyday, indoor, winter) with photos of the same week.</remarks>
+    public const int GeneratorVersion = 7;
 
     public const int DefaultSeed = 36;
     public const string RootFolder = "tree";
@@ -379,6 +383,27 @@ public static class SmallCorpusGenerator
         for (var i = 0; i < 2; i++)
             b.File($"Import/IMG_20180901_12{05 + i * 5:00}00.jpg", PhotoOf(b, Scene.Coast), D(2018, 9, 1, 12, 5 + i * 5), Photo, None,
                 "Taken the day a program was installed; no folder for it yet.", CoastDay);
+
+        // Version 7 (Issue 85): a folder of two different things on one day, a folder under a random string with
+        // photos nobody described, account pictures of a program, and photos sharing only general features with the
+        // folder of a person in the library.
+        b.Dir("Import/Neuer Ordner", Mixed, "Placeholder name; a sunflower field in the morning and a crack in a wall in the afternoon.");
+        for (var i = 0; i < 2; i++)
+            b.File($"Import/Neuer Ordner/IMG_20190615_09{10 + i * 10}00.jpg", PhotoOf(b, Scene.Garden), D(2019, 6, 15, 9, 10 + i * 10), Photo, None,
+                "Sunflower field: other thing than the wall photos of the afternoon.", SunflowerField);
+        for (var i = 0; i < 2; i++)
+            b.File($"Import/Neuer Ordner/IMG_20190615_15{10 + i * 10}00.jpg", PhotoOf(b, Scene.Portrait), D(2019, 6, 15, 15, 10 + i * 10), Photo, None,
+                "Crack in a wall: other thing than the sunflowers of the morning.", WallCrack);
+        b.Dir("Import/c7e2a9f4", Mixed, "Random string as name; photos nobody described yet.");
+        for (var i = 0; i < 2; i++)
+            b.File($"Import/c7e2a9f4/IMG_20130303_10{10 + i * 10}00.jpg", PhotoOf(b, Scene.Lake), D(2013, 3, 3, 10, 10 + i * 10), Photo, None,
+                "Not described; the folder name says nothing; no target.", NotDescribed);
+        b.Dir("Import/Kontobilder", SystemDir, "Account pictures a program keeps; system clutter.");
+        for (var i = 1; i <= 2; i++)
+            b.File($"Import/Kontobilder/user{i}.png", Screen(b, i), D(2017, 4, 2), null, None, "Account picture of a program.");
+        for (var i = 0; i < 2; i++)
+            b.File($"Import/IMG_20190112_19{10 + i * 10}00.jpg", PhotoOf(b, Scene.Portrait), D(2019, 1, 12, 19, 10 + i * 10), Photo, None,
+                "Cooking at home in the week of the photos of a person in the library: only everyday, indoor and winter in common.", KitchenEvening);
     }
 
     // Version 6 (Issue 85): what the traps and the closed units of the library show.
@@ -390,6 +415,12 @@ public static class SmallCorpusGenerator
     private static readonly TruthDescription SamplePicture = new("sample picture", null, "outdoor", null, null, false);
     private static readonly TruthDescription NotDescribed = new();
     private static readonly TruthDescription EveningClip = new("living room", "dancing", "indoor", "spring", "party", true);
+
+    // Version 7 (Issue 85).
+    private static readonly TruthDescription SunflowerField = new("sunflower field", "walking", "outdoor", "summer", "outing", true);
+    private static readonly TruthDescription WallCrack = new("cracked plaster wall", "repair work", "indoor", "summer", "everyday", false);
+    private static readonly TruthDescription KitchenEvening = new("kitchen table", "cooking", "indoor", "winter", "everyday", true);
+    private static readonly TruthDescription PersonAtHome = new("sofa by the window", "reading", "indoor", "winter", "everyday", true);
 
     /// <summary>
     /// Version 5 (Issue 56): the library of the corpus, a folder next to <c>tree</c> (never inside it), and
@@ -426,6 +457,8 @@ public static class SmallCorpusGenerator
         Photos("Bilder/Skifahrt 2021", "ski trip", Scene.Snow, D(2021, 2, 5, 10, 0), SkiDay);
         Photos("Bilder/Sommerfest 2021", "garden party", Scene.Garden, D(2021, 8, 14, 15, 0), GardenParty);
         Photos("Bilder/Ostern 2020", "easter", Scene.Garden, D(2020, 4, 12, 11, 0), EasterGarden);
+        // Version 7 (Issue 85): the folder of a person; what it shows in general (everyday, indoor, winter) is no reason.
+        Photos("Bilder/Lena", "a person at home", Scene.Portrait, D(2019, 1, 10, 18, 0), PersonAtHome);
         b.Dir("Unterlagen", null);
         Invoices("Unterlagen/Rechnungen Stadtwerke", PowerCompany);
         Invoices("Unterlagen/Rechnungen Telefon", PhoneCompany);
@@ -479,7 +512,14 @@ public static class SmallCorpusGenerator
             new("bundle", "Import/VID_20200510_211500.mp4", null, "Trap (Issue 85): same evening as the folder of a season; an episode folder is closed."),
             new("bundle", "Import/IMG_20180901_120500.jpg", null, "Trap (Issue 85): same time as the sample pictures of a program; a program is closed."),
             new("folder", "Import", null, "Trap (Issue 85): a library that is gone is a named failure, not a silent answer.",
-                EvalTargetTruth.LibraryUnreachable)
+                EvalTargetTruth.LibraryUnreachable),
+            new("folder", "Import/Neuer Ordner", null, "Trap (Issue 85): two different things; each part on its own, never the mixture.",
+                EvalTargetTruth.Split),
+            new("folder", "Import/c7e2a9f4", null, "Trap (Issue 85): a random string and no description name nothing; no target.",
+                EvalTargetTruth.NoTargetOutcome),
+            new("folder", "Import/Kontobilder", null, "Trap (Issue 85): system clutter is left out of the match.", EvalTargetTruth.Excluded),
+            new("bundle", "Import/IMG_20190112_191000.jpg", null,
+                "Trap (Issue 85): only everyday, indoor and winter in common with the folder of a person; that folder is wrong.")
         ];
         var doc = new EvalTargetTruthDocument(EvalTargetTruth.SchemaVersion, LibraryFolder, files, targets);
         File.WriteAllText(Path.Combine(dir, EvalTargetTruth.FileName), JsonSerializer.Serialize(doc, EvalJson.Options) + "\n", new UTF8Encoding(false));
