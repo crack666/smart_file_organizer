@@ -269,7 +269,8 @@ public class FindingsCommandTests : IDisposable
         Assert.Equal(result.GetProperty("total").GetInt64(), s.GetProperty("listed").GetInt64());
         foreach (var kind in new[] { "not_backed_up", "in_noise", "misplaced", "sensitive", "duplicate" })
             Assert.True(s.GetProperty("by_kind").GetProperty(kind).GetProperty("findings").GetInt64() >= 1, kind);
-        Assert.Equal(0, s.GetProperty("missing_steps").GetArrayLength());
+        // Every step ran; only the target match of the findings that should move is still open (Issue 83).
+        Assert.Equal([$"sfo findings targets {job}"], s.GetProperty("missing_steps").EnumerateArray().Select(x => x.GetString()));
 
         // sfo summary carries the counts.
         var jobSummary = await OkAsync("summary", job);

@@ -53,7 +53,8 @@ public static class FindingsCommand
         IReadOnlyList<string> Notes,
         string? DecidedBy,
         DateTime? DecidedAt,
-        string? DecisionNote)
+        string? DecisionNote,
+        string? TargetStatus = null)
     {
         public static FindingView From(Finding f) => new(
             f.Rank, f.Key, f.Kind.ToCode(), f.Certainty.ToCode(), f.Unsure ? "unsure" : "sure", f.State.ToCode(),
@@ -65,12 +66,13 @@ public static class FindingsCommand
                 ? new TargetView(t.Path, t.RelativePath, t.Certainty.ToCode(), t.Reason, t.SameContentFiles, t.ContentCheck.ToCode(),
                     t.LibraryJobId, t.LibraryRoot)
                 : null,
-            f.Duplicates, f.Examples, f.Notes, f.DecidedBy.ToCode(), f.DecidedAt, f.DecisionNote);
+            f.Duplicates, f.Examples, f.Notes, f.DecidedBy.ToCode(), f.DecidedAt, f.DecisionNote, f.TargetStatus.ToCode());
 
         public string ToLine() =>
             $"{Rank,4}  {Key,-24} {Certainty,-9} {Files,7} files {ReadFormat.Size(Bytes),10}  {Action.Kind,-13}"
             + (State == "open" ? string.Empty : $" [{State}]")
-            + $"  {Title}";
+            + $"  {Title}"
+            + (Target is { } t ? $"  -> {t.RelativePath} (library job {t.LibraryJobId})" : TargetStatus is { } s && s != "not_matched" ? $"  -> none ({s})" : string.Empty);
     }
 
     public sealed record InputsView(
@@ -117,13 +119,15 @@ public static class FindingsCommand
     public sealed record RootStorageView(long LibraryJobId, string RootPath, long? FreeBytes, long NeededBytes, int Findings, string Space);
 
     /// <summary>Where the proposals go: library roots only, with free and needed space.</summary>
+    /// <param name="UnplacedByReason">Findings without a target per reason code (<c>not_matched</c>, <c>no_fitting_folder</c>,
+    /// <c>content_unclear</c>, <c>no_model</c>).</param>
     public sealed record StorageView(string Status, string? Message, IReadOnlyList<RootStorageView> Roots, int UnplacedFindings,
-        TallyView Unplaced, IReadOnlyList<string> Warnings)
+        TallyView Unplaced, IReadOnlyList<string> Warnings, IReadOnlyDictionary<string, int>? UnplacedByReason = null)
     {
         public static StorageView From(FindingStorage s) => new(
             s.Status.ToCode(), s.Message,
             s.Roots.Select(r => new RootStorageView(r.LibraryJobId, r.RootPath, r.FreeBytes, r.NeededBytes, r.Findings, r.Space.ToCode())).ToList(),
-            s.UnplacedFindings, TallyView.From(s.Unplaced), s.Warnings);
+            s.UnplacedFindings, TallyView.From(s.Unplaced), s.Warnings, s.UnplacedByReason ?? new Dictionary<string, int>());
     }
 
     public sealed record CoverageView(string Coverage, string? Note);
@@ -141,9 +145,11 @@ public static class FindingsCommand
 
     public sealed record KindTotalsView(long Findings, long Sure, long Unsure, long Files, long Bytes);
 
+    /// <param name="Target">The place of the finding in a library, with its reason; null without one.</param>
+    /// <param name="TargetStatus">For findings that should move: a <c>FindingTargetStatus</c> code; null for the other kinds.</param>
     public sealed record BriefView(
         int Rank, string Key, string Kind, string Certainty, string State, string Title, string? RelativePath,
-        long Files, long Bytes, string Action);
+        long Files, long Bytes, string Action, TargetView? Target = null, string? TargetStatus = null);
 
     public sealed record SummaryResult(
         long JobId,
@@ -279,6 +285,7 @@ public static class FindingsCommand
         });
 
         command.Subcommands.Add(CreateShow(host, globals));
+        command.Subcommands.Add(CreateTargets(host, globals));
         command.Subcommands.Add(CreateDecision(host, globals, "accept", FindingState.Accepted,
             "Accept findings: the plan turns them into actions. Changes no file."));
         command.Subcommands.Add(CreateDecision(host, globals, "reject", FindingState.Rejected,
@@ -321,7 +328,14 @@ public static class FindingsCommand
                 sb.AppendLine($"      {f.Reason}");
                 sb.AppendLine($"      action: {f.Action.Kind}: {f.Action.Reason}");
                 if (f.Target is { } t)
-                    sb.AppendLine($"      target: {t.RelativePath} ({t.Certainty}, content {t.ContentCheck})");
+                {
+                    sb.AppendLine($"      target: {t.RelativePath} in library job {t.LibraryJobId} ({t.Certainty}, content {t.ContentCheck})");
+                    sb.AppendLine($"      why there: {t.Reason}");
+                }
+                else if (f.TargetStatus is { } none)
+                {
+                    sb.AppendLine($"      target: none ({none})");
+                }
                 if (f.Markers.Count > 0)
                     sb.AppendLine($"      markers: {string.Join(", ", f.Markers)} ({string.Join(", ", f.SensitiveRules)})");
                 foreach (var note in f.Notes)
@@ -334,6 +348,113 @@ public static class FindingsCommand
             });
         });
         return command;
+    }
+
+    public sealed record TargetItemView(
+        string Key, string Kind, string Title, string Status, bool Reused, long? LibraryJobId, string? Path, string? RelativePath,
+        string? Certainty, string ContentCheck, string ContentStatus, string Reason);
+
+    public sealed record TargetsResult(
+        long JobId,
+        string Status,
+        string? Message,
+        IReadOnlyList<long> LibraryJobIds,
+        int Considered,
+        int Matched,
+        int Reused,
+        IReadOnlyDictionary<string, int> ByStatus,
+        IReadOnlyList<TargetItemView> Items,
+        IReadOnlyList<ModelCallUsage> ModelCalls);
+
+    /// <summary>
+    /// <c>sfo findings targets</c> (https://github.com/crack666/smart_file_organizer/issues/83): the target match of
+    /// <c>sfo library match</c> for every finding that should move, stored per finding. Resumable; a finding whose stored
+    /// match still fits is not matched again.
+    /// </summary>
+    private static Command CreateTargets(CliHost host, GlobalOptions globals)
+    {
+        var job = JobArguments.Create("Job id of a source (see sfo jobs).");
+        var against = new Option<long[]>("--against")
+        {
+            Description = "Library job to look in. Repeatable. Default: the libraries of the newest sfo compare.",
+            HelpName = "job"
+        };
+        var key = new Option<string[]>("--key")
+        {
+            Description = "Only this finding (see sfo findings). Repeatable. Default: every open or accepted finding of the kinds not_backed_up, in_noise and misplaced.",
+            HelpName = "key"
+        };
+        var noModel = LibraryCommand.NoModelOption();
+        var model = LibraryCommand.ModelOption();
+        var refresh = new Option<bool>("--refresh")
+        {
+            Description = "Match every finding again and ask the model again, even where a stored match still fits."
+        };
+        var command = new Command("targets",
+            "Find a place in the libraries for every finding that should move (the match of sfo library match: time, names, kinds of files, content), and store it per finding. Resumable.")
+        {
+            job, against, key, noModel, model, refresh
+        };
+
+        CommandRunner.SetHandler(command, host, globals, async (ctx, ct) =>
+        {
+            var services = await ctx.GetServicesAsync(ct);
+            var p = ctx.ParseResult;
+            var query = new FindingTargetQuery
+            {
+                JobId = p.GetValue(job),
+                Libraries = (p.GetValue(against) ?? []).Distinct().ToList(),
+                Keys = (p.GetValue(key) ?? []).Distinct(StringComparer.Ordinal).ToList(),
+                UseModel = !p.GetValue(noModel),
+                Refresh = p.GetValue(refresh),
+                Model = p.GetValue(model)
+            };
+            var progress = new SynchronousProgress<FindingTargetProgress>(pr =>
+                ctx.Progress.Report("targets", pr.Done, pr.Total, 0, pr.Key, pr.Reused ? "stored: " + pr.Status.ToCode() : pr.Status.ToCode()));
+
+            FindingTargetRun run;
+            try
+            {
+                run = await Run(() => services.GetRequiredService<FindingTargetService>().MatchAsync(query, progress, ct));
+            }
+            catch (Application.Library.LibraryServiceException ex)
+            {
+                throw LibraryCommand.ToFailure(ex);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                return CommandOutcome.Cancelled(
+                    "Target match interrupted. The findings matched so far are stored; run the command again to go on.");
+            }
+
+            var result = new TargetsResult(run.Job.Id, run.Status.ToCode(), run.Message, run.LibraryJobIds, run.Considered, run.Matched,
+                run.Reused, run.ByStatus,
+                run.Items.Select(i => new TargetItemView(i.Key, i.Kind.ToCode(), i.Title, i.Status.ToCode(), i.Reused, i.LibraryJobId,
+                    i.Path, i.RelativePath, i.Certainty.ToCode(), i.ContentCheck.ToCode(), i.ContentStatus.ToCode(), i.Reason)).ToList(),
+                services.GetRequiredService<ModelUsageMeter>().Snapshot());
+            return CommandOutcome.Success(result, () => RenderTargets(result));
+        });
+        return command;
+    }
+
+    private static string RenderTargets(TargetsResult r)
+    {
+        var sb = new StringBuilder();
+        if (r.Message is { } message)
+            return message;
+        sb.AppendLine($"Job {r.JobId}: {r.Considered} findings to place, {r.Matched} matched now, {r.Reused} kept from an earlier run "
+                      + $"(library jobs {string.Join(", ", r.LibraryJobIds)})");
+        foreach (var (status, n) in r.ByStatus)
+            sb.AppendLine($"  {status,-18} {n,4}");
+        foreach (var i in r.Items)
+        {
+            sb.AppendLine($"  {i.Key,-24} {i.Status,-18} "
+                          + (i.RelativePath is { } rel ? $"{rel} (library job {i.LibraryJobId}, {i.Certainty}, content {i.ContentCheck})" : "-"));
+            sb.AppendLine($"      {i.Reason}");
+        }
+        if (r.ModelCalls.Count > 0)
+            AnalyzeCommand.AppendModelCalls(sb.AppendLine("Model calls:"), r.ModelCalls);
+        return sb.ToString().TrimEnd();
     }
 
     private static Command CreateDecision(CliHost host, GlobalOptions globals, string name, FindingState target, string description)
@@ -421,7 +542,11 @@ public static class FindingsCommand
         s.ByState.ToDictionary(k => k.Key.ToCode(), k => k.Value),
         s.BelowThreshold.ToDictionary(k => k.Key.ToCode(), k => k.Value),
         s.Top.Select(b => new BriefView(b.Rank, b.Key, b.Kind.ToCode(), b.Certainty.ToCode(), b.State.ToCode(), b.Title,
-            b.RelativePath, b.Files, b.Bytes, b.Action.ToCode())).ToList(),
+            b.RelativePath, b.Files, b.Bytes, b.Action.ToCode(),
+            b.Target is { } t
+                ? new TargetView(t.Path, t.RelativePath, t.Certainty.ToCode(), t.Reason, t.SameContentFiles, t.ContentCheck.ToCode(), t.LibraryJobId, t.LibraryRoot)
+                : null,
+            b.TargetStatus.ToCode())).ToList(),
         s.Overview is { } o ? OverviewView.From(o) : null,
         s.Storage is { } st ? StorageView.From(st) : null);
 
@@ -446,7 +571,10 @@ public static class FindingsCommand
             foreach (var root in st.Roots)
                 sb.AppendLine($"  target {root.RootPath}: {(root.FreeBytes is { } free ? ReadFormat.Size(free) : "unknown")} free, {ReadFormat.Size(root.NeededBytes)} needed ({root.Space})");
             if (st.UnplacedFindings > 0)
-                sb.AppendLine($"  without target yet: {st.UnplacedFindings} findings, {ReadFormat.Size(st.Unplaced.Bytes)}");
+                sb.AppendLine($"  without target yet: {st.UnplacedFindings} findings, {ReadFormat.Size(st.Unplaced.Bytes)}"
+                              + (st.UnplacedByReason is { Count: > 0 } why
+                                  ? $" ({string.Join(", ", why.Select(w => $"{w.Key} {w.Value}"))})"
+                                  : string.Empty));
             foreach (var warning in st.Warnings)
                 sb.AppendLine("  warning: " + warning);
         }
@@ -458,7 +586,11 @@ public static class FindingsCommand
                           + (coverage is null || coverage.Coverage == "complete" ? string.Empty : $"  [{coverage.Coverage}: {coverage.Note}]"));
         }
         foreach (var b in r.Top)
+        {
             sb.AppendLine($"  {b.Rank,4}  {b.Key,-24} {b.Certainty,-9} {b.Action,-13} {b.Title}");
+            if (b.Target is { } t)
+                sb.AppendLine($"        -> {t.RelativePath} (library job {t.LibraryJobId}, {t.Certainty}, content {t.ContentCheck}): {t.Reason}");
+        }
         foreach (var step in r.MissingSteps)
             sb.AppendLine("  missing: " + step);
         return sb.ToString().TrimEnd();

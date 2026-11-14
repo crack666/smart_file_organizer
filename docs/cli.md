@@ -139,7 +139,8 @@ sfo analyze 7 --phase classification --parallel 2 --json
 ```
 
 `model_calls` has one entry per kind of call made in this run (`pre_assessment`, `classification`,
-`second_check`, `summary`, see [glossary.md](glossary.md#kind-of-a-model-call-modelcallkinds)), with the
+`second_check`, `summary`; library questions as `content_fit`, `folder_name`, `library_advice` with calls and time
+only, see [glossary.md](glossary.md#kind-of-a-model-call-modelcallkinds)), with the
 counts the model server returns with every answer: `prompt_tokens` (`prompt_eval_count`), of them
 `cached_prompt_tokens` taken from the server prompt cache (`prompt_eval_cached_count`), `answer_tokens`
 (`eval_count`), `mean_seconds` (prompt and answer time per call as the server measured it) and `cut_off`
@@ -1088,11 +1089,15 @@ https://github.com/crack666/smart_file_organizer/issues/39
     "dump_count": 1, "bundle_count": 10, "unbundled_files": 0
   },
   "top_level_by_kind": { "event": 3, "dump": 1, "folder": 1 },
-  "comparison": { "comparison_id": 3, "against_job_id": 8, "compared_at": "2026-11-12T15:02:11.410Z" }
+  "comparison": { "comparison_id": 3, "against_job_id": 8, "compared_at": "2026-11-12T15:02:11.410Z",
+                  "library_job_ids": [ 8, 9 ] }
 }
 ```
 
-`comparison` is the latest `sfo compare` of the job against a library, or `null`. Errors:
+`comparison` is the newest `sfo compare` run of the job against libraries, or `null`: `library_job_ids` lists all of
+them, `comparison_id` and `against_job_id` name the first, `compared_at` is the oldest of the run. The `comparison`
+counts of each bundle (`sfo bundles list`) join all of them: a file is `backed_up` as soon as one library holds it.
+Errors:
 `job_not_found` (1), `scan_not_completed` (1), `patterns_invalid` (1, the pattern file or a threshold).
 
 ### `sfo bundles list <job>`
@@ -1143,7 +1148,8 @@ One page of bundles (paging as in [Lists and paging](#lists-and-paging)): the to
 
 The short list a job ends in (https://github.com/crack666/smart_file_organizer/issues/26). Rules, certainty,
 ranking and thresholds: [architecture.md, Findings flow](architecture.md#findings-flow). No model call, no
-scanned file opened; decisions change only their row.
+scanned file opened; decisions change only their row. The one exception is `sfo findings targets`, the target match,
+which asks the model as `sfo library match` does and stores its answer per finding.
 
 ### `sfo findings <job>`
 
@@ -1191,17 +1197,26 @@ scanned file opened; decisions change only their row.
   folders). The action keeps the copy in `keep`: `delete_source` for the others with a library, `leave` without.
 - `group` (for `not_backed_up` and `in_noise`): the kind of files, one finding per place and kind
   ([glossary](glossary.md#kind-of-files-of-a-finding-group)); `null` for the other kinds.
-- `target` (for `misplaced`): `path`, `relative_path`, `certainty`, `reason`, `same_content_files`,
-  `content_check` (`not_checked` until targets are checked by content), `library_job_id` and `library_root`: the
-  library the place lies in. A target lies inside a library root or there is none: a proposed place outside every
-  root is dropped with a note, and without a library no finding has a target.
+- `target`: `path` (the target folder), `relative_path` (below the library root), `certainty`, `reason`,
+  `same_content_files`, `content_check` (`not_checked`, `fits`, `contradicts`, `unclear`), `library_job_id` and
+  `library_root`: the library the place lies in. For `not_backed_up`, `in_noise` and `misplaced` it comes from the
+  target match ([`sfo findings targets`](#sfo-findings-targets-job)); a `misplaced` finding not matched yet may carry a
+  target of the rules alone (`not_checked`). A target lies inside a library root or there is none: a proposed place
+  outside every root is dropped with a note, and without a library no finding has a target.
+- `target_status` (for `not_backed_up`, `in_noise`, `misplaced`; `null` for the others): what the target match found,
+  `existing_folder`, `new_folder`, or why there is no target: `not_matched`, `no_fitting_folder`, `content_unclear`,
+  `no_model` ([glossary](glossary.md#target-match-of-a-finding-findingtargetstatus)). The text list ends a line with
+  `-> <target>` or `-> none (<code>)`.
 - `inputs.library_job_ids` lists every library the findings rest on; `library_job_id` and `library_compared_at` are
   those of the first one.
 - `sensitive` findings name path, marker and rule ids, never content.
 - `--summary` gives `{ "job_id", "root_path", "inputs", "coverage", "missing_steps", "listed", "sure", "unsure",
   "by_kind": { "<kind>": { "findings", "sure", "unsure", "files", "bytes" } }, "by_certainty", "by_state",
   "below_threshold", "top": [ { "rank", "key", "kind", "certainty", "state", "title", "relative_path", "files",
-  "bytes", "action" } ], "overview", "storage" }`.
+  "bytes", "action", "target", "target_status" } ], "overview", "storage" }`. `target` is the place with its reason as
+  in the list; the text names it under the finding (`-> Fotos/Skifahrt 2015 (library job 8, certain, content fits): ...`).
+- `missing_steps` names `sfo findings targets <job>` while a finding that should move has no target and was not
+  matched yet.
 
 **Overview first** (https://github.com/crack666/smart_file_organizer/issues/74). `overview` answers file by file,
 before any finding: what lies on the source, what of it is worth keeping and not safe, what is safe and where.
@@ -1238,7 +1253,8 @@ overview counts files, the findings count what passed their thresholds.
              { "library_job_id": 9, "root_path": "/mnt/nas/videos", "free_bytes": null,
                "needed_bytes": 0, "findings": 0, "space": "unknown" } ],
   "unplaced_findings": 4, "unplaced": { "files": 330, "bytes": 700000000 },
-  "warnings": []
+  "warnings": [],
+  "unplaced_by_reason": { "content_unclear": 1, "no_fitting_folder": 1, "not_matched": 2 }
 }
 ```
 
@@ -1248,8 +1264,10 @@ overview counts files, the findings count what passed their thresholds.
   `free_bytes` is what the file system lets the user write there (local folder, mounted share or network path;
   `null` when it cannot be told). `space` is `enough`, `not_enough` or `unknown`
   ([glossary](glossary.md#room-at-a-target-root-targetspace)); never an error.
-- `unplaced`: findings that should move (`not_backed_up`, `in_noise`) but have no target yet; they need room in one of
-  the roots too.
+- `unplaced`: findings that should move (`not_backed_up`, `in_noise`, `misplaced` with a move) but have no target;
+  they need room in one of the roots too. `unplaced_by_reason` counts them per `target_status`: `not_matched` until
+  `sfo findings targets` ran, then only those that really got none, with the reason (`no_fitting_folder`,
+  `content_unclear`, `no_model`). The text line reads `without target yet: 4 findings, 668 MB (content_unclear 1, ...)`.
 - `warnings`: one line per root that has not enough room, and one when the unplaced findings need more than is left
   free in all roots together (only when every root's free space is known).
 
@@ -1261,6 +1279,58 @@ the job was not compared with), `settings_invalid` (1, a `Findings` value), `usa
 `{ "job_id", "finding": {...}, "total", "limit", "offset", "next_offset", "files": [ ... ] }`: the finding and
 its files, one page at a time, as `sfo files` writes them (marked files protected; `--include-sensitive` as
 there). Errors: `job_not_found` (1), `finding_not_found` (1).
+
+### `sfo findings targets <job>`
+
+The step between overview and recommendation: where each finding should go
+(https://github.com/crack666/smart_file_organizer/issues/83). For every open or accepted finding of the kinds
+`not_backed_up`, `in_noise` and `misplaced` it runs the match of [`sfo library match`](#sfo-library-match-job-path)
+with exactly the files of the finding, over all libraries of the comparison: time, names, kinds of files, the files
+already there, and the content check (unit description against a sample of each candidate folder,
+`fits|contradicts|unclear`). A named folder or device copy keeps its name, as with `library match --bundle`. The answer
+is stored per finding (`finding_targets`): the best existing folder, else a new folder in the style of the library with
+a complete name, else why there is none. `sfo findings`, `findings show`, `--summary` and `sfo plan create` read it from
+there. Sensitive findings never get a target. Nothing on disk is changed.
+
+| Option | Meaning |
+|---|---|
+| `--against <job>` | Library job to look in. Repeatable. Default: the libraries of the newest `sfo compare`. |
+| `--key <key>` | Only this finding. Repeatable. Default: every open or accepted finding of the three kinds. |
+| `--no-model` | Rules only: no content check, no model name for a new folder. A target is then `uncertain` at most, as with `library match --no-model`. |
+| `--model <name>` | Ollama model for this run. |
+| `--refresh` | Match every finding again and ask the model again, even where a stored match still fits. |
+
+**Resumable and cheap the second time.** Each answer is stored as soon as it is there; a run cut off (Ctrl+C) goes on
+where it stopped. A finding whose stored match rests on the same files, the same descriptions of them and the same
+libraries is not matched again (`reused`), unless this run may ask the model and the stored match could not
+(`--no-model` before, model away). Below that, folder descriptions (`folder_descriptions`) and the model's answers
+(`library_advice`) are stored as in `library match`. Progress goes to stderr, one line per finding.
+
+```json
+{
+  "job_id": 1, "status": "known", "message": null, "library_job_ids": [ 8, 9 ],
+  "considered": 3, "matched": 3, "reused": 0,
+  "by_status": { "existing_folder": 1, "new_folder": 1, "no_fitting_folder": 1 },
+  "items": [
+    { "key": "not_backed_up-880444df56", "kind": "not_backed_up",
+      "title": "4 images (72 B) worth keeping, not in the library: loose files in Neuer Ordner",
+      "status": "existing_folder", "reused": false, "library_job_id": 8, "path": "/nas/photos/Fotos/Skifahrt 2015",
+      "relative_path": "Fotos/Skifahrt 2015", "certainty": "certain", "content_check": "fits", "content_status": "checked",
+      "reason": "Into Fotos/Skifahrt 2015: the content fits: snowy slope, skiing, holiday; ..." }
+  ],
+  "model_calls": [ { "kind": "content_fit", "calls": 2, "prompt_tokens": 0, "...": "" } ]
+}
+```
+
+- `status` is `known`, or `no_library` with a `message` and no items: without a library there is no target.
+- `items[].status` is a `FindingTargetStatus` code ([glossary](glossary.md#target-match-of-a-finding-findingtargetstatus));
+  `content_status` the `ContentCheckStatus` of the match ([library-match.md](library-match.md#content-check)).
+- `model_calls` counts the calls of this run per kind (`classification` for describing a library folder's sample,
+  `content_fit`, `folder_name`); empty when every answer was stored already.
+
+Errors: `job_not_found` (1), `wrong_role` (1, a library), `comparison_not_found` (1, `--against` names a library the
+job was not compared with), `finding_not_found` (1, `--key`), `library_patterns_invalid` (1), `settings_invalid` (1),
+`usage` (2).
 
 ### `sfo findings accept|reject|wrong|reopen <job> <key>...`
 
@@ -1379,8 +1449,8 @@ action per whole folder or per worth-keeping file, which a person or a steering 
 [Executing a plan](#executing-a-plan) does, with `--execute`, and it runs the same checks again. Rules:
 [architecture.md, Plan flow](architecture.md#plan-flow); codes: [glossary.md, Plans](glossary.md#plans).
 
-Order of work: overview (`sfo findings --summary`), recommendation (`sfo findings`, `sfo plan create`), decision
-(`sfo findings accept`, `sfo plan approve`).
+Order of work: overview (`sfo findings --summary`), where to (`sfo findings targets`), recommendation
+(`sfo findings`, `sfo plan create`), decision (`sfo findings accept`, `sfo plan approve`).
 
 **Hard rules**, checked when an action is created, set, imported and confirmed (`problems`, see the glossary):
 
@@ -1410,11 +1480,12 @@ Settings, section `Plan` of the settings file:
 How actions arise from accepted findings:
 
 - A folder judged `unit` or `uniform` whose files all go (worth keeping, not in a library, not marked, no misplaced
-  file among them) is one action with `source_kind` `folder`; the target keeps the folder name. The topmost such
-  folder wins.
+  file among them) is one action with `source_kind` `folder`; the target keeps the folder name (a target folder that
+  already carries that name, from `sfo findings targets`, is taken as it is). The topmost such folder wins.
 - Everything else of a finding to move is one action per worth-keeping file; the rest of a `mixed` folder stays.
-- The target is the place the finding proposes in a library, else the target of `sfo decide` below the root of the
-  `--library`. Without one: `leave`.
+- The target is the place the finding proposes in a library (from [`sfo findings targets`](#sfo-findings-targets-job),
+  or for `misplaced` from the rules), else the target of `sfo decide` below the root of the `--library`. Without one:
+  `leave`. The checks below apply to every target alike.
 - `sensitive`: one `leave` per file (`sensitive`, `single_decision` true). `duplicate`: `delete_source` for each copy
   outside the kept folder whose content a library holds (the target is the place in the library); else one `leave`.
   Any other finding that recommends nothing to move is one `leave`.

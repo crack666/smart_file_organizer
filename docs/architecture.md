@@ -173,8 +173,9 @@ files through `IJobReadRepository`, capture date, device and image origin throug
 `BundleBuilder` in memory: dumps by `DumpSignature` (outermost match wins), their parts by `keep_parts` and
 `noise_paths`, named folders by `IsGenericName`, events by `EventGrouper`. `IBundleRepository.ReplaceAsync` stores
 the tree in one transaction. `ListAsync` and `GetAsync` add, when read, the marked files per bundle
-(`SensitiveOutputGuard.GetMatch`, rolled up along `parent_bundle_id`) and the comparison states of the latest
-comparison with a library. `JobReadService.ListFilesAsync` filters by a bundle and its descendants
+(`SensitiveOutputGuard.GetMatch`, rolled up along `parent_bundle_id`) and the comparison states of the newest
+`sfo compare` run over all of its libraries (`LibraryComparisonSet`: a file is backed up as soon as one holds it; until
+https://github.com/crack666/smart_file_organizer/issues/83 only the newest single comparison counted). `JobReadService.ListFilesAsync` filters by a bundle and its descendants
 (`FileListFilter.BundleIds`), so files of a bundle pass the output guard like every other listing.
 
 ## Findings flow
@@ -225,13 +226,26 @@ raised from `uniform` by a sample) or `disposable`. A folder judged `mixed` that
 | `duplicate` | identical files (same full SHA-256) of the source worth keeping, outside every whole, marked files left out; or a whole (topmost folder judged `unit` or `system`, a program folder, app data of a device copy) that exists more than once, when at least half of the smaller one is identical | `certain` | keep one copy, `delete_source` for the others with a library, `leave` without |
 
 A file is in at most one of `not_backed_up`, `in_noise`, `sensitive`. `misplaced` may only rest on a target
-whose content was checked (https://github.com/crack666/smart_file_organizer/issues/56). Until that check exists
-every target says `content_check: not_checked`. The check plugs in at `IFindingTargetAdvisor`
-(`LibraryFindingTargetAdvisor` wraps `LibraryTargetService.BestPlacesAsync` over every library of the set and keeps the
-best place of all): `fits` lifts the cap to the target's certainty, `contradicts` drops the target; the rules stay as
-they are. Whatever the advisor returns, `FindingService` keeps a target only when it lies inside a library root and
-records that library (`FindingTarget.LibraryJobId`, `LibraryRoot`); without a library no target exists
-(https://github.com/crack666/smart_file_organizer/issues/74).
+whose content was checked (https://github.com/crack666/smart_file_organizer/issues/56). While findings are computed
+the rules alone propose a place for `misplaced` groups through `IFindingTargetAdvisor` (`LibraryFindingTargetAdvisor`
+wraps `LibraryTargetService.BestPlacesAsync` over every library of the set and keeps the best place of all); such a
+target says `content_check: not_checked`. Whatever the advisor returns, `FindingService` keeps a target only when it
+lies inside a library root and records that library (`FindingTarget.LibraryJobId`, `LibraryRoot`); without a library
+no target exists (https://github.com/crack666/smart_file_organizer/issues/74).
+
+**Target match** (https://github.com/crack666/smart_file_organizer/issues/83). Computing findings calls no model, so
+the content check runs as a step of its own: `FindingTargetService` (`sfo findings targets`) hands the files of every
+open or accepted `not_backed_up`, `in_noise` and `misplaced` finding to `LibraryTargetService.MatchAsync`
+(`LibraryMatchQuery.Files`; a named folder or device copy also gives its path, so it keeps its name), over all
+libraries of the comparison, and stores the answer per finding in `finding_targets`: the best existing folder, else a
+new folder with a complete name, else why none (`FindingTargetStatus`). Each answer is stored as it comes, so a run
+cut off goes on where it stopped. `FindingService` reads the stored match back as long as `input_hash` (the file ids,
+their description facts, the library ids) is the finding's own (`Finding.TargetInput`); it sets `Target`,
+`TargetStatus` and a `move` action, recomputes the certainty of a `misplaced` finding (`fits` lifts the cap), and drops
+a rule target of a `misplaced` finding the match found no fitting folder for. A second run keeps every stored match
+whose input is unchanged and asks nothing, unless it may ask the model and the stored match could not. A marked file
+never gets a target. The plan reads the target like any other (`FindingTarget.Path`); a folder kept whole whose target
+already carries its name goes there itself, not into a folder of its name below it.
 
 **Overview and room.** Besides the findings, `FindingService` counts the files of the job once
 (`FindingOverview`: worth keeping and not backed up, backed up per library, disposable, sensitive) and weighs the
@@ -909,6 +923,11 @@ Important tables:
 - `finding_decisions` — decisions about findings (step 14): `job_id`, `finding_key`, `kind`, `state` (`accepted`,
   `rejected`, `wrong`; no row means open), `origin` (`human`, `agent`), `note`, `decided_at`, `snapshot_json`.
   Findings themselves are computed when read; deleted with the job
+- `finding_targets` — the target match of `sfo findings targets` per finding (step 26): `job_id`, `finding_key`,
+  `input_hash` (files, their description facts and the libraries the match rested on), `status`
+  (`FindingTargetStatus`), `library_job_id`, `path`, `relative_path`, `certainty`, `content_check`, `content_status`
+  (`ContentCheckStatus`), `reason`, `same_content_files`, `with_model`, `model`, `matched_at`; one row per job and key.
+  Read by the findings while `input_hash` still fits; deleted with the job
 - `plans` — one row per plan (step 23): `job_id`, `created_at`, `libraries` (JSON list of library job ids), `notes`
   (JSON list). Deleted with the job
 - `plan_actions` — the actions of a plan (step 23): `plan_id`, `finding_key`, `finding_kind`, `unit`, `source_kind`
@@ -955,7 +974,7 @@ new table is not covered.
 1. Add one file `Migrations/M000N_ShortName.cs` with a class implementing `ISchemaMigration`, or deriving from `SqlSchemaMigration` when plain SQL is enough. `Version` is `N`.
 2. Take the next free number on `master`. Steps are discovered by reflection, so no shared list is edited.
 3. Versions must be exactly `1..N`. If two branches picked the same number, startup and `SchemaMigrationTests` fail with a "Duplicate schema migration versions" message; the branch merged second renumbers its step (file name and `Version`).
-4. Never change a step that has been merged; add a new one. Step 1 (`M0001_InitialSchema`) is the schema as it existed before migrations. Step 2 (`M0002_SensitiveMarkers`) adds the sensitive-marker columns. Step 3 (`M0003_DirectoryVerdicts`) adds `directory_verdicts`. Step 4 (`M0004_ScanJobRules`) adds the scan rules of a job. Step 5 (`M0005_ContentComparison`) adds the comparison with the library. Step 6 (`M0006_DirectorySamples`) adds `directory_samples`, the escalation columns and the origin and keep-hint columns of `ai_results`; its new codes are English. Step 7 (`M0007_FileFacts`) adds `file_facts` and `ai_results.evidence`. Step 8 (`M0008_LibraryReview`) adds `scan_jobs.structure_only` and `library_advice`. Step 9 (`M0009_Evaluation`) adds `eval_cases` and `eval_runs`. Step 10 (`M0010_ResultChecks`) adds certainty, attempts and previous error to `ai_results` and the table `result_checks`. Step 11 (`M0011_Bundles`) adds `bundles`, `bundle_files` and `bundle_builds`. Step 12 (`M0012_SensitiveGaps`) adds the markers of skipped folders, the rule version per file and the marked inputs of directory summaries. Step 13 (`M0013_EnglishCodes`) switches the German codes of steps 2 and 3 to the English codes of [glossary.md](glossary.md): it rebuilds `directory_verdicts` (its CHECK constraints named the old codes), rewrites marker lists token by token, and the texts the program wrote from codes (keep reason, container reason, profile hint, `dominant_type` of the pre-assessment, stored check answers, stored evaluation reports); raw model answers stay as received. The old codes are spelled out in that step, and in step 3, and nowhere else in code. Step 14 (`M0014_FindingDecisions`) adds `finding_decisions`. Step 19 (`M0019_OrphanRows`) removes rows whose job, file or folder no longer exists, left behind by job deletions before the deletion covered every table; optional references to a missing row become NULL, test cases and evaluation runs are kept. Step 20 (`M0020_FileDecisions`) adds `file_decisions`; results and facts stored before stay as they are and are decided without a new analysis. Step 21 (`M0021_ComparisonRuns`) adds `comparisons.run_id`, which groups the comparisons of one run against several libraries; a comparison stored before is its own run. Step 22 (`M0022_ContentStore`) adds `content_assessments`, `content_corrections` and `user_overrides.origin`, and copies `ai_results` once to widen the CHECK of `origin` by `reused` (SQLite cannot change a constraint in place; the copy takes the table definition from `sqlite_master`, so every column and row stays). Step 23 (`M0023_Plans`) adds `plans` and `plan_actions`. Step 24 (`M0024_FolderDescriptions`) adds `folder_descriptions`, what a few files of a library folder show, per library job, folder and description source (https://github.com/crack666/smart_file_organizer/issues/56). Step 25 (`M0025_PlanExecution`) copies `plan_actions` once to widen the CHECK of `state` by `verified`, adds `scan_jobs.keep_source` and the journal `plan_steps` (https://github.com/crack666/smart_file_organizer/issues/12).
+4. Never change a step that has been merged; add a new one. Step 1 (`M0001_InitialSchema`) is the schema as it existed before migrations. Step 2 (`M0002_SensitiveMarkers`) adds the sensitive-marker columns. Step 3 (`M0003_DirectoryVerdicts`) adds `directory_verdicts`. Step 4 (`M0004_ScanJobRules`) adds the scan rules of a job. Step 5 (`M0005_ContentComparison`) adds the comparison with the library. Step 6 (`M0006_DirectorySamples`) adds `directory_samples`, the escalation columns and the origin and keep-hint columns of `ai_results`; its new codes are English. Step 7 (`M0007_FileFacts`) adds `file_facts` and `ai_results.evidence`. Step 8 (`M0008_LibraryReview`) adds `scan_jobs.structure_only` and `library_advice`. Step 9 (`M0009_Evaluation`) adds `eval_cases` and `eval_runs`. Step 10 (`M0010_ResultChecks`) adds certainty, attempts and previous error to `ai_results` and the table `result_checks`. Step 11 (`M0011_Bundles`) adds `bundles`, `bundle_files` and `bundle_builds`. Step 12 (`M0012_SensitiveGaps`) adds the markers of skipped folders, the rule version per file and the marked inputs of directory summaries. Step 13 (`M0013_EnglishCodes`) switches the German codes of steps 2 and 3 to the English codes of [glossary.md](glossary.md): it rebuilds `directory_verdicts` (its CHECK constraints named the old codes), rewrites marker lists token by token, and the texts the program wrote from codes (keep reason, container reason, profile hint, `dominant_type` of the pre-assessment, stored check answers, stored evaluation reports); raw model answers stay as received. The old codes are spelled out in that step, and in step 3, and nowhere else in code. Step 14 (`M0014_FindingDecisions`) adds `finding_decisions`. Step 19 (`M0019_OrphanRows`) removes rows whose job, file or folder no longer exists, left behind by job deletions before the deletion covered every table; optional references to a missing row become NULL, test cases and evaluation runs are kept. Step 20 (`M0020_FileDecisions`) adds `file_decisions`; results and facts stored before stay as they are and are decided without a new analysis. Step 21 (`M0021_ComparisonRuns`) adds `comparisons.run_id`, which groups the comparisons of one run against several libraries; a comparison stored before is its own run. Step 22 (`M0022_ContentStore`) adds `content_assessments`, `content_corrections` and `user_overrides.origin`, and copies `ai_results` once to widen the CHECK of `origin` by `reused` (SQLite cannot change a constraint in place; the copy takes the table definition from `sqlite_master`, so every column and row stays). Step 23 (`M0023_Plans`) adds `plans` and `plan_actions`. Step 24 (`M0024_FolderDescriptions`) adds `folder_descriptions`, what a few files of a library folder show, per library job, folder and description source (https://github.com/crack666/smart_file_organizer/issues/56). Step 25 (`M0025_PlanExecution`) copies `plan_actions` once to widen the CHECK of `state` by `verified`, adds `scan_jobs.keep_source` and the journal `plan_steps` (https://github.com/crack666/smart_file_organizer/issues/12). Step 26 (`M0026_FindingTargets`) adds `finding_targets`, the stored target match per finding (https://github.com/crack666/smart_file_organizer/issues/83).
 5. Do not put `PRAGMA journal_mode` or other transaction-incompatible statements in a step.
 
 ## Architectural rules

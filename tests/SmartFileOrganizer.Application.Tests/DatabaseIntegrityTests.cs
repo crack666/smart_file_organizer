@@ -236,6 +236,8 @@ public class DatabaseIntegrityTests : IDisposable
                 VALUES (@job, 'd', 'sample', '[]', '{}', 1, 1, @T);
             INSERT INTO finding_decisions (job_id, finding_key, kind, state, origin, decided_at, snapshot_json)
                 VALUES (@job, 'k', 'sensitive', 'accepted', 'human', @T, '{}');
+            INSERT INTO finding_targets (job_id, finding_key, input_hash, status, content_check, content_status, reason, with_model, matched_at)
+                VALUES (@job, 'k', 'h', 'no_model', 'not_checked', 'no_model', 'r', 0, @T);
             INSERT INTO model_server_waits (job_id, since, checked_at, cause) VALUES (@job, @T, @T, 'busy');
             INSERT INTO plans (job_id, created_at, libraries, notes) VALUES (@job, @T, '[]', '[]');
             INSERT INTO plan_actions (plan_id, finding_key, finding_kind, unit, source_kind, source_path, relative_path,

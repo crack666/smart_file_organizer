@@ -97,6 +97,20 @@ public sealed class Finding
 
     public required FindingAction Action { get; set; }
     public FindingTarget? Target { get; set; }
+
+    /// <summary>
+    /// For the kinds that need a place (<see cref="FindingRules.TargetKinds"/>): what the stored target match says
+    /// (https://github.com/crack666/smart_file_organizer/issues/83), <c>not_matched</c> when none fits the finding as it
+    /// is now. Null for the other kinds.
+    /// </summary>
+    public FindingTargetStatus? TargetStatus { get; set; }
+
+    /// <summary>
+    /// SHA-256 of what a target match of this finding rests on (its files, their description facts, the libraries); a
+    /// stored match counts only while it is the same. Null for the kinds without a target.
+    /// </summary>
+    public string? TargetInput { get; set; }
+
     public FindingDuplicates? Duplicates { get; set; }
 
     /// <summary>A few file paths relative to the job root, so the finding can be checked at a glance.</summary>
@@ -181,7 +195,9 @@ public sealed record RootStorage(long LibraryJobId, string RootPath, long? FreeB
 /// <summary>
 /// Where the proposals of the findings go (https://github.com/crack666/smart_file_organizer/issues/74): only into
 /// library roots. <see cref="Unplaced"/> counts files of findings that should move but have no target yet (worth keeping
-/// and not in the library, or among noise); they need room in one of the roots too.
+/// and not in the library, or among noise); they need room in one of the roots too. <see cref="UnplacedByReason"/> says
+/// why per <see cref="FindingTargetStatus"/> code: not matched yet, no fitting folder, content unclear, no model
+/// (https://github.com/crack666/smart_file_organizer/issues/83).
 /// </summary>
 public sealed record FindingStorage(
     StorageStatus Status,
@@ -189,7 +205,8 @@ public sealed record FindingStorage(
     IReadOnlyList<RootStorage> Roots,
     int UnplacedFindings,
     FileTally Unplaced,
-    IReadOnlyList<string> Warnings);
+    IReadOnlyList<string> Warnings,
+    IReadOnlyDictionary<string, int>? UnplacedByReason = null);
 
 /// <summary>All findings of a job, ranked, with what they rest on.</summary>
 public sealed record FindingReport(

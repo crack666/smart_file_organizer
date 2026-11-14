@@ -263,14 +263,17 @@ Links and read errors: https://github.com/crack666/smart_file_organizer/issues/5
 
 ### Kind of a model call (`ModelCallKinds`)
 
-Counted per run in `model_calls` of `sfo analyze --json` and `sfo eval --json`.
+Counted per run in `model_calls` of `sfo analyze --json`, `sfo eval --json` and `sfo findings targets --json`.
 
 | Code | Meaning |
 |---|---|
 | `pre_assessment` | Phase 1: one call per directory, verdict and sample plan. |
-| `classification` | Phase 2: the first call for a file. |
+| `classification` | Phase 2: the first call for a file; also the description of a sampled library folder file. |
 | `second_check` | Phase 2: the second call for an unsure or contradicted file, with its directory as context. |
 | `summary` | Phase 3: one call per directory, the closing summary. |
+| `content_fit` | The content check of target folders: one short call per unit and library. Calls and time only, no tokens. |
+| `folder_name` | The name of a new folder in the style of the library. Calls and time only, no tokens. |
+| `library_advice` | Other questions about a library (purposes, review, proposal). Calls and time only, no tokens. |
 
 ## File facts
 
@@ -700,10 +703,26 @@ nothing yet.
 
 | Code | Meaning |
 |---|---|
-| `not_checked` | Not compared: the target rests on period, names and file types. Every target of a finding today; `sfo library match` checks content on its own (`ContentFit`). |
+| `not_checked` | Not compared: the target rests on period, names and file types. A target of the rules alone, of `sfo findings targets --no-model`, or a new folder. `sfo library match` and `sfo findings targets` check content (`ContentFit`); until 14.11.2026 every target of a finding said `not_checked`. |
 | `fits` | The content of the unit fits what the target holds. |
 | `contradicts` | The content contradicts the target; the target is dropped. |
 | `unclear` | Compared, without a clear answer. |
+
+### Target match of a finding (`FindingTargetStatus`)
+
+What `sfo findings targets` found for a finding that should move (`not_backed_up`, `in_noise`, `misplaced`;
+https://github.com/crack666/smart_file_organizer/issues/83). Stored per finding in `finding_targets.status`; shown as
+`target_status` by `sfo findings`, `findings show` and the `top` of `--summary`, and counted per code in
+`storage.unplaced_by_reason` for the findings without a target.
+
+| Code | Meaning |
+|---|---|
+| `existing_folder` | An existing folder of a library is the target. |
+| `new_folder` | No existing folder fits; a new folder in the style of the library, with a complete name, is the target. |
+| `not_matched` | No stored match fits the finding as it is now: never matched, or its files, their descriptions or the libraries changed. Not stored. |
+| `no_fitting_folder` | No folder of any library fits, and no complete name for a new one was found. |
+| `content_unclear` | No folder fits by time, name or kind of files, and the files are not described, so their content cannot choose one. |
+| `no_model` | A new folder needs a name the rules cannot complete, and no model was used (`--no-model`) or reachable. |
 
 ### Coverage of a kind of finding (`FindingCoverage`)
 
