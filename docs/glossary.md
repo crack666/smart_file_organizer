@@ -1011,13 +1011,15 @@ and offered "Bestätigen", "Ablehnen" and "Als Ballast".
 | Word | Codes | What executing does |
 |---|---|---|
 | Umziehen | `move`, `copy` | Copied to the target and checked (step 1); for `move` the original then goes into the Papierkorb (step 2). |
-| Papierkorb ("In den Papierkorb") | `quarantine`, `delete_source` | The original goes into the hold folder `.sfo-hold` in the job folder (step 2); `quarantine` first puts a checked copy into the quarantine folder of the library. "Zurücknehmen" puts it back; deleted for good only by `sfo plan purge`. |
+| Papierkorb ("In den Papierkorb") | `discard`; `quarantine`, `delete_source` under "Genauer" | The original goes into the hold folder `.sfo-hold` in the job folder (step 2), on the drive of the source. `discard` makes no copy anywhere; `quarantine` first puts a checked copy into the quarantine folder of the library. "Zurücknehmen" puts it back; deleted for good, and room freed, only by "Papierkorb leeren" (`sfo plan purge`). Until 14.11.2026 (#105) "In den Papierkorb" set `delete_source` or `quarantine`. |
+| Papierkorb leeren | `sfo plan purge` | Deletes what lies in the plan's hold folder for good, after a confirmation with count and size. Cannot be taken back. |
 | Hier lassen | `leave`, or any `rejected` action | Nothing. |
 | Offen | `proposed` | Not released; does not run. |
 | Freigegeben ("Freigeben") | `approved` | Released; runs in the next step. |
 | Abgelehnt | `rejected` | Set by the CLI or an agent; shown as "Hier lassen", never released by a release. Choosing an outcome sets it to `proposed` with that outcome. |
 
-"Löschen" in the sense of deleting for good is only `sfo plan purge`, which the GUI does not offer.
+"Löschen" in the sense of deleting for good is only `sfo plan purge`, in the GUI "Papierkorb leeren" (since 14.11.2026,
+#105; until then the GUI did not offer it).
 
 ### Source of an action (`PlanSourceKind`)
 

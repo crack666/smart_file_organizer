@@ -273,6 +273,7 @@ public partial class PlanViewModel : ViewModelBase
         try
         {
             Apply(await _plans.GetAsync(p.Plan.Id));
+            await UpdateHeldAsync(p.Plan.Id);
         }
         catch (Exception ex) when (ex is PlanException or JobReadException)
         {
@@ -518,8 +519,9 @@ public partial class PlanViewModel : ViewModelBase
 
     /// <summary>
     /// What happens to the files of <paramref name="rows"/>: <see cref="PlanOutcome.Move"/> sets <c>move</c> (out of
-    /// quarantine with its old target), <see cref="PlanOutcome.Bin"/> asks the plan for <c>delete_source</c> where a
-    /// library holds the content, else <c>quarantine</c> (<see cref="PlanService.MarkForRemovalAsync"/>), and
+    /// quarantine with its old target), <see cref="PlanOutcome.Bin"/> sets <c>discard</c>: the original goes into the
+    /// bin of its source, no copy anywhere (<see cref="PlanService.MarkForRemovalAsync"/>; until 14.11.2026
+    /// <c>delete_source</c> where a library held the content, else <c>quarantine</c>; both stay under "Genauer"), and
     /// <see cref="PlanOutcome.Stay"/> sets <c>leave</c>. A rejected action whose kind already has the outcome is only
     /// opened again. Every change goes through the plan's checks and must be released anew; a sensitive action is changed
     /// only on its own.
@@ -734,7 +736,9 @@ public partial class PlanViewModel : ViewModelBase
         var a = row.Action;
         DetailTitle = row.Name;
         DetailSource = a.SourcePath;
-        DetailTarget = a.TargetPath ?? "kein Ziel";
+        DetailTarget = a.Kind == PlanActionKind.Discard
+            ? "kein Ziel: Papierkorb der Quelle, ohne Kopie"
+            : a.TargetPath ?? "kein Ziel";
         DetailRecommended = $"Vorschlag: {PlanDisplay.KindLabel(a.Recommended)}" + (a.Kind != a.Recommended ? " (geändert)" : string.Empty);
         DetailReason = a.Reason;
         DetailNote = a.Note ?? string.Empty;
@@ -744,7 +748,7 @@ public partial class PlanViewModel : ViewModelBase
                          + (a.DecidedAt is { } at ? $" am {at.ToLocalTime():dd.MM.yyyy HH:mm}" : string.Empty);
         DetailConsequence = row.Consequence;
         DetailOutcomeColor = row.OutcomeColor;
-        DetailRelease = PlanDisplay.StateLabel(a.State) + (a.Sensitive && a.State == PlanActionState.Proposed ? " · sensibel: nur hier einzeln freizugeben" : string.Empty);
+        DetailRelease = PlanDisplay.StateLabel(a) + (a.Sensitive && a.State == PlanActionState.Proposed ? " · sensibel: nur hier einzeln freizugeben" : string.Empty);
         DetailReleaseColor = row.StateColor;
         OutcomeChoices = PlanDisplay.Outcomes.Select(o => new PlanOutcomeChoice(o, o == row.Outcome)).ToList();
         DetailDescription = DetailMarker = DetailFacts = DetailMedia = string.Empty;
@@ -880,11 +884,19 @@ public partial class PlanViewModel : ViewModelBase
             run.Select(i => i.ActionId).ToHashSet(),
             State?.Libraries.Select(l => l.RootPath).ToList() ?? [],
             State?.Job.RootPath ?? string.Empty,
-            dry.KeepSource))
-        {
-            $"Jetzt, Schritt 1: {PlanDisplay.Files(run.Sum(i => i.Files))} ({PlanDisplay.Size(run.Sum(i => i.Bytes))}) werden in die Bibliothek kopiert "
-            + "und per voller Prüfsumme geprüft. Kein Original wird in diesem Schritt angefasst."
-        };
+            dry.KeepSource));
+        var discard = PlanActionKind.Discard.ToCode();
+        var copies = run.Where(i => i.Kind != discard).ToList();
+        var checks = run.Where(i => i.Kind == discard).ToList();
+        lines.Add("Jetzt, Schritt 1: "
+                  + (copies.Count > 0
+                      ? $"{PlanDisplay.Files(copies.Sum(i => i.Files))} ({PlanDisplay.Size(copies.Sum(i => i.Bytes))}) werden in die Bibliothek kopiert "
+                        + "und per voller Prüfsumme geprüft. "
+                      : string.Empty)
+                  + (checks.Count > 0
+                      ? $"{PlanDisplay.Files(checks.Sum(i => i.Files))} für den Papierkorb ohne Kopie werden nur mit dem Scan verglichen. "
+                      : string.Empty)
+                  + "Kein Original wird in diesem Schritt angefasst.");
         if (!await ConfirmAsync("Ausführen, Schritt 1 von 2", lines, "Kopieren und prüfen", isDanger: false)) return;
         await RunAsync("Schritt 1 · kopieren und prüfen", run.Count,
             (o, ct) => _executor.ApplyAsync(p.Plan.Id, o, ct));
@@ -908,7 +920,9 @@ public partial class PlanViewModel : ViewModelBase
             run.Select(i => i.ActionId).ToHashSet(),
             State?.Job.RootPath ?? string.Empty))
         {
-            $"Frei wird: {PlanDisplay.Size(run.Sum(i => i.Bytes))} ({PlanDisplay.Files(run.Sum(i => i.Files))})."
+            // Until 14.11.2026 this line said "Frei wird", but the bin lies on the drive of the source: holding frees nothing.
+            $"In den Papierkorb kommen: {PlanDisplay.Size(run.Sum(i => i.Bytes))} ({PlanDisplay.Files(run.Sum(i => i.Files))}). "
+            + "Der Papierkorb liegt auf dem Laufwerk der Quelle: Platz wird dort erst mit „Papierkorb leeren“ frei."
         };
         if (!await ConfirmAsync("Ausführen, Schritt 2 von 2: Originale in den Papierkorb?", lines, "In den Papierkorb", isDanger: true)) return;
         await RunAsync("Schritt 2 · Originale in den Papierkorb", run.Count,
@@ -935,6 +949,51 @@ public partial class PlanViewModel : ViewModelBase
         };
         if (!await ConfirmAsync("Zurücknehmen?", lines, "Zurücknehmen", isDanger: false)) return;
         await RunAsync("Zurücknehmen", run.Count, (o, ct) => _executor.UndoAsync(p.Plan.Id, o, ct));
+    }
+
+    /// <summary>
+    /// Empties the bin of the plan (<c>sfo plan purge</c>, https://github.com/crack666/smart_file_organizer/issues/105):
+    /// what lies in the hold folder is removed for good, after a confirmation with how many files and how much room. The
+    /// only button of the view that deletes a file, and it does nothing else. A moved original whose copy changed stays.
+    /// </summary>
+    [RelayCommand]
+    public async Task EmptyBinAsync()
+    {
+        if (SelectedPlan is not { } p || IsRunning) return;
+        var held = await _executor.GetHeldAsync(p.Plan.Id);
+        var dry = await _executor.PurgeAsync(p.Plan.Id, new PlanRunOptions([], Execute: false));
+        ShowReport("Trockenlauf · Papierkorb leeren", dry);
+        var run = dry.Items.Where(i => i.Outcome == "would_run").ToList();
+        if (run.Count == 0)
+        {
+            StatusText = "Papierkorb leeren: der Papierkorb dieses Plans ist leer.";
+            return;
+        }
+        var lines = PlanOutcomeSummary.BeforePurge(run, held, State?.Job.RootPath ?? string.Empty);
+        if (!await ConfirmAsync("Papierkorb leeren? Endgültig löschen", lines, "Endgültig löschen", isDanger: true)) return;
+        await RunAsync("Papierkorb leeren", run.Count, (o, ct) => _executor.PurgeAsync(p.Plan.Id, o, ct));
+    }
+
+    /// <summary>What lies in the bin of the plan now, for the line beside "Papierkorb leeren".</summary>
+    [ObservableProperty] private string _binHeldText = string.Empty;
+
+    [ObservableProperty] private bool _hasBinHeld;
+
+    private async Task UpdateHeldAsync(long planId)
+    {
+        try
+        {
+            var held = await _executor.GetHeldAsync(planId);
+            HasBinHeld = held.Files > 0;
+            BinHeldText = held.Files == 0
+                ? "Papierkorb leer"
+                : $"Im Papierkorb: {PlanDisplay.Files(held.Files)} · {PlanDisplay.Size(held.Bytes)} (Platz erst nach dem Leeren frei)";
+        }
+        catch (Exception ex) when (ex is PlanException or JobReadException)
+        {
+            HasBinHeld = false;
+            BinHeldText = string.Empty;
+        }
     }
 
     /// <summary>Stops a running step; the executor treats it like Ctrl+C and the next run settles the open step.</summary>
@@ -1017,6 +1076,10 @@ public partial class PlanViewModel : ViewModelBase
                      + $"fehlgeschlagen {report.Items.Count(i => i.Outcome is "failed" or "would_fail")} · Kollisionen {collisions}"
                      + (report.Removal.Actions > 0
                          ? $" · warten auf Schritt 2: {report.Removal.Actions} ({PlanDisplay.Size(report.Removal.Bytes)})"
+                         : string.Empty)
+                     + (report.Held is { Files: > 0 } held
+                         ? $" · im Papierkorb{(report.Executed ? string.Empty : " danach")}: {PlanDisplay.Files(held.Files)} "
+                           + $"({PlanDisplay.Size(held.Bytes)}, frei erst nach dem Leeren)"
                          : string.Empty);
     }
 }

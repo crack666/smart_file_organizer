@@ -315,8 +315,12 @@
                                 ToolTip.Tip="Schritt 1 ohne Änderung: was kopiert würde, was übersprungen würde, Kollisionen" />
                         <Button Classes="compact" Content="1 · Kopieren und prüfen" Command="{Binding ApplyCommand}" />
                         <Button Classes="compact" Content="2 · Originale in den Papierkorb" Command="{Binding RemoveSourcesCommand}"
-                                ToolTip.Tip="Originale nach .sfo-hold im Job-Ordner; „Zurücknehmen“ legt sie zurück, geleert wird nur mit sfo plan purge" />
-                        <Button Classes="compact" Content="Zurücknehmen" Command="{Binding UndoCommand}" Margin="0,0,12,0" />
+                                ToolTip.Tip="Originale nach .sfo-hold im Job-Ordner, auf demselben Laufwerk; „Zurücknehmen“ legt sie zurück, Platz wird erst beim Leeren frei" />
+                        <Button Classes="compact" Content="Zurücknehmen" Command="{Binding UndoCommand}" />
+                        <Button Classes="compact" Content="Papierkorb leeren…" Command="{Binding EmptyBinCommand}"
+                                BorderBrush="#E5534B" IsEnabled="{Binding HasBinHeld}"
+                                ToolTip.Tip="Löscht, was im Papierkorb dieses Plans liegt, endgültig (sfo plan purge); vorher eine Rückfrage mit Anzahl und Größe" />
+                        <TextBlock Text="{Binding BinHeldText}" Classes="small" VerticalAlignment="Center" Margin="4,0,12,0" />
                         <TextBlock Text="{Binding StatusText}" Foreground="White" FontSize="12" VerticalAlignment="Center"
                                    TextTrimming="CharacterEllipsis" MaxWidth="640" ToolTip.Tip="{Binding StatusText}" />
                     </WrapPanel>

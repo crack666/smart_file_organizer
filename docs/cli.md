@@ -2047,7 +2047,9 @@ it switches an action to `quarantine` without a target of its own, the target is
 Since 14.11.2026 (Issue 102) the GUI names outcomes instead of kinds ("Umziehen", "In den Papierkorb", "Hier lassen";
 see [glossary](glossary.md#the-plan-view-outcomes-and-release)) and never sets `rejected` itself. "In den Papierkorb"
 sets `discard` (since Issue 105; until then `delete_source` where a library held the content, else `quarantine`, which
-first wrote a copy of the clutter into the library).
+first wrote a copy of the clutter into the library). `quarantine` and `delete_source` stay reachable under "Genauer".
+"Papierkorb leeren" runs `sfo plan purge` for the plan after a confirmation that names count and size (since Issue 105;
+until then purge was CLI only).
 
 ### `sfo plan import <plan> <file>`
 
