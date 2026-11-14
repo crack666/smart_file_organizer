@@ -6,13 +6,41 @@ using SmartFileOrganizer.Domain.Models;
 namespace SmartFileOrganizer.Infrastructure.Content;
 
 /// <summary>
-/// SHA-256 checksums for the library comparison. Files are opened read-only and shared, so
+/// SHA-256 checksums for the library comparison and the duplicate report. Files are opened read-only and shared, so
 /// neither the source medium nor the library is changed.
 /// </summary>
 public sealed class ContentHasher : IContentHasher
 {
-    /// <summary>Bytes read from the start and from the end for the head-and-tail checksum.</summary>
+    /// <summary>Bytes read from the start and from the end for the sample checksum.</summary>
     public const int EdgeBytes = 64 * 1024;
+
+    /// <summary>Files up to this size are read whole; their sample checksum is the full checksum.</summary>
+    public const long WholeFileLimit = 2L * EdgeBytes;
+
+    /// <summary>Fixed places between head and tail that the sample checksum reads.</summary>
+    public const int MiddleSamples = 6;
+
+    /// <summary>Bytes read at each of the <see cref="MiddleSamples"/> places.</summary>
+    public const int MiddleBytes = 4 * 1024;
+
+    /// <summary>
+    /// The byte ranges the sample checksum reads from a file of <paramref name="size"/> bytes, in order: the head, the
+    /// places in between, the tail. Derived from the size alone, so two files of one size are read at the same places.
+    /// A file up to <see cref="WholeFileLimit"/> is one range over all of it.
+    /// </summary>
+    public static IReadOnlyList<(long Offset, int Length)> SampleRanges(long size)
+    {
+        if (size <= WholeFileLimit)
+            return [(0, (int)size)];
+
+        var ranges = new List<(long, int)>(MiddleSamples + 2) { (0, EdgeBytes) };
+        var middle = size - 2L * EdgeBytes;
+        var chunk = (int)Math.Min(MiddleBytes, middle);
+        for (var i = 1; i <= MiddleSamples; i++)
+            ranges.Add((EdgeBytes + (middle - chunk) * i / (MiddleSamples + 1), chunk));
+        ranges.Add((size - EdgeBytes, EdgeBytes));
+        return ranges;
+    }
 
     public FileStat Stat(string path)
     {
@@ -29,28 +57,33 @@ public sealed class ContentHasher : IContentHasher
         }
     }
 
-    public async Task<HeadTailResult> ComputeHeadTailAsync(string path, long expectedSize, CancellationToken ct)
+    public async Task<SampleResult> ComputeSampleAsync(string path, long expectedSize, CancellationToken ct)
     {
         await using var stream = Open(path);
         RequireLength(stream, path, expectedSize);
 
-        if (expectedSize <= 2L * EdgeBytes)
+        if (expectedSize <= WholeFileLimit)
         {
-            // Small file: read it whole; the head-and-tail checksum is then the full checksum.
+            // Small file: read it whole; the sample checksum is then the full checksum.
             var all = new byte[expectedSize];
             await stream.ReadExactlyAsync(all, ct);
             RequireEnd(stream, path);
             var full = Convert.ToHexStringLower(SHA256.HashData(all));
-            return new HeadTailResult(full, full);
+            return new SampleResult(full, full, expectedSize);
         }
 
-        var buffer = new byte[8 + 2 * EdgeBytes];
+        var ranges = SampleRanges(expectedSize);
+        var buffer = new byte[8 + ranges.Sum(r => r.Length)];
         BinaryPrimitives.WriteInt64LittleEndian(buffer, expectedSize);
-        await stream.ReadExactlyAsync(buffer.AsMemory(8, EdgeBytes), ct);
-        stream.Seek(expectedSize - EdgeBytes, SeekOrigin.Begin);
-        await stream.ReadExactlyAsync(buffer.AsMemory(8 + EdgeBytes, EdgeBytes), ct);
+        var at = 8;
+        foreach (var (offset, length) in ranges)
+        {
+            stream.Seek(offset, SeekOrigin.Begin);
+            await stream.ReadExactlyAsync(buffer.AsMemory(at, length), ct);
+            at += length;
+        }
         RequireEnd(stream, path);
-        return new HeadTailResult(Convert.ToHexStringLower(SHA256.HashData(buffer)), null);
+        return new SampleResult(Convert.ToHexStringLower(SHA256.HashData(buffer)), null, buffer.Length - 8);
     }
 
     public async Task<string> ComputeFullAsync(string path, long expectedSize, CancellationToken ct)

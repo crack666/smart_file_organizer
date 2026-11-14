@@ -6,12 +6,14 @@ namespace SmartFileOrganizer.Domain.Models;
 /// Cached content identity of one file, keyed by its full path (<c>content_fingerprints</c>).
 /// Valid only while <see cref="Size"/> and <see cref="LastWriteTicks"/> still match the file;
 /// otherwise it is recomputed. Shared by all jobs, so a rescan does not hash the library again.
+/// <see cref="SampleHash"/> is the sample checksum (stage 2 of the comparison and the duplicate report),
+/// <see cref="FullHash"/> the SHA-256 of the whole file.
 /// </summary>
 public sealed record ContentFingerprint(
     string FullPath,
     long Size,
     long LastWriteTicks,
-    string? HeadTailHash,
+    string? SampleHash,
     string? FullHash,
     DateTime ComputedAt,
     DateTime? FullHashAt);
@@ -22,8 +24,9 @@ public sealed record FileStat(bool Exists, long Size, long LastWriteTicks, strin
     public static FileStat Missing(string error) => new(false, 0, 0, error);
 }
 
-/// <summary>Result of the head-and-tail checksum; <see cref="FullHash"/> is set when the whole file was read.</summary>
-public sealed record HeadTailResult(string HeadTailHash, string? FullHash);
+/// <summary>Result of the sample checksum; <see cref="FullHash"/> is set when the whole file was read.</summary>
+/// <param name="BytesRead">Bytes read from the file for this checksum.</param>
+public sealed record SampleResult(string SampleHash, string? FullHash, long BytesRead);
 
 /// <summary>The columns of a scanned file that the comparison needs.</summary>
 public sealed record ComparableFile(long Id, string FullPath, string Name, string ParentPath, long Size);

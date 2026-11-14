@@ -65,9 +65,9 @@ public sealed class ContentStoreService
 
             var full = await _hasher.ComputeFullAsync(file.FullPath, stat.Size, ct);
             var now = DateTime.UtcNow;
-            // The head-and-tail checksum of the comparison stays when it belongs to the same state of the file.
+            // The sample checksum stays when it belongs to the same state of the file.
             await _fingerprints.UpsertFingerprintsAsync(
-                [new ContentFingerprint(file.FullPath, stat.Size, stat.LastWriteTicks, same ? stored!.HeadTailHash : null, full, now, now)], ct);
+                [new ContentFingerprint(file.FullPath, stat.Size, stat.LastWriteTicks, same ? stored!.SampleHash : null, full, now, now)], ct);
             return new ContentKey(full, stat.Size);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)

@@ -2,6 +2,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
+using SmartFileOrganizer.Application.Duplicates;
 using SmartFileOrganizer.Application.Library;
 using SmartFileOrganizer.Application.Bundles;
 using SmartFileOrganizer.Application.Evaluation;
@@ -206,6 +207,10 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ScanExportService>();
         services.AddSingleton<FocusedRescanService>();
         services.AddSingleton<ContentComparisonService>();
+
+        // Duplicates over a whole holding (https://github.com/crack666/smart_file_organizer/issues/87): reports only.
+        services.AddSingleton<IDuplicateRepository, DuplicateRepository>();
+        services.AddSingleton<DuplicateService>();
 
         // Bundles (https://github.com/crack666/smart_file_organizer/issues/39)
         services.AddSingleton<IBundleRepository, BundleRepository>();

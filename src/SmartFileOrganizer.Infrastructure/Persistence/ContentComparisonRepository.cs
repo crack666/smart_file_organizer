@@ -88,14 +88,14 @@ public class ContentComparisonRepository : IContentComparisonRepository
         {
             var rows = await conn.QueryAsync<FingerprintRow>(new CommandDefinition(
                 """
-                SELECT full_path, size, last_write_ticks, head_tail_hash, full_hash, computed_at, full_hash_at
+                SELECT full_path, size, last_write_ticks, sample_hash, full_hash, computed_at, full_hash_at
                 FROM content_fingerprints WHERE full_path IN @paths
                 """,
                 new { paths = chunk }, cancellationToken: ct));
             foreach (var row in rows)
             {
                 result[row.FullPath] = new ContentFingerprint(
-                    row.FullPath, row.Size, row.LastWriteTicks, row.HeadTailHash, row.FullHash, row.ComputedAt, row.FullHashAt);
+                    row.FullPath, row.Size, row.LastWriteTicks, row.SampleHash, row.FullHash, row.ComputedAt, row.FullHashAt);
             }
         }
 
@@ -112,12 +112,12 @@ public class ContentComparisonRepository : IContentComparisonRepository
         await using var tx = await conn.BeginTransactionAsync(ct);
         await conn.ExecuteAsync(new CommandDefinition(
             """
-            INSERT INTO content_fingerprints (full_path, size, last_write_ticks, head_tail_hash, full_hash, computed_at, full_hash_at)
-            VALUES (@FullPath, @Size, @LastWriteTicks, @HeadTailHash, @FullHash, @ComputedAt, @FullHashAt)
+            INSERT INTO content_fingerprints (full_path, size, last_write_ticks, sample_hash, full_hash, computed_at, full_hash_at)
+            VALUES (@FullPath, @Size, @LastWriteTicks, @SampleHash, @FullHash, @ComputedAt, @FullHashAt)
             ON CONFLICT(full_path) DO UPDATE SET
                 size = excluded.size,
                 last_write_ticks = excluded.last_write_ticks,
-                head_tail_hash = excluded.head_tail_hash,
+                sample_hash = excluded.sample_hash,
                 full_hash = excluded.full_hash,
                 computed_at = excluded.computed_at,
                 full_hash_at = excluded.full_hash_at
@@ -315,7 +315,7 @@ public class ContentComparisonRepository : IContentComparisonRepository
         public string FullPath { get; set; } = string.Empty;
         public long Size { get; set; }
         public long LastWriteTicks { get; set; }
-        public string? HeadTailHash { get; set; }
+        public string? SampleHash { get; set; }
         public string? FullHash { get; set; }
         public DateTime ComputedAt { get; set; }
         public DateTime? FullHashAt { get; set; }

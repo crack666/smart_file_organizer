@@ -379,7 +379,7 @@ Decided 13.11.2026 in https://github.com/crack666/smart_file_organizer/issues/38
 it was paid per path: the same file on the next old disk, renamed, or in a new scan went to the model again.
 
 - What the model said about a content is kept under its full SHA-256 and size, across jobs, and taken over before a
-  model call. Only a full checksum says "the same content"; head-and-tail and names never do.
+  model call. Only a full checksum says "the same content"; a sample checksum and names never do.
 - Taken over only with the same model and the same prompt version. The version is a hash of the classification prompt
   itself, not a number in code: a number would be forgotten once, and then a changed prompt would silently reuse old
   answers. Old entries stay (`stale`) until cleared, so switching back costs nothing.

@@ -200,7 +200,7 @@ public static class CompareCommand
         if (r.Against != null)
             sb.AppendLine($"  {c.Files} files: {c.BackedUp} backed_up, {c.New} new, {c.Differs} differs, {c.Errors} error");
         sb.AppendLine($"  {r.Duplicates.GroupsTotal} duplicate groups ({r.Duplicates.Files} files)");
-        sb.AppendLine($"  checksums: {r.Hashing.HeadTailComputed} head-tail and {r.Hashing.FullComputed} full computed, {r.Hashing.Reused} files from cache");
+        sb.AppendLine($"  checksums: {r.Hashing.HeadTailComputed} sample and {r.Hashing.FullComputed} full computed, {r.Hashing.Reused} files from cache");
         foreach (var f in r.Files)
             sb.AppendLine($"  {ContentStateLabel(f.State),-10} {f.Path}{(f.MatchPath == null ? string.Empty : $"  <- {f.MatchPath}")}");
         foreach (var e in r.Errors)
