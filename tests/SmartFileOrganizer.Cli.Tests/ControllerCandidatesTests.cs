@@ -1,4 +1,7 @@
 using System.Text.Json;
+using Dapper;
+using Microsoft.Extensions.Logging.Abstractions;
+using SmartFileOrganizer.Infrastructure.Persistence;
 
 namespace SmartFileOrganizer.Cli.Tests;
 
@@ -10,6 +13,15 @@ namespace SmartFileOrganizer.Cli.Tests;
 public partial class FindingTargetsCommandTests
 {
     private static List<string?> Names(JsonElement list) => list.EnumerateArray().Select(s => s.GetString()).ToList();
+
+    /// <summary>Sets the drive label <c>sfo places</c> knows for a scanned root; the label of the test machine's drive is no fixture.</summary>
+    private async Task SetPlaceLabelAsync(string root, string? label)
+    {
+        var db = new DatabaseContext(_dbPath, NullLogger<DatabaseContext>.Instance);
+        await using var conn = db.CreateConnection();
+        await conn.OpenAsync();
+        Assert.Equal(1, await conn.ExecuteAsync("UPDATE places SET volume_label = @label WHERE root_path = @root", new { label, root }));
+    }
 
     /// <summary>
     /// Done when: the top level of a library shows whether its root was stored with or without a trailing separator, in a
@@ -86,5 +98,63 @@ public partial class FindingTargetsCommandTests
         Assert.Equal(2, fotos.GetProperty("subdirs").GetInt32());
         Assert.Equal(9, fotos.GetProperty("files").GetInt64());
         Assert.False(fotos.GetProperty("sensitive").GetBoolean());
+    }
+
+    /// <summary>
+    /// Done when: the subfolder of a source in an inbox is named after its place (the drive label <c>sfo places</c> knows,
+    /// with the folder name of the source root after it), and one part of a split finding is recorded into the inbox
+    /// while the other part keeps its own decision. Without a label, or with <c>InboxNameFromPlace</c> off, it is the
+    /// folder name of the source root as before.
+    /// </summary>
+    [Fact]
+    public async Task APartGoesIntoTheInbox_InASubfolderNamedAfterThePlace()
+    {
+        foreach (var hhmm in new[] { "1500", "1530", "1600" })
+            Write(_source, $"Neuer Ordner/IMG_20150208_{hhmm}00.jpg", $"wall {hhmm}", new DateTime(2015, 2, 8, int.Parse(hhmm[..2]), int.Parse(hhmm[2..]), 0));
+        var library = (await OkAsync("scan", _library, "--role", "library", "--structure-only")).GetProperty("job").GetProperty("id").GetInt64();
+        var source = (await OkAsync("scan", _source, "--role", "source")).GetProperty("job").GetProperty("id").GetInt64();
+        var job = source.ToString();
+        await OkAsync("compare", job, "--against", library.ToString());
+        await OkAsync("bundles", "build", job);
+        await DescribeMixedSourceAsync(source);
+        await SetPlaceLabelAsync(_source, "Urlaub-Stick");
+
+        var candidates = await OkAsync("findings", "candidates", job);
+        Assert.Equal("Urlaub-Stick - fund", Str(candidates, "inbox_name"));
+        var item = candidates.GetProperty("items").EnumerateArray().Single(i => Str(i, "kind") == "not_backed_up");
+        Assert.True(item.GetProperty("split").GetBoolean());
+        var groups = item.GetProperty("groups").EnumerateArray().ToList();
+        Assert.Equal(2, groups.Count);
+        var wall = groups.Single(g => Str(g, "label").Contains("wall", StringComparison.Ordinal)).GetProperty("part").GetInt32();
+        var ski = groups.Single(g => g.GetProperty("part").GetInt32() != wall).GetProperty("part").GetInt32();
+        var key = Str(item, "key");
+
+        var places = Places();
+        var placed = await OkAsync(places, "findings", "place", job, key, "--part", wall.ToString(), "--status", "inbox",
+            "--library", library.ToString(), "--reason", "A crack in a wall; no folder of the library is about the house.");
+        var stored = placed.GetProperty("items").EnumerateArray().Single();
+        Assert.Equal(wall, stored.GetProperty("part").GetInt32());
+        Assert.Equal("_Inbox/Urlaub-Stick - fund", Str(stored, "relative_path"));
+        await OkAsync(places, "findings", "place", job, key, "--part", ski.ToString(), "--status", "existing_folder",
+            "--library", library.ToString(), "--folder", "Fotos/Skifahrt 2015", "--reason", "The ski trip of the day before.");
+
+        var finding = (await OkAsync("findings", job, "--kind", "not_backed_up")).GetProperty("items").EnumerateArray().Single();
+        Assert.Equal("split", Str(finding, "target_status"));
+        var parts = finding.GetProperty("target_parts").EnumerateArray().ToList();
+        var wallPart = parts.Single(p => p.GetProperty("index").GetInt32() == wall);
+        Assert.Equal("inbox", Str(wallPart, "status"));
+        Assert.Equal("_Inbox/Urlaub-Stick - fund", Str(wallPart, "relative_path"));
+        var skiPart = parts.Single(p => p.GetProperty("index").GetInt32() == ski);
+        Assert.Equal("existing_folder", Str(skiPart, "status"));
+        Assert.Equal("Fotos/Skifahrt 2015", Str(skiPart, "relative_path"));
+
+        // Without a label: the folder name of the source root, as before.
+        await SetPlaceLabelAsync(_source, null);
+        Assert.Equal("fund", Str(await OkAsync("findings", "candidates", job), "inbox_name"));
+
+        // With a label but the setting off: the folder name as well.
+        await SetPlaceLabelAsync(_source, "Urlaub-Stick");
+        File.WriteAllText(Path.Combine(Path.GetDirectoryName(_dbPath)!, "settings.json"), """{ "LibraryMatch": { "InboxNameFromPlace": false } }""");
+        Assert.Equal("fund", Str(await OkAsync("findings", "candidates", job), "inbox_name"));
     }
 }

@@ -248,6 +248,7 @@ public static class ServiceCollectionExtensions
 
         // Facts for a controlling model and its decisions (https://github.com/crack666/smart_file_organizer/issues/95):
         // candidates without a model call, decisions checked like plan targets and stored with decided_by controller.
+        services.AddSingleton<InboxNames>();
         services.AddSingleton<FindingCandidateService>();
         services.AddSingleton<FindingPlacementService>();
 

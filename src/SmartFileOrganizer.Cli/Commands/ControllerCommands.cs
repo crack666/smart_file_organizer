@@ -133,11 +133,13 @@ public static class ControllerCommands
     public sealed record LibraryView(
         long LibraryJobId, string RootPath, bool Reachable, long? FreeBytes, string InboxFolder, bool RootSensitive, IReadOnlyList<TopLevelView> TopLevel);
 
+    /// <param name="InboxName">The subfolder this source gets in the inbox of a library (<c>inbox_folder/inbox_name</c>).</param>
     public sealed record CandidatesResult(
         long JobId,
         string Status,
         string? Message,
         IReadOnlyList<LibraryView> Libraries,
+        string? InboxName,
         int Total,
         int Offset,
         int? NextOffset,
@@ -264,6 +266,7 @@ public static class ControllerCommands
             var result = new CandidatesResult(run.Job.Id, run.Status.ToCode(), run.Message,
                 run.Libraries.Select(l => new LibraryView(l.Library.Id, l.Library.RootPath, Directory.Exists(l.Library.RootPath), l.FreeBytes, l.InboxFolder,
                     l.Root?.Sensitive ?? false, (l.TopLevel ?? []).Select(TopLevelView.From).ToList())).ToList(),
+                run.InboxName,
                 all.Count, start, next, next is not null, page);
             return CommandOutcome.Success(result, () => RenderCandidates(result));
         });
@@ -313,7 +316,7 @@ public static class ControllerCommands
         sb.AppendLine($"Job {r.JobId}: {r.Total} finding(s) to place" + (r.NextOffset is { } next ? $", more with --offset {next}" : string.Empty));
         foreach (var l in r.Libraries)
         {
-            sb.AppendLine($"  library job {l.LibraryJobId}: {l.RootPath} ({(l.FreeBytes is { } free ? ReadFormat.Size(free) : "unknown")} free, inbox {l.InboxFolder})");
+            sb.AppendLine($"  library job {l.LibraryJobId}: {l.RootPath} ({(l.FreeBytes is { } free ? ReadFormat.Size(free) : "unknown")} free, inbox {l.InboxFolder}/{r.InboxName})");
             if (l.RootSensitive) sb.AppendLine("    top level not listed: the root is sensitive");
             foreach (var t in l.TopLevel)
                 sb.AppendLine($"    {t.Name}/  {t.Files} files, {t.Subdirs} subfolders"

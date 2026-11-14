@@ -57,7 +57,8 @@ The local model failed at these; the controller should not.
 - **Parts are decided apart.** A `split` finding mixes things; decide each part, and leave a part you cannot place
   without a target rather than forcing it next to the others.
 - **When in doubt: inbox or no target.** A wrong target buries files in a folder nobody looks into for them. The
-  inbox (`_Inbox/<source>` below the library root by default) keeps them findable; `no_target` leaves them where they
+  inbox (`_Inbox/<inbox_name>` below the library root by default; `inbox_name`, named after the drive label of the
+  source, is in the head of `findings candidates`) keeps them findable; `no_target` leaves them where they
   are. Both are decisions with a reason, not failures.
 - **Marked things stay closed.** Marked files show path and markers only, marked folders no names or description.
   They are decided by a person; do not try to recover their content from paths.

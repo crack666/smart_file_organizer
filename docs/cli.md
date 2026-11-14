@@ -1579,6 +1579,7 @@ folders of the rules (time, names, kinds of files, the same files already there)
                        "bytes": 3221225472, "by_file_type": { "image": 1200, "video": 50 },
                        "period": { "from": "2009-07-04T10:12:00", "to": "2024-12-26T18:40:00", "time_source": "mixed" },
                        "sensitive": false } ] } ],
+  "inbox_name": "Holiday stick - DCIM",
   "total": 1, "offset": 0, "next_offset": null, "truncated": false,
   "items": [
     { "key": "not_backed_up-09b9879a63", "kind": "not_backed_up", "state": "open",
@@ -1618,6 +1619,8 @@ folders of the rules (time, names, kinds of files, the same files already there)
 - `libraries`: every library with `reachable` (the root exists now), `free_bytes` (`null` when it cannot be told) and
   its `inbox_folder` (below the root; [Inbox](#the-inbox-of-a-library)). A root that cannot be read is the error
   `library_unreachable`, as in `findings targets`.
+- `inbox_name` (since Issue 97): the subfolder this source gets in the inbox of a library, so `inbox` puts its files
+  into `<root>/<inbox_folder>/<inbox_name>`.
 - `libraries[].top_level` (since Issue 97): the folders directly below the root, once per library, with `role`, counts,
   `by_file_type` and `period`, so the controller sees the order of the library without asking `library folder` for
   each one. A sensitive folder is listed with `sensitive` true and its counts only. When the root itself is sensitive
@@ -1693,7 +1696,7 @@ The stored decision has `decided_by` `controller`, certainty `likely`, `content_
 `content_status` `controller`. It stays until it is withdrawn or replaced by another `place`: `findings targets` keeps
 it (also with `--local-model --refresh`), and it stays when the files or their descriptions change (a note in
 `sfo findings` says so). `no_target` keeps the finding out of the plan (the action says why); `inbox` puts the files
-into `<root>/<inbox folder>/<name of the source root>`.
+into `<root>/<inbox folder>/<inbox name>` (`inbox_name` in `findings candidates`; [Inbox](#the-inbox-of-a-library)).
 
 Errors: `placement_refused` (1), `import_invalid` (1, the file cannot be read, is not JSON, has no `decisions` list,
 or an entry has no `key` or a wrong type; nothing is stored), `job_not_found` (1), `wrong_role` (1),
@@ -1702,13 +1705,17 @@ or an entry has no `key` or a wrong type; nothing is stored), `job_not_found` (1
 ### The inbox of a library
 
 For files without a fitting home a library has an inbox folder (target status `inbox`, Issue 95): by default `_Inbox`
-below the root, one subfolder per source named after the folder name of the source root (`source-<job>` for a drive
-root). Settings, section `LibraryMatch`:
+below the root, one subfolder per source. Since Issue 97 the subfolder is named after the place of the source, the
+drive label that [`sfo places`](#sfo-places) knows: `Holiday stick` for a whole drive, `Holiday stick - DCIM` for a
+folder on it, because the folder name of a source root alone is often a general one. Without a known label, or with
+`InboxNameFromPlace` false, it is the folder name of the source root (`source-<job>` for a drive root), as before.
+Settings, section `LibraryMatch`:
 
 ```json
 "LibraryMatch": {
   "InboxFolder": "_Inbox",
-  "Inboxes": [ { "Root": "/nas/photos", "Folder": "Unsorted/Incoming" } ]
+  "Inboxes": [ { "Root": "/nas/photos", "Folder": "Unsorted/Incoming" } ],
+  "InboxNameFromPlace": true
 }
 ```
 

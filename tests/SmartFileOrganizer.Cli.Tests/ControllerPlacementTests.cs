@@ -192,6 +192,7 @@ public partial class FindingTargetsCommandTests
         Photos(_source, "Zeug", new DateTime(2020, 10, 1, 10, 0, 0), 3, "src");
         var (library, source) = await PrepareAsync();
         var job = source.ToString();
+        await SetPlaceLabelAsync(_source, null);   // the inbox subfolder is then named after the source root folder
         var keys = (await FindingsByFolderAsync(job)).ToDictionary(f => f.Key, f => Str(f.Value, "key"));
         var places = Places();
 

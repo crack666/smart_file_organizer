@@ -335,7 +335,7 @@ fit and named new folders after a file name. The judgement therefore lies with a
   `decided_by` `controller`. It is checked like a plan target, all or nothing per call, and no later run replaces it.
 
 The inbox is a folder of the library for files without a fitting home (`InboxFolder`, default `_Inbox`, per library
-`Inboxes`), one subfolder per source. Only the controller puts files there. Workflow and the rules the controller
+`Inboxes`), one subfolder per source, named after its place (`InboxNameFromPlace`). Only the controller puts files there. Workflow and the rules the controller
 follows: [controller-guide.md](controller-guide.md); commands: [cli.md](cli.md#sfo-findings-candidates-job).
 
 ## Targets only in the permanent storage
@@ -396,6 +396,7 @@ system clutter, a folder of a person that shares only general features); with th
 | `MatchUnclearWorth` | `false` | System clutter and folders of unclear worth get no target (Issue 85). On: they are matched like anything else. |
 | `InboxFolder` | `_Inbox` | Below each library root, for files the controller has no home for (Issue 95); the underscore sorts it first and marks it as not part of the order. |
 | `Inboxes` | empty | `[ { "Root", "Folder" } ]`: another inbox folder for single libraries, by root path as scanned. |
+| `InboxNameFromPlace` | `true` | The subfolder of a source in an inbox is named after its place: the drive label of `sfo places`, plus the folder name of the source root when the source is not the whole drive (`Urlaub-Stick - DCIM`). A root folder name alone is often a general one (Issue 97). Off, or without a known label: the folder name of the source root. |
 | `PatternsDirectory` | `library-patterns` next to the database | One file per library job, beside the data it was made from. |
 
 An invalid value ends `show` and `match` with `settings_invalid`, naming every problem.
