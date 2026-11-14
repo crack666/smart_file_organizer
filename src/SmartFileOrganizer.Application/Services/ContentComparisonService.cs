@@ -12,8 +12,9 @@ namespace SmartFileOrganizer.Application.Services;
 /// </summary>
 /// <remarks>
 /// <para>Content identity is tiered so that a large library is read as little as possible:
-/// size first; then SHA-256 over size, first and last 64 KiB, only for files that share a size;
-/// then SHA-256 over the whole file, only where the head-and-tail checksums agree. A file is
+/// size first; then the sample checksum (SHA-256 over size, first and last 64 KiB and six fixed places in between),
+/// only for files that share a size;
+/// then SHA-256 over the whole file, only where the sample checksums agree. A file is
 /// <c>backed_up</c> only when the full checksums are equal.</para>
 /// <para>Checksums are cached per path in <c>content_fingerprints</c> and reused while size and
 /// modification time are unchanged.</para>
@@ -164,7 +165,7 @@ public sealed class ContentComparisonService
 
         var cache = await _repo.GetFingerprintsAsync(
             sourceFiles.Select(f => f.FullPath).Concat(sizeCandidates.Select(f => f.FullPath)).ToList(), ct);
-        var resolver = new Resolver(_hasher, cache);
+        var resolver = new FingerprintResolver(_hasher, cache);
 
         var outcomes = sourceFiles.ToDictionary(f => f.Id, _ => new Outcome());
         var candidateIssues = new Dictionary<string, ComparisonIssue>(StringComparer.Ordinal);
@@ -196,11 +197,11 @@ public sealed class ContentComparisonService
         header = header with { Id = id, RunId = runId ?? id };
 
         _logger.LogInformation(
-            "Compared job {Source} with {Against}: {Files} files, {Errors} errors, {HeadTail} head-tail and {Full} full checksums computed, {Reused} reused.",
-            source.Id, against?.Id, files.Count, errors.Count, resolver.HeadTailComputed, resolver.FullComputed, resolver.Reused);
+            "Compared job {Source} with {Against}: {Files} files, {Errors} errors, {Sample} sample and {Full} full checksums computed, {Reused} reused.",
+            source.Id, against?.Id, files.Count, errors.Count, resolver.SampleComputed, resolver.FullComputed, resolver.Reused);
 
         return BuildReport(header, source, against, files, errors,
-            new HashingStats(resolver.HeadTailComputed, resolver.FullComputed, resolver.Reused));
+            new HashingStats(resolver.SampleComputed, resolver.FullComputed, resolver.Reused));
     }
 
     /// <summary>
@@ -285,7 +286,7 @@ public sealed class ContentComparisonService
         IReadOnlyList<ComparableFile> sizeCandidates,
         IReadOnlyList<ComparableFile> nameCandidates,
         bool hasLibrary,
-        Resolver resolver,
+        FingerprintResolver resolver,
         Dictionary<long, Outcome> outcomes,
         Dictionary<string, ComparisonIssue> candidateIssues,
         IProgress<ComparisonProgress>? progress,
@@ -349,9 +350,9 @@ public sealed class ContentComparisonService
         }
     }
 
-    /// <summary>Library files of one size, each with its head-and-tail checksum or its read error.</summary>
+    /// <summary>Library files of one size, each with its sample checksum or its read error.</summary>
     private static async Task<CandidateGroup> LoadCandidateGroupAsync(
-        long size, IEnumerable<ComparableFile> candidates, Resolver resolver, CancellationToken ct)
+        long size, IEnumerable<ComparableFile> candidates, FingerprintResolver resolver, CancellationToken ct)
     {
         var group = new CandidateGroup();
         foreach (var candidate in candidates)
@@ -361,14 +362,14 @@ public sealed class ContentComparisonService
             if (entry.Error == null && entry.Stat.Size != size)
                 continue; // changed since the library scan: it no longer has this content
             if (entry.Error == null)
-                await resolver.HeadTailAsync(entry, ct);
+                await resolver.SampleAsync(entry, ct);
             group.Candidates.Add((candidate, entry));
         }
         return group;
     }
 
     private static async Task MatchAsync(
-        ComparableFile file, Entry entry, CandidateGroup group, Resolver resolver, Outcome outcome, CancellationToken ct)
+        ComparableFile file, FingerprintEntry entry, CandidateGroup group, FingerprintResolver resolver, Outcome outcome, CancellationToken ct)
     {
         var readable = group.Candidates
             .Where(c => c.Entry.Error == null && !SamePath(c.File.FullPath, file.FullPath)) // a file never backs up itself
@@ -376,17 +377,17 @@ public sealed class ContentComparisonService
         if (readable.Count == 0)
             return;
 
-        var headTail = await resolver.HeadTailAsync(entry, ct);
-        if (headTail == null)
+        var sample = await resolver.SampleAsync(entry, ct);
+        if (sample == null)
             return;
 
-        var matches = new List<(ComparableFile File, Entry Entry)>();
+        var matches = new List<(ComparableFile File, FingerprintEntry Entry)>();
         foreach (var (candidate, candidateEntry) in readable)
         {
-            if (candidateEntry.HeadTail != headTail)
+            if (candidateEntry.Sample != sample)
                 continue;
 
-            // backed_up only on equal full checksums of both files; head and tail never suffice.
+            // backed_up only on equal full checksums of both files; the sample never suffices.
             var full = await resolver.FullAsync(entry, ct);
             if (full == null)
                 return;
@@ -409,11 +410,11 @@ public sealed class ContentComparisonService
 
     /// <summary>
     /// Unreadable library files of the same size that could still hold this content: those whose
-    /// head-and-tail checksum is unknown, and those whose head and tail agree but whose full read failed.
+    /// sample checksum is unknown, and those whose sample agrees but whose full read failed.
     /// Independent of the order in which source files are processed.
     /// </summary>
-    private static async Task<List<(ComparableFile File, Entry Entry)>> UnreadableCandidatesAsync(
-        ComparableFile file, Entry entry, CandidateGroup group, Resolver resolver, CancellationToken ct)
+    private static async Task<List<(ComparableFile File, FingerprintEntry Entry)>> UnreadableCandidatesAsync(
+        ComparableFile file, FingerprintEntry entry, CandidateGroup group, FingerprintResolver resolver, CancellationToken ct)
     {
         var failed = group.Candidates
             .Where(c => c.Entry.Error != null && !SamePath(c.File.FullPath, file.FullPath))
@@ -421,26 +422,26 @@ public sealed class ContentComparisonService
         if (failed.Count == 0)
             return failed;
 
-        var headTail = failed.Any(c => c.Entry.HeadTail != null) ? await resolver.HeadTailAsync(entry, ct) : null;
-        return failed.Where(c => c.Entry.HeadTail == null || headTail == null || c.Entry.HeadTail == headTail).ToList();
+        var sample = failed.Any(c => c.Entry.Sample != null) ? await resolver.SampleAsync(entry, ct) : null;
+        return failed.Where(c => c.Entry.Sample == null || sample == null || c.Entry.Sample == sample).ToList();
     }
 
     private async Task FindDuplicatesAsync(
-        IReadOnlyList<ComparableFile> sourceFiles, Resolver resolver, Dictionary<long, Outcome> outcomes, CancellationToken ct)
+        IReadOnlyList<ComparableFile> sourceFiles, FingerprintResolver resolver, Dictionary<long, Outcome> outcomes, CancellationToken ct)
     {
         var found = new List<List<ComparableFile>>();
 
         // Empty files are all equal and not worth a hint.
         foreach (var sizeGroup in sourceFiles.Where(f => f.Size > 0).GroupBy(f => f.Size).Where(g => g.Count() > 1))
         {
-            var byHead = new Dictionary<string, List<(ComparableFile File, Entry Entry)>>(StringComparer.Ordinal);
+            var byHead = new Dictionary<string, List<(ComparableFile File, FingerprintEntry Entry)>>(StringComparer.Ordinal);
             foreach (var file in sizeGroup)
             {
                 ct.ThrowIfCancellationRequested();
                 var entry = resolver.Get(file.FullPath);
                 if (entry.Error != null || entry.Stat.Size != file.Size)
                     continue;
-                var head = await resolver.HeadTailAsync(entry, ct);
+                var head = await resolver.SampleAsync(entry, ct);
                 if (head == null)
                     continue;
                 if (!byHead.TryGetValue(head, out var list))
@@ -526,7 +527,7 @@ public sealed class ContentComparisonService
         return new ComparisonReport(header, source, against, files, duplicates, directories, errors, hashing);
     }
 
-    private static FileComparison ToFileComparison(ComparableFile file, Outcome outcome, Resolver resolver, bool hasLibrary)
+    private static FileComparison ToFileComparison(ComparableFile file, Outcome outcome, FingerprintResolver resolver, bool hasLibrary)
     {
         var sourceError = resolver.TryGet(file.FullPath)?.Error;
         if (sourceError != null)
@@ -542,7 +543,7 @@ public sealed class ContentComparisonService
             outcome.MatchHash, outcome.MatchVerifiedAt);
     }
 
-    private async Task FlushFingerprintsAsync(Resolver resolver, bool force, CancellationToken ct)
+    private async Task FlushFingerprintsAsync(FingerprintResolver resolver, bool force, CancellationToken ct)
     {
         if (!force && resolver.DirtyCount < FingerprintFlushThreshold)
             return;
@@ -579,131 +580,7 @@ public sealed class ContentComparisonService
     private sealed class CandidateGroup
     {
         /// <summary>Library files of one size; <c>Entry.Error</c> is set for those that could not be read.</summary>
-        public List<(ComparableFile File, Entry Entry)> Candidates { get; } = [];
+        public List<(ComparableFile File, FingerprintEntry Entry)> Candidates { get; } = [];
     }
 
-    private sealed class Entry(string path, FileStat stat)
-    {
-        public string Path { get; } = path;
-        public FileStat Stat { get; } = stat;
-        public string? HeadTail { get; set; }
-        public string? Full { get; set; }
-
-        /// <summary>When <see cref="Full"/> was computed from the file (now, or in an earlier run if cached).</summary>
-        public DateTime? FullAt { get; set; }
-        public string? Error { get; set; }
-        public bool FromCache { get; set; }
-        public bool Dirty { get; set; }
-    }
-
-    /// <summary>Stats each file once per run and computes checksums on demand, using the cache where it is still valid.</summary>
-    private sealed class Resolver(IContentHasher hasher, IReadOnlyDictionary<string, ContentFingerprint> cache)
-    {
-        private readonly Dictionary<string, Entry> _entries = new(StringComparer.Ordinal);
-        private readonly HashSet<string> _reused = new(StringComparer.Ordinal);
-
-        public int HeadTailComputed { get; private set; }
-        public int FullComputed { get; private set; }
-        public int Reused => _reused.Count;
-        public int DirtyCount { get; private set; }
-
-        public Entry? TryGet(string path) => _entries.GetValueOrDefault(path);
-
-        public Entry Get(string path)
-        {
-            if (_entries.TryGetValue(path, out var existing))
-                return existing;
-
-            var stat = hasher.Stat(path);
-            var entry = new Entry(path, stat) { Error = stat.Exists ? null : stat.Error ?? "File not found." };
-            if (stat.Exists
-                && cache.TryGetValue(path, out var fp)
-                && fp.Size == stat.Size
-                && fp.LastWriteTicks == stat.LastWriteTicks)
-            {
-                entry.HeadTail = fp.HeadTailHash;
-                entry.Full = fp.FullHash;
-                entry.FullAt = fp.FullHash == null ? null : fp.FullHashAt ?? fp.ComputedAt;
-                entry.FromCache = true;
-            }
-            _entries[path] = entry;
-            return entry;
-        }
-
-        public async Task<string?> HeadTailAsync(Entry entry, CancellationToken ct)
-        {
-            if (entry.Error != null)
-                return null;
-            if (entry.HeadTail != null)
-            {
-                if (entry.FromCache)
-                    _reused.Add(entry.Path);
-                return entry.HeadTail;
-            }
-            try
-            {
-                var result = await hasher.ComputeHeadTailAsync(entry.Path, entry.Stat.Size, ct);
-                entry.HeadTail = result.HeadTailHash;
-                if (entry.Full == null && result.FullHash != null)
-                {
-                    entry.Full = result.FullHash;
-                    entry.FullAt = DateTime.UtcNow;
-                }
-                HeadTailComputed++;
-                MarkDirty(entry);
-                return entry.HeadTail;
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            {
-                entry.Error = ex.Message;
-                return null;
-            }
-        }
-
-        public async Task<string?> FullAsync(Entry entry, CancellationToken ct)
-        {
-            if (entry.Error != null)
-                return null;
-            if (entry.Full != null)
-            {
-                if (entry.FromCache)
-                    _reused.Add(entry.Path);
-                return entry.Full;
-            }
-            try
-            {
-                entry.Full = await hasher.ComputeFullAsync(entry.Path, entry.Stat.Size, ct);
-                entry.FullAt = DateTime.UtcNow;
-                FullComputed++;
-                MarkDirty(entry);
-                return entry.Full;
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-            {
-                entry.Error = ex.Message;
-                return null;
-            }
-        }
-
-        public IReadOnlyList<ContentFingerprint> TakeDirty()
-        {
-            var now = DateTime.UtcNow;
-            var dirty = _entries.Values
-                .Where(e => e.Dirty && e.Error == null)
-                .Select(e => new ContentFingerprint(e.Path, e.Stat.Size, e.Stat.LastWriteTicks, e.HeadTail, e.Full, now, e.FullAt))
-                .ToList();
-            foreach (var e in _entries.Values)
-                e.Dirty = false;
-            DirtyCount = 0;
-            return dirty;
-        }
-
-        private void MarkDirty(Entry entry)
-        {
-            if (entry.Dirty)
-                return;
-            entry.Dirty = true;
-            DirtyCount++;
-        }
-    }
 }

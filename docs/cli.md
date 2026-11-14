@@ -325,17 +325,20 @@ State per source file:
 
 | `state` | Meaning |
 |---|---|
-| `backed_up` | A file with exactly the same content is in the library: the full SHA-256 of both files is equal (head and tail alone never count). `match_path` is one of them (first by path), `match_count` how many, `match_hash` the shared full SHA-256 and `match_verified_at` the older of the two times that checksum was computed from the files (possibly in an earlier run, see the cache below). A step that deletes the source file must read both files again and compare with `match_hash` first. For a marked file, or a file whose match is marked, `match_hash` is `null`: for a short secret the checksum would confirm a guess of its content. |
+| `backed_up` | A file with exactly the same content is in the library: the full SHA-256 of both files is equal (the sample checksum alone never counts). `match_path` is one of them (first by path), `match_count` how many, `match_hash` the shared full SHA-256 and `match_verified_at` the older of the two times that checksum was computed from the files (possibly in an earlier run, see the cache below). A step that deletes the source file must read both files again and compare with `match_hash` first. For a marked file, or a file whose match is marked, `match_hash` is `null`: for a short secret the checksum would confirm a guess of its content. |
 | `new` | No library file has this content, and none has the same name in a folder of the same name. |
 | `differs` | Not in the library by content, but a file with the same name lies in a folder of the same name there (`match_path`): probably another version. |
 | `error` | The content could not be determined: the source file is unreadable, gone or changed since its scan, or a library file of the same size that could hold this content cannot be read. `error` says which. Never counted as `new` or `backed_up`. |
 
 How content is compared, so a large library on a network drive is read as little as possible:
-size first; for files sharing a size, SHA-256 over the size and the first and last 64 KiB; only
-where those agree, SHA-256 over the whole file. Files up to 128 KiB are read whole at once.
+size first; for files sharing a size, the sample checksum (SHA-256 over the size, the first and
+last 64 KiB and six places of 4 KiB in between whose offsets follow from the size); only where
+those agree, SHA-256 over the whole file. Files up to 128 KiB are read whole at once.
 Checksums are stored per path and reused while size and modification time are unchanged, so a
-second run without changes reads no file content (`hashing` shows the counts). A file never
-matches itself, even when the source lies inside the library.
+second run without changes reads no file content (`hashing` shows the counts; `head_tail_computed`
+counts sample checksums, the key stays from the time the sample was head and tail only, before
+https://github.com/crack666/smart_file_organizer/issues/87). The same checksums serve
+[`sfo duplicates`](#sfo-duplicates-job-job-). A file never matches itself, even when the source lies inside the library.
 Folders a scan skipped by rule (`dir_status` skip) are not part of the comparison, on either side: no file
 below them is compared and no read error below them is reported, even when the folder is gone by now.
 

@@ -48,6 +48,8 @@ public sealed record DirectoryComparison(string Path, int Files, int BackedUp, i
 }
 
 /// <summary>How many checksums a run computed and how many it took from the cache.</summary>
+/// <param name="HeadTailComputed">Sample checksums computed (stage 2). The name, and the JSON key <c>head_tail_computed</c>,
+/// stay from the time stage 2 read head and tail only.</param>
 public sealed record HashingStats(int HeadTailComputed, int FullComputed, int Reused);
 
 public sealed record ComparisonReport(

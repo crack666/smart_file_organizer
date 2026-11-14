@@ -382,11 +382,11 @@ public class ContentComparisonTests : IDisposable
 
         public FileStat Stat(string path) => inner.Stat(path);
 
-        public Task<HeadTailResult> ComputeHeadTailAsync(string path, long expectedSize, CancellationToken ct)
+        public Task<SampleResult> ComputeSampleAsync(string path, long expectedSize, CancellationToken ct)
         {
             Calls++;
             Paths.Add(path);
-            return inner.ComputeHeadTailAsync(path, expectedSize, ct);
+            return inner.ComputeSampleAsync(path, expectedSize, ct);
         }
 
         public Task<string> ComputeFullAsync(string path, long expectedSize, CancellationToken ct)
