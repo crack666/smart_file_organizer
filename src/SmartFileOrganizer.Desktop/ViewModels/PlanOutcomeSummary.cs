@@ -36,11 +36,13 @@ public static class PlanOutcomeSummary
         if (bin.Count > 0)
         {
             var quarantine = bin.Count(a => a.Kind == PlanActionKind.Quarantine);
+            var discard = bin.Where(a => a.Kind == PlanActionKind.Discard).ToList();
             lines.Add(keepSource
                 ? $"Papierkorb: {Count(bin)}; „Quelle nicht anfassen“ ist an, die Originale bleiben"
                   + (quarantine > 0 ? $" ({quarantine} bekommen eine Kopie im Quarantäneordner der Bibliothek)." : ".")
                 : $"In den Papierkorb: {Count(bin)}. Die Originale kommen in Schritt 2 nach {HoldOf(jobRoot)}; "
-                  + "endgültig gelöscht erst beim Leeren (sfo plan purge), bis dahin legt „Zurücknehmen“ sie zurück."
+                  + "endgültig gelöscht erst beim Leeren („Papierkorb leeren“, sfo plan purge), bis dahin legt „Zurücknehmen“ sie zurück."
+                  + (discard.Count > 0 ? $" {Count(discard)} davon ohne Kopie: Schritt 1 prüft sie nur, nichts wird in eine Bibliothek geschrieben." : string.Empty)
                   + (quarantine > 0 ? $" {quarantine} davon bekommen vorher eine geprüfte Kopie im Quarantäneordner der Bibliothek." : string.Empty));
         }
 
@@ -66,14 +68,41 @@ public static class PlanOutcomeSummary
     {
         var run = all.Where(a => willRun.Contains(a.Id)).ToList();
         var moved = run.Count(a => PlanDisplay.OutcomeOf(a.Kind) == PlanOutcome.Move);
+        var discard = run.Count(a => a.Kind == PlanActionKind.Discard);
         var bin = run.Count - moved;
-        return
-        [
+        var lines = new List<string>
+        {
             $"In den Papierkorb ({HoldOf(jobRoot)}): die Originale von {Count(run)}"
-            + $" – {moved} umgezogen (Kopie in der Bibliothek geprüft), {bin} „In den Papierkorb“.",
-            "Unmittelbar vorher wird jedes Original noch einmal mit seiner Kopie verglichen.",
-            "Endgültig gelöscht wird nichts: „Zurücknehmen“ legt die Originale zurück; geleert wird der Papierkorb nur mit sfo plan purge.",
-        ];
+            + $" – {moved} umgezogen (Kopie in der Bibliothek geprüft), {bin} „In den Papierkorb“"
+            + (discard > 0 ? $", davon {discard} ohne Kopie." : "."),
+            "Unmittelbar vorher wird jedes Original noch einmal mit seiner Kopie verglichen"
+            + (discard > 0 ? "; was ohne Kopie in den Papierkorb kommt, muss so sein, wie der Scan es sah." : "."),
+            "Endgültig gelöscht wird nichts: „Zurücknehmen“ legt die Originale zurück; geleert wird der Papierkorb nur mit „Papierkorb leeren“.",
+        };
+        return lines;
+    }
+
+    /// <summary>
+    /// Lines before emptying the bin (<c>sfo plan purge</c>). <paramref name="willPurge"/> are the items of the purge's dry
+    /// run that would run; <paramref name="held"/> is what lies in the bin now.
+    /// </summary>
+    public static IReadOnlyList<string> BeforePurge(IReadOnlyList<PlanRunItem> willPurge, PlanHoldSummary held, string jobRoot)
+    {
+        var files = willPurge.Sum(i => i.Files);
+        var bytes = willPurge.Sum(i => i.Bytes);
+        var lines = new List<string>
+        {
+            $"Endgültig gelöscht werden {PlanDisplay.Files(files)} ({PlanDisplay.Size(bytes)}) aus {HoldOf(jobRoot)}. Das lässt sich nicht zurücknehmen.",
+        };
+        if (held.DiscardedFiles > 0)
+            lines.Add($"{PlanDisplay.Files(held.DiscardedFiles)} ({PlanDisplay.Size(held.DiscardedBytes)}) davon kamen ohne Kopie in den Papierkorb: "
+                      + "sie sind danach nirgends mehr.");
+        if (held.Files > held.DiscardedFiles)
+            lines.Add("Bei Umgezogenem bleibt die geprüfte Kopie in der Bibliothek; ein Original, dessen Kopie sich seitdem verändert hat, "
+                      + "bleibt im Papierkorb.");
+        lines.Add($"Frei wird: {PlanDisplay.Size(bytes)} auf dem Laufwerk der Quelle"
+                  + (held.Files > held.DiscardedFiles ? " (weniger, wo ein Original bleiben muss)." : "."));
+        return lines;
     }
 
     /// <summary>The hold folder of the job as the person sees it: job folder name and folder name.</summary>

@@ -114,7 +114,9 @@ public sealed class PlaceService
         foreach (var n in await _places.GetNoticeEntriesAsync(path, ct))
         {
             if (history.Any(h => SamePath(h.From, n.SourcePath) && h.PlanId == n.PlanId && h.State == MoveState.Moved)) continue;
-            history.Add(new WhereMove(n.SourcePath, n.TargetPath, n.MovedAt, n.PlanId, null, MoveState.Moved, null, false, WhereSource.Notice));
+            // An entry "removed" (discard) has no new place.
+            history.Add(new WhereMove(n.SourcePath, n.TargetPath is { Length: > 0 } to ? to : null, n.MovedAt, n.PlanId, null,
+                MoveState.Moved, null, false, WhereSource.Notice));
         }
 
         var now = new List<WherePlace>();

@@ -4,7 +4,12 @@ using System.Text;
 namespace SmartFileOrganizer.Domain.Models;
 
 /// <summary>One file that left a folder: when, by which plan and action, its name there, and its new place.</summary>
-public sealed record MoveNoticeEntry(DateTime MovedAt, long PlanId, long ActionId, string Name, string Target);
+/// <param name="Target">The new place; empty for a file that was removed (<c>discard</c>), which has none.</param>
+public sealed record MoveNoticeEntry(DateTime MovedAt, long PlanId, long ActionId, string Name, string Target)
+{
+    /// <summary>Removed, not moved: the file went into the hold folder and no copy of it was made.</summary>
+    public bool Removed => Target.Length == 0;
+}
 
 /// <summary>A read notice: its format version and its entries. Entries are only known for a version this build reads.</summary>
 public sealed record MoveNoticeDocument(int Version, IReadOnlyList<MoveNoticeEntry> Entries)
@@ -21,8 +26,8 @@ public sealed record MoveNoticeDocument(int Version, IReadOnlyList<MoveNoticeEnt
 /// # (lines starting with # explain the file to a person)
 /// moved&#9;2026-11-14T10:00:00Z&#9;5&#9;12&#9;IMG_0001.jpg&#9;/library/Fotos/IMG_0001.jpg
 /// </code>
-/// One line per file, fields separated by a tab: the word <c>moved</c>, date and time (UTC), plan, action, the file
-/// name in this folder, its new place. A backslash, tab, line feed or carriage return in a field is written as
+/// One line per file, fields separated by a tab: the word <c>moved</c> (or <c>removed</c> for a discarded file, whose new
+/// place stays empty), date and time (UTC), plan, action, the file name in this folder, its new place. A backslash, tab, line feed or carriage return in a field is written as
 /// <c>\\</c>, <c>\t</c>, <c>\n</c>, <c>\r</c>. Nothing about the content of a file is written.
 /// </summary>
 public static class MoveNotice
@@ -40,6 +45,13 @@ public static class MoveNotice
     public const int MaxBytes = 4 * 1024 * 1024;
 
     private const string EntryWord = "moved";
+
+    /// <summary>
+    /// First field of a file that was removed (<c>discard</c>, https://github.com/crack666/smart_file_organizer/issues/105):
+    /// it lies in the hold folder until it is emptied, and the new place stays empty. Builds before 14.11.2026 skip such
+    /// lines when they read a notice.
+    /// </summary>
+    private const string RemovedWord = "removed";
 
     /// <summary>Whether <paramref name="path"/> carries the fixed name (the content still has to be checked).</summary>
     public static bool HasNoticeName(string path) =>
@@ -65,12 +77,13 @@ public static class MoveNotice
             var line = raw.TrimEnd('\r');
             if (line.Length == 0 || line.StartsWith('#')) continue;
             var fields = line.Split('\t');
-            if (fields.Length != 6 || fields[0] != EntryWord) continue;
+            if (fields.Length != 6 || fields[0] is not (EntryWord or RemovedWord)) continue;
             if (!DateTime.TryParse(fields[1], CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out var at)
                 || !long.TryParse(fields[2], NumberStyles.None, CultureInfo.InvariantCulture, out var plan)
                 || !long.TryParse(fields[3], NumberStyles.None, CultureInfo.InvariantCulture, out var action))
                 continue;
-            entries.Add(new MoveNoticeEntry(DateTime.SpecifyKind(at, DateTimeKind.Utc), plan, action, Unescape(fields[4]), Unescape(fields[5])));
+            entries.Add(new MoveNoticeEntry(DateTime.SpecifyKind(at, DateTimeKind.Utc), plan, action, Unescape(fields[4]),
+                fields[0] == RemovedWord ? string.Empty : Unescape(fields[5])));
         }
         return new MoveNoticeDocument(version, entries);
     }
@@ -80,12 +93,13 @@ public static class MoveNotice
     {
         var sb = new StringBuilder();
         sb.Append(Marker).Append(' ').Append(Version.ToString(CultureInfo.InvariantCulture)).Append('\n');
-        sb.Append("# Files from this folder were moved by Smart File Organizer (sfo). The folder may stay empty.\n");
+        sb.Append("# Files from this folder were moved or removed by Smart File Organizer (sfo). The folder may stay empty.\n");
         sb.Append("# One line per file, separated by tabs: moved, date and time (UTC), plan, action, name here, new place.\n");
+        sb.Append("# 'removed' instead of 'moved': no copy was made; the file lies in the hold folder of this drive until it is emptied.\n");
         sb.Append("# 'sfo where <old path>' shows the history; 'sfo plan undo <plan>' brings the files back.\n");
         foreach (var e in Order(entries))
         {
-            sb.Append(EntryWord).Append('\t')
+            sb.Append(e.Removed ? RemovedWord : EntryWord).Append('\t')
               .Append(e.MovedAt.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ", CultureInfo.InvariantCulture)).Append('\t')
               .Append(e.PlanId.ToString(CultureInfo.InvariantCulture)).Append('\t')
               .Append(e.ActionId.ToString(CultureInfo.InvariantCulture)).Append('\t')

@@ -3,7 +3,7 @@
 Issue: https://github.com/crack666/smart_file_organizer/issues/86
 
 When `sfo plan apply <plan> --remove-sources --execute` takes originals out of a folder, it leaves a small text file in
-that folder that says where they went. The folder itself stays, even when nothing else is left in it. The notice is
+that folder that says where they went, or that they were removed (`discard`). The folder itself stays, even when nothing else is left in it. The notice is
 meant to be read by a person who finds the folder on an old disk years later, without sfo and without its database.
 
 ## Name and place
@@ -22,23 +22,30 @@ Plain text, UTF-8 without byte order mark, lines end in a line feed.
 
 ```text
 # sfo-move-notice 1
-# Files from this folder were moved by Smart File Organizer (sfo). The folder may stay empty.
+# Files from this folder were moved or removed by Smart File Organizer (sfo). The folder may stay empty.
 # One line per file, separated by tabs: moved, date and time (UTC), plan, action, name here, new place.
+# 'removed' instead of 'moved': no copy was made; the file lies in the hold folder of this drive until it is emptied.
 # 'sfo where <old path>' shows the history; 'sfo plan undo <plan>' brings the files back.
 moved	2026-11-14T10:00:00Z	5	12	IMG_0001.jpg	/media/archive/Fotos/2019/IMG_0001.jpg
 moved	2026-11-14T10:00:01Z	5	12	IMG_0002.jpg	/media/archive/Fotos/2019/IMG_0002.jpg
+removed	2026-11-14T10:00:02Z	5	13	setup_old.exe	
 ```
 
 - **First line:** `# sfo-move-notice <version>`. It marks the file as a notice. A notice of another version is
   recognised (the scan leaves it out) but not changed.
 - **Lines starting with `#`:** explanation for a person; ignored when read.
 - **Entry lines:** six fields separated by one tab:
-  1. the word `moved`;
+  1. the word `moved`, or `removed` for a file a plan discarded (`discard`): no copy of it was made anywhere;
   2. when the original went into the hold folder, ISO 8601 UTC to the second;
   3. the plan id;
   4. the action id;
   5. the file name in this folder;
-  6. the new place: the checked copy, or for `delete_source` the library file with the same content.
+  6. the new place: the checked copy, or for `delete_source` the library file with the same content; empty for
+     `removed`.
+- `removed` exists since 14.11.2026 (https://github.com/crack666/smart_file_organizer/issues/105) and stays within
+  version 1: a removed file is named as removed, not as moved. Until then the notice had only `moved` lines, and the
+  second comment line said "were moved". A build from before reads a notice with `removed` lines without them, so it
+  would not list them in `sfo where`; if it changes such a notice for its own plan, it drops them.
 - In fields 5 and 6 a backslash, tab, line feed and carriage return are written as `\\`, `\t`, `\n`, `\r`.
 - Entries are sorted by time, plan, action and name.
 

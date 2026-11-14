@@ -193,6 +193,42 @@ public class SchemaMigrationTests : IDisposable
             "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_dir_verdicts_unit'"));
     }
 
+    /// <summary>
+    /// The step of the kind <c>discard</c> rebuilds <c>plan_actions</c>; actions stored before keep their id and values,
+    /// and the journal steps that point at them stay (https://github.com/crack666/smart_file_organizer/issues/105).
+    /// </summary>
+    [Fact]
+    public async Task DiscardKindStep_AllowsDiscard_AndKeepsActionsAndTheirJournal()
+    {
+        var step = SchemaMigrator.BuiltIn.Single(m => m.Description == "Plan action kind discard").Version;
+        await using var conn = Open();
+        await new SchemaMigrator(SchemaMigrator.BuiltIn.Where(m => m.Version < step), NullLogger.Instance).MigrateAsync(conn);
+        await conn.ExecuteAsync("""
+            INSERT INTO scan_jobs (root_path, status, created_at) VALUES ('/old', 3, '2026-11-14T00:00:00Z');
+            INSERT INTO plans (job_id, created_at, libraries, notes) VALUES (1, '2026-11-14T00:00:00Z', '[]', '[]');
+            INSERT INTO plan_actions (plan_id, finding_key, finding_kind, unit, source_kind, source_path, relative_path,
+                files, bytes, kind, recommended, reason, origin, state, updated_at)
+            VALUES (1, 'k1', 'in_noise', 'u', 'file', '/old/a.tmp', 'a.tmp', 1, 5, 'quarantine', 'move', 'r', 'human', 'executed',
+                    '2026-11-14T00:00:00Z');
+            INSERT INTO plan_steps (plan_id, action_id, kind, state, source_path, hold_path, bytes, hash, started_at)
+            VALUES (1, 1, 'hold', 'done', '/old/a.tmp', '/old/.sfo-hold/a.tmp', 5, 'abc', '2026-11-14T00:00:00Z');
+            """);
+        await Assert.ThrowsAsync<SqliteException>(() => conn.ExecuteAsync("UPDATE plan_actions SET kind = 'discard' WHERE id = 1"));
+
+        await new SchemaMigrator(SchemaMigrator.BuiltIn, NullLogger.Instance).MigrateAsync(conn);
+
+        var kept = await conn.QuerySingleAsync<(long Id, string Kind, string State)>("SELECT id, kind, state FROM plan_actions");
+        Assert.Equal((1L, "quarantine", "executed"), kept);
+        Assert.Equal(1, await conn.ExecuteScalarAsync<long>("SELECT COUNT(*) FROM plan_steps WHERE action_id = 1"));
+        await conn.ExecuteAsync("UPDATE plan_actions SET kind = 'discard', recommended = 'discard' WHERE id = 1");
+        await Assert.ThrowsAsync<SqliteException>(() => conn.ExecuteAsync("UPDATE plan_actions SET kind = 'trash' WHERE id = 1"));
+        Assert.Equal(1, await conn.ExecuteScalarAsync<long>(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'idx_plan_actions_plan'"));
+        // The journal still points at the rebuilt table: removing the plan takes its actions and steps along.
+        await conn.ExecuteAsync("PRAGMA foreign_keys=ON; DELETE FROM plans WHERE id = 1;");
+        Assert.Equal(0, await conn.ExecuteScalarAsync<long>("SELECT COUNT(*) FROM plan_steps"));
+    }
+
     [Fact]
     public void DuplicateVersions_AreRejected()
     {

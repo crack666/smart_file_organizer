@@ -15,7 +15,7 @@ namespace SmartFileOrganizer.Cli.Tests;
 /// generated source and a generated library, both in a temp folder this test makes. No model runs; every name and every
 /// file is invented. Runs are cut off through <see cref="PlanExecutionHooks"/>, as a crash or Ctrl+C would.
 /// </summary>
-public class PlanApplyCommandTests : IDisposable
+public partial class PlanApplyCommandTests : IDisposable
 {
     private readonly string _dir;
     private readonly string _dbPath;

@@ -381,8 +381,8 @@ public sealed class PlanService
     /// Sets the kind of the selected actions and brings the target with it, so a person switches kinds without typing a
     /// path: <c>quarantine</c> goes to the quarantine folder (<see cref="PlanOptions.QuarantineFolder"/>) of the
     /// action's library, keeping the rest of its target; <c>move</c> and <c>copy</c> take an action back out of that
-    /// folder; <c>delete_source</c> points at the place in a library that holds the same content; <c>leave</c> keeps
-    /// the target. Every change goes through <see cref="ChangeAsync"/> and its checks; an action the checks refuse is
+    /// folder; <c>delete_source</c> points at the place in a library that holds the same content; <c>discard</c> and
+    /// <c>leave</c> keep the target, which they do not use, so that switching back to <c>move</c> finds it again. Every change goes through <see cref="ChangeAsync"/> and its checks; an action the checks refuse is
     /// left as it was and listed, the others are stored. A sensitive action is changed only on its own, never as part of
     /// a selection of several.
     /// </summary>
@@ -391,15 +391,17 @@ public sealed class PlanService
         RetypeAsync(planId, actionIds, kind, origin, ct);
 
     /// <summary>
-    /// Marks the selected actions as clutter to remove instead of moving it: <c>delete_source</c> where a library already
-    /// holds the content of the file, else <c>quarantine</c>. As <see cref="SetKindAsync"/>, with the same checks.
+    /// Marks the selected actions as clutter to remove instead of moving it: <c>discard</c>, the original goes into the
+    /// hold folder of its source and nothing is copied (https://github.com/crack666/smart_file_organizer/issues/105). As
+    /// <see cref="SetKindAsync"/>, with the same checks. Until 14.11.2026 this set <c>delete_source</c> where a library
+    /// held the content and else <c>quarantine</c>, which wrote a copy of the clutter into the library first.
     /// </summary>
     public Task<PlanBatchChangeResult> MarkForRemovalAsync(
         long planId, IReadOnlyList<long> actionIds, PlanActionOrigin origin, CancellationToken ct = default) =>
-        RetypeAsync(planId, actionIds, null, origin, ct);
+        RetypeAsync(planId, actionIds, PlanActionKind.Discard, origin, ct);
 
     private async Task<PlanBatchChangeResult> RetypeAsync(
-        long planId, IReadOnlyList<long> actionIds, PlanActionKind? kind, PlanActionOrigin origin, CancellationToken ct)
+        long planId, IReadOnlyList<long> actionIds, PlanActionKind kind, PlanActionOrigin origin, CancellationToken ct)
     {
         var (_, job, libraries, actions, ctx) = await LoadAsync(planId, ct);
         var set = libraries.Count > 0
@@ -416,7 +418,7 @@ public sealed class PlanService
                 refused.Add(new RefusedChange(id, [], $"Plan {planId} has no action {id}."));
                 continue;
             }
-            var wanted = kind ?? (MatchInLibrary(a, ctx, set) is not null ? PlanActionKind.DeleteSource : PlanActionKind.Quarantine);
+            var wanted = kind;
             if (wanted == a.Kind) continue;
             if (a.SingleDecision && ids.Count > 1)
             {

@@ -60,6 +60,13 @@ public enum PlanActionKind
     /// <summary>Remove the original, because the same content is already in the library.</summary>
     [JsonStringEnumMemberName("delete_source")] DeleteSource,
 
+    /// <summary>
+    /// Clutter: the original goes into the hold folder of its source and nothing is copied anywhere
+    /// (https://github.com/crack666/smart_file_organizer/issues/105). Needs neither target nor library; taken back by
+    /// <c>sfo plan undo</c>, removed for good only by <c>sfo plan purge</c>. Never recommended by a finding.
+    /// </summary>
+    [JsonStringEnumMemberName("discard")] Discard,
+
     /// <summary>Leave the file where it is.</summary>
     [JsonStringEnumMemberName("leave")] Leave
 }

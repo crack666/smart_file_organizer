@@ -59,6 +59,40 @@ public class PlanChecksTests
         Assert.Contains(PlanProblem.TargetOutsideLibrary, Check(Move(S("a.jpg"), L("..", "..", "x", "a.jpg"))));
     }
 
+    // ── discard (https://github.com/crack666/smart_file_organizer/issues/105) ──
+
+    [Fact]
+    public void Discard_NeedsNoTargetAndNoLibrary_AndIgnoresATargetItStillCarries()
+    {
+        var discard = Move(S("tmp", "junk.bin"), null);
+        discard.Kind = PlanActionKind.Discard;
+        var noLibrary = Ctx() with { LibraryRoots = new Dictionary<long, string>() };
+        Assert.Empty(Check(discard, noLibrary));
+        // A target kept from before (so that "move" finds it again) is neither checked nor claimed.
+        discard.TargetPath = Path.Combine(Profile, "junk.bin");
+        Assert.Empty(Check(discard, Ctx(exists: _ => true)));
+        Assert.False(PlanChecks.Writes(PlanActionKind.Discard));
+        Assert.True(PlanChecks.RemovesSource(PlanActionKind.Discard));
+    }
+
+    [Fact]
+    public void Discard_KeepsTheSourceProtections_AndASensitiveFileIsDiscardedOnlyByAPerson()
+    {
+        PlanAction Discard(string source, bool sensitive = false, PlanActionOrigin origin = PlanActionOrigin.Rule)
+        {
+            var a = Move(source, null);
+            a.Kind = PlanActionKind.Discard;
+            a.Sensitive = sensitive;
+            a.Origin = origin;
+            return a;
+        }
+
+        Assert.Equal([PlanProblem.SourceInLibrary], Check(Discard(L("old.jpg"))));
+        Assert.Equal([PlanProblem.SourceInManagedArea], Check(Discard(S("PhotoApp", "index.db"))));
+        Assert.Equal([PlanProblem.SensitiveKind], Check(Discard(S("keys.txt"), sensitive: true, PlanActionOrigin.Agent)));
+        Assert.Empty(Check(Discard(S("keys.txt"), sensitive: true, PlanActionOrigin.Human)));
+    }
+
     [Fact]
     public void ATargetInTheSource_IsRefused() =>
         Assert.Contains(PlanProblem.TargetInSource, Check(Move(S("a.jpg"), S("sorted", "a.jpg"))));

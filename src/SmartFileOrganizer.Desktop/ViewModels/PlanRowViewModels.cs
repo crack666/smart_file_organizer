@@ -22,7 +22,8 @@ public partial class PlanActionRowViewModel : ViewModelBase
             ? folder.Replace(Path.DirectorySeparatorChar, '/')
             : ".";
         Outcome = PlanDisplay.OutcomeOf(a);
-        ShortTargetText = a.TargetPath is { } t ? ShortTarget(t, roots) : "kein Ziel";
+        // discard writes nowhere; a target it still carries is only kept for switching back to "Umziehen".
+        ShortTargetText = a.Kind != PlanActionKind.Discard && a.TargetPath is { } t ? ShortTarget(t, roots) : "kein Ziel";
         TargetText = TargetLine(a, Outcome, ShortTargetText, keepSource);
         Consequence = PlanDisplay.Consequence(a, keepSource, t => ShortTarget(t, roots));
         SizeText = $"{PlanDisplay.Files(a.Files)}, {PlanDisplay.Size(a.Bytes)}";
@@ -38,6 +39,7 @@ public partial class PlanActionRowViewModel : ViewModelBase
         PlanOutcome.Move when a.Kind == PlanActionKind.Copy || keepSource => $"→ {target} · Original bleibt",
         PlanOutcome.Move => "→ " + target,
         PlanOutcome.Bin when keepSource => "bleibt (Quelle nicht anfassen)",
+        PlanOutcome.Bin when a.Kind == PlanActionKind.Discard => "Papierkorb · ohne Kopie",
         PlanOutcome.Bin when a.Kind == PlanActionKind.Quarantine => $"Papierkorb · Kopie nach {target}",
         PlanOutcome.Bin => $"Papierkorb · liegt schon in {target}",
         _ when a.State == PlanActionState.Rejected => "bleibt hier · abgelehnt",
@@ -85,7 +87,7 @@ public partial class PlanActionRowViewModel : ViewModelBase
     /// <summary>Released (approved) for execution.</summary>
     public bool IsReleased => Action.State == PlanActionState.Approved;
 
-    public string StateLabel => PlanDisplay.StateLabel(Action.State);
+    public string StateLabel => PlanDisplay.StateLabel(Action);
     public string StateColor => PlanDisplay.StateColor(Action.State);
 
     /// <summary>A steering agent confirmed or rejected it; the person may want to look again.</summary>

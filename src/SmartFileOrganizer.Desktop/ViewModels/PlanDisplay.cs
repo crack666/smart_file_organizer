@@ -14,7 +14,10 @@ public enum PlanOutcome
     /// <summary><c>move</c> or <c>copy</c>: to a target in a library.</summary>
     Move,
 
-    /// <summary><c>quarantine</c> or <c>delete_source</c>: the original goes into the hold folder (the "Papierkorb").</summary>
+    /// <summary>
+    /// <c>discard</c> (what "In den Papierkorb" sets since https://github.com/crack666/smart_file_organizer/issues/105),
+    /// <c>quarantine</c> or <c>delete_source</c>: the original goes into the hold folder (the "Papierkorb").
+    /// </summary>
     Bin,
 
     /// <summary><c>leave</c>, or any rejected action: nothing happens to the file.</summary>
@@ -35,7 +38,7 @@ public static class PlanDisplay
     public static PlanOutcome OutcomeOf(PlanActionKind kind) => kind switch
     {
         PlanActionKind.Move or PlanActionKind.Copy => PlanOutcome.Move,
-        PlanActionKind.Quarantine or PlanActionKind.DeleteSource => PlanOutcome.Bin,
+        PlanActionKind.Discard or PlanActionKind.Quarantine or PlanActionKind.DeleteSource => PlanOutcome.Bin,
         _ => PlanOutcome.Stay
     };
 
@@ -74,8 +77,9 @@ public static class PlanDisplay
     public static string OutcomeHint(PlanOutcome outcome) => outcome switch
     {
         PlanOutcome.Move => "In die Bibliothek: kopieren, prüfen, dann das Original in den Papierkorb. Ziel siehe Zeile.",
-        PlanOutcome.Bin => $"Das Original kommt in den Papierkorb ({PlanExecutor.HoldFolderName} im Job-Ordner); endgültig gelöscht "
-                           + "erst beim Leeren (sfo plan purge). Bis dahin legt „Zurücknehmen“ es zurück.",
+        PlanOutcome.Bin => $"Das Original kommt in den Papierkorb der Quelle ({PlanExecutor.HoldFolderName} im Job-Ordner, auf demselben "
+                           + "Laufwerk); es wird keine Kopie angelegt. Bis zum Leeren legt „Zurücknehmen“ es zurück. Endgültig gelöscht "
+                           + "und Platz frei erst mit „Papierkorb leeren“.",
         _ => "Die Datei bleibt, wo sie ist. Beim Ausführen geschieht nichts."
     };
 
@@ -94,18 +98,27 @@ public static class PlanDisplay
                 return "Abgelehnt" + (a.DecidedBy is { } by ? $" ({OriginLabel(by)})" : string.Empty)
                        + ": bleibt, wo es ist. Beim Ausführen geschieht nichts. Einen Ausgang wählen, um neu zu entscheiden.";
             case PlanActionState.Verified:
-                return a.Kind == PlanActionKind.DeleteSource
-                    ? $"Schritt 1 ist erledigt: die Datei in {target} ist mit dem Original verglichen. Das Original wartet auf Schritt 2 (Papierkorb)."
-                    : $"Schritt 1 ist erledigt: die Kopie in {target} ist geprüft. Das Original wartet auf Schritt 2 (Papierkorb).";
+                return a.Kind switch
+                {
+                    PlanActionKind.Discard => "Schritt 1 ist erledigt: geprüft, nichts kopiert. Das Original wartet auf Schritt 2 (Papierkorb).",
+                    PlanActionKind.DeleteSource =>
+                        $"Schritt 1 ist erledigt: die Datei in {target} ist mit dem Original verglichen. Das Original wartet auf Schritt 2 (Papierkorb).",
+                    _ => $"Schritt 1 ist erledigt: die Kopie in {target} ist geprüft. Das Original wartet auf Schritt 2 (Papierkorb)."
+                };
             case PlanActionState.Executed:
+                if (a.Kind == PlanActionKind.Discard)
+                    return $"Ausgeführt: das Original liegt im {HoldText}, ohne Kopie. „Zurücknehmen“ legt es zurück, "
+                           + "bis der Papierkorb geleert wird; dann ist es endgültig gelöscht.";
                 return a.Kind == PlanActionKind.Copy || keepSource
                     ? $"Ausgeführt: kopiert nach {target}; das Original ist an seinem Platz. „Zurücknehmen“ entfernt die Kopie."
                     : $"Ausgeführt: das Original liegt im {HoldText}" + (a.Kind == PlanActionKind.DeleteSource ? string.Empty : $", die geprüfte Kopie in {target}")
-                      + ". „Zurücknehmen“ legt es zurück; endgültig gelöscht wird es erst beim Leeren (sfo plan purge).";
+                      + ". „Zurücknehmen“ legt es zurück; endgültig gelöscht wird es erst beim Leeren („Papierkorb leeren“).";
             case PlanActionState.Failed:
                 return "Fehlgeschlagen: das Original ist an seinem Platz; die Notiz sagt, warum.";
             case PlanActionState.Undone:
-                return "Zurückgenommen: das Original ist wieder an seinem Platz, die Kopie dieses Plans entfernt.";
+                return a.Kind == PlanActionKind.Discard
+                    ? "Zurückgenommen: das Original ist wieder an seinem Platz."
+                    : "Zurückgenommen: das Original ist wieder an seinem Platz, die Kopie dieses Plans entfernt.";
         }
 
         string text;
@@ -117,7 +130,7 @@ public static class PlanDisplay
                 break;
             case PlanActionKind.Move:
                 text = $"Wird nach {target} kopiert und geprüft (Schritt 1); danach kommt das Original in den {HoldText} (Schritt 2). "
-                       + "„Zurücknehmen“ legt es zurück; endgültig gelöscht wird es erst beim Leeren (sfo plan purge).";
+                       + "„Zurücknehmen“ legt es zurück; endgültig gelöscht wird es erst beim Leeren („Papierkorb leeren“).";
                 break;
             case PlanActionKind.Copy:
                 text = $"Wird nach {target} kopiert und geprüft; das Original bleibt, wo es ist. „Zurücknehmen“ entfernt die Kopie wieder.";
@@ -127,14 +140,22 @@ public static class PlanDisplay
                 break;
             case PlanActionKind.Quarantine:
                 text = $"Eine geprüfte Kopie kommt in den Quarantäneordner der Bibliothek ({target}), das Original in den {HoldText}. "
-                       + "„Zurücknehmen“ legt es zurück; endgültig gelöscht wird es erst beim Leeren (sfo plan purge).";
+                       + "„Zurücknehmen“ legt es zurück; endgültig gelöscht wird es erst beim Leeren („Papierkorb leeren“).";
                 break;
             case PlanActionKind.DeleteSource when keepSource:
                 text = $"Die Bibliothek hat den Inhalt schon ({target}). „Quelle nicht anfassen“ ist an: es geschieht nichts.";
                 break;
             case PlanActionKind.DeleteSource:
                 text = $"Die Bibliothek hat den Inhalt schon ({target}); beide werden verglichen, dann kommt das Original in den {HoldText}. "
-                       + "„Zurücknehmen“ legt es zurück; endgültig gelöscht wird es erst beim Leeren (sfo plan purge).";
+                       + "„Zurücknehmen“ legt es zurück; endgültig gelöscht wird es erst beim Leeren („Papierkorb leeren“).";
+                break;
+            case PlanActionKind.Discard when keepSource:
+                text = "Papierkorb ohne Kopie. „Quelle nicht anfassen“ ist an: es geschieht nichts.";
+                break;
+            case PlanActionKind.Discard:
+                text = $"Das Original kommt in den {HoldText}, es wird keine Kopie angelegt, auch nicht in der Bibliothek "
+                       + "(Schritt 1 prüft nur, Schritt 2 legt es ab). „Zurücknehmen“ legt es zurück, bis der Papierkorb geleert wird. "
+                       + "Platz auf dem Laufwerk wird erst mit „Papierkorb leeren“ frei.";
                 break;
             default:
                 text = "Bleibt, wo es ist. Beim Ausführen geschieht nichts.";
@@ -153,6 +174,7 @@ public static class PlanDisplay
         PlanActionKind.Copy => "Kopieren (Original bleibt)",
         PlanActionKind.Quarantine => "Papierkorb, Kopie in Quarantäne",
         PlanActionKind.DeleteSource => "Papierkorb, Bibliothek hat es",
+        PlanActionKind.Discard => "Papierkorb, ohne Kopie",
         _ => "Hier lassen"
     };
 
@@ -170,6 +192,10 @@ public static class PlanDisplay
         PlanActionState.Failed => "Fehlgeschlagen",
         _ => "Zurückgenommen"
     };
+
+    /// <summary>The state of one action in its row: after step 1 a <c>discard</c> was checked, not copied.</summary>
+    public static string StateLabel(PlanAction a) =>
+        a is { State: PlanActionState.Verified, Kind: PlanActionKind.Discard } ? "Geprüft" : StateLabel(a.State);
 
     public static string StateColor(PlanActionState state) => state switch
     {
@@ -201,7 +227,7 @@ public static class PlanDisplay
         PlanProblem.SourceInLibrary => "Quelle liegt in einer Bibliothek",
         PlanProblem.SourceInManagedArea => "Quelle liegt in einem verwalteten Bereich",
         PlanProblem.AlreadyInLibrary => "die Bibliothek hat den Inhalt schon",
-        PlanProblem.SensitiveKind => "sensible Datei: nicht in Quarantäne",
+        PlanProblem.SensitiveKind => "sensible Datei: nicht in Quarantäne, in den Papierkorb nur durch einen Menschen",
         PlanProblem.NameCollision => "am Ziel liegt schon etwas",
         _ => problem.ToCode()
     } + $" ({problem.ToCode()})";

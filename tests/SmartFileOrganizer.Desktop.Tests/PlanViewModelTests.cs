@@ -67,17 +67,19 @@ public class PlanViewModelTests : IDisposable
         Assert.Contains("bibliothek/Dokumente/Rechnung_Strom.pdf", invoice.Consequence);
         Assert.Contains(PlanExecutor.HoldFolderName, invoice.Consequence);
 
-        // In den Papierkorb: no library holds it, so the plan picks quarantine; the original goes into the hold folder.
+        // In den Papierkorb: kind discard (#105); the original goes into the hold folder of the source, no copy anywhere.
         vm.SelectedRow = invoice;
         await vm.SetSelectedOutcomeCommand.ExecuteAsync(PlanOutcome.Bin);
         invoice = Row(vm, "Rechnung_Strom.pdf");
         Assert.Equal(PlanOutcome.Bin, invoice.Outcome);
-        Assert.Equal(PlanActionKind.Quarantine, invoice.Action.Kind);
+        Assert.Equal(PlanActionKind.Discard, invoice.Action.Kind);
         Assert.Equal(PlanActionState.Proposed, invoice.Action.State);
         Assert.Equal("Offen", invoice.StateLabel);
-        Assert.StartsWith("Papierkorb · Kopie nach bibliothek/" + PlanOptions.DefaultQuarantineFolder, invoice.TargetText);
+        Assert.Equal("Papierkorb · ohne Kopie", invoice.TargetText);
+        Assert.Equal("kein Ziel", invoice.ShortTargetText);
         Assert.Contains("Papierkorb", invoice.Consequence);
-        Assert.Contains("sfo plan purge", invoice.Consequence);
+        Assert.Contains("keine Kopie", invoice.Consequence);
+        Assert.Contains("„Papierkorb leeren“", invoice.Consequence);
         Assert.Contains("Noch nicht freigegeben", invoice.Consequence);
         await WaitUntil(() => vm.DetailConsequence == Row(vm, "Rechnung_Strom.pdf").Consequence);
         Assert.Single(vm.OutcomeChoices, c => c.IsCurrent && c.Outcome == PlanOutcome.Bin);
@@ -105,6 +107,13 @@ public class PlanViewModelTests : IDisposable
         await vm.SetSelectedKindAsync(PlanActionKind.DeleteSource);
         Assert.Equal(PlanActionKind.Copy, Row(vm, "Rechnung_Strom.pdf").Action.Kind);
         Assert.Contains("no_target", vm.StatusText);
+        // Quarantine (a checked copy first) and delete_source stay reachable under "Genauer" next to discard (#105).
+        Assert.Contains(vm.KindOptions, o => o.Kind == PlanActionKind.Quarantine);
+        Assert.Contains(vm.KindOptions, o => o.Kind == PlanActionKind.DeleteSource);
+        Assert.Contains(vm.KindOptions, o => o.Kind == PlanActionKind.Discard);
+        await vm.SetSelectedKindAsync(PlanActionKind.Quarantine);
+        Assert.Equal(PlanActionKind.Quarantine, Row(vm, "Rechnung_Strom.pdf").Action.Kind);
+        Assert.StartsWith("Papierkorb · Kopie nach bibliothek/" + PlanOptions.DefaultQuarantineFolder, Row(vm, "Rechnung_Strom.pdf").TargetText);
     }
 
     [Fact]
@@ -119,13 +128,8 @@ public class PlanViewModelTests : IDisposable
         vm.AllActions.Single(r => r.Action.Sensitive).IsChecked = true;
 
         await vm.BinCheckedCommand.ExecuteAsync(null);
-        var quarantine = PlanChecks.Join(_bed.Library, PlanOptions.DefaultQuarantineFolder);
         foreach (var id in targets.Keys)
-        {
-            var a = vm.AllActions.Single(r => r.Id == id).Action;
-            Assert.Equal(PlanActionKind.Quarantine, a.Kind);
-            Assert.True(PlanChecks.IsAtOrBelow(a.TargetPath!, quarantine), a.TargetPath);
-        }
+            Assert.Equal(PlanActionKind.Discard, vm.AllActions.Single(r => r.Id == id).Action.Kind);
         Assert.StartsWith("Papierkorb: 2 ", vm.BinText);
         // A sensitive action is changed only on its own.
         Assert.Equal(PlanActionKind.Leave, vm.AllActions.Single(r => r.Action.Sensitive).Action.Kind);
@@ -144,11 +148,15 @@ public class PlanViewModelTests : IDisposable
             Assert.Equal(PlanChecks.Normalize(target), PlanChecks.Normalize(a.TargetPath!));
         }
 
-        // On its own it is the plan's checks that decide: a sensitive file never goes to quarantine.
+        // On its own it is the plan's checks that decide: a sensitive file never gets a copy in the quarantine folder ...
         vm.SelectedRow = vm.AllActions.Single(r => r.Action.Sensitive);
-        await vm.SetSelectedOutcomeCommand.ExecuteAsync(PlanOutcome.Bin);
+        await vm.SetSelectedKindAsync(PlanActionKind.Quarantine);
         Assert.Equal(PlanActionKind.Leave, vm.AllActions.Single(r => r.Action.Sensitive).Action.Kind);
         Assert.Contains("sensitive_kind", vm.StatusText);
+        // ... but the person may put it, named on its own, into the bin of its source without a copy (#105).
+        vm.SelectedRow = vm.AllActions.Single(r => r.Action.Sensitive);
+        await vm.SetSelectedOutcomeCommand.ExecuteAsync(PlanOutcome.Bin);
+        Assert.Equal(PlanActionKind.Discard, vm.AllActions.Single(r => r.Action.Sensitive).Action.Kind);
     }
 
     [Fact]
@@ -462,12 +470,13 @@ public class PlanViewModelTests : IDisposable
         Assert.Contains(vm.AllActions, r => r.Action.State == PlanActionState.Verified);
         Assert.False(vm.IsRunning);
 
-        // Step 2: its own confirmation, with what goes into the bin and the room it frees.
+        // Step 2: its own confirmation, with what goes into the bin; room is freed only by emptying it (#105).
         var step2 = vm.RemoveSourcesCommand.ExecuteAsync(null);
         var confirm2 = await ConfirmationAsync(vm, step2);
         Assert.True(confirm2.IsDanger);
         Assert.Contains(confirm2.Lines, l => l.Contains(PlanExecutor.HoldFolderName));
-        Assert.Contains(confirm2.Lines, l => l.StartsWith("Frei wird", StringComparison.Ordinal));
+        Assert.Contains(confirm2.Lines, l => l.StartsWith("In den Papierkorb kommen", StringComparison.Ordinal)
+                                             && l.Contains("erst mit „Papierkorb leeren“ frei"));
         confirm2.AcceptCommand.Execute(null);
         await step2;
         Assert.False(File.Exists(Path.Combine(_bed.Tree, "Downloads", "Rechnung_Strom.pdf")));
@@ -483,6 +492,64 @@ public class PlanViewModelTests : IDisposable
         Assert.Equal(tree, Snapshot(_bed.Tree));
         Assert.Equal(library, Snapshot(_bed.Library));
         Assert.Contains(vm.AllActions, r => r.Action.State == PlanActionState.Undone);
+    }
+
+    [Fact]
+    public async Task InDenPapierkorb_HoldsWithoutACopy_AndOnlyEmptyingTheBinAfterAConfirmationDeletes()
+    {
+        await _bed.CreatePlanAsync();
+        var vm = await _bed.OpenPlanAsync();
+        var source = Path.Combine(_bed.Tree, "Downloads", "Rechnung_Strom.pdf");
+        var size = new FileInfo(source).Length;
+        vm.SelectedRow = Row(vm, "Rechnung_Strom.pdf");
+        await vm.SetSelectedOutcomeCommand.ExecuteAsync(PlanOutcome.Bin);
+        Assert.Equal(PlanActionKind.Discard, Row(vm, "Rechnung_Strom.pdf").Action.Kind);
+        vm.SelectedRow = Row(vm, "Rechnung_Strom.pdf");
+        await vm.ReleaseSelectedCommand.ExecuteAsync(null);
+        Assert.Equal(PlanActionState.Approved, Row(vm, "Rechnung_Strom.pdf").Action.State);
+        Assert.False(vm.HasBinHeld);
+
+        var step1 = vm.ApplyCommand.ExecuteAsync(null);
+        (await ConfirmationAsync(vm, step1)).AcceptCommand.Execute(null);
+        await step1;
+        var library = Snapshot(_bed.Library);
+        Assert.DoesNotContain(library.Keys, k => k.EndsWith("Rechnung_Strom.pdf", StringComparison.Ordinal));
+        Assert.Equal(PlanActionState.Verified, Row(vm, "Rechnung_Strom.pdf").Action.State);
+        Assert.Equal("Geprüft", Row(vm, "Rechnung_Strom.pdf").StateLabel);
+        Assert.True(File.Exists(source));
+
+        var step2 = vm.RemoveSourcesCommand.ExecuteAsync(null);
+        (await ConfirmationAsync(vm, step2)).AcceptCommand.Execute(null);
+        await step2;
+        Assert.False(File.Exists(source));
+        Assert.Equal(library, Snapshot(_bed.Library));
+        var hold = Path.Combine(_bed.Tree, PlanExecutor.HoldFolderName);
+        Assert.Contains(Directory.GetFiles(hold, "*", SearchOption.AllDirectories), f => Path.GetFileName(f) == "Rechnung_Strom.pdf");
+        await WaitUntil(() => vm.HasBinHeld);
+        Assert.StartsWith("Im Papierkorb: ", vm.BinHeldText);
+        Assert.StartsWith("Ausgeführt", Row(vm, "Rechnung_Strom.pdf").Consequence);
+
+        // Emptying asks first, with count and size; declined, nothing is deleted.
+        var declined = vm.EmptyBinCommand.ExecuteAsync(null);
+        var ask = await ConfirmationAsync(vm, declined);
+        Assert.True(ask.IsDanger);
+        Assert.Contains(ask.Lines, l => l.StartsWith("Endgültig gelöscht werden ", StringComparison.Ordinal)
+                                        && l.Contains("nicht zurücknehmen"));
+        Assert.Contains(ask.Lines, l => l.Contains("ohne Kopie") && l.Contains(PlanDisplay.Size(size)) && l.Contains("nirgends mehr"));
+        Assert.Contains(ask.Lines, l => l.StartsWith("Frei wird: ", StringComparison.Ordinal) && l.Contains("Laufwerk der Quelle"));
+        ask.CancelCommand.Execute(null);
+        await declined;
+        Assert.Contains(Directory.GetFiles(hold, "*", SearchOption.AllDirectories), f => Path.GetFileName(f) == "Rechnung_Strom.pdf");
+        Assert.True(vm.HasBinHeld);
+
+        // Confirmed: the bin is empty, the file is gone for good and can no longer be put back.
+        var purge = vm.EmptyBinCommand.ExecuteAsync(null);
+        (await ConfirmationAsync(vm, purge)).AcceptCommand.Execute(null);
+        await purge;
+        Assert.False(Directory.Exists(hold) && Directory.GetFiles(hold, "*", SearchOption.AllDirectories).Length > 0);
+        Assert.False(File.Exists(source));
+        Assert.Equal(library, Snapshot(_bed.Library));
+        await WaitUntil(() => !vm.HasBinHeld);
     }
 
     [Fact]

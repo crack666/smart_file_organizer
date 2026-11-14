@@ -824,7 +824,8 @@ folder can be decided kind by kind.
 ### Kind of a plan action (`PlanActionKind`)
 
 Recommended by every finding and stored per plan action (`kind`, `recommended`, see [Plans](#plans)); executed by
-nothing yet.
+`sfo plan apply` (https://github.com/crack666/smart_file_organizer/issues/12). Until 14.11.2026 this said "executed by
+nothing yet", which had been stale since the execution step.
 
 | Code | Meaning |
 |---|---|
@@ -832,6 +833,7 @@ nothing yet.
 | `copy` | Copy to the target; the original stays. Never recommended for documents. |
 | `quarantine` | Move to a quarantine folder from which it can be restored. |
 | `delete_source` | Remove the original, because the same content is already in the library. |
+| `discard` | Clutter: the original goes into the hold folder of its source (step 2), nothing is copied anywhere; needs no target and no library. `sfo plan undo` puts it back, only `sfo plan purge` removes it for good. Never recommended by a finding; set by a person or an agent (a sensitive file only by a person). Since 14.11.2026 (https://github.com/crack666/smart_file_organizer/issues/105). |
 | `leave` | Leave it where it is. Always the recommendation for sensitive files. |
 
 ### Content check of a target (`TargetContentCheck`)
@@ -1028,13 +1030,15 @@ and offered "Bestätigen", "Ablehnen" and "Als Ballast".
 | Word | Codes | What executing does |
 |---|---|---|
 | Umziehen | `move`, `copy` | Copied to the target and checked (step 1); for `move` the original then goes into the Papierkorb (step 2). |
-| Papierkorb ("In den Papierkorb") | `quarantine`, `delete_source` | The original goes into the hold folder `.sfo-hold` in the job folder (step 2); `quarantine` first puts a checked copy into the quarantine folder of the library. "Zurücknehmen" puts it back; deleted for good only by `sfo plan purge`. |
+| Papierkorb ("In den Papierkorb") | `discard`; `quarantine`, `delete_source` under "Genauer" | The original goes into the hold folder `.sfo-hold` in the job folder (step 2), on the drive of the source. `discard` makes no copy anywhere; `quarantine` first puts a checked copy into the quarantine folder of the library. "Zurücknehmen" puts it back; deleted for good, and room freed, only by "Papierkorb leeren" (`sfo plan purge`). Until 14.11.2026 (#105) "In den Papierkorb" set `delete_source` or `quarantine`. |
+| Papierkorb leeren | `sfo plan purge` | Deletes what lies in the plan's hold folder for good, after a confirmation with count and size. Cannot be taken back. |
 | Hier lassen | `leave`, or any `rejected` action | Nothing. |
 | Offen | `proposed` | Not released; does not run. |
 | Freigegeben ("Freigeben") | `approved` | Released; runs in the next step. |
 | Abgelehnt | `rejected` | Set by the CLI or an agent; shown as "Hier lassen", never released by a release. Choosing an outcome sets it to `proposed` with that outcome. |
 
-"Löschen" in the sense of deleting for good is only `sfo plan purge`, which the GUI does not offer.
+"Löschen" in the sense of deleting for good is only `sfo plan purge`, in the GUI "Papierkorb leeren" (since 14.11.2026,
+#105; until then the GUI did not offer it).
 
 ### Source of an action (`PlanSourceKind`)
 
@@ -1055,9 +1059,9 @@ and skip an action in `sfo plan approve`. `leave` has none.
 | `target_in_source` | The target lies in the scanned source, or inside the source of the action. |
 | `target_protected` | The target lies in the user profile, on the system drive, or in a place of `Plan:ProtectedPlaces`. |
 | `source_in_library` | The source lies in a library; a library is never a source. |
-| `source_in_managed_area` | A move, quarantine or removal of something in a managed area (`Plan:ManagedAreas`), where nothing is moved, renamed or removed. |
+| `source_in_managed_area` | A move, quarantine or removal (`delete_source`, `discard`) of something in a managed area (`Plan:ManagedAreas`), where nothing is moved, renamed or removed. |
 | `already_in_library` | A move or copy of content some library holds already. |
-| `sensitive_kind` | A sensitive file to quarantine, or removed (`delete_source`) without a person deciding it. |
+| `sensitive_kind` | A sensitive file to quarantine, or removed (`delete_source`, `discard`) without a person deciding it. |
 | `name_collision` | Another action writes to the same target, or something exists there already. |
 
 ### Journal step of the execution (`PlanStepKind`)
@@ -1071,8 +1075,8 @@ afterwards; `hash` is the full checksum it was checked with.
 | `copy` | A file was copied under a temporary name, read back, compared by its full checksum and then named at the target. |
 | `present` | A file with the same full checksum lay at the target already; nothing was written and the undo leaves it. |
 | `verify` | For `delete_source`: the library file and the original were read whole and have the same checksum. |
-| `hold` | The original was renamed into the hold folder on its own drive (`<job root>/.sfo-hold/...`); it can be put back. |
-| `purge` | A held original was removed for good (`sfo plan purge`). |
+| `hold` | The original was renamed into the hold folder on its own drive (`<job root>/.sfo-hold/...`); it can be put back. For `discard` without `target_path`: there is no copy. |
+| `purge` | A held original was removed for good (`sfo plan purge`); the hold folder is emptied. |
 | `restore` | An original was put back: from the hold folder, or copied back from the checked file at the target. |
 | `uncopy` | A copy this tool wrote was removed again, after its original was back with its checksum. |
 | `remove_folder` | A folder this tool created was removed again because it was empty. |
@@ -1130,7 +1134,7 @@ same path, size and modification time is unchanged; unchanged files are counted,
 | `new` | The file is there now and was not in the previous job. |
 | `changed` | The file was there before with another size or modification time; its checksum, result and facts are not taken over. |
 | `missing` | The file was there before and is gone, and no plan moved it. |
-| `moved` | The file is gone because a plan moved it; `target` names its new place. |
+| `moved` | The file is gone because a plan moved it; `target` names its new place. A file a plan discarded (`discard`) is `moved` too, with `target` null: it has no new place. |
 
 ### State of a move (`MoveState`)
 

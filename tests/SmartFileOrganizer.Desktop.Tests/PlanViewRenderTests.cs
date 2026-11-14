@@ -102,7 +102,18 @@ public class PlanViewRenderTests
         plan.Confirmation!.AcceptCommand.Execute(null);
         await step2;
         Assert.Contains(plan.AllActions, r => r.Action.State == PlanActionState.Executed);
+        await Until(() => plan.HasBinHeld);
+        Assert.Contains(Visible(window), t => t.StartsWith("Im Papierkorb: ", StringComparison.Ordinal));
         Frame(window, shots, "07-executed.png");
+
+        // 6: "Papierkorb leeren" asks first with count and size (#105); declined here, so the undo below still works.
+        var empty = plan.EmptyBinCommand.ExecuteAsync(null);
+        await Until(() => plan.Confirmation is not null);
+        await Until(() => Visible(window).Any(t => t.StartsWith("Endgültig gelöscht werden ", StringComparison.Ordinal)));
+        Frame(window, shots, "09-confirm-empty-bin.png");
+        plan.Confirmation!.CancelCommand.Execute(null);
+        await empty;
+        Assert.True(plan.HasBinHeld);
 
         // 6: taken back.
         var undo = plan.UndoCommand.ExecuteAsync(null);

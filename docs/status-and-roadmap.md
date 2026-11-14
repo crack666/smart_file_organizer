@@ -214,7 +214,23 @@ yet against a real Ollama restart.
   ([screenshots](images/01-plan-agent.png)); the real window was not driven by
   hand._ Limits: the folder tree reads the library map anew for each opened
   folder, which may be slow on a large library; no still frame without
-  `ffmpeg`; `sfo plan purge` (emptying the bin) is still CLI only.
+  `ffmpeg`; `sfo plan purge` (emptying the bin) is still CLI only (in the GUI
+  since #105, below).
+- Plan kind `discard` and "Papierkorb leeren" (since 14.11.2026,
+  [#105](https://github.com/crack666/smart_file_organizer/issues/105)). Until
+  then "In den Papierkorb" set `delete_source` or `quarantine`, so clutter was
+  copied into the library first. Now it sets `discard`: step 1 only checks the
+  file against the scan, step 2 moves the original into `.sfo-hold` of the
+  source with no copy anywhere, "Zurücknehmen" puts it back until the bin is
+  emptied. `quarantine` and `delete_source` stay under "Genauer". "Papierkorb
+  leeren" runs `sfo plan purge` after a confirmation with count and size; only
+  that frees room on the drive of the source, which the summaries say. The
+  move notice names a discarded file `removed`.
+  _Checked 14.11.2026: `SmartFileOrganizer.Desktop.Tests` 18 passed on Windows
+  and on Linux (Avalonia headless), one pass rendered with the confirmation
+  of "Papierkorb leeren" ([screenshot](images/09-confirm-empty-bin.png)); the
+  real window was not driven by hand._ Limits: a discarded file that was purged cannot be put
+  back; an older build that rewrites a move notice drops its `removed` lines.
 
 ### Command line
 
