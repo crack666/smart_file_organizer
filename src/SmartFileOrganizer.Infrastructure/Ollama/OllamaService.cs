@@ -370,7 +370,8 @@ public class OllamaService : IOllamaService
             JsonSerializer.Serialize(BuildClassificationSchema(askKeepHint: true)),
             JsonSerializer.Serialize(BuildClassificationSchema(askKeepHint: false, DescriptionKind.Picture)),
             JsonSerializer.Serialize(BuildClassificationSchema(askKeepHint: false, DescriptionKind.Document)),
-            JsonSerializer.Serialize(BuildClassificationSchema(askKeepHint: false, DescriptionKind.Picture, Enum.GetValues<VideoKind>())),
+            // The kinds the model can be offered at most (never received, which only a messenger's name tells).
+            JsonSerializer.Serialize(BuildClassificationSchema(askKeepHint: false, DescriptionKind.Picture, SmartFileOrganizer.Application.Media.VideoKindRules.RemainingKinds(null))),
             JsonSerializer.Serialize(BuildPreAssessmentSchema()),
             JsonSerializer.Serialize(BuildSummarySchema())
         ]);

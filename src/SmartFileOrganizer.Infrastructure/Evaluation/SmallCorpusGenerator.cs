@@ -53,8 +53,11 @@ public static class SmallCorpusGenerator
     /// system folder (left out of the match), and the folder of a person in the library that shares only general
     /// features (everyday, indoor, winter) with photos of the same week.
     /// Version 8 (https://github.com/crack666/smart_file_organizer/issues/103): the clips are small real containers with
-    /// metadata, and folders of films, a season, screen recordings and clips of others; <c>video_kind</c> in the truth.</remarks>
-    public const int GeneratorVersion = 8;
+    /// metadata, and folders of films, a season, screen recordings and clips of others; <c>video_kind</c> in the truth.
+    /// Version 9 (https://github.com/crack666/smart_file_organizer/issues/103, second round): downloads whose container
+    /// carries a video platform's handler name (no phone), messenger clips as <c>received</c>, and the name schemes of
+    /// social network downloads, stream segments, music mixes and a phone with a copy suffix.</remarks>
+    public const int GeneratorVersion = 9;
 
     public const int DefaultSeed = 36;
     public const string RootFolder = "tree";
@@ -96,7 +99,7 @@ public static class SmallCorpusGenerator
 
     // Video kind codes (version 8, Issue 103).
     private const string OwnRecording = "own_recording", Movie = "movie", SeriesEpisode = "series_episode",
-        ScreenRecording = "screen_recording", WebClip = "web_clip", MusicVideo = "music_video";
+        ScreenRecording = "screen_recording", WebClip = "web_clip", MusicVideo = "music_video", Received = "received";
 
     /// <summary>A small video container with the given metadata (MP4, or Matroska with <paramref name="mkv"/>).</summary>
     private static byte[] Clip(SyntheticVideoSpec spec, bool mkv = false) => mkv ? SyntheticVideo.Mkv(spec) : SyntheticVideo.Mp4(spec);
@@ -343,11 +346,35 @@ public static class SmallCorpusGenerator
             D(2023, 4, 1, 10, 0), Video, None, "Name of a screen recorder: screen recording, likely.", videoKind: ScreenRecording);
         b.Dir("Clips", Uniform, "Clips of others: received in a messenger, downloaded, a music video.");
         b.File("Clips/VID-20230716-WA0003.mp4", Clip(new SyntheticVideoSpec { DurationSeconds = 20, MediaBytes = 30_000 }), D(2023, 7, 16), Video, None,
-            "Messenger name scheme: web clip, likely.", videoKind: WebClip);
+            "Messenger name scheme: received, likely (version 9; web clip before).", videoKind: Received);
         b.File("Clips/Papierboot falten [aB3dE5fG7hJ].webm", Clip(new SyntheticVideoSpec { DurationSeconds = 240, MediaBytes = 30_100 }, mkv: true), D(2023, 9, 2), Video, None,
             "Video id of a download in brackets: web clip, likely.", videoKind: WebClip);
         b.File("Clips/Beispielband - Beispiellied (Official Video).mp4", Clip(new SyntheticVideoSpec { DurationSeconds = 210, MediaBytes = 30_200 }), D(2022, 5, 1), Video, None,
             "Music video by its name: music video, likely.", videoKind: MusicVideo);
+
+        // Version 9 (Issue 103, second round): the trap of a download whose container carries the handler name a video
+        // platform writes (a phone maker word in it), and the name schemes a real collection left unknown.
+        const string platform = "ISO Media file produced by Google Inc.";
+        b.File("Clips/Zehn Gartentricks (1080p_30fps_H264-128kbit_AAC).mp4",
+            Clip(new SyntheticVideoSpec { VideoTrackName = platform, DurationSeconds = 300, MediaBytes = 30_300 }), D(2023, 10, 1), Video, None,
+            "Trap: platform handler name in the container is no phone; download program scheme: web clip, likely.", videoKind: WebClip);
+        b.File("Clips/Beispielband - Zweites Lied (Official Video) (1080p_30fps_H264-128kbit_AAC).mp4",
+            Clip(new SyntheticVideoSpec { VideoTrackName = platform, DurationSeconds = 220, MediaBytes = 30_400 }), D(2023, 10, 2), Video, None,
+            "Trap with a music marker: music video, likely; no device.", videoKind: MusicVideo);
+        b.File("Clips/WhatsApp Video 2023-07-16 at 18.30.12.mp4", Clip(new SyntheticVideoSpec { DurationSeconds = 15, MediaBytes = 30_500 }), D(2023, 7, 16), Video, None,
+            "Messenger name scheme: received, likely.", videoKind: Received);
+        b.File("Clips/20230901_beispielkanal_Kurzer Trick_7301234567890123456.mp4", Clip(new SyntheticVideoSpec { DurationSeconds = 30, MediaBytes = 30_600 }), D(2023, 9, 1), Video, None,
+            "Social network download (date, channel, title, post id): web clip, likely.", videoKind: WebClip);
+        b.File("Clips/beispielkonto - C5xYz12AbCd.mp4", Clip(new SyntheticVideoSpec { DurationSeconds = 25, MediaBytes = 30_700 }), D(2023, 9, 3), Video, None,
+            "Social network download (account and post id): web clip, likely.", videoKind: WebClip);
+        b.File("Clips/123456789012345_987654321098765.mp4", Clip(new SyntheticVideoSpec { DurationSeconds = 35, MediaBytes = 30_800 }), D(2023, 9, 4), Video, None,
+            "Social network download (numeric ids): web clip, likely.", videoKind: WebClip);
+        b.File("Clips/HLS_3_v2 (720p).mp4", Clip(new SyntheticVideoSpec { DurationSeconds = 60, Height = 720, Width = 1280, MediaBytes = 30_900 }), D(2023, 9, 5), Video, None,
+            "Saved stream segment: web clip, likely.", videoKind: WebClip);
+        b.File("Clips/▶ Beispielkuenstler - Beispieltitel (Extended Mix).mpeg", Clip(new SyntheticVideoSpec { DurationSeconds = 400, MediaBytes = 31_000 }), D(2023, 9, 6), Video, None,
+            "Player symbol and a mix marker: music video, likely.", videoKind: MusicVideo);
+        b.File("Videos/VID20200102183000 (1).m4v", Clip(new SyntheticVideoSpec { MediaBytes = 64_400 }), D(2020, 1, 2, 18, 30), Video, None,
+            "Phone name scheme with a copy suffix: own recording, likely.", videoKind: OwnRecording);
         b.Dir("Screenshots", Uniform, "Screenshots only.");
         for (var i = 0; i < 4; i++)
             b.File($"Screenshots/Screenshot_2023-0{i + 2}-1{i}_09{10 + i}00.png", Screen(b, 2 + i), D(2023, 2 + i, 10 + i), Screenshot, None);
