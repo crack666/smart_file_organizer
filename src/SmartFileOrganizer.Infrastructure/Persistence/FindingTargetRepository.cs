@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Dapper;
 using SmartFileOrganizer.Domain.Enums;
 using SmartFileOrganizer.Domain.Interfaces;
@@ -29,6 +30,21 @@ public sealed class FindingTargetRepository : IFindingTargetRepository
         public bool WithModel { get; set; }
         public string? Model { get; set; }
         public DateTime MatchedAt { get; set; }
+    }
+
+    private sealed class PartRow
+    {
+        public string FindingKey { get; set; } = string.Empty;
+        public int PartIndex { get; set; }
+        public string FileIds { get; set; } = "[]";
+        public string Label { get; set; } = string.Empty;
+        public string Status { get; set; } = string.Empty;
+        public long? LibraryJobId { get; set; }
+        public string? Path { get; set; }
+        public string? RelativePath { get; set; }
+        public string? Certainty { get; set; }
+        public string ContentCheck { get; set; } = string.Empty;
+        public string Reason { get; set; } = string.Empty;
     }
 
     public async Task<IReadOnlyDictionary<string, FindingTargetRecord>> GetAllAsync(long jobId, CancellationToken ct = default)
@@ -69,6 +85,37 @@ public sealed class FindingTargetRepository : IFindingTargetRepository
                 MatchedAt = r.MatchedAt
             };
         }
+
+        var parts = await conn.QueryAsync<PartRow>(new CommandDefinition(
+            """
+            SELECT finding_key, part_index, file_ids, label, status, library_job_id, path, relative_path, certainty, content_check, reason
+            FROM finding_target_parts WHERE job_id = @jobId ORDER BY finding_key, part_index
+            """,
+            new { jobId }, cancellationToken: ct));
+        foreach (var p in parts)
+        {
+            if (!result.TryGetValue(p.FindingKey, out var record)) continue;
+            if (!VerdictCodes.TryParse<FindingTargetStatus>(p.Status, out var status)
+                || !VerdictCodes.TryParse<TargetContentCheck>(p.ContentCheck, out var check))
+            {
+                // A part this version cannot read: the whole match counts as not made.
+                result.Remove(p.FindingKey);
+                continue;
+            }
+            record.Parts.Add(new FindingTargetPart
+            {
+                Index = p.PartIndex,
+                FileIds = JsonSerializer.Deserialize<List<long>>(p.FileIds) ?? [],
+                Label = p.Label,
+                Status = status,
+                LibraryJobId = p.LibraryJobId,
+                Path = p.Path,
+                RelativePath = p.RelativePath,
+                Certainty = VerdictCodes.ParseNullable<ResultCertainty>(p.Certainty),
+                ContentCheck = check,
+                Reason = p.Reason
+            });
+        }
         return result;
     }
 
@@ -76,6 +123,35 @@ public sealed class FindingTargetRepository : IFindingTargetRepository
     {
         await using var conn = _db.CreateConnection();
         await conn.OpenAsync(ct);
+        await using var tx = await conn.BeginTransactionAsync(ct);
+        await conn.ExecuteAsync(new CommandDefinition(
+            "DELETE FROM finding_target_parts WHERE job_id = @JobId AND finding_key = @FindingKey",
+            new { record.JobId, record.FindingKey }, tx, cancellationToken: ct));
+        foreach (var p in record.Parts)
+        {
+            await conn.ExecuteAsync(new CommandDefinition(
+                """
+                INSERT INTO finding_target_parts (job_id, finding_key, part_index, file_ids, label, status, library_job_id, path,
+                                                  relative_path, certainty, content_check, reason)
+                VALUES (@JobId, @FindingKey, @Index, @FileIds, @Label, @Status, @LibraryJobId, @Path, @RelativePath, @Certainty,
+                        @ContentCheck, @Reason)
+                """,
+                new
+                {
+                    record.JobId,
+                    record.FindingKey,
+                    p.Index,
+                    FileIds = JsonSerializer.Serialize(p.FileIds),
+                    p.Label,
+                    Status = p.Status.ToCode(),
+                    p.LibraryJobId,
+                    p.Path,
+                    p.RelativePath,
+                    Certainty = p.Certainty.ToCode(),
+                    ContentCheck = p.ContentCheck.ToCode(),
+                    p.Reason
+                }, tx, cancellationToken: ct));
+        }
         await conn.ExecuteAsync(new CommandDefinition(
             """
             INSERT INTO finding_targets (job_id, finding_key, input_hash, status, library_job_id, path, relative_path, certainty,
@@ -106,6 +182,7 @@ public sealed class FindingTargetRepository : IFindingTargetRepository
                 record.WithModel,
                 record.Model,
                 record.MatchedAt
-            }, cancellationToken: ct));
+            }, tx, cancellationToken: ct));
+        await tx.CommitAsync(ct);
     }
 }

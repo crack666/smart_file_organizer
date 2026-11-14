@@ -42,7 +42,8 @@ public sealed record FindingTargetItem(
     ResultCertainty? Certainty,
     TargetContentCheck ContentCheck,
     ContentCheckStatus ContentStatus,
-    string Reason);
+    string Reason,
+    IReadOnlyList<FindingTargetPart>? Parts = null);
 
 /// <summary>Progress of a run, one report per finding.</summary>
 public sealed record FindingTargetProgress(int Done, int Total, string Key, FindingTargetStatus Status, bool Reused);
@@ -168,7 +169,7 @@ public sealed class FindingTargetService
             }
 
             items.Add(new FindingTargetItem(finding.Key, finding.Kind, finding.Title, record.Status, fromStore, record.LibraryJobId,
-                record.Path, record.RelativePath, record.Certainty, record.ContentCheck, record.ContentStatus, record.Reason));
+                record.Path, record.RelativePath, record.Certainty, record.ContentCheck, record.ContentStatus, record.Reason, record.Parts));
             progress?.Report(new FindingTargetProgress(i + 1, todo.Count, finding.Key, record.Status, fromStore));
         }
 
@@ -191,18 +192,56 @@ public sealed class FindingTargetService
         Finding finding, LibraryMatchAnswer answer, IReadOnlyList<FileNode> nodes, IReadOnlyDictionary<long, FileComparison> rows,
         bool useModel, DateTime now)
     {
+        var record = Place(answer, nodes, rows, useModel);
+        record.JobId = answer.Source.Id;
+        record.FindingKey = finding.Key;
+        record.InputHash = finding.TargetInput!;
+        record.WithModel = useModel;
+        record.MatchedAt = now;
+        if (answer.Parts is { Count: > 0 } parts)
+        {
+            // The files do not belong together: the mixture gets no target, each part its own (Issue 85).
+            record.Status = FindingTargetStatus.Split;
+            record.ContentCheck = TargetContentCheck.NotChecked;
+            record.ContentStatus = parts.Select(p => p.Answer?.Result?.Content?.Status).FirstOrDefault(s => s is not null) ?? ContentCheckStatus.NoCandidates;
+            record.Model = parts.Select(p => p.Answer?.Advice.Model).FirstOrDefault(m => m is not null);
+            record.Reason = answer.Result?.NoTarget ?? "The files do not belong together by content; each part is matched on its own.";
+            for (var i = 0; i < parts.Count; i++)
+            {
+                var p = parts[i];
+                var placed = p.Answer is { } a ? Place(a, p.Files, rows, useModel) : null;
+                record.Parts.Add(new FindingTargetPart
+                {
+                    Index = i,
+                    FileIds = p.Files.Select(f => f.Id).ToList(),
+                    Label = p.Label,
+                    Status = placed?.Status ?? FindingTargetStatus.NoTarget,
+                    LibraryJobId = placed?.LibraryJobId,
+                    Path = placed?.Path,
+                    RelativePath = placed?.RelativePath,
+                    Certainty = placed?.Certainty,
+                    ContentCheck = placed?.ContentCheck ?? TargetContentCheck.NotChecked,
+                    Reason = placed?.Reason ?? p.NotMatched ?? "Not matched."
+                });
+            }
+        }
+        return record;
+    }
+
+    /// <summary>Where the answer of one match puts the files: the best existing folder, else a complete new folder, else why none.</summary>
+    private static FindingTargetRecord Place(
+        LibraryMatchAnswer answer, IReadOnlyList<FileNode> nodes, IReadOnlyDictionary<long, FileComparison> rows, bool useModel)
+    {
         var content = answer.Result?.Content;
         var contentStatus = content?.Status ?? ContentCheckStatus.NoModel;
-        var record = new FindingTargetRecord
+        var record = new FindingTargetRecord { ContentStatus = contentStatus, Model = answer.Advice.Model };
+        if (answer.Excluded is { } excluded)
         {
-            JobId = answer.Source.Id,
-            FindingKey = finding.Key,
-            InputHash = finding.TargetInput!,
-            ContentStatus = contentStatus,
-            WithModel = useModel,
-            Model = answer.Advice.Model,
-            MatchedAt = now
-        };
+            record.Status = FindingTargetStatus.Excluded;
+            record.ContentCheck = TargetContentCheck.NotChecked;
+            record.Reason = "Not matched on purpose: " + excluded;
+            return record;
+        }
 
         if (answer.Result is { Candidates.Count: > 0 } result && answer.CandidateLibraries is { Count: > 0 } candidateLibraries)
         {

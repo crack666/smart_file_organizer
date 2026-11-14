@@ -1200,6 +1200,42 @@ public sealed class FindingService
                 continue;
             }
 
+            if (row.Status == FindingTargetStatus.Split)
+            {
+                // The files do not belong together (Issue 85): each part keeps its own place, inside a library root only.
+                var parts = row.Parts.Select(p =>
+                {
+                    if (p.Status is not (FindingTargetStatus.ExistingFolder or FindingTargetStatus.NewFolder)) return p;
+                    var inRoot = p.Path is { } partPath
+                                 && libraries.Any(l => l.Id == p.LibraryJobId && IsAtOrBelow(partPath, Path.TrimEndingDirectorySeparator(l.RootPath)));
+                    return inRoot ? p : new FindingTargetPart
+                    {
+                        Index = p.Index, FileIds = p.FileIds, Label = p.Label, Status = FindingTargetStatus.NoFittingFolder,
+                        ContentCheck = p.ContentCheck, Reason = "A matched place outside every library root was dropped."
+                    };
+                }).ToList();
+                finding.TargetStatus = FindingTargetStatus.Split;
+                finding.TargetParts = parts;
+                var placed = parts.Where(p => p.Status is FindingTargetStatus.ExistingFolder or FindingTargetStatus.NewFolder).ToList();
+                finding.Notes.Add($"Split by content ({parts.Count} parts, {placed.Count} with a place): {row.Reason}");
+                if (placed.Count > 0)
+                {
+                    finding.Action = new FindingAction(PlanActionKind.Move,
+                        $"Move part by part: {string.Join("; ", placed.Take(3).Select(p => $"{p.FileIds.Count} files ({p.Label}) to {p.RelativePath}"))}"
+                        + (placed.Count < parts.Count ? $"; {parts.Count - placed.Count} part(s) without a place stay." : "."));
+                    finding.Notes.RemoveAll(n => n == NoFolderFitsNote || n.StartsWith("No place looked up", StringComparison.Ordinal));
+                }
+                if (finding.Kind == FindingKind.Misplaced && finding.Target is not null)
+                {
+                    // A place the rules alone proposed for the whole mixture does not count.
+                    finding.Target = null;
+                    if (placed.Count == 0)
+                        finding.Action = new FindingAction(PlanActionKind.Leave, "The files do not belong together, and no part has a place; decide where they belong.");
+                    finding.Certainty = FindingRules.MisplacedCertainty(fileCertainty, null);
+                }
+                continue;
+            }
+
             finding.TargetStatus = row.Status;
             finding.Notes.Add($"No target ({row.Status.ToCode()}): {row.Reason}");
             // The match by content found no fitting folder: a place the rules alone proposed does not count either.

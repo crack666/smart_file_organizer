@@ -94,7 +94,20 @@ public sealed record LibraryMatchQuery
     public bool UseModel { get; init; } = true;
     public bool Refresh { get; init; }
     public string? Model { get; init; }
+
+    /// <summary>
+    /// Loose files whose content does not belong together are matched part by part (Issue 85); false for a part itself,
+    /// which is never split again.
+    /// </summary>
+    public bool SplitMixed { get; init; } = true;
 }
+
+/// <summary>
+/// One part of a unit whose files do not belong together by content (https://github.com/crack666/smart_file_organizer/issues/85),
+/// matched on its own. <see cref="Answer"/> is null for the rest beyond <c>MaxUnitParts</c>, which is not matched.
+/// </summary>
+/// <param name="Label">What the part shows (the gist of its description), or the name of its first file.</param>
+public sealed record LibraryMatchPart(IReadOnlyList<FileNode> Files, string Label, LibraryMatchAnswer? Answer, string? NotMatched);
 
 /// <summary>The answer of <c>sfo library match</c>.</summary>
 /// <param name="Library">The library of the best proposal (or of the new folder); the first one named when there is none.</param>
@@ -119,7 +132,9 @@ public sealed record LibraryMatchAnswer(
     IReadOnlyList<ScanJob>? CandidateLibraries = null,
     ScanJob? NewFolderLibrary = null,
     IReadOnlyList<RootStorage>? Space = null,
-    IReadOnlyList<ScanJob>? UnconfirmedLibraries = null);
+    IReadOnlyList<ScanJob>? UnconfirmedLibraries = null,
+    string? Excluded = null,
+    IReadOnlyList<LibraryMatchPart>? Parts = null);
 
 /// <summary>
 /// <c>sfo library show</c> and <c>sfo library match</c> (https://github.com/crack666/smart_file_organizer/issues/25):
@@ -273,6 +288,20 @@ public sealed partial class LibraryTargetService
         if (unit.States is { } states && states.GetValueOrDefault(ContentStateValues.BackedUp) == unit.Files && unit.Files > 0)
             notes.Add($"All {unit.Files} files are already in the library; nothing of it needs a new place.");
 
+        // System clutter and files of unclear worth get no target at all (Issue 85): no model is asked for them.
+        if (!_options.MatchUnclearWorth && await ExcludedAsync(source, files, ct) is { } excluded)
+        {
+            notes.Add("Not matched: " + excluded);
+            return new LibraryMatchAnswer(source, libraries[0], choice, MatchStatus.Ok, null, unit, set?.First,
+                new MatchResult([], 0, null, [], ContentCheck.NotChecked(ContentCheckStatus.NoCandidates, "not matched"), [], excluded),
+                null, LibraryModelPart.Skipped, notes, libraries, [], null, null, [], Excluded: excluded);
+        }
+
+        // Loose files that do not belong together by content are matched part by part; the mixture as a whole gets no
+        // existing folder and no new one (Issue 85).
+        if (query.SplitMixed && !unit.KeepWhole && files.Count >= 2 && await SplitAsync(source, files, ct) is { Count: >= 2 } split)
+            return await MatchPartsAsync(source, libraries, choice, unit, set, query, split, notes, ct);
+
         // What the unit shows, from the description facts of its analysed files.
         var unitDescription = await DescribeUnitAsync(source, files, ct);
         var modelReady = new Lazy<Task<bool>>(() => _ollama is null ? Task.FromResult(true) : _ollama.IsAvailableAsync(ct));
@@ -350,6 +379,99 @@ public sealed partial class LibraryTargetService
         return new LibraryMatchAnswer(source, home, choice, MatchStatus.Ok, null, unit, set?.Headers.FirstOrDefault(h => h.AgainstJobId == home.Id) ?? set?.First,
             result, patterns, advice, notes, libraries, ranked.Select(x => x.Library).ToList(), withNewFolder?.Library, space,
             unconfirmed.Select(x => x.Library).ToList());
+    }
+
+    // ------------------------------------------------------------------ exclusion and parts (Issue 85)
+
+    /// <summary>
+    /// Why the files get no target at all, or null: at least half of them lie in a folder the analysis judged system
+    /// clutter (verdict <c>system</c>: account pictures, templates of a program), or in a folder judged as a whole
+    /// (<c>uniform</c>, <c>unit</c>) whose worth is unclear (retention <c>review</c>). A mixed folder says nothing about the
+    /// worth of each of its files, so its retention does not count. Each file counts with the nearest folder above it
+    /// that has a verdict.
+    /// </summary>
+    private async Task<string?> ExcludedAsync(ScanJob source, IReadOnlyList<FileNode> files, CancellationToken ct)
+    {
+        if (files.Count == 0) return null;
+        var dirs = (await _reads.GetDirectoriesAsync(source.Id, ct)).ToDictionary(d => d.FullPath, PathComparer);
+        var system = new Dictionary<string, int>(PathComparer);
+        var review = new Dictionary<string, int>(PathComparer);
+        foreach (var f in files)
+        {
+            DirectoryReadRow? judged = null;
+            for (var p = f.ParentPath; dirs.TryGetValue(p, out var d); p = d.ParentPath)
+            {
+                if (d.Verdict is not null) { judged = d; break; }
+                if (d.Depth == 0 || string.Equals(d.ParentPath, p, PathComparison)) break;
+            }
+            if (judged is null) continue;
+            if (judged.Verdict == DirectoryVerdictKind.System.ToCode())
+                system[judged.RelativePath] = system.GetValueOrDefault(judged.RelativePath) + 1;
+            else if (judged.Retention == RetentionValue.Review.ToCode()
+                     && judged.Verdict is { } v && (v == DirectoryVerdictKind.Uniform.ToCode() || v == DirectoryVerdictKind.Unit.ToCode()))
+                review[judged.RelativePath] = review.GetValueOrDefault(judged.RelativePath) + 1;
+        }
+        var bySystem = system.Values.Sum();
+        var byReview = review.Values.Sum();
+        if ((bySystem + byReview) * 2 < files.Count) return null;
+        static string Where(Dictionary<string, int> d) => string.Join(", ", d.OrderByDescending(x => x.Value).Take(2).Select(x => x.Key.Length == 0 ? "." : x.Key.Replace('\\', '/')));
+        return bySystem >= byReview
+            ? $"system clutter: {bySystem} of {files.Count} files lie in {Where(system)}, judged a folder of the system or a program (verdict system), "
+              + "not own content; such files get no place in the permanent storage."
+            : $"worth unclear: {byReview} of {files.Count} files lie in {Where(review)}, whose worth the analysis left open (retention review); "
+              + "a target is proposed once a person keeps them.";
+    }
+
+    /// <summary>The parts of the unit by content (<see cref="ContentUnity"/>); one part when it is one whole or nothing is described.</summary>
+    private async Task<IReadOnlyList<IReadOnlyList<FileNode>>> SplitAsync(ScanJob source, IReadOnlyList<FileNode> files, CancellationToken ct)
+    {
+        if (_facts is null) return [files];
+        var all = await _facts.GetByJobAsync(source.Id, ct);
+        if (!files.Any(f => all.TryGetValue(f.Id, out var x) && x.Any(y => y.Key.IsDescription()))) return [files];
+        var captures = await _captures.GetAsync(source.Id, ct);
+        var unity = files.Select(f => new UnityFile(f, EventGrouper.TimeOf(f, captures).Time,
+            all.TryGetValue(f.Id, out var facts) ? facts : [])).ToList();
+        return ContentUnity.Parts(unity, LibraryWords.Default, _options.UnitGapHours);
+    }
+
+    /// <summary>
+    /// Matches each part of a mixed unit on its own, the largest first up to <c>MaxUnitParts</c>; the rest is listed
+    /// without a match. The answer for the whole is no target, with the parts.
+    /// </summary>
+    private async Task<LibraryMatchAnswer> MatchPartsAsync(
+        ScanJob source, IReadOnlyList<ScanJob> libraries, LibraryChoice? choice, MatchUnit unit, LibraryComparisonSet? set,
+        LibraryMatchQuery query, IReadOnlyList<IReadOnlyList<FileNode>> split, List<string> notes, CancellationToken ct)
+    {
+        var all = _facts is null ? new Dictionary<long, IReadOnlyList<FileFact>>() : await _facts.GetByJobAsync(source.Id, ct);
+        string Label(IReadOnlyList<FileNode> files)
+        {
+            var described = ContentDescription.From(files.Where(f => all.ContainsKey(f.Id)).Select(f => all[f.Id]).Take(_options.UnitSampleSize).ToList());
+            return described.IsEmpty ? $"{files[0].Name}{(files.Count > 1 ? $" and {files.Count - 1} more" : string.Empty)} (not described)" : described.Gist();
+        }
+
+        var matchedParts = split.OrderByDescending(p => p.Count).Take(_options.MaxUnitParts).ToHashSet();
+        var parts = new List<LibraryMatchPart>();
+        foreach (var files in split)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (!matchedParts.Contains(files))
+            {
+                parts.Add(new LibraryMatchPart(files, Label(files), null,
+                    $"Not matched: the files show more than {_options.MaxUnitParts} different things; only the largest parts are matched."));
+                continue;
+            }
+            var answer = await MatchAsync(query with { Files = files, Path = null, BundleId = null, SplitMixed = false }, ct);
+            parts.Add(new LibraryMatchPart(files, Label(files), answer, null));
+        }
+
+        var why = $"The {unit.Files} files do not belong together by content: they show {parts.Count} different things "
+                  + $"({string.Join("; ", parts.Take(4).Select(p => p.Label))}{(parts.Count > 4 ? "; ..." : string.Empty)}). "
+                  + "A mixture as a whole fits any folder a little and none really, so each part is matched on its own.";
+        notes.Add(why);
+        var model = parts.Select(p => p.Answer?.Advice).FirstOrDefault(a => a?.Model is not null) ?? LibraryModelPart.Skipped;
+        return new LibraryMatchAnswer(source, libraries[0], choice, MatchStatus.Ok, null, unit, set?.First,
+            new MatchResult([], 0, null, [], ContentCheck.NotChecked(ContentCheckStatus.NoCandidates, "matched per part"), [], why),
+            null, model, notes, libraries, [], null, null, [], Parts: parts);
     }
 
     // ------------------------------------------------------------------ library and map

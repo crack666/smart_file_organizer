@@ -82,6 +82,21 @@ public sealed class LibraryMatchOptions
     public double MinLibraryKindShare { get; set; } = 0.10;
 
     /// <summary>
+    /// Hours between two files below which they count as taken together for the unity check of a unit (Issue 85): files
+    /// close in time belong together when one of them is not described or both show the same occasion.
+    /// </summary>
+    public double UnitGapHours { get; set; } = 3;
+
+    /// <summary>Parts a mixed unit is matched in at most; the smallest parts beyond that stay without a target.</summary>
+    public int MaxUnitParts { get; set; } = 12;
+
+    /// <summary>
+    /// Matches the files of a folder that is only system clutter (verdict <c>system</c>) or whose worth is unclear
+    /// (a whole folder with retention <c>review</c>) all the same. Off by default: such files get no target (Issue 85).
+    /// </summary>
+    public bool MatchUnclearWorth { get; set; }
+
+    /// <summary>
     /// Folder for the patterns files (one per library job, editable by hand). Set by the host to
     /// <c>library-patterns</c> next to the database; null keeps the patterns in memory only.
     /// </summary>
@@ -112,6 +127,8 @@ public sealed class LibraryMatchOptions
         if (MaxContentCandidates is < 0 or > 20) problems.Add($"{nameof(MaxContentCandidates)} must be between 0 and 20");
         if (FolderSampleSize is < 1 or > 10) problems.Add($"{nameof(FolderSampleSize)} must be between 1 and 10");
         if (UnitSampleSize is < 1 or > 100) problems.Add($"{nameof(UnitSampleSize)} must be between 1 and 100");
+        if (UnitGapHours is < 0 or > 720 || double.IsNaN(UnitGapHours)) problems.Add($"{nameof(UnitGapHours)} must be between 0 and 720");
+        if (MaxUnitParts is < 2 or > 100) problems.Add($"{nameof(MaxUnitParts)} must be between 2 and 100");
         Share(nameof(WeightContentFit), WeightContentFit);
         foreach (var (name, w) in new[]
                  {

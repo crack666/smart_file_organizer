@@ -47,4 +47,34 @@ public sealed class FindingTargetRecord
 
     public string? Model { get; set; }
     public DateTime MatchedAt { get; set; }
+
+    /// <summary>
+    /// For <see cref="FindingTargetStatus.Split"/>: the parts of the finding by content, each with its own target or why
+    /// none (<c>finding_target_parts</c>, Issue 85). Empty otherwise.
+    /// </summary>
+    public List<FindingTargetPart> Parts { get; set; } = [];
+}
+
+/// <summary>
+/// One part of a finding whose files do not belong together by content (https://github.com/crack666/smart_file_organizer/issues/85):
+/// its files and the place found for them, or why there is none. Status never <c>split</c> or <c>not_matched</c>.
+/// </summary>
+public sealed class FindingTargetPart
+{
+    /// <summary>Position in the finding, from 0, in time order.</summary>
+    public int Index { get; set; }
+
+    /// <summary>Ids of the files of this part (files of the source job).</summary>
+    public List<long> FileIds { get; set; } = [];
+
+    /// <summary>What the part shows, in a few words, or its first file.</summary>
+    public string Label { get; set; } = string.Empty;
+
+    public FindingTargetStatus Status { get; set; }
+    public long? LibraryJobId { get; set; }
+    public string? Path { get; set; }
+    public string? RelativePath { get; set; }
+    public ResultCertainty? Certainty { get; set; }
+    public TargetContentCheck ContentCheck { get; set; }
+    public string Reason { get; set; } = string.Empty;
 }

@@ -182,6 +182,10 @@ public static class PlanBuilder
             if (!below.TryGetValue(d.FullPath, out var ids) || ids.Count == 0) continue;
             // Misplaced files leave their folder on their own; a folder holding one does not move as a whole.
             if (!ids.All(id => owner.TryGetValue(id, out var o) && o.Kind != FindingKind.Misplaced) || ids.Any(used.Contains)) continue;
+            // Files of a finding split by content (Issue 85) move with their part; a folder spanning parts does not move whole.
+            if (ids.Select(id => owner[id]).Any(o => o.TargetParts.Count > 0)
+                && ids.Select(id => owner[id].TargetParts.FirstOrDefault(p => p.FileIds.Contains(id))).Distinct().Count() != 1)
+                continue;
 
             var first = ids.Select(id => inputs.Files[id].File).OrderBy(f => f.FullPath, StringComparer.Ordinal).First();
             var f = owner[first.Id];
@@ -239,6 +243,20 @@ public static class PlanBuilder
     private static (string? Target, long? Library, string? Why) TargetOf(
         PlanInputs inputs, Finding f, IReadOnlyList<long> ids, string name, bool folder = false)
     {
+        // A finding split by content (Issue 85): each file goes to the place of its part; a folder moves whole only when
+        // all of its files are in one placed part.
+        if (f.TargetParts.Count > 0)
+        {
+            var parts = ids.Select(id => f.TargetParts.FirstOrDefault(p => p.FileIds.Contains(id))).Distinct().ToList();
+            if (parts.Count != 1 || parts[0] is not { } part)
+                return (null, null, "The files of this folder belong to different parts of the finding; each moves on its own.");
+            if (part.Status is not (FindingTargetStatus.ExistingFolder or FindingTargetStatus.NewFolder) || part.Path is null || part.LibraryJobId is null)
+                return (null, null, $"This part of the finding ({part.Label}) has no target: {part.Reason}");
+            if (folder && string.Equals(Path.GetFileName(Path.TrimEndingDirectorySeparator(part.Path)), name, StringComparison.OrdinalIgnoreCase))
+                return (part.Path, part.LibraryJobId, null);
+            return (PlanChecks.Join(part.Path, name), part.LibraryJobId, null);
+        }
+
         if (f.Target is { LibraryJobId: { } lib } t)
         {
             // A folder kept whole whose target already carries its name (sfo findings targets: a folder of that name, or
