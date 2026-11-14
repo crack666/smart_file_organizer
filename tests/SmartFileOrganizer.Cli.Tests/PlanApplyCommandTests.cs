@@ -154,11 +154,16 @@ public class PlanApplyCommandTests : IDisposable
         var tree = Snapshot(_tree);
         var source = Path.Combine(_tree, "Downloads", "Rechnung_Strom.pdf");
         var target = Path.Combine(_library, "Dokumente", "Rechnung_Strom.pdf");
+        var notice = Path.Combine(_tree, "Downloads", MoveNotice.FileName);
         await OkAsync("plan", "apply", plan, "--execute");
+        // The dry run of step 2 names the notice it would write and writes none.
+        var dryRemove = await OkAsync("plan", "apply", plan, "--remove-sources");
+        Assert.Contains(dryRemove.GetProperty("notices").EnumerateArray(),
+            n => Str(n, "path") == notice && Str(n, "outcome") == "would_write" && n.GetProperty("entries").GetInt32() == 3);
+        Assert.False(File.Exists(notice));
         var removed = await OkAsync("plan", "apply", plan, "--remove-sources", "--execute");
 
         // The notice lies in the source folder, readable without sfo: names and new places, nothing about the content.
-        var notice = Path.Combine(_tree, "Downloads", MoveNotice.FileName);
         Assert.True(File.Exists(notice));
         var text = File.ReadAllText(notice);
         Assert.StartsWith("# sfo-move-notice 1\n", text);
@@ -185,6 +190,12 @@ public class PlanApplyCommandTests : IDisposable
         var byHash = await OkAsync("where", Hash(target));
         Assert.Contains(byHash.GetProperty("now").EnumerateArray(), p => Str(p, "path") == target);
         Assert.DoesNotContain(byHash.GetProperty("now").EnumerateArray(), p => Str(p, "path") == source);
+
+        // The dry run of the undo says the notice would go, and it stays.
+        var dryUndo = await OkAsync("plan", "undo", plan);
+        Assert.Contains(dryUndo.GetProperty("notices").EnumerateArray(), n => Str(n, "path") == notice && Str(n, "outcome") == "would_remove");
+        Assert.DoesNotContain(dryUndo.GetProperty("notices").EnumerateArray(), n => Str(n, "outcome") == "removed");
+        Assert.True(File.Exists(notice));
 
         // Undo takes the notices back with the originals: the source tree is as before.
         var undone = await OkAsync("plan", "undo", plan, "--execute");

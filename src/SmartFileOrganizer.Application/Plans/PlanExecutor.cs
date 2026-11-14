@@ -33,7 +33,8 @@ public sealed class PlanExecutionHooks
 public sealed record PlanRunOptions(IReadOnlyList<long> ActionIds, bool Execute, bool Notices = true);
 
 /// <summary>What a run did with the move notice of one source folder.</summary>
-/// <param name="Outcome"><c>written</c> (created or changed), <c>removed</c> (no entry left), <c>would_write</c> (dry run),
+/// <param name="Outcome"><c>written</c> (created or changed), <c>removed</c> (no entry left), <c>would_write</c> or
+/// <c>would_remove</c> (dry run),
 /// <c>skipped</c> (a file that is not a notice carries the name; it is left alone) or <c>failed</c>.</param>
 /// <param name="Entries">Entries in the notice afterwards, of every plan.</param>
 public sealed record PlanNoticeItem(string Path, string Outcome, int Entries, string? Detail);
@@ -385,7 +386,16 @@ public sealed class PlanExecutor
         var pending = run.Checked(a.Id).Where(s => run.ActiveHold(a.Id, s.SourcePath) is null).ToList();
         var bytes = pending.Sum(s => s.Bytes);
         if (!run.Execute)
+        {
+            // The dry run reports the move notices as they would be after this action.
+            var now = DateTime.UtcNow;
+            run.WouldHold.AddRange(pending.Select(s => new PlanStep
+            {
+                PlanId = run.Plan.Id, ActionId = a.Id, Kind = PlanStepKind.Hold, State = PlanStepState.Done,
+                SourcePath = s.SourcePath, TargetPath = s.TargetPath, Bytes = s.Bytes, StartedAt = now, FinishedAt = now
+            }));
             return Item(a, "would_run", [], pending.Count, bytes);
+        }
 
         var scanned = (await _journal.GetScannedFilesAsync(run.Job.Id, a.SourcePath, ct)).ToDictionary(f => f.FullPath, PathComparer);
         foreach (var s in pending)
@@ -465,6 +475,7 @@ public sealed class PlanExecutor
         var bytes = holds.Sum(h => h.Bytes) + copies.Sum(c => c.Bytes);
         if (!run.Execute)
         {
+            run.WouldReturn.Add(a.Id);
             var purged = holds.Count(h => run.Purged(h));
             return Item(a, "would_run", [], files, bytes,
                 purged > 0 ? $"{purged} originals were purged; they are copied back from the target" : null);
@@ -699,6 +710,12 @@ public sealed class PlanExecutor
         public required PlanRunOptions Options { get; init; }
         public bool KeepSource { get; init; }
         public bool Execute => Options.Execute;
+
+        /// <summary>Dry run only: the originals step 2 would take away (unsaved hold steps, id 0).</summary>
+        public List<PlanStep> WouldHold { get; } = [];
+
+        /// <summary>Dry run only: actions whose originals the undo would put back.</summary>
+        public HashSet<long> WouldReturn { get; } = [];
 
         public bool Named(PlanAction a) => Options.ActionIds.Contains(a.Id);
         public bool Selected(PlanAction a) => a.Kind != PlanActionKind.Leave && (Options.ActionIds.Count == 0 || Named(a));
@@ -1072,12 +1089,15 @@ public sealed class PlanExecutor
     private async Task<IReadOnlyList<PlanNoticeItem>> UpdateNoticesAsync(RunState run, bool create, CancellationToken ct)
     {
         var result = new List<PlanNoticeItem>();
-        var holds = run.Steps.Where(s => s.Kind == PlanStepKind.Hold && s.State == PlanStepState.Done).ToList();
+        // A dry run counts the originals it would take away and leaves out those it would put back.
+        var holds = run.Steps.Where(s => s.Kind == PlanStepKind.Hold && s.State == PlanStepState.Done).Concat(run.WouldHold).ToList();
+        bool Away(PlanStep h) => !run.WouldReturn.Contains(h.ActionId)
+                                 && (h.Id == 0 || run.ActiveHold(h.ActionId, h.SourcePath)?.Id == h.Id);
         foreach (var folder in holds.Select(h => Path.GetDirectoryName(h.SourcePath)!).Distinct(PathComparer).Order(StringComparer.Ordinal))
         {
             var path = Path.Combine(folder, MoveNotice.FileName);
             var away = holds
-                .Where(h => PathComparer.Equals(Path.GetDirectoryName(h.SourcePath), folder) && run.ActiveHold(h.ActionId, h.SourcePath)?.Id == h.Id)
+                .Where(h => PathComparer.Equals(Path.GetDirectoryName(h.SourcePath), folder) && Away(h))
                 .Select(h => new MoveNoticeEntry(h.FinishedAt ?? h.StartedAt, run.Plan.Id, h.ActionId, Path.GetFileName(h.SourcePath),
                     h.TargetPath ?? string.Empty))
                 .ToList();
@@ -1112,7 +1132,7 @@ public sealed class PlanExecutor
                 continue;
             if (!run.Execute)
             {
-                result.Add(new PlanNoticeItem(path, entries.Count == 0 ? "removed" : "would_write", entries.Count, null));
+                result.Add(new PlanNoticeItem(path, entries.Count == 0 ? "would_remove" : "would_write", entries.Count, null));
                 continue;
             }
 

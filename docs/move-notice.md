@@ -51,7 +51,8 @@ The notice is derived from the journal (`plan_steps`): it lists the originals of
 not put back. Each change is a journal step `notice` (`source_path` is the notice), written as `<notice>.sfo-partial`
 and then named; a run cut off in between leaves the old notice or the new one, and the next run brings it in line.
 The notice is the tool's own file: it is replaced in place only after it was read and recognised as a notice just
-before.
+before. A dry run (`sfo plan apply --remove-sources` or `sfo plan undo` without `--execute`) writes nothing and reports
+the notice as it would be: `would_write`, or `would_remove` when no entry would be left.
 
 ## How it is read
 

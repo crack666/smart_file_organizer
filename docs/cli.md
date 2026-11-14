@@ -1784,7 +1784,8 @@ original stays) or `partial` (undo and purge: not all of it). `reasons` are `Pla
 or the state of an action named by `--action` that cannot run. `removal` is what step 2 would take away now: the
 originals of every `verified` action and the bytes they free. `mode` is `apply`, `remove_sources`, `undo` or `purge`.
 `notices` (step 2 and undo) lists the move notices the run wrote (`written`), removed (`removed`) or left alone because
-a file that is not a notice carries the name (`skipped`), or could not write (`failed`); a folder whose notice needed
+a file that is not a notice carries the name (`skipped`), or could not write (`failed`); a dry run says what it would
+do (`would_write`, `would_remove`), counting the originals it would take away or put back. A folder whose notice needed
 no change is not listed. A folder that holds only its notice counts as left empty.
 
 Errors: `plan_run_incomplete` (1, with the result: an action failed or an undo or purge was partial), `plan_not_found`
