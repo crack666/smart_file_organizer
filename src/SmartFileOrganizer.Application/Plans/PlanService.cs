@@ -209,7 +209,7 @@ public sealed class PlanService
                 refused.Add(new RefusedChange(change.ActionId, [], $"Plan {planId} has no action {change.ActionId}."));
                 continue;
             }
-            if (current.State is PlanActionState.Executed or PlanActionState.Failed or PlanActionState.Undone)
+            if (current.State is PlanActionState.Verified or PlanActionState.Executed or PlanActionState.Failed or PlanActionState.Undone)
             {
                 refused.Add(new RefusedChange(change.ActionId, [], $"Action {change.ActionId} is {current.State.ToCode()}; it can no longer be changed."));
                 continue;
@@ -295,7 +295,7 @@ public sealed class PlanService
         var skipped = new List<SkippedAction>();
         foreach (var a in selected)
         {
-            if (a.State is PlanActionState.Executed or PlanActionState.Failed or PlanActionState.Undone)
+            if (a.State is PlanActionState.Verified or PlanActionState.Executed or PlanActionState.Failed or PlanActionState.Undone)
             {
                 skipped.Add(new SkippedAction(a.Id, [a.State.ToCode()]));
                 continue;
@@ -327,6 +327,10 @@ public sealed class PlanService
     }
 
     // ------------------------------------------------------------------ helpers
+
+    /// <summary>The plan, its job, libraries and actions, and the context of the checks as they stand now.</summary>
+    internal Task<(Plan Plan, ScanJob Job, IReadOnlyList<ScanJob> Libraries, IReadOnlyList<PlanAction> Actions, PlanCheckContext Ctx)> LoadForRunAsync(
+        long planId, CancellationToken ct) => LoadAsync(planId, ct);
 
     private async Task<(Plan Plan, ScanJob Job, IReadOnlyList<ScanJob> Libraries, IReadOnlyList<PlanAction> Actions, PlanCheckContext Ctx)> LoadAsync(
         long planId, CancellationToken ct)

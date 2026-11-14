@@ -248,6 +248,12 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<IConfiguration>().GetSection("Plan").Get<PlanOptions>() ?? new PlanOptions());
         services.AddSingleton<PlanService>();
 
+        // Executing and taking back a plan (https://github.com/crack666/smart_file_organizer/issues/12): copies checked
+        // by full checksum, originals into a hold folder, a journal per step. The hooks are empty; tests cut runs off there.
+        services.AddSingleton<IPlanJournal, PlanJournalRepository>();
+        services.TryAddSingleton<PlanExecutionHooks>();
+        services.AddSingleton<PlanExecutor>();
+
         return services;
     }
 

@@ -50,6 +50,12 @@ dotnet run --project src/SmartFileOrganizer.Cli -- decide <job> --targets <targe
 # a plan from the accepted findings, to change and confirm; it executes nothing (docs/cli.md, Planning):
 dotnet run --project src/SmartFileOrganizer.Cli -- plan create <job> --json
 dotnet run --project src/SmartFileOrganizer.Cli -- plan approve <plan> --all
+# carry it out: always a dry run first; copies are checked by full checksum, originals go to a hold folder
+# in a second, separate step, undo takes it back (docs/cli.md, Executing a plan):
+dotnet run --project src/SmartFileOrganizer.Cli -- plan apply <plan>
+dotnet run --project src/SmartFileOrganizer.Cli -- plan apply <plan> --execute
+dotnet run --project src/SmartFileOrganizer.Cli -- plan apply <plan> --remove-sources --execute
+dotnet run --project src/SmartFileOrganizer.Cli -- plan undo <plan> --execute
 ```
 
 To judge how an existing library is filed, without opening a file and

@@ -784,7 +784,9 @@ say nothing; `certainty` is a certainty code.
 ## Plans
 
 https://github.com/crack666/smart_file_organizer/issues/11, written by `sfo plan` ([cli.md](cli.md#planning)) and
-stored in `plans` and `plan_actions`. The kind of an action is a `PlanActionKind` code. A plan executes nothing.
+stored in `plans` and `plan_actions`. The kind of an action is a `PlanActionKind` code. A plan executes nothing; the
+execution (https://github.com/crack666/smart_file_organizer/issues/12, `sfo plan apply|undo|purge`) writes the journal
+`plan_steps` and sets the states `verified`, `executed`, `failed` and `undone`.
 
 ### State of a plan action (`PlanActionState`)
 
@@ -793,9 +795,10 @@ stored in `plans` and `plan_actions`. The kind of an action is a `PlanActionKind
 | `proposed` | Proposed, not confirmed; also after every change of kind, target or reason. |
 | `approved` | Confirmed by a person or a steering agent; only an action without problems is confirmed. |
 | `rejected` | Not wanted; it is not executed. |
-| `executed` | Carried out by the execution step (Issue 12); never set by the plan. |
-| `failed` | The execution step tried and stopped; the original stays. Never set by the plan. |
-| `undone` | Carried out and taken back. Never set by the plan. |
+| `verified` | Step 1 of the execution is done: the copy at the target is written and checked by its full checksum (for `delete_source` the library file is checked); the original is still in its place and waits for `sfo plan apply --remove-sources`. |
+| `executed` | Carried out: a `copy` (or any action of a job with `keep_source`) after step 1, the others after their originals went into the hold folder. |
+| `failed` | The execution tried and stopped; the original stays, the note says why. |
+| `undone` | Carried out and taken back completely by `sfo plan undo`. |
 
 ### Who set an action (`PlanActionOrigin`)
 
@@ -831,6 +834,57 @@ and skip an action in `sfo plan approve`. `leave` has none.
 | `already_in_library` | A move or copy of content some library holds already. |
 | `sensitive_kind` | A sensitive file to quarantine, or removed (`delete_source`) without a person deciding it. |
 | `name_collision` | Another action writes to the same target, or something exists there already. |
+
+### Journal step of the execution (`PlanStepKind`)
+
+`kind` of a row of `plan_steps`. Every step is written as `started` before the file system is touched and finished
+afterwards; `hash` is the full checksum it was checked with.
+
+| Code | Meaning |
+|---|---|
+| `make_folder` | A folder at the target that did not exist was created; the undo removes it when it is empty again. |
+| `copy` | A file was copied under a temporary name, read back, compared by its full checksum and then named at the target. |
+| `present` | A file with the same full checksum lay at the target already; nothing was written and the undo leaves it. |
+| `verify` | For `delete_source`: the library file and the original were read whole and have the same checksum. |
+| `hold` | The original was renamed into the hold folder on its own drive (`<job root>/.sfo-hold/...`); it can be put back. |
+| `purge` | A held original was removed for good (`sfo plan purge`). |
+| `restore` | An original was put back: from the hold folder, or copied back from the checked file at the target. |
+| `uncopy` | A copy this tool wrote was removed again, after its original was back with its checksum. |
+| `remove_folder` | A folder this tool created was removed again because it was empty. |
+
+### State of a journal step (`PlanStepState`)
+
+| Code | Meaning |
+|---|---|
+| `started` | Written before the file system was touched; a step still `started` belongs to a run that was cut off and is settled by the next run. |
+| `done` | Finished as intended. |
+| `failed` | Not finished; `detail` says why, and what it had begun was taken back. |
+
+### Why the execution passed over or stopped an action (`PlanRunReason`)
+
+`reasons` of an item in the result of `sfo plan apply`, `undo` and `purge`, beside `PlanProblem` codes (the checks of
+the plan run again before every action) and state codes (an action named by `--action` that is in no state to run).
+
+| Code | Meaning |
+|---|---|
+| `not_approved` | Not confirmed; only confirmed actions are executed. |
+| `single_decision` | A sensitive action: it runs only when named by `--action`, never in a run over the whole plan. |
+| `keep_source` | The job is set to leave its sources untouched: nothing is removed, a move only copies. |
+| `source_missing` | The source is gone. |
+| `source_changed` | The source differs from the scan in size, modification time or set of files, or from step 1 in its checksum. |
+| `source_has_link` | The source is or holds a link or junction, or lies behind one; links are never followed. |
+| `target_collision` | Something with other content lies at the target; nothing is ever overwritten. |
+| `already_present` | A file with the same content lay at the target already; nothing was written there. |
+| `hash_mismatch` | The copy read back, or the library file, does not have the full checksum of the original; a copy is removed, the original stays. |
+| `target_missing` | The file at the target is gone. |
+| `target_changed` | The file at the target no longer has the checksum it was checked with; the original stays. |
+| `same_file` | Source and target are one file (a link, a hard link, a volume reached twice). |
+| `identity_unknown` | The file system cannot tell whether source and target are one file; treated like `same_file`. |
+| `other_volume` | The hold folder would lie on another drive than the original; an original is only ever renamed. |
+| `original_occupied` | Undo: something lies at the place of the original; it is not overwritten. |
+| `held_changed` | Undo: the held original no longer has its checksum. |
+| `not_undoable` | Undo: the original was removed for good and no checked copy is left to copy back, or it is not back, so its copy stays. |
+| `io_error` | The file system refused (access, full disk, a path too long); `detail` has the message. |
 
 ## Model server
 

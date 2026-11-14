@@ -18,6 +18,13 @@ public enum PlanActionState
     /// <summary>Not wanted; it is not executed.</summary>
     [JsonStringEnumMemberName("rejected")] Rejected,
 
+    /// <summary>
+    /// The first step of the execution is done: the copy at the target is written and checked by its full checksum
+    /// (for <c>delete_source</c>: the copy in the library is checked), and the original waits for the second,
+    /// separately confirmed step that removes it.
+    /// </summary>
+    [JsonStringEnumMemberName("verified")] Verified,
+
     /// <summary>Carried out by the execution step.</summary>
     [JsonStringEnumMemberName("executed")] Executed,
 
@@ -86,4 +93,114 @@ public enum PlanProblem
 
     /// <summary>Another action has the same target, or something already exists there.</summary>
     [JsonStringEnumMemberName("name_collision")] NameCollision
+}
+
+/// <summary>
+/// What one journal step of the execution did (https://github.com/crack666/smart_file_organizer/issues/12), stored in
+/// <c>plan_steps</c>. Every step is written as <c>started</c> before the file system is touched and finished afterwards,
+/// so a run cut off in the middle is recognised and finished or taken back by the next one.
+/// </summary>
+public enum PlanStepKind
+{
+    /// <summary>A folder at the target that did not exist and was created; taken back when it is empty again.</summary>
+    [JsonStringEnumMemberName("make_folder")] MakeFolder,
+
+    /// <summary>A file copied to the target under a temporary name, checked by its full checksum and then named.</summary>
+    [JsonStringEnumMemberName("copy")] Copy,
+
+    /// <summary>The target held a file with the same full checksum already; nothing was written, nothing is taken back.</summary>
+    [JsonStringEnumMemberName("present")] Present,
+
+    /// <summary>For <c>delete_source</c>: the copy in the library was read whole and has the checksum of the original.</summary>
+    [JsonStringEnumMemberName("verify")] Verify,
+
+    /// <summary>The original was moved into the hold folder on its own drive; it can be put back.</summary>
+    [JsonStringEnumMemberName("hold")] Hold,
+
+    /// <summary>A held original was removed for good (<c>sfo plan purge</c>).</summary>
+    [JsonStringEnumMemberName("purge")] Purge,
+
+    /// <summary>An original was put back to its place: from the hold folder, or copied back from the target.</summary>
+    [JsonStringEnumMemberName("restore")] Restore,
+
+    /// <summary>A copy this tool wrote was removed again, after the original was back and checked.</summary>
+    [JsonStringEnumMemberName("uncopy")] Uncopy,
+
+    /// <summary>A folder this tool created was removed again because it was empty.</summary>
+    [JsonStringEnumMemberName("remove_folder")] RemoveFolder
+}
+
+/// <summary>Where a journal step stands.</summary>
+public enum PlanStepState
+{
+    /// <summary>Written before the file system was touched; still so after a run was cut off in this step.</summary>
+    [JsonStringEnumMemberName("started")] Started,
+
+    /// <summary>Finished as intended.</summary>
+    [JsonStringEnumMemberName("done")] Done,
+
+    /// <summary>Not finished; <c>detail</c> says why. What it had begun was taken back.</summary>
+    [JsonStringEnumMemberName("failed")] Failed
+}
+
+/// <summary>
+/// Why the execution passed over an action or a file, or why it failed (<c>reasons</c> in the result of
+/// <c>sfo plan apply</c>, <c>undo</c> and <c>purge</c>). A <see cref="PlanProblem"/> code can stand beside them: the
+/// checks of the plan run again before every action.
+/// </summary>
+public enum PlanRunReason
+{
+    /// <summary>Not confirmed; only confirmed actions are executed.</summary>
+    [JsonStringEnumMemberName("not_approved")] NotApproved,
+
+    /// <summary>A sensitive action, executed only when named by <c>--action</c>, never in a run over the whole plan.</summary>
+    [JsonStringEnumMemberName("single_decision")] SingleDecision,
+
+    /// <summary>The job is set to leave its sources alone (<c>sfo plan keep-source</c>): nothing is removed, a move only copies.</summary>
+    [JsonStringEnumMemberName("keep_source")] KeepSource,
+
+    /// <summary>The source is gone.</summary>
+    [JsonStringEnumMemberName("source_missing")] SourceMissing,
+
+    /// <summary>The source differs from the scan in size, modification time, set of files or checksum.</summary>
+    [JsonStringEnumMemberName("source_changed")] SourceChanged,
+
+    /// <summary>The source is, or holds, a link or junction; links are never followed.</summary>
+    [JsonStringEnumMemberName("source_has_link")] SourceHasLink,
+
+    /// <summary>Something with other content lies at the target; nothing is ever overwritten.</summary>
+    [JsonStringEnumMemberName("target_collision")] TargetCollision,
+
+    /// <summary>A file with the same content lies at the target already; nothing was written.</summary>
+    [JsonStringEnumMemberName("already_present")] AlreadyPresent,
+
+    /// <summary>The copy read back does not have the full checksum of the original; the copy was removed, the original stays.</summary>
+    [JsonStringEnumMemberName("hash_mismatch")] HashMismatch,
+
+    /// <summary>The file at the target is gone.</summary>
+    [JsonStringEnumMemberName("target_missing")] TargetMissing,
+
+    /// <summary>The file at the target no longer has the checksum it was checked with.</summary>
+    [JsonStringEnumMemberName("target_changed")] TargetChanged,
+
+    /// <summary>Source and target are one file (a link, a hard link, a volume reached twice).</summary>
+    [JsonStringEnumMemberName("same_file")] SameFile,
+
+    /// <summary>The file system cannot tell whether source and target are one file; treated like <c>same_file</c>.</summary>
+    [JsonStringEnumMemberName("identity_unknown")] IdentityUnknown,
+
+    /// <summary>The hold folder would lie on another drive than the original; an original is only ever renamed there.</summary>
+    [JsonStringEnumMemberName("other_volume")] OtherVolume,
+
+    /// <summary>Taking back: something lies at the place of the original; it is not overwritten.</summary>
+    [JsonStringEnumMemberName("original_occupied")] OriginalOccupied,
+
+    /// <summary>Taking back: the held original no longer has its checksum.</summary>
+    [JsonStringEnumMemberName("held_changed")] HeldChanged,
+
+    /// <summary>Taking back: the original was removed for good and no checked copy is left to copy it back from.</summary>
+    [JsonStringEnumMemberName("not_undoable")] NotUndoable,
+
+    /// <summary>The file system refused (access, full disk, a path too long); the message is in <c>detail</c>.</summary>
+    [JsonStringEnumMemberName("io_error")] IoError
 }

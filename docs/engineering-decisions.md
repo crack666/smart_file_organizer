@@ -393,6 +393,34 @@ Trade-off: every file the model would judge is read once more for its checksum (
 file). The evidence preparation is not part of the prompt version: a change there (more PDF text, more frames) needs
 `sfo cache clear` to take effect on content judged before.
 
+## 13. Executing a plan: copy, check, hold, then purge on its own
+
+Decided 14.11.2026 in https://github.com/crack666/smart_file_organizer/issues/12 and its addendum of 12.11.2026, which
+replaced "no deletion" by "less lies twice at the end". The tool may now take an original away, so how it does that
+was decided for safety first, speed second.
+
+- Always copy, never rename into the library, even on one drive. A rename would be quicker, but then the original is
+  gone in the same instant as it arrives, and the person could not confirm the removal on its own after seeing every
+  copy checked. Two steps, each its own command, is the rule of the addendum.
+- A checksum counts only when read just now. Before an original goes, both files are read whole; a stored checksum
+  (fingerprint cache, `match_hash`) only has to agree as well. A file overwritten with the same size and time keeps its
+  old value in the cache, and the cache would then approve a removal it should refuse.
+- A hold folder on the drive of the original instead of the system recycle bin. It works the same on every system and
+  medium (a USB stick has no recycle bin), `undo` can use it, and only renaming happens there, which loses nothing if a
+  run is cut off. Purging is a separate command that refuses while the copy at the target is not the original's
+  content; the recycle bin is not used at all.
+- "Cannot tell whether these are one file" refuses like "one file". The comparison does not detect hard links or a
+  volume mounted twice; the file identity of the system does, and where it gives none the original stays.
+- Nothing is ever overwritten. A file at the target with the same content counts as present (and is never removed by
+  `undo`); with other content the action fails. The issue text first proposed a suffix to the name; failing was chosen
+  instead, because a second copy under another name is exactly the redundancy the package is meant to remove.
+- A journal row before every touch of the file system, finished after. With copies only named after their check and
+  originals only renamed, every state between two rows can be settled from what lies on disk.
+
+Trade-off: step 1 needs room for a full copy before anything is freed, and every original is read three times (copy,
+check before removal, the copy once more). The cache of the system is not bypassed when a copy on a network drive is
+read back.
+
 ## Design stance going forward
 
 Prefer:

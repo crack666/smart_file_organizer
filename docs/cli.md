@@ -1375,9 +1375,9 @@ Checksums are not removed. The next analysis asks the model again for every file
 
 https://github.com/crack666/smart_file_organizer/issues/11: the accepted findings of a source become a plan, one
 action per whole folder or per worth-keeping file, which a person or a steering model reads, changes and confirms.
-**A plan executes nothing**: no command here moves, copies or removes a file; that is the execution step (Issue 12),
-which runs the same checks again. Rules: [architecture.md, Plan flow](architecture.md#plan-flow); codes:
-[glossary.md, Plans](glossary.md#plans).
+**A plan executes nothing**: the commands below up to `approve|reject` move, copy or remove no file; only
+[Executing a plan](#executing-a-plan) does, with `--execute`, and it runs the same checks again. Rules:
+[architecture.md, Plan flow](architecture.md#plan-flow); codes: [glossary.md, Plans](glossary.md#plans).
 
 Order of work: overview (`sfo findings --summary`), recommendation (`sfo findings`, `sfo plan create`), decision
 (`sfo findings accept`, `sfo plan approve`).
@@ -1466,7 +1466,7 @@ holds them, no library, no accepted finding). Errors: `plan_not_found` (1).
 
 The change is checked at once; a refused change changes nothing and ends with `plan_change_refused` (1) and
 `{ "plan_id", "refused": [ { "action_id", "problems", "message" } ] }` as result. A changed action is `proposed`
-again. Executed, failed and undone actions are not changed. Result: `{ "plan_id", "items": [ action ] }`.
+again. Verified, executed, failed and undone actions are not changed. Result: `{ "plan_id", "items": [ action ] }`.
 
 ### `sfo plan import <plan> <file>`
 
@@ -1486,10 +1486,105 @@ unknown kind), `plan_change_refused` (1, as in `set`), `plan_not_found` (1).
 
 `--action <id>` (repeatable), `--dir <folder>` (every action whose source lies at or below it) or `--all`; one of
 them is needed (else `usage`, 2). `--by human|agent`, default `human`. `approve` confirms only actions without
-problems, and a sensitive action only when named by `--action`; `reject` marks them not to be executed. Executed,
-failed and undone actions are skipped. Result: `{ "plan_id", "state", "changed": [ ids ], "skipped": [ { "action_id",
-"reasons" } ], "by_state" }`; a reason is a problem code, `single_decision` or the state of the action. Errors:
-`plan_not_found` (1), `action_not_found` (1).
+problems, and a sensitive action only when named by `--action`; `reject` marks them not to be executed. Verified,
+executed, failed and undone actions are skipped. Result: `{ "plan_id", "state", "changed": [ ids ], "skipped": [ {
+"action_id", "reasons" } ], "by_state" }`; a reason is a problem code, `single_decision` or the state of the action.
+Errors: `plan_not_found` (1), `action_not_found` (1).
+
+## Executing a plan
+
+https://github.com/crack666/smart_file_organizer/issues/12: confirmed actions are carried out and can be taken back.
+How it works inside: [architecture.md, Plan execution](architecture.md#plan-execution); codes:
+[glossary.md, Plans](glossary.md#plans).
+
+**Always look first.** Every command here is a dry run unless `--execute` is given: it reads and checks and reports
+what would happen, and changes nothing. Run it without `--execute`, read the result, then run the same line with
+`--execute`.
+
+```bash
+sfo plan apply 1                              # step 1, dry run: what would be copied and checked
+sfo plan apply 1 --execute                    # step 1: copy and check; no original is touched
+sfo plan apply 1 --remove-sources             # step 2, dry run: which originals would go, how much room it frees
+sfo plan apply 1 --remove-sources --execute   # step 2: originals into the hold folder
+sfo plan undo 1                               # dry run of taking it all back
+sfo plan purge 1                              # dry run of removing the held originals for good
+```
+
+**What this can remove, and what guards it.**
+
+- Only confirmed actions run (`sfo plan approve`); before each one the checks of the plan run again. A sensitive
+  action runs only when named by `--action`, never in a run over the whole plan.
+- An original is never removed in the same step as its copy is written. Step 1 copies under a temporary name, reads
+  the copy back whole and compares its full checksum with the original's, then names it; nothing is ever overwritten.
+  Step 2 is its own command.
+- Immediately before an original goes, both files are read again whole; the original must also be as the scan saw it
+  (size, modification time) and source and target must be shown to be two files (not a link, a hard link or one
+  volume reached twice; "cannot tell" refuses too). Otherwise the original stays and the action is `failed` with the
+  reason.
+- An original is only renamed into the hold folder `<job root>/.sfo-hold/plan-<id>/action-<id>/` on its own drive, from
+  where `undo` puts it back. Only `purge` removes it for good, and only while the copy at the target still has its
+  checksum: the last copy of anything is never removed. The hold folder lies in the job root, so a new scan of the
+  source sees it; `purge` or `undo` before scanning again. Deleting the job drops the journal but not the
+  hold folder.
+- Links and junctions are never followed; a source that is or holds one is skipped. Empty source folders stay and are
+  reported (`empty_folders`).
+- `sfo plan keep-source <job>` leaves every source of the job untouched: a move only copies, nothing is removed.
+
+Every step is journalled before it touches a file (`plan_steps`); a run cut off by a crash or Ctrl+C is finished by
+running the same command again, which first settles the step it finds open.
+
+### `sfo plan apply <plan>`
+
+| Option | Meaning |
+|---|---|
+| `--execute` | Really change files. Without it: dry run. |
+| `--remove-sources` | Step 2 instead of step 1: the originals of `verified` actions go into the hold folder. |
+| `--action <id>` | Only this action; repeatable. Needed for a sensitive action. Default: every action of the plan. |
+
+Step 1 runs `approved` actions: `move`, `quarantine` and `copy` copy and check; `delete_source` reads the library file
+and the original whole and compares them. The action becomes `verified` (its original waits for step 2), or
+`executed` for a `copy` and for every action of a job with `keep_source`. A file already at the target with the same
+content counts as `already_present`; with other content the action fails (`target_collision`). A source changed since
+the scan is skipped (`source_changed`). Step 2 runs `verified` actions and makes them `executed`.
+
+```json
+{ "plan_id": 1, "mode": "apply", "executed": true, "keep_source": false,
+  "items": [ { "action_id": 3, "kind": "move", "outcome": "done", "state": "verified", "reasons": [],
+               "files": 1, "bytes": 18234, "detail": null } ],
+  "removal": { "actions": 4, "files": 6, "bytes": 81234 },
+  "empty_folders": [] }
+```
+
+`outcome` is `done`, `would_run` or `would_fail` (dry run), `skipped` (left as it was), `failed` (state `failed`, the
+original stays) or `partial` (undo and purge: not all of it). `reasons` are `PlanRunReason` codes, `PlanProblem` codes
+or the state of an action named by `--action` that cannot run. `removal` is what step 2 would take away now: the
+originals of every `verified` action and the bytes they free. `mode` is `apply`, `remove_sources`, `undo` or `purge`.
+
+Errors: `plan_run_incomplete` (1, with the result: an action failed or an undo or purge was partial), `plan_not_found`
+(1), `action_not_found` (1).
+
+### `sfo plan undo <plan>`
+
+`--execute`, `--action <id>` as in `apply`. Takes back, newest action first: originals come back from the hold folder
+(after a `purge`, they are copied back from the checked file at the target, for `delete_source` from the library);
+then the copies this tool wrote are removed, but only once their original is back with its checksum and the copy is
+unchanged; then the target folders it created, when empty. A file it did not write is never removed. A fully taken
+back action is `undone`; otherwise it keeps its state and the reasons (`target_changed`: the copy was edited and
+stays; `original_occupied`: something lies at the place of the original; `not_undoable`). Result and errors as
+`apply`.
+
+### `sfo plan purge <plan>`
+
+`--execute`, `--action <id>` as in `apply`. Removes the held originals of the plan for good, each only while the file at
+its target still has its checksum and is another file; the rest stay held (`target_changed`, `target_missing`,
+`same_file`). This cannot be undone from the hold folder, but `undo` can still copy an original back from its target.
+Result and errors as `apply`.
+
+### `sfo plan keep-source <job>`
+
+The person's switch "leave the source untouched" for a whole job: a move then only copies and becomes `executed`,
+`delete_source` and `quarantine` are skipped (`keep_source`), step 2 removes nothing. `--off` lifts it. Result:
+`{ "job_id", "keep_source" }`. Errors: `job_not_found` (1).
 
 ## Machine contract
 
@@ -1532,7 +1627,7 @@ lines when it starts or stops waiting for the model server (see `sfo analyze`); 
 | Code | Meaning | `error.code` |
 |---|---|---|
 | 0 | Done | |
-| 1 | The command ran but could not do its job | `job_not_found`, `path_not_found`, `scan_failed`, `scan_not_completed`, `wrong_role`, `compare_incomplete`, `comparison_not_found`, `database_error`, `model_missing`, `rules_invalid`, `words_invalid`, `output_inside_job`, `export_failed`, `truth_invalid`, `run_not_found`, `output_not_empty`, `bundle_not_found`, `patterns_invalid`, `library_patterns_invalid`, `settings_invalid`, `finding_not_found`, `targets_invalid`, `plan_not_found`, `action_not_found`, `plan_change_refused`, `library_invalid`, `import_invalid`, `internal_error` |
+| 1 | The command ran but could not do its job | `job_not_found`, `path_not_found`, `scan_failed`, `scan_not_completed`, `wrong_role`, `compare_incomplete`, `comparison_not_found`, `database_error`, `model_missing`, `rules_invalid`, `words_invalid`, `output_inside_job`, `export_failed`, `truth_invalid`, `run_not_found`, `output_not_empty`, `bundle_not_found`, `patterns_invalid`, `library_patterns_invalid`, `settings_invalid`, `finding_not_found`, `targets_invalid`, `plan_not_found`, `action_not_found`, `plan_change_refused`, `library_invalid`, `import_invalid`, `plan_run_incomplete`, `internal_error` |
 | 2 | Wrong invocation: unknown command or option, missing or invalid value | `usage` |
 | 3 | Ollama not reachable | `ollama_unavailable` |
 | 4 | The model server went away during `sfo analyze` and did not come back within `ModelServer.MaxWaitMinutes`; open items stay open, run the command again | `model_server_lost` |

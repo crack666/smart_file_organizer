@@ -21,6 +21,30 @@ public interface IPlanRepository
 }
 
 /// <summary>
+/// The journal of the execution (<c>plan_steps</c>), what the scan saw of a source, and the per-job switch that keeps
+/// the sources untouched (https://github.com/crack666/smart_file_organizer/issues/12).
+/// </summary>
+public interface IPlanJournal
+{
+    /// <summary>Writes a step as started and sets its id; to be called before the file system is touched.</summary>
+    Task<PlanStep> StartAsync(PlanStep step, CancellationToken ct = default);
+
+    /// <summary>Finishes a step: state, checksum, detail and the time.</summary>
+    Task FinishAsync(PlanStep step, CancellationToken ct = default);
+
+    /// <summary>Every step of a plan, oldest first.</summary>
+    Task<IReadOnlyList<PlanStep>> GetStepsAsync(long planId, CancellationToken ct = default);
+
+    /// <summary>The scanned files of a job at <paramref name="path"/> (a file) or below it (a folder).</summary>
+    Task<IReadOnlyList<ScannedFile>> GetScannedFilesAsync(long jobId, string path, CancellationToken ct = default);
+
+    /// <summary>Whether the sources of the job are to be left untouched: then nothing is removed and a move only copies.</summary>
+    Task<bool> GetKeepSourceAsync(long jobId, CancellationToken ct = default);
+
+    Task SetKeepSourceAsync(long jobId, bool keep, CancellationToken ct = default);
+}
+
+/// <summary>
 /// Places no target may ever lie in: the user profile and the system drive (on Windows), the home and system folders
 /// (elsewhere). Abstracted so tests that work in a temporary folder of the profile can name their own.
 /// </summary>
