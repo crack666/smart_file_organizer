@@ -416,6 +416,105 @@ job is deleted or a directory of it is rescanned. Not decided here: a file the l
 under the same content but whose scan was skipped by the scan rules counts as `new`; files that
 changed in the library after its scan are judged by the library scan's sizes.
 
+### `sfo duplicates <job> [<job> ...]`
+
+Files and folders with the same content over one or more completed scans of any role: within a source, within a
+library (also over several library roots, each its own job), and across sources and libraries. Issue:
+https://github.com/crack666/smart_file_organizer/issues/87. It only reports: it changes no file, stores nothing but
+checksums, and never proposes to remove a copy inside a library.
+
+| Option | Meaning |
+|---|---|
+| `--verify` | Stage 3: read the whole of every file of a group that agrees after the sample. A group is then `certain` or falls apart. Without it a group is `likely`, unless every file of it has a full checksum already (files up to 128 KiB, or from an earlier `sfo compare`, `--verify` or content key). |
+| `--summary` | Counts only; `groups` and `errors` stay empty, `groups_total` and `errors_total` count all. |
+| `--limit <n>` | Maximum groups and errors listed, largest redundancy first; default 20, `0` lists everything. |
+| `--min-size <size>` | Leave out smaller files: bytes or a number with K, M, G, T (`1M`). Empty files are always left out. |
+
+How it reads, so a large holding on a network drive is read as little as possible:
+
+1. **Size**, from the scan rows: only files whose size occurs more than once among the jobs go on. Nothing is opened.
+2. **Sample checksum**: SHA-256 over the size, the first and last 64 KiB and six places of 4 KiB in between, at
+   offsets that follow from the size, so two files of one size are read at the same places. Files up to 128 KiB are
+   read whole; their sample is their full checksum. Files that still agree form a group.
+3. **Full SHA-256**, only with `--verify` and only for those groups.
+
+Every checksum is stored per path with size and modification time (`content_fingerprints`, shared with
+`sfo compare`) and reused while both are unchanged: a second run without changes reads no file, and a run that was
+cut off (`cancelled`, 130) goes on where it stopped. `read` tells how much was read in this run against the size of
+all files of the jobs; `stages` how many files each stage looked at. A path that two jobs share (a library root inside
+another) is one file, not two copies. Folders a scan skipped by rule are left out.
+
+**Folders.** When folders are wholly or mostly the same, the folders are one group (`scope: folders`) instead of
+their files: at least two files in each folder (counted with everything below it), and at least half of them have a
+copy in another folder of the group, the rule of the `duplicate` finding for wholes. The topmost such folders are
+reported (`Projekt` and `Sicherung/Projekt Kopie`, not their subfolders). A file group whose copies all lie in those
+folders is counted there; a copy elsewhere keeps its own group.
+
+Per group: `scope`, `certainty` (`likely`, `certain`), `advice`, `size` (one copy; for folders the identical files of
+one folder), `copies`, `wasted_bytes` (what keeping one copy would free), `hash` (the full SHA-256 of a `certain` file
+group; `null` when a file of the group is marked, see [Sensitive files](#sensitive-files)), `jobs`, `across_jobs`,
+`in_library`, `files_total`, `files` (path, job, role, `managed`, `sensitive`, `sensitive_rule`; empty for folder
+groups) and `folders` (path, job, role, `managed`, `files`, `matched_files`). `managed` marks a path in a managed area
+(`Plan:ManagedAreas`). Codes: [glossary.md, Duplicates](glossary.md#duplicates). Sorted by `wasted_bytes`, largest
+first.
+
+`advice` never proposes to remove a copy in a library. For sources the rule of the findings holds: a copy may go only
+after the full checksum and only when a library holds the content (`source_copies_held`); the removal itself goes the
+usual way (`sfo compare`, `sfo findings`, `sfo plan`), which reads both files again first.
+
+```bash
+sfo duplicates 7 9 8 --verify --json
+```
+
+```json
+{
+  "schema_version": 1,
+  "command": "duplicates",
+  "ok": true,
+  "exit_code": 0,
+  "result": {
+    "jobs": [ { "id": 7, "root_path": "/media/usb-stick", "role": "source", "...": "same fields as scan" } ],
+    "verified": true,
+    "min_size": 1,
+    "complete": true,
+    "files": 48210,
+    "bytes": 912000000000,
+    "read": { "files": 412, "bytes": 3100000000, "share": 0.003399 },
+    "stages": { "size_candidates": 5120, "size_candidate_bytes": 20400000000, "sample_groups": 431,
+                "sample_computed": 5120, "full_computed": 412, "reused": 0 },
+    "summary": { "groups": 180, "file_groups": 172, "folder_groups": 8, "copies": 431, "wasted_bytes": 2900000000,
+                 "certain": 180, "likely": 0, "across_jobs": 61, "in_library": 40 },
+    "groups_total": 180,
+    "groups": [
+      { "group": 1, "scope": "folders", "certainty": "certain", "advice": "source_copies_held", "size": 1200000000,
+        "copies": 2, "wasted_bytes": 1200000000, "hash": null, "jobs": [ 7, 8 ], "across_jobs": true, "in_library": true,
+        "files_total": 160, "files": [],
+        "folders": [
+          { "path": "/media/usb-stick/Urlaub 2019", "job_id": 7, "role": "source", "managed": false, "files": 80, "matched_files": 80 },
+          { "path": "/mnt/nas/fotos/2019/Urlaub", "job_id": 8, "role": "library", "managed": false, "files": 82, "matched_files": 80 }
+        ] },
+      { "group": 2, "scope": "files", "certainty": "certain", "advice": "library_only", "size": 700000000, "copies": 2,
+        "wasted_bytes": 700000000, "hash": "9f2c...", "jobs": [ 8, 9 ], "across_jobs": true, "in_library": true,
+        "files_total": 2,
+        "files": [
+          { "path": "/mnt/nas/fotos/film.mp4", "job_id": 8, "role": "library", "managed": false, "sensitive": [], "sensitive_rule": null },
+          { "path": "/mnt/nas/videos/film.mp4", "job_id": 9, "role": "library", "managed": true, "sensitive": [], "sensitive_rule": null }
+        ],
+        "folders": [] }
+    ],
+    "errors_total": 0,
+    "errors": []
+  },
+  "error": null
+}
+```
+
+A file that cannot be read now, or changed since its scan, is in no group and listed in `errors` (`job_id`, `path`,
+`message`); then `complete` is `false`, the command still exits 0. Failures: `job_not_found` (1),
+`scan_not_completed` (1), `path_not_found` (1, a root is not reachable), `cancelled` (130; checksums computed so far
+are kept). Not part of this command: similar instead of equal files (another format, resolution or version) and
+hashing on the storage device itself.
+
 ### `sfo doctor`
 
 Checks the database (creates and migrates it if missing), whether Ollama answers within

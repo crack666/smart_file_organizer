@@ -121,6 +121,45 @@ A scan job has a role (`ScanJob.Role`, column `scan_jobs.role`): `source`, a med
 
 **Several libraries** (https://github.com/crack666/smart_file_organizer/issues/74). `CompareWithLibrariesAsync(sourceJobId, againstJobIds, ...)` checks every job first, then runs the steps above once per library; each pair is stored as before, and the comparisons of one run share `comparisons.run_id` (migration 21; a comparison stored before is its own run). `LibraryComparisonSet` reads a set back, either the libraries named or, without ids, the newest run (`IContentComparisonRepository.GetLatestLibraryRunAsync`), and joins the rows per file: `backed_up` in any library, else `error`, else `differs`, else `new`; `FileComparison.MatchJobId` names the library of the match. `BackedUpSkipService` (`sfo analyze --against`), `FindingService` and `LibraryTargetService.MatchAsync` read the comparison only through this set.
 
+## Duplicate flow (whole holding)
+
+Issue: https://github.com/crack666/smart_file_organizer/issues/87. Command: [cli.md, `sfo duplicates`](cli.md#sfo-duplicates-job-job-);
+codes: [glossary.md, Duplicates](glossary.md#duplicates).
+
+The comparison above finds a source's files in a library and duplicates within the source; it hashes library files
+only where their size matches a source file. `DuplicateService.ReportAsync(jobIds, options, progress, ct)`
+(Application/Duplicates) reports redundancy over any set of jobs of any role: within a library, over several library
+roots, the same file on several sources, and whether a library holds it too. It reads only, stores only checksums
+and changes no file.
+
+1. Checks every job (exists, `completed`, root reachable; `ComparisonException`, as the comparison) before any file is
+   read.
+2. Stage 1, size: `IDuplicateRepository.GetSizeCandidatesAsync` (`Infrastructure/Persistence/DuplicateRepository`)
+   returns the files of at least `--min-size` bytes whose size occurs more than once among the jobs (index
+   `file_nodes(job_id, size)`). Files below folders a scan skipped by rule are left out; a path two jobs share is one
+   file (the first job named keeps it), so a library root scanned inside another is no copy of itself.
+3. Stage 2, sample checksum per size group (`IContentHasher.ComputeSampleAsync`, the stage 2 of the comparison too).
+   A file gone or changed since its scan is an error and in no group.
+4. Stage 3: with `Verify`, the full SHA-256 of every file of a group that still agrees; groups split by it and are
+   `certain`. Without it a group whose files all have a full checksum already (small files, an earlier comparison)
+   is split the same way without reading; any other group is `likely`.
+5. Checksums go through `FingerprintResolver` (shared with `ContentComparisonService`) to `content_fingerprints`,
+   flushed every 256 entries and on cancel, so a run cut off continues and a second run without changes reads
+   nothing. The resolver counts files and bytes read.
+6. Folders: per folder the files at or below it (`GetFolderFileCountsAsync`, rolled up to the job root) and the groups
+   with a file there. The parents of each group's copies are a candidate set; a folder stays in it while it has at
+   least `FolderMinFiles` (2) files and at least `FolderCopyMinShare` (0.5) of them have a copy in another folder of
+   the set (the rule of the `duplicate` finding for wholes); the set is lifted to the parents while they qualify too,
+   so the topmost copies are reported. A set inside a larger one is dropped. File groups whose copies all lie in one
+   set, in at least two of its folders, become part of that folder group.
+7. Advice (`DuplicateService.AdviceFor`): `likely` is `verify_first`; all copies in libraries `library_only` (nothing is
+   proposed inside a library); a library and sources `source_copies_held`; sources only `no_library_copy`. Paths in
+   `Plan:ManagedAreas` are marked `managed`.
+
+`DuplicatesCommand` adds the markers of marked files (`JobReadService.GetMarkedFilesAsync`); a group with a marked file
+shows no checksum. The comparison's results do not change through this: its stage 2 reads the same sample, and only
+equal full checksums make `backed_up`.
+
 ## Content store
 
 Issue: https://github.com/crack666/smart_file_organizer/issues/38. Commands: [cli.md, Content store](cli.md#content-store);
