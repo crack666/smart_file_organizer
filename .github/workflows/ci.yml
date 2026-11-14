@@ -1,16 +1,22 @@
 name: CI
 
+# Runs for master and for pull requests only. A push to a feature branch without a pull request
+# starts nothing: until 14.11.2026 every push ran, each new push cancelled the run before it, and
+# every cancelled run sent a failure notice.
 on:
   push:
+    branches: [master]
   pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
 
+# Runs of one pull request queue up instead of cancelling each other: a cancelled run counts as
+# failed in the notifications.
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
 
 jobs:
   build-and-test:

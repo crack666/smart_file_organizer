@@ -34,14 +34,36 @@ public class DatabaseContext
         {
             DataSource = dbPath,
             Pooling = false,
-            ForeignKeys = true
+            ForeignKeys = true,
+            // Microsoft.Data.Sqlite retries a locked database until the command timeout. The default
+            // of 30 s was too short for parallel writers on a slow disk: on 14.11.2026 three CI runs
+            // on Windows ended with "database is locked".
+            DefaultTimeout = LockWaitSeconds
         }.ToString();
         _logger = logger;
     }
 
+    /// <summary>How long a command waits for a locked database before it fails.</summary>
+    public const int LockWaitSeconds = 180;
+
     public string DatabasePath { get; }
 
-    public SqliteConnection CreateConnection() => new(_connectionString);
+    public SqliteConnection CreateConnection()
+    {
+        var connection = new SqliteConnection(_connectionString);
+        // synchronous is a setting of the connection, not of the file. NORMAL is safe with WAL (the
+        // file stays consistent; only the last commits before a power cut can be lost) and saves a
+        // disk flush per commit, which is what made each writer hold the lock so long.
+        connection.StateChange += (sender, change) =>
+        {
+            if (change.CurrentState != System.Data.ConnectionState.Open || sender is not SqliteConnection opened)
+                return;
+            using var command = opened.CreateCommand();
+            command.CommandText = "PRAGMA synchronous=NORMAL;";
+            command.ExecuteNonQuery();
+        };
+        return connection;
+    }
 
     /// <summary>
     /// Opens the database (creating the file if needed) and applies all pending schema steps.

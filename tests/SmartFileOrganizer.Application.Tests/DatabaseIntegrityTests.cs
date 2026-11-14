@@ -75,6 +75,21 @@ public class DatabaseIntegrityTests : IDisposable
     }
 
     [Fact]
+    public async Task EveryConnection_WaitsLongForALock_AndSyncsNormal()
+    {
+        var db = await CreateDatabaseAsync();
+
+        await using var conn = db.CreateConnection();
+        await conn.OpenAsync();
+
+        // 1 = NORMAL. The setting belongs to the connection, so each new one has to get it.
+        Assert.Equal(1, await conn.ExecuteScalarAsync<long>("PRAGMA synchronous"));
+        Assert.Equal("wal", await conn.ExecuteScalarAsync<string>("PRAGMA journal_mode"));
+        Assert.Equal(DatabaseContext.LockWaitSeconds, conn.DefaultTimeout);
+        Assert.True(DatabaseContext.LockWaitSeconds >= 120);
+    }
+
+    [Fact]
     public async Task DeletingAJob_LeavesNoRowForItInAnyTable()
     {
         var db = await CreateDatabaseAsync();
