@@ -90,6 +90,7 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<VideoFrameExtractor>()));
         services.AddSingleton<IContentHasher, ContentHasher>();
         services.TryAddSingleton<IFreeSpaceProbe, FreeSpaceProbe>();
+        services.TryAddSingleton<ILibraryRootProbe>(SmartFileOrganizer.Application.Library.FileSystemLibraryRootProbe.Instance);
 
         // Ollama
         services.AddSingleton(sp =>

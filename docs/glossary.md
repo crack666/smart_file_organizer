@@ -463,6 +463,20 @@ Finer than the category: the category says invoice, letter or personal document,
 | `dump` | A copy of a device, computer or package. |
 | `mixed` | No single role. |
 
+### Closed unit in a library (`ClosedUnitKind`)
+
+Why a folder of a library map belongs to a closed unit (https://github.com/crack666/smart_file_organizer/issues/85).
+Shown as `closed` (with `closed_at`, the folder that closes the unit) by `sfo library show`. Such a folder, and every
+folder below it, never takes in loose files from elsewhere and is never the parent of a new folder; only the same unit
+under its own name may go into it. Dumps are closed as well, through their role `dump`.
+
+| Code | Meaning |
+|---|---|
+| `program` | A program or project tree: mostly code and programs with files of its own, or unit markers such as an exe next to its dlls. |
+| `technical` | A technical part by its name (`technical_names` of the word file): a cache, thumbnails, the css or js of a web page, build output. |
+| `single_title` | The folder of one film or one episode: one or two videos with posters, subtitles or info files, or named like an episode or a film. |
+| `unit` | The analysis judged the folder a unit (verdict `unit`). |
+
 ### Proposed change (`ProposalAction`)
 
 | Code | Meaning |
@@ -723,6 +737,7 @@ https://github.com/crack666/smart_file_organizer/issues/83). Stored per finding 
 | `no_fitting_folder` | No folder of any library fits, and no complete name for a new one was found. |
 | `content_unclear` | No folder fits by time, name or kind of files, and the files are not described, so their content cannot choose one. |
 | `no_model` | A new folder needs a name the rules cannot complete, and no model was used (`--no-model`) or reachable. |
+| `no_target` | No target on purpose: no existing folder is confirmed by content, and no library holds this kind of content (own photos and videos, documents, films), so a new folder would be a guess as well (Issue 85). |
 
 ### Coverage of a kind of finding (`FindingCoverage`)
 

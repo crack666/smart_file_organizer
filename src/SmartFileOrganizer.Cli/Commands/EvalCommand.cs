@@ -241,7 +241,25 @@ public static class EvalCommand
                 new SynchronousProgress<ComparisonProgress>(pr => ctx.Progress.Report("compare", pr.Processed, pr.Total, 0)), ct);
             if (expectedFindings is null)
                 await services.GetRequiredService<BundleService>().BuildAsync(job.Id, null, ct);
-            targets = await services.GetRequiredService<TargetEvaluator>().RunAsync(job.Id, library.Id, expectedTargets.Targets, useModel: true, ct);
+            // A library that is gone (Issue 85: a share that is not connected): scanned while it was there, then removed,
+            // so the targets that expect library_unreachable are matched against it.
+            long? gone = null;
+            if (expectedTargets.Targets.Any(t => t.Outcome == EvalTargetTruth.LibraryUnreachable))
+            {
+                var goneRoot = Path.Combine(Path.GetTempPath(), $"sfo-eval-gone-{Guid.NewGuid():N}");
+                Directory.CreateDirectory(Path.Combine(goneRoot, "Bilder"));
+                var goneJob = await jobs.CreateJobAsync(goneRoot, rules, ScanRole.Library, structureOnly: true, ct);
+                try
+                {
+                    await jobs.RunAsync(goneJob.Id, null, null, ct);
+                }
+                finally
+                {
+                    Directory.Delete(goneRoot, recursive: true);
+                }
+                gone = goneJob.Id;
+            }
+            targets = await services.GetRequiredService<TargetEvaluator>().RunAsync(job.Id, library.Id, expectedTargets.Targets, useModel: true, ct, gone);
         }
 
         var report = await services.GetRequiredService<CorpusEvaluator>().EvaluateAsync(truth, job.Id, expectedFindings, listed, targets, ct);

@@ -67,6 +67,20 @@ public sealed class LibraryMatchOptions
     /// <summary>Described files of the unit its description is built from, spread over its period.</summary>
     public int UnitSampleSize { get; set; } = 12;
 
+    // Rather no target than a wrong one (https://github.com/crack666/smart_file_organizer/issues/85).
+
+    /// <summary>
+    /// An existing folder is proposed only with content that confirms it: the same files already there, or a content check
+    /// that fits. Without, the folder is listed as unconfirmed and a new folder (or no target) is proposed.
+    /// </summary>
+    public bool RequireContent { get; set; } = true;
+
+    /// <summary>
+    /// Share of a library's files of the unit's kind of content (own pictures, documents, films, ...) below which the
+    /// library does not hold that kind: no new folder is proposed there.
+    /// </summary>
+    public double MinLibraryKindShare { get; set; } = 0.10;
+
     /// <summary>
     /// Folder for the patterns files (one per library job, editable by hand). Set by the host to
     /// <c>library-patterns</c> next to the database; null keeps the patterns in memory only.
@@ -88,6 +102,7 @@ public sealed class LibraryMatchOptions
         Share(nameof(MinNameShare), MinNameShare);
         Share(nameof(MinSiblingShare), MinSiblingShare);
         Share(nameof(RoleShare), RoleShare);
+        Share(nameof(MinLibraryKindShare), MinLibraryKindShare);
         if (FullContentShare < MinContentShare || FullContentShare <= 0)
             problems.Add($"{nameof(FullContentShare)} must be above 0 and at least {nameof(MinContentShare)}");
         if (PeriodToleranceDays is < 0 or > 365) problems.Add($"{nameof(PeriodToleranceDays)} must be between 0 and 365");

@@ -116,6 +116,10 @@ public sealed class FindingTargetService
                     $"Finding {key} is not part of job {query.JobId}; the data it rested on may have changed. List the findings again.");
         }
 
+        // A library that cannot be read ends the run with a named failure before anything is matched or stored
+        // (https://github.com/crack666/smart_file_organizer/issues/85); never a run that looks successful.
+        await _targets.EnsureReadableAsync(libraries, ct);
+
         var todo = report.Findings
             .Where(f => f.State is FindingState.Open or FindingState.Accepted)
             .Where(f => FindingRules.TargetKinds.Contains(f.Kind) && f.TargetInput is not null && f.FileIds.Count > 0)
@@ -238,7 +242,13 @@ public sealed class FindingTargetService
         }
 
         record.ContentCheck = TargetContentCheck.NotChecked;
-        var modelMissing = !useModel || contentStatus is ContentCheckStatus.NoModel or ContentCheckStatus.Unavailable or ContentCheckStatus.Failed;
+        if (answer.Result?.NoTarget is { } why)
+        {
+            record.Status = FindingTargetStatus.NoTarget;
+            record.Reason = why;
+            return record;
+        }
+        var modelMissing =!useModel || contentStatus is ContentCheckStatus.NoModel or ContentCheckStatus.Unavailable or ContentCheckStatus.Failed;
         record.Status = proposal is { NameComplete: false } && modelMissing
             ? FindingTargetStatus.NoModel
             : contentStatus == ContentCheckStatus.NoDescription

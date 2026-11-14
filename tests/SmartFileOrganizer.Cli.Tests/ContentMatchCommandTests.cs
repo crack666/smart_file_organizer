@@ -297,35 +297,39 @@ public partial class ContentMatchCommandTests : IDisposable
         Assert.Equal(before, model.Described.Count);
     }
 
-    /// <summary>Without fitting content no proposal is better than uncertain: without a model, and without a description.</summary>
+    /// <summary>
+    /// Without fitting content no existing folder is proposed (Issue 85; until then it was at most uncertain): without a
+    /// model, and without a description. The folders time and names chose are listed as unconfirmed, with the reason.
+    /// </summary>
     [Fact]
-    public async Task WithoutFittingContent_NoProposalIsBetterThanUncertain()
+    public async Task WithoutFittingContent_NoExistingFolderIsProposed()
     {
         var (_, source) = await PrepareAsync(birthday: false);
         var ski = await EventFromAsync(source, "2015-02-08T09");
         var birthday = await EventFromAsync(source, "2015-02-08T20");
 
-        // Without a model: the old signals still find the folder, but only as uncertain, and say why.
+        // Without a model: the old signals still find the folder, but it is not proposed, and the reason says why.
         var noModel = await OkAsync("library", "match", source.ToString(), "--bundle", ski.ToString(), "--no-model");
         Assert.Equal("no_model", Str(noModel.GetProperty("content_check"), "status"));
-        var first = Candidates(noModel)[0];
+        Assert.Empty(Candidates(noModel));
+        var first = noModel.GetProperty("unconfirmed")[0];
         Assert.Equal("Fotos/Skifahrt 2015", Str(first, "target_relative"));
-        Assert.Equal("uncertain", Str(first, "certainty"));
         Assert.Contains("the content was not checked (no model)", Str(first, "reason"));
         Assert.Contains(first.GetProperty("signals").EnumerateArray(), s => Str(s, "signal") == "period" && s.GetProperty("agrees").GetBoolean());
+        Assert.NotEqual(JsonValueKind.Null, noModel.GetProperty("new_folder").ValueKind);
 
-        // With a model, but the birthday photos were never described: nothing to compare, still uncertain at best.
+        // With a model, but the birthday photos were never described: nothing to compare, so no existing folder.
         var (configure, _, judge) = WithModel();
         var undescribed = await OkAsync(configure, "library", "match", source.ToString(), "--bundle", birthday.ToString());
         Assert.Equal("no_description", Str(undescribed.GetProperty("content_check"), "status"));
-        Assert.All(Candidates(undescribed), c => Assert.Contains(Str(c, "certainty"), new[] { "uncertain", "review" }));
+        Assert.Empty(Candidates(undescribed));
         Assert.DoesNotContain(judge.Requests, r => r.Task == LibraryAdviceTask.Fit);
 
-        // Every proposal of every unit without the same files at the target: at most uncertain without the content.
+        // Every unit without the same files at the target: no existing folder without the content.
         foreach (var path in new[] { "Neuer Ordner", "Import", "Rechnung_2023_11.pdf" })
         {
             var result = await OkAsync("library", "match", source.ToString(), path, "--no-model", "--limit", "10");
-            Assert.All(Candidates(result), c => Assert.Contains(Str(c, "certainty"), new[] { "uncertain", "review" }));
+            Assert.All(Candidates(result), c => Assert.NotEqual("into_existing", Str(c, "placement")));
         }
     }
 

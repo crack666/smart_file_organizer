@@ -102,6 +102,7 @@ public sealed record LibraryMatchQuery
 /// <param name="CandidateLibraries">The library of each of <see cref="MatchResult.Candidates"/>, in the same order.</param>
 /// <param name="NewFolderLibrary">The library the new folder would lie in.</param>
 /// <param name="Space">Per library root: free space and what the unit needs there (its files not yet backed up).</param>
+/// <param name="UnconfirmedLibraries">The library of each of <see cref="MatchResult.Unconfirmed"/>, in the same order.</param>
 public sealed record LibraryMatchAnswer(
     ScanJob Source,
     ScanJob? Library,
@@ -117,7 +118,8 @@ public sealed record LibraryMatchAnswer(
     IReadOnlyList<ScanJob>? Libraries = null,
     IReadOnlyList<ScanJob>? CandidateLibraries = null,
     ScanJob? NewFolderLibrary = null,
-    IReadOnlyList<RootStorage>? Space = null);
+    IReadOnlyList<RootStorage>? Space = null,
+    IReadOnlyList<ScanJob>? UnconfirmedLibraries = null);
 
 /// <summary>
 /// <c>sfo library show</c> and <c>sfo library match</c> (https://github.com/crack666/smart_file_organizer/issues/25):
@@ -143,6 +145,7 @@ public sealed partial class LibraryTargetService
     private readonly IContentFitJudge? _judge;
     private readonly IReadOnlyList<IFolderDescriptionSource> _descriptionSources;
     private readonly IOllamaService? _ollama;
+    private readonly ILibraryRootProbe _rootProbe;
 
     public LibraryTargetService(
         LibraryService library,
@@ -157,8 +160,10 @@ public sealed partial class LibraryTargetService
         IFileFactRepository? facts = null,
         IContentFitJudge? judge = null,
         IEnumerable<IFolderDescriptionSource>? descriptionSources = null,
-        IOllamaService? ollama = null)
+        IOllamaService? ollama = null,
+        ILibraryRootProbe? rootProbe = null)
     {
+        _rootProbe = rootProbe ?? FileSystemLibraryRootProbe.Instance;
         _freeSpace = freeSpace;
         _facts = facts;
         _judge = judge;
@@ -252,6 +257,7 @@ public sealed partial class LibraryTargetService
                 nothing.Unit, null, null, null, LibraryModelPart.Skipped, notes, []);
         }
 
+        EnsureReadable(libraries);
         var (set, missing) = await LibraryComparisonSet.LoadAsync(_comparisons, source.Id, libraries.Select(l => l.Id).ToList(), ct);
         foreach (var id in missing)
             notes.Add($"Job {source.Id} was not compared with library {id}; the signal 'same content already there' is missing (sfo compare {source.Id} --against {id}).");
@@ -286,20 +292,33 @@ public sealed partial class LibraryTargetService
                       ?? ContentCheck.NoModel;
         var rejected = matched.SelectMany(m => m.Result.Rejected ?? []).ToList();
         if (content.Status is not (ContentCheckStatus.Checked or ContentCheckStatus.NoCandidates))
-            notes.Add($"The content was not checked ({ContentNote(content)}); no proposal without the same files at the target is better than uncertain.");
+            notes.Add($"The content was not checked ({ContentNote(content)}); without the same files at the target no existing folder is proposed.");
 
         var ranked = matched
             .SelectMany((m, order) => m.Result.Candidates.Select(c => (Candidate: c, m.Library, Order: order)))
             .OrderByDescending(x => x.Candidate.Score).ThenBy(x => x.Order)
             .Take(limit)
             .ToList();
+        var unconfirmed = matched
+            .SelectMany((m, order) => (m.Result.Unconfirmed ?? []).Select(c => (Candidate: c, m.Library, Order: order)))
+            .OrderByDescending(x => x.Candidate.Score).ThenBy(x => x.Order)
+            .Take(limit)
+            .ToList();
+        // A new folder in the library that holds this kind of content (own pictures, papers, films), then the most
+        // certain proposal, then the library named first (https://github.com/crack666/smart_file_organizer/issues/85).
         var withNewFolder = ranked.Count > 0
             ? null
             : matched.Select((m, order) => (m, order)).Where(x => x.m.Result.NewFolder is not null)
-                .OrderBy(x => (int)x.m.Result.NewFolder!.Certainty).ThenBy(x => x.order)
+                .OrderByDescending(x => Math.Round(LibraryMatcher.KindShare(x.m.Map, unit), 2))
+                .ThenBy(x => (int)x.m.Result.NewFolder!.Certainty).ThenBy(x => x.order)
                 .Select(x => ((ScanJob Library, LibraryMap Map, LibraryPatternsInfo Patterns, MatchResult Result)?)x.m).FirstOrDefault();
+        var noTarget = ranked.Count == 0 && withNewFolder is null
+            ? matched.Select(m => m.Result.NoTarget).FirstOrDefault(t => t is not null)
+            : null;
+        if (noTarget is not null && matched.Count > 1)
+            noTarget = $"No existing folder is confirmed by content, and none of the {matched.Count} libraries holds {LibraryMatcher.KindWords(LibraryMatcher.KindOf(unit))}: a new folder would be a guess as well.";
         var result = new MatchResult(ranked.Select(x => x.Candidate).ToList(), matched.Sum(m => m.Result.Considered),
-            withNewFolder?.Result.NewFolder, rejected, content);
+            withNewFolder?.Result.NewFolder, rejected, content, unconfirmed.Select(x => x.Candidate).ToList(), noTarget);
         var home = ranked.Count > 0 ? ranked[0].Library : withNewFolder?.Library ?? libraries[0];
         var homeMatch = matched.First(m => m.Library.Id == home.Id);
         var homeMap = homeMatch.Map;
@@ -329,10 +348,41 @@ public sealed partial class LibraryTargetService
             notes.Add($"Library {s.LibraryJobId} ({s.RootPath}) has {FindingRules.Size(s.FreeBytes!.Value)} free; the files not yet backed up need {FindingRules.Size(s.NeededBytes)}.");
 
         return new LibraryMatchAnswer(source, home, choice, MatchStatus.Ok, null, unit, set?.Headers.FirstOrDefault(h => h.AgainstJobId == home.Id) ?? set?.First,
-            result, patterns, advice, notes, libraries, ranked.Select(x => x.Library).ToList(), withNewFolder?.Library, space);
+            result, patterns, advice, notes, libraries, ranked.Select(x => x.Library).ToList(), withNewFolder?.Library, space,
+            unconfirmed.Select(x => x.Library).ToList());
     }
 
     // ------------------------------------------------------------------ library and map
+
+    /// <summary>
+    /// Every library root must be readable (https://github.com/crack666/smart_file_organizer/issues/85): a share that is
+    /// not connected cannot show what its folders hold, and a target there could not be checked. Until then the match ran
+    /// on the stored scan and reported success with reasons such as "the folder's files could not be described".
+    /// </summary>
+    /// <exception cref="LibraryServiceException"><see cref="LibraryFailure.LibraryUnreachable"/>, naming every root.</exception>
+    public async Task EnsureReadableAsync(IEnumerable<long> libraryJobIds, CancellationToken ct = default)
+    {
+        var jobs = new List<ScanJob>();
+        foreach (var id in libraryJobIds.Distinct())
+        {
+            if (await _jobs.GetByIdAsync(id, ct) is { } job) jobs.Add(job);
+        }
+        EnsureReadable(jobs);
+    }
+
+    /// <inheritdoc cref="EnsureReadableAsync"/>
+    public void EnsureReadable(IEnumerable<ScanJob> libraries)
+    {
+        var problems = libraries
+            .Select(l => (Library: l, Problem: _rootProbe.Problem(l.RootPath)))
+            .Where(x => x.Problem is not null)
+            .Select(x => $"library {x.Library.Id} ({x.Library.RootPath}): {x.Problem}")
+            .ToList();
+        if (problems.Count > 0)
+            throw new LibraryServiceException(LibraryFailure.LibraryUnreachable,
+                $"Cannot read {string.Join("; ", problems)}. No target is proposed while a library cannot be read; connect it and run again, "
+                + "or leave it out with --against.");
+    }
 
     /// <summary>
     /// The libraries to match against: those named; else those of the newest comparison of the source; else the newest

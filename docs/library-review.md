@@ -105,7 +105,10 @@ Names are compared in lower case with umlauts transliterated.
 
 Other keys: `system_files`, `system_file_prefixes`, `common_child_names`, `stop_words`,
 `sensitive_name_words`, `device_markers`, `computer_markers`, `package_markers`,
-`app_package_pattern`, `app_package_min_children`.
+`app_package_pattern`, `app_package_min_children`, and for the target match (Issue 85,
+[library-match.md](library-match.md#the-map)) `common_words` (everyday words that never make two
+names agree: `neu`, `film`, `sommer`, `home`, ...) and `technical_names` (folders that are a closed
+unit by name: `cache`, `thumbs`, `css`, `assets`, `bin`, `logs`, ...).
 
 An exception covers its folder and everything below it, for the listed kinds (all kinds when
 `kinds` is empty). `path` is relative to the job's root with `/`; `.` is the root.

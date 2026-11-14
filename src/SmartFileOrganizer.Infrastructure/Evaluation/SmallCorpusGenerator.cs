@@ -44,8 +44,11 @@ public static class SmallCorpusGenerator
     /// public profile with learning material, account pictures and shortcuts, a package manager, system files, a folder
     /// with one file) and an archive of bank statements under a number.
     /// Version 5 (https://github.com/crack666/smart_file_organizer/issues/56): a folder <c>Import</c> with photos of two
-    /// occasions of one day, a lake outing and two invoices, and a library next to the tree with <c>targets.json</c>.</remarks>
-    public const int GeneratorVersion = 5;
+    /// occasions of one day, a lake outing and two invoices, and a library next to the tree with <c>targets.json</c>.
+    /// Version 6 (https://github.com/crack666/smart_file_organizer/issues/85): closed units in the library (a film
+    /// folder under an everyday word, a season, a game cache, a program) with own pictures and clips of their time in
+    /// <c>Import</c> that belong into none of them, and a library that is gone.</remarks>
+    public const int GeneratorVersion = 6;
 
     public const int DefaultSeed = 36;
     public const string RootFolder = "tree";
@@ -336,7 +339,7 @@ public static class SmallCorpusGenerator
     /// </summary>
     private static void Import(Builder b)
     {
-        b.Dir("Import", Mixed, "Generic name; photos of three occasions and two invoices waiting for a place.");
+        b.Dir("Import", Mixed, "Generic name; photos of three occasions, two invoices and own pictures and clips (version 6) waiting for a place.");
         // The name carries the time (the grouping reads it), so it must be a valid one.
         static string Named(DateTime t) => $"Import/IMG_{t:yyyyMMdd_HHmmss}.jpg";
         for (var i = 0; i < 3; i++)
@@ -361,7 +364,32 @@ public static class SmallCorpusGenerator
             PhoneCompany + ", Postfach 10, 54321 Nachbarort",
             "Festnetz und Internet Dezember 2023",
             "Rechnungsbetrag: 34,99 EUR"]), D(2023, 12, 20), Invoice, None, "Belongs to the invoices of its provider.", InvoiceOf(PhoneCompany, 2023));
+
+        // Version 6 (Issue 85): own pictures and clips at the time of closed units of the library (a film folder, the
+        // cache of a game, an episode folder, a program); none of them is a target.
+        for (var i = 1; i <= 2; i++)
+            b.File($"Import/Sommer am Teich {i}.jpg", PhotoOf(b, Scene.Lake), D(2022, 7, 10, 20, i * 3), Photo, None,
+                "Own picture with an everyday word of a film title in its name; no folder for it yet.", PondEvening);
+        for (var i = 0; i < 2; i++)
+            b.File($"Import/IMG_20220305_18{15 + i * 5}00.jpg", PhotoOf(b, Scene.Garden), D(2022, 3, 5, 18, 15 + i * 5), Photo, None,
+                "Taken while a game wrote its cache; no folder for it yet.", GardenDay);
+        for (var i = 0; i < 2; i++)
+            b.File($"Import/VID_20200510_21{15 + i * 5}00.mp4", Mp4(b, 64_000), D(2020, 5, 10, 21, 15 + i * 5), Video, None,
+                "Own clip of the evening an episode was saved; no folder for it yet.", EveningClip);
+        for (var i = 0; i < 2; i++)
+            b.File($"Import/IMG_20180901_12{05 + i * 5:00}00.jpg", PhotoOf(b, Scene.Coast), D(2018, 9, 1, 12, 5 + i * 5), Photo, None,
+                "Taken the day a program was installed; no folder for it yet.", CoastDay);
     }
+
+    // Version 6 (Issue 85): what the traps and the closed units of the library show.
+    private static readonly TruthDescription PondEvening = new("pond at dusk", "walking", "outdoor", "summer", "outing", true);
+    private static readonly TruthDescription GardenDay = new("garden lawn", "gardening", "outdoor", "spring", null, true);
+    private static readonly TruthDescription CoastDay = new("rocky coast", "hiking", "outdoor", "summer", "holiday", true);
+    private static readonly TruthDescription FilmPoster = new("film poster", null, "indoor", null, null, false);
+    private static readonly TruthDescription GameTexture = new("game texture", null, null, null, null, false);
+    private static readonly TruthDescription SamplePicture = new("sample picture", null, "outdoor", null, null, false);
+    private static readonly TruthDescription NotDescribed = new();
+    private static readonly TruthDescription EveningClip = new("living room", "dancing", "indoor", "spring", "party", true);
 
     /// <summary>
     /// Version 5 (Issue 56): the library of the corpus, a folder next to <c>tree</c> (never inside it), and
@@ -401,6 +429,39 @@ public static class SmallCorpusGenerator
         b.Dir("Unterlagen", null);
         Invoices("Unterlagen/Rechnungen Stadtwerke", PowerCompany);
         Invoices("Unterlagen/Rechnungen Telefon", PhoneCompany);
+
+        // Version 6 (Issue 85): closed units, which take no loose files of another kind: a film folder under an
+        // everyday word, the folder of a season, the cache of a game and a program with sample pictures.
+        void Described(string path, byte[] content, DateTime when, TruthDescription description, string note)
+        {
+            b.File(path, content, when, null, None);
+            files.Add(new LibraryFileEntry(path, description, note));
+        }
+        b.Dir("Filme", null);
+        foreach (var (title, when) in new[] { ("Sommer am See (2009)", D(2022, 7, 10, 20, 0)), ("Ein anderer Film (2011)", D(2022, 7, 11, 20, 0)) })
+        {
+            b.Dir($"Filme/{title}", null);
+            Described($"Filme/{title}/{title}.mp4", Mp4(b, 96_000), when, NotDescribed, "film");
+            Described($"Filme/{title}/poster.jpg", PhotoOf(b, Scene.Lake), when.AddMinutes(1), FilmPoster, "film poster");
+            Described($"Filme/{title}/fanart.jpg", PhotoOf(b, Scene.Lake), when.AddMinutes(2), FilmPoster, "film poster");
+        }
+        b.Dir("Serien", null);
+        b.Dir("Serien/Beispielserie", null);
+        b.Dir("Serien/Beispielserie/Staffel 1", null);
+        for (var e = 1; e <= 2; e++)
+            Described($"Serien/Beispielserie/Staffel 1/Beispielserie S01E0{e}.mp4", Mp4(b, 80_000), D(2020, 5, 10, 21, e * 10), NotDescribed, "episode");
+        b.Dir("Spiele", null);
+        b.Dir("Spiele/Beispielspiel", null);
+        Described("Spiele/Beispielspiel/spiel.exe", Exe(b), D(2022, 3, 5, 18, 0), NotDescribed, "game");
+        b.Dir("Spiele/Beispielspiel/cache", null);
+        for (var i = 0; i < 3; i++)
+            Described($"Spiele/Beispielspiel/cache/{i:000}.jpg", PhotoOf(b, Scene.Garden), D(2022, 3, 5, 18, 10 + i), GameTexture, "game cache");
+        b.Dir("Programme", null);
+        b.Dir("Programme/Bildbetrachter", null);
+        Described("Programme/Bildbetrachter/betrachter.exe", Exe(b), D(2018, 9, 1, 12, 0), NotDescribed, "program");
+        Described("Programme/Bildbetrachter/betrachter.dll", Exe(b), D(2018, 9, 1, 12, 0), NotDescribed, "program");
+        for (var i = 1; i <= 2; i++)
+            Described($"Programme/Bildbetrachter/beispiel{i}.jpg", PhotoOf(b, Scene.Coast), D(2018, 9, 1, 12, i), SamplePicture, "sample picture of a program");
         b.ApplyDirectoryTimes();
 
         ExpectedTarget[] targets =
@@ -411,7 +472,14 @@ public static class SmallCorpusGenerator
             new("bundle", "Import/IMG_20210814_110000.jpg", null,
                 "Trap: same day as the garden party, other occasion; no folder for it yet."),
             new("file", "Import/Rechnung_2023_11.pdf", "Unterlagen/Rechnungen Stadtwerke", "The invoices of its provider, not of the other."),
-            new("file", "Import/Rechnung_2023_12.pdf", "Unterlagen/Rechnungen Telefon", "The invoices of its provider, not of the other.")
+            new("file", "Import/Rechnung_2023_12.pdf", "Unterlagen/Rechnungen Telefon", "The invoices of its provider, not of the other."),
+            new("file", "Import/Sommer am Teich 1.jpg", null,
+                "Trap (Issue 85): one everyday word and the time in common with a film folder; a film is a closed unit."),
+            new("bundle", "Import/IMG_20220305_181500.jpg", null, "Trap (Issue 85): same time as the cache of a game; a cache takes no photos."),
+            new("bundle", "Import/VID_20200510_211500.mp4", null, "Trap (Issue 85): same evening as the folder of a season; an episode folder is closed."),
+            new("bundle", "Import/IMG_20180901_120500.jpg", null, "Trap (Issue 85): same time as the sample pictures of a program; a program is closed."),
+            new("folder", "Import", null, "Trap (Issue 85): a library that is gone is a named failure, not a silent answer.",
+                EvalTargetTruth.LibraryUnreachable)
         ];
         var doc = new EvalTargetTruthDocument(EvalTargetTruth.SchemaVersion, LibraryFolder, files, targets);
         File.WriteAllText(Path.Combine(dir, EvalTargetTruth.FileName), JsonSerializer.Serialize(doc, EvalJson.Options) + "\n", new UTF8Encoding(false));

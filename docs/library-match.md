@@ -38,6 +38,7 @@ findings of [library-review.md](library-review.md). Per folder:
 | `pattern` | The effective habit: the hand-edited pattern if there is one, else `children_pattern`. |
 | `findings`, `weak` | Structure-review findings at this folder (sensitive locations and dominant files are left out). |
 | `dump_kind` | For a dump: `device`, `computer`, `package`; its inside is one entry. |
+| `closed`, `closed_at` | A closed unit (below): `program`, `technical`, `single_title` or `unit`, and the folder that makes it one (itself or the closed folder above it). |
 
 Roles, in this order:
 
@@ -49,7 +50,23 @@ Roles, in this order:
 5. `topic` for a folder with no files.
 6. `occasion` when photos and videos make up at least `RoleShare` and the name is not generic.
 7. `document_type`, `media_title`, `project` (software share at least half, or unit markers),
-   `mixed`, else `topic`.
+   `mixed`, else `topic`. A single title (below) is `media_title` before step 6: a film folder is
+   a title, not an occasion.
+
+**Closed units** (https://github.com/crack666/smart_file_organizer/issues/85). Some folders belong
+together as they are and take no loose files of another kind: no unit goes into them, and they are
+never the parent of a new folder. Everything below a closed folder is closed too (`closed_at` names
+the top one). Codes of `ClosedUnitKind` ([glossary.md](glossary.md#closed-unit-in-a-library-closedunitkind)):
+
+| `closed` | When |
+|---|---|
+| `unit` | The structure review judged the folder a unit. |
+| `program` | A program or project tree: role `project`, or at least 3 files with a software share of at least half, with files of its own (or no subfolders); or unit markers. |
+| `technical` | The name is a technical one of the word file (`technical_names`: `cache`, `thumbs`, `css`, `assets`, `bin`, `logs`, ...). |
+| `single_title` | The folder of one film or episode: one or two videos with at most 12 files, a video of its own, the rest companions (subtitles, `.nfo`, poster, fanart, folder or cover pictures), subfolders only technical or common ones, and a title name (`Title (2009)`, `S01E02`) or a companion. |
+
+Only a kept-whole unit of the same name may still go into a closed folder (the same film under its
+own name).
 
 ## `match`: signals and certainty
 
@@ -71,7 +88,7 @@ Signals:
 |---|---|---|---|
 | `content_neighbours` | 0.40 | 0.35 | at least `MinContentShare` of the unit's files already lie in the folder or below it with the same content; full value at `FullContentShare` |
 | `period` | 0.25 | 0.10 | the unit's reliable time overlaps the folder's file period, or a day or month in its name (`PeriodToleranceDays`). A year in the name agrees weakly (0.5), the same file year weaker (0.3). As a subfolder: inside a year folder, or within the years of the neighbours (±1) |
-| `name` | 0.20 | 0.10 | at least `MinNameShare` of the unit's words are in the folder's name (prefix of 4 letters, or one letter apart from 5). As a subfolder: the unit's name follows the habit of its new neighbours |
+| `name` | 0.20 | 0.10 | at least `MinNameShare` of the unit's meaningful words are in the folder's name (prefix of 4 letters, or one letter apart from 5), and at least two of them. Everyday words of the word file (`common_words`: `neu`, `film`, `sommer`, `home`, ...) do not count, a single word never agrees, and into a folder the name counts only when another signal agrees too (Issue 85). A kept-whole unit compares its whole name as before. As a subfolder: the unit's name follows the habit of its new neighbours |
 | `file_type` | 0.15 | 0.15 | never strong; agrees when the unit's main kind of files is at least half of the folder |
 | `siblings` | | 0.30 | at least `MinSiblingShare` of the subfolders have the unit's role (for dated loose files, year folders count) |
 
@@ -93,6 +110,18 @@ either the same files already at the target or a content check that fits
   strong signal or the file type agreeing.
 - `uncertain`: everything else, in particular period, name and type without content. No
   proposal without content is better than `uncertain`.
+
+**Rather no target than a wrong one** (https://github.com/crack666/smart_file_organizer/issues/85).
+With `RequireContent` (default on), an existing folder into which loose files would go is only a
+candidate when content confirms it: the same files already lie there (`content_neighbours`
+strong) or the content check says `fits`. A kept-whole unit and a new subfolder do not need it.
+The others are listed under `unconfirmed` with their reason, and the answer is a new folder in the
+library that holds this kind of content: own recordings (pictures and videos outside single titles),
+films and episodes, documents, audio, archives or software. The new folder's reason names the
+unconfirmed folder ("fits by time, name or kind of files only, and no content confirms it"). When the
+library holds less than `MinLibraryKindShare` of this kind (photos and a library of papers only), a
+new folder there would be a guess as well: the answer is `no_target` with that reason, and no folder
+at all. With several libraries the new folder goes into the one with the highest share of the kind.
 
 When the runner-up scores within `Margin` of the best, the best drops one level: two places
 fit about equally well and a person decides. Candidates below `MinScore` are dropped.
@@ -132,8 +161,8 @@ Run by `match` per library, after the scores and before the certainty:
 
 When every candidate is dropped, the new folder is proposed, and its reason names the folder
 that fit only by time or name. Without a model (`--no-model`, Ollama not reachable, no
-description) nothing is checked, `content_check.status` says why and a note says that no proposal
-without the same files at the target is better than `uncertain`.
+description) nothing is checked, `content_check.status` says why and a note says that without the
+same files at the target no existing folder is proposed.
 
 | `content_check.status` | Meaning |
 |---|---|
@@ -163,7 +192,7 @@ When no candidate reaches `MinScore`, `new_folder` names a parent and a name:
 
 - The parent is the folder whose subfolders are most like the unit (siblings, type, period),
   with 0.10 off for parents whose subfolders are named in several ways. It needs agreeing
-  siblings or file type; otherwise the library root.
+  siblings or file type; otherwise the library root. A closed unit is never the parent.
 - A kept-whole unit keeps its name. Other units get the parent's pattern filled from what is
   known: `{year}`, `{date}`, `{month}` from the unit's period, `{occasion}`/`{name}` from a
   meaningful source name. What is not known stays as a placeholder (`{occasion} 2021`) and
@@ -183,6 +212,15 @@ no proposals. There is no fallback target: never a folder of the user profile (V
 Documents) or of the system drive, which is often short of room and no safe storage. Which
 libraries are used: `--against` (repeatable), else those of the latest comparison, else the newest
 completed library job (with a note).
+
+## A library that cannot be read
+
+Before anything is compared, `match` and `findings targets` check that every library root can be
+read (it exists, and one entry of it can be listed). A share that is not connected, a drive that is
+not plugged in or a root without access ends the command with `library_unreachable`, naming each
+library, its root and the problem; nothing is stored (Issue 85). The map of a scan would otherwise
+answer silently from an old state. `sfo doctor` runs the same check for every completed library
+job.
 
 ## Several libraries
 
@@ -209,15 +247,20 @@ should move (`not_backed_up`, `in_noise`, `misplaced`), so the findings and the 
 the match is built a second time: the unit is exactly the files of the finding (`LibraryMatchQuery.Files`); a named
 folder or a device copy also gives its path, so it is kept whole under its name as with `--bundle`; all other findings
 are placed as loose files. The libraries are those of the comparison; the content check, the new folder and its name
-by the model work as above, and `--no-model` caps a target at `uncertain` in the same way.
+by the model work as above, and `--no-model` works the same way (no existing folder without the same files there).
 
 Per finding one answer is stored in `finding_targets` (step 26):
 
 1. the best existing folder of all libraries (`existing_folder`), with its certainty, reason and content check;
-2. else a new folder whose name is complete (`new_folder`), in the library whose proposal is most certain;
-3. else no target, with the reason: `no_model` (a new folder needs a name the rules cannot complete and no model was
+2. else a new folder whose name is complete (`new_folder`), in the library that holds this kind of content (above);
+3. else no target, with the reason: `no_target` (no library holds this kind of content, so a new folder would be a
+   guess; step 28, Issue 85), `no_model` (a new folder needs a name the rules cannot complete and no model was
    used or reachable), `content_unclear` (no candidate, and the files are not described), `no_fitting_folder`
    (anything else).
+
+Since Issue 85 an existing folder is only stored when content confirms it (`RequireContent` above); without a model
+that means the same files already lie there. A library that cannot be read ends the run with `library_unreachable`
+before any answer is stored.
 
 The answer belongs to an input hash of the finding's file ids, their description facts and the library ids. The findings
 read it back only while that hash is still the finding's own; otherwise the finding is `not_matched` again. A second
@@ -256,8 +299,9 @@ rules. A file that does not parse ends the command with `library_patterns_invali
 ## Settings (`LibraryMatch`)
 
 Starting values, not measured against a real library. The evaluation corpus has a small library
-with known truth since version 5; with the stub, every target there is hit (measured 13.11.2026,
-`sfo eval --stub`), which checks the wiring, not the model.
+with known truth since version 5, and since version 6 the traps of Issue 85 (closed units, an everyday word, a library
+that is gone); with the stub, every target there is hit (measured 14.11.2026 by `EvalCliTests`, `sfo eval --stub`),
+which checks the wiring, not the model.
 
 | Setting | Default | Reason |
 |---|---|---|
@@ -277,6 +321,8 @@ with known truth since version 5; with the stub, every target there is hit (meas
 | `FolderSampleSize` | 4 | Enough to see what a folder shows; each described file is a model call the first time. |
 | `UnitSampleSize` | 12 | The unit's files are described already; more only lengthens the prompt. |
 | `SubfolderWeight*` | 0.35 / 0.30 / 0.15 / 0.10 / 0.10 | For a whole folder the neighbours count most after content: a new occasion goes next to occasions. |
+| `RequireContent` | `true` | Time, name and kind of files only say a folder *could* fit; the first real run filled film, episode and cache folders that way (Issue 85). Off: the earlier behaviour, an `uncertain` existing folder. |
+| `MinLibraryKindShare` | 0.10 | Below a tenth of its files of the unit's kind, a library is no place for it; a new folder there is no better than a guess. |
 | `PatternsDirectory` | `library-patterns` next to the database | One file per library job, beside the data it was made from. |
 
 An invalid value ends `show` and `match` with `settings_invalid`, naming every problem.

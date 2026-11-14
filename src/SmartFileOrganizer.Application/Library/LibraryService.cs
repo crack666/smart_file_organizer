@@ -26,7 +26,10 @@ public enum LibraryFailure
     PatternsInvalid,
 
     /// <summary>A threshold of section <c>LibraryMatch</c> is out of range.</summary>
-    OptionsInvalid
+    OptionsInvalid,
+
+    /// <summary>The root of a library cannot be read (share not connected, drive not plugged in, no access).</summary>
+    LibraryUnreachable
 }
 
 public sealed class LibraryServiceException(LibraryFailure failure, string message) : Exception(message)

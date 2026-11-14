@@ -434,15 +434,17 @@ sfo doctor --json
                   "schema_version": 1, "ok": true, "error": null },
     "settings_path": "/home/me/.config/SmartFileOrganizer/settings.json",
     "ollama": { "base_url": "http://localhost:11434", "reachable": false },
-    "model": { "name": "gemma4:26b", "available": null, "installed": [] }
+    "model": { "name": "gemma4:26b", "available": null, "installed": [] },
+    "libraries": [ { "job_id": 4, "root_path": "/media/archive", "readable": true, "problem": null } ]
   },
   "error": { "code": "ollama_unavailable", "message": "Ollama is not reachable at http://localhost:11434." }
 }
 ```
 
-`model.available` is `null` when Ollama could not be asked. Exit code: 1 for a database
-error (`database_error`), 3 if Ollama is unreachable, 1 if the model is missing
-(`model_missing`), else 0.
+`model.available` is `null` when Ollama could not be asked. `libraries` checks the root of every completed library
+job: it exists and one entry of it can be listed; `problem` says why not (a share that is not connected, a drive that is
+not plugged in, no access). Exit code: 1 for a database error (`database_error`), 3 if Ollama is unreachable, 1 if the
+model is missing (`model_missing`), 1 if a library root cannot be read (`library_unreachable`), else 0.
 
 ### `sfo rules check <path>...`
 
@@ -995,13 +997,15 @@ The target map of a `library` job, one page of folders in tree order.
       "name_period": null,
       "children_pattern": { "template": "{occasion} {year}", "name_pattern": "year_suffix", "count": 3, "of": 3,
                             "examples": [ "Grill 2016", "Ostern 2018", "Ski 2015" ] },
-      "pattern": "{occasion} {year}", "findings": [], "weak": false, "dump_kind": null }
+      "pattern": "{occasion} {year}", "findings": [], "weak": false, "dump_kind": null, "closed": null, "closed_at": null }
   ],
   "advice": { "status": "skipped", "model": null, "error": null, "dropped": 0 }
 }
 ```
 
-`patterns.ignored` lists hand-edited targets whose folder no longer exists. Errors:
+`closed` marks a closed unit that takes no loose files and is no parent of a new folder (`program`, `technical`,
+`single_title`, `unit`; [library-match.md](library-match.md#the-map)), `closed_at` the folder that makes it one; the
+text output shows `closed` on the line. `patterns.ignored` lists hand-edited targets whose folder no longer exists. Errors:
 `job_not_found` (1), `scan_not_completed` (1), `wrong_role` (1, not a library job),
 `path_not_found` (1, `--under` or word file), `words_invalid` (1), `library_patterns_invalid` (1),
 `settings_invalid` (1, a `LibraryMatch` value), `ollama_unavailable` (3, with `result`: the map is
@@ -1075,8 +1079,13 @@ source root or full) or a bundle (`--bundle <id>`), exactly one of them.
   `no_description`, `no_candidates` or `failed`. A checked candidate has `content`:
   `{ "fit": "fits"|"unclear", "reason", "folder": <description of the folder> }`, and the signal `content_fit` when
   it fits; an unchecked one has `content: null`. `rejected` lists the candidates whose content contradicts the unit:
-  `{ "target_relative", "reason", "folder" }`. Without a check (`--no-model`, no model, no description) no proposal
-  without the same files at the target is better than `uncertain`, and `notes` says so.
+  `{ "target_relative", "reason", "folder" }`. Without a check (`--no-model`, no model, no description) no existing
+  folder is proposed without the same files at the target, and `notes` says so.
+- Rather no target than a wrong one (Issue 85, [library-match.md](library-match.md#match-signals-and-certainty)):
+  `unconfirmed` (`null` when empty) lists, like `candidates`, the existing folders loose files would go into that only
+  time, name or kind of files support, without the same files there and without `fits`; they are never the proposal.
+  `no_target` (`null` otherwise) is the reason why not even a new folder is proposed: no library holds this kind of
+  content. Then `candidates` is empty and `new_folder` is `null`; the text output shows both as lines.
 - `status: "no_library"` with a `message` and no proposals, exit code 0, when there is no library
   to match against: no permanent storage is known, so there is no target path at all, never a folder of the
   user profile or the system drive instead. `notes` says when there is no or an incomplete comparison, when the newest
@@ -1084,7 +1093,8 @@ source root or full) or a bundle (`--bundle <id>`), exactly one of them.
 
 Errors: `job_not_found` (1, source or `--against`), `scan_not_completed` (1), `wrong_role` (1, the
 source is a library or `--against` is not), `path_not_found` (1), `bundle_not_found` (1),
-`words_invalid` (1), `library_patterns_invalid` (1), `settings_invalid` (1), `usage` (2, both or
+`words_invalid` (1), `library_patterns_invalid` (1), `settings_invalid` (1), `library_unreachable` (1, a library root
+cannot be read; the message names each library, its root and why), `usage` (2, both or
 neither of `path` and `--bundle`). An unreachable model is not an error here: the new folder keeps
 the name of the rules, `advice.status` says `unavailable`.
 
@@ -1325,7 +1335,7 @@ there. Sensitive findings never get a target. Nothing on disk is changed.
 |---|---|
 | `--against <job>` | Library job to look in. Repeatable. Default: the libraries of the newest `sfo compare`. |
 | `--key <key>` | Only this finding. Repeatable. Default: every open or accepted finding of the three kinds. |
-| `--no-model` | Rules only: no content check, no model name for a new folder. A target is then `uncertain` at most, as with `library match --no-model`. |
+| `--no-model` | Rules only: no content check, no model name for a new folder. An existing folder is then the target only when the same files already lie there (Issue 85), as with `library match --no-model`. |
 | `--model <name>` | Ollama model for this run. |
 | `--refresh` | Match every finding again and ask the model again, even where a stored match still fits. |
 
@@ -1356,9 +1366,14 @@ libraries is not matched again (`reused`), unless this run may ask the model and
   `content_status` the `ContentCheckStatus` of the match ([library-match.md](library-match.md#content-check)).
 - `model_calls` counts the calls of this run per kind (`classification` for describing a library folder's sample,
   `content_fit`, `folder_name`); empty when every answer was stored already.
+- Since Issue 85 an existing folder is stored only when content confirms it (the same files there, or `fits`); else a
+  new folder in the library that holds this kind of content, else `no_target` with the reason
+  ([library-match.md](library-match.md#for-every-finding-sfo-findings-targets)). With `--no-model` that means: no
+  existing folder without the same files there.
 
 Errors: `job_not_found` (1), `wrong_role` (1, a library), `comparison_not_found` (1, `--against` names a library the
 job was not compared with), `finding_not_found` (1, `--key`), `library_patterns_invalid` (1), `settings_invalid` (1),
+`library_unreachable` (1, a library root cannot be read: checked before any finding is matched, nothing is stored),
 `usage` (2).
 
 ### `sfo findings accept|reject|wrong|reopen <job> <key>...`
@@ -1786,7 +1801,7 @@ lines when it starts or stops waiting for the model server (see `sfo analyze`); 
 | Code | Meaning | `error.code` |
 |---|---|---|
 | 0 | Done | |
-| 1 | The command ran but could not do its job | `job_not_found`, `path_not_found`, `scan_failed`, `scan_not_completed`, `wrong_role`, `compare_incomplete`, `comparison_not_found`, `database_error`, `model_missing`, `rules_invalid`, `words_invalid`, `output_inside_job`, `export_failed`, `truth_invalid`, `run_not_found`, `output_not_empty`, `bundle_not_found`, `patterns_invalid`, `library_patterns_invalid`, `settings_invalid`, `finding_not_found`, `targets_invalid`, `plan_not_found`, `action_not_found`, `plan_change_refused`, `library_invalid`, `import_invalid`, `plan_run_incomplete`, `internal_error` |
+| 1 | The command ran but could not do its job | `job_not_found`, `path_not_found`, `scan_failed`, `scan_not_completed`, `wrong_role`, `compare_incomplete`, `comparison_not_found`, `database_error`, `model_missing`, `rules_invalid`, `words_invalid`, `output_inside_job`, `export_failed`, `truth_invalid`, `run_not_found`, `output_not_empty`, `bundle_not_found`, `patterns_invalid`, `library_patterns_invalid`, `settings_invalid`, `finding_not_found`, `targets_invalid`, `plan_not_found`, `action_not_found`, `plan_change_refused`, `library_invalid`, `import_invalid`, `plan_run_incomplete`, `library_unreachable`, `internal_error` |
 | 2 | Wrong invocation: unknown command or option, missing or invalid value | `usage` |
 | 3 | Ollama not reachable | `ollama_unavailable` |
 | 4 | The model server went away during `sfo analyze` and did not come back within `ModelServer.MaxWaitMinutes`; open items stay open, run the command again | `model_server_lost` |

@@ -65,20 +65,22 @@ public class LibraryMatcherTests
     }
 
     /// <summary>
-    /// Period and file type choose the folder but no longer decide (https://github.com/crack666/smart_file_organizer/issues/56):
-    /// without the content they give <c>uncertain</c> (until then <c>likely</c>); the same files at the target still give
-    /// <c>certain</c>.
+    /// Period and file type choose the folder but do not decide (https://github.com/crack666/smart_file_organizer/issues/56):
+    /// without content that confirms it the folder is no proposal at all (Issue 85; until then it was <c>uncertain</c>), and
+    /// the new folder names it as unconfirmed. The same files at the target still give <c>certain</c>.
     /// </summary>
     [Fact]
-    public async Task SameContentAndPeriod_IsCertain_PeriodAndTypeAlone_IsUncertain()
+    public async Task SameContentAndPeriod_IsCertain_PeriodAndTypeAlone_IsNoExistingFolder()
     {
         var map = await MapAsync(Occasions());
         var unit = Loose(new DateTime(2015, 2, 7, 18, 0, 0), new DateTime(2015, 2, 8, 9, 0, 0));
 
         var byTime = LibraryMatcher.Match(map, unit, Options, 3, LibraryWords.Default);
-        Assert.Equal("Fotos/Skifahrt 2015", byTime.Candidates[0].Target.RelativePath);
-        Assert.Equal(ResultCertainty.Uncertain, byTime.Candidates[0].Certainty);
-        Assert.Contains("the content was not checked (no model)", byTime.Candidates[0].Reason);
+        Assert.Empty(byTime.Candidates);
+        Assert.Equal("Fotos/Skifahrt 2015", byTime.Unconfirmed![0].Target.RelativePath);
+        Assert.Contains("the content was not checked (no model)", byTime.Unconfirmed[0].Reason);
+        Assert.Equal("Fotos", byTime.NewFolder!.Parent.RelativePath);
+        Assert.Contains("Fotos/Skifahrt 2015 fits by time, name or kind of files only, and no content confirms it", byTime.NewFolder.Reason);
 
         var withContent = unit with { MatchDirectories = [LibraryTreeFixture.Full("Fotos/Skifahrt 2015"), LibraryTreeFixture.Full("Fotos/Skifahrt 2015")] };
         var certain = LibraryMatcher.Match(map, withContent, Options, 3, LibraryWords.Default);
@@ -149,7 +151,12 @@ public class LibraryMatcherTests
         f.Files("Fotos/Sonstiges", Enumerable.Range(0, 5).Select(i => $"IMG_20200301_1{i}0000.jpg"));
         var map = await MapAsync(f);
 
-        var result = LibraryMatcher.Match(map, Loose(new DateTime(2020, 3, 1, 9, 0, 0), new DateTime(2020, 3, 1, 12, 0, 0)), Options, 3, LibraryWords.Default);
+        // Two of the four files already lie there: the content confirms the place, the weak order still caps it.
+        var unit = Loose(new DateTime(2020, 3, 1, 9, 0, 0), new DateTime(2020, 3, 1, 12, 0, 0)) with
+        {
+            MatchDirectories = [LibraryTreeFixture.Full("Fotos/Sonstiges"), LibraryTreeFixture.Full("Fotos/Sonstiges")]
+        };
+        var result = LibraryMatcher.Match(map, unit, Options, 3, LibraryWords.Default);
 
         var first = result.Candidates[0];
         Assert.Equal("Fotos/Sonstiges", first.Target.RelativePath);
@@ -233,26 +240,184 @@ public class LibraryMatcherTests
         Assert.Equal(ResultCertainty.Review, kept.Candidates[0].Certainty);
     }
 
-    /// <summary>Without fitting content (unclear, not checked, not described) nothing is better than uncertain.</summary>
+    /// <summary>
+    /// Done when of Issue 85: without content that fits (unclear, not checked, not described) and without the same files at
+    /// the target, no existing folder is the target, however well period and names agree; a new folder is proposed and
+    /// says which folder fit by time and name only. Until then such a folder was proposed as <c>uncertain</c>.
+    /// </summary>
     [Theory]
     [InlineData(ContentCheckStatus.Checked)]
     [InlineData(ContentCheckStatus.NoModel)]
     [InlineData(ContentCheckStatus.Unavailable)]
     [InlineData(ContentCheckStatus.NoDescription)]
-    public async Task WithoutFittingContent_NothingIsBetterThanUncertain(ContentCheckStatus status)
+    public async Task WithoutFitsAndWithoutTheSameFiles_NoExistingFolderIsTheTarget(ContentCheckStatus status)
     {
         var map = await MapAsync(Occasions());
         // Period and name agree as strongly as they can: the unit is named like the folder and taken on its days.
-        var unit = Loose(new DateTime(2015, 2, 7, 10, 0, 0), new DateTime(2015, 2, 7, 12, 0, 0)) with { Words = ["skifahrt"] };
+        var unit = Loose(new DateTime(2015, 2, 7, 10, 0, 0), new DateTime(2015, 2, 7, 12, 0, 0)) with { Words = ["skifahrt", "berghuette"] };
         var check = status == ContentCheckStatus.Checked
             ? Check(SkiTrip, "Fotos/Skifahrt 2015", ContentFit.Unclear, "too few pictures described")
             : ContentCheck.NotChecked(status, "test");
 
         var result = LibraryMatcher.Match(map, unit, Options, 3, LibraryWords.Default, check);
 
-        Assert.NotEmpty(result.Candidates);
-        Assert.All(result.Candidates, c => Assert.True(c.Certainty >= ResultCertainty.Uncertain, $"{c.Target.RelativePath}: {c.Certainty}"));
-        Assert.Contains("the content", result.Candidates[0].Reason);
+        Assert.Empty(result.Candidates);
+        Assert.Equal("Fotos/Skifahrt 2015", result.Unconfirmed![0].Target.RelativePath);
+        Assert.Contains("the content", result.Unconfirmed[0].Reason);
+        Assert.NotNull(result.NewFolder);
+        Assert.Contains("no content confirms it", result.NewFolder!.Reason);
+
+        // With a fitting content check the same folder is the target.
+        var fits = LibraryMatcher.Match(map, unit, Options, 3, LibraryWords.Default, Check(SkiTrip, "Fotos/Skifahrt 2015", ContentFit.Fits));
+        Assert.Equal("Fotos/Skifahrt 2015", fits.Candidates[0].Target.RelativePath);
+    }
+
+    // ------------------------------------------------------------------ closed units and names (issue 85)
+
+    /// <summary>
+    /// A library as the first real run met it: photos per occasion, films with posters, a series with one folder per
+    /// episode, a game with its cache, a program project with pictures inside. Invented names.
+    /// </summary>
+    private static LibraryTreeFixture WithClosedUnits()
+    {
+        var f = Occasions();
+        var t = new DateTime(2019, 7, 20, 12, 0, 0, DateTimeKind.Utc);
+        f.Files("Filme/Ein Sommer in Rom (2009)", ["Ein Sommer in Rom.mkv", "poster.jpg", "fanart.jpg", "folder.jpg", "Ein Sommer in Rom.srt"], time: t);
+        f.Files("Filme/Die lange Reise (2011)", ["Die lange Reise.mkv", "poster.jpg", "fanart.jpg"], time: t);
+        f.Files("Serien/Beispielserie/Staffel 1/Folge 01", ["Folge 01.mkv", "thumb.jpg"], time: t);
+        f.Files("Serien/Beispielserie/Staffel 1/Folge 02", ["Folge 02.mkv", "thumb.jpg"], time: t);
+        f.Numbered("Spiele/Beispielspiel/cache", "tex", ".jpg", 6, time: t);
+        f.Files("Spiele/Beispielspiel/saves", ["slot1.sav"], time: t);
+        f.Files("Projekte/Webseite", ["index.html", "site.js"], time: t);
+        f.Numbered("Projekte/Webseite/src", "page", ".js", 8, time: t);
+        f.Numbered("Projekte/Webseite/bilder", "header", ".png", 3, time: t);
+        return f;
+    }
+
+    /// <summary>Loose holiday photos of that summer, named with one everyday word the film shares.</summary>
+    private static MatchUnit SummerPhotos() =>
+        Loose(new DateTime(2019, 7, 20, 10, 0, 0), new DateTime(2019, 7, 20, 18, 0, 0)) with
+        {
+            Words = ["sommer", "garten"], TimeSource = TimeSource.ModifiedDate
+        };
+
+    [Fact]
+    public async Task Map_MarksClosedUnits_AndFilmsAreTitlesNotOccasions()
+    {
+        var map = await MapAsync(WithClosedUnits());
+
+        var film = map.ByRelativePath["Filme/Ein Sommer in Rom (2009)"];
+        Assert.Equal(FolderRole.MediaTitle, film.Role);
+        Assert.Equal(ClosedUnitKind.SingleTitle, film.Closed);
+        Assert.Equal(ClosedUnitKind.SingleTitle, map.ByRelativePath["Serien/Beispielserie/Staffel 1/Folge 01"].Closed);
+        Assert.Equal(ClosedUnitKind.Technical, map.ByRelativePath["Spiele/Beispielspiel/cache"].Closed);
+        var inside = map.ByRelativePath["Projekte/Webseite/bilder"];
+        Assert.Equal(ClosedUnitKind.Program, inside.Closed);
+        Assert.Equal("Projekte/Webseite", inside.ClosedAt);
+        Assert.Null(map.ByRelativePath["Fotos/Skifahrt 2015"].Closed);
+        Assert.Null(map.ByRelativePath["Filme"].Closed);
+        Assert.Equal(FolderRole.MediaTitle, map.ByRelativePath["Filme"].ChildrenRole);
+    }
+
+    /// <summary>
+    /// Done when of Issue 85: loose photos never get a film folder because a word of their names is in the film's name,
+    /// and nothing is proposed into a folder of a closed unit (episode, cache, project), not even as a candidate the
+    /// content check could confirm, nor as the parent of a new folder.
+    /// </summary>
+    [Fact]
+    public async Task LoosePhotos_GetNoFilmFolderForACommonWord_AndNothingGoesIntoAClosedUnit()
+    {
+        var map = await MapAsync(WithClosedUnits());
+        var closed = map.Entries.Where(e => e.Closed is not null).Select(e => e.RelativePath).ToHashSet();
+        Assert.Contains("Spiele/Beispielspiel/cache", closed);
+
+        // Even a content check that says "fits" for every closed folder changes nothing: they are never asked about.
+        var fitsEverywhere = new ContentCheck(ContentCheckStatus.Checked, SkiTrip,
+            closed.ToDictionary(p => ContentCheck.KeyOf(MatchPlacement.IntoExisting, p), _ => new CandidateContent(ContentFit.Fits, "scripted", SkiTrip)),
+            "scripted");
+        var result = LibraryMatcher.Match(map, SummerPhotos(), Options, 10, LibraryWords.Default, fitsEverywhere);
+
+        var named = result.Candidates.Concat(result.Unconfirmed ?? []).Concat(result.Rejected ?? []).Select(c => c.Target.RelativePath).ToList();
+        Assert.DoesNotContain(named, closed.Contains);
+        Assert.DoesNotContain(named, p => p.StartsWith("Filme/", StringComparison.Ordinal));
+        Assert.Empty(result.Candidates);
+        Assert.NotNull(result.NewFolder);
+        Assert.DoesNotContain(result.NewFolder!.Parent.RelativePath, closed);
+        Assert.Equal("Fotos", result.NewFolder.Parent.RelativePath);
+        Assert.DoesNotContain(LibraryMatcher.Preselect(map, SummerPhotos(), Options, LibraryWords.Default), c => closed.Contains(c.Target.RelativePath));
+    }
+
+    /// <summary>A kept-whole film from elsewhere may go into the film folder of the same name: the same unit, not loose files.</summary>
+    [Fact]
+    public async Task TheSameFilmUnderItsOwnName_IsStillACandidate()
+    {
+        var map = await MapAsync(WithClosedUnits());
+        var types = Types(FileType.Video, 1);
+        types[(int)FileType.Image] = 3;
+        var film = new MatchUnit
+        {
+            Kind = MatchUnitKind.Folder, Name = "Ein Sommer in Rom (2009)", KeepWhole = true, Role = FolderRole.MediaTitle,
+            Files = 4, Types = types, Words = ["sommer", "rom"], States = new Dictionary<string, long>()
+        };
+
+        var result = LibraryMatcher.Match(map, film, Options, 10, LibraryWords.Default);
+
+        Assert.Contains(result.Candidates, c => c.Placement == MatchPlacement.IntoExisting && c.Destination == "Filme/Ein Sommer in Rom (2009)");
+    }
+
+    [Theory]
+    [InlineData(new[] { "sommer" }, false)]                   // one everyday word
+    [InlineData(new[] { "sommer", "garten" }, false)]         // an everyday word, and a word not in the name
+    [InlineData(new[] { "rechnungen", "stadtwerke" }, true)]  // two words that say something
+    public async Task Names_OneWordOrEverydayWordsNeverAgree(string[] unitWords, bool agrees)
+    {
+        var f = new LibraryTreeFixture();
+        f.Files("Ablage/Sommergarten Rechnungen Stadtwerke", ["a.pdf", "b.pdf", "c.pdf"]);
+        f.Files("Ablage/Anderes", ["d.pdf"]);
+        var map = await MapAsync(f);
+        var unit = new MatchUnit
+        {
+            Kind = MatchUnitKind.File, Name = "x.pdf", Role = FolderRole.DocumentType, Files = 1, Types = Types(FileType.Document, 1),
+            Words = unitWords, From = new DateTime(2016, 5, 1), To = new DateTime(2016, 5, 1), TimeSource = TimeSource.ModifiedDate,
+            States = new Dictionary<string, long>()
+        };
+
+        var result = LibraryMatcher.Match(map, unit, Options, 10, LibraryWords.Default);
+
+        var candidate = result.Unconfirmed!.Concat(result.Candidates).Single(c => c.Target.RelativePath == "Ablage/Sommergarten Rechnungen Stadtwerke");
+        Assert.Equal(agrees, candidate.Signals.Single(s => s.Signal == MatchSignal.Name).Agrees);
+    }
+
+    /// <summary>Photos and a library that holds only papers: no folder fits, and a new folder there would be a guess too.</summary>
+    [Fact]
+    public async Task ALibraryWithoutThisKindOfContent_GivesNoTarget()
+    {
+        var f = new LibraryTreeFixture();
+        f.Files("Unterlagen/Rechnungen", ["r1.pdf", "r2.pdf", "r3.pdf"]);
+        f.Files("Unterlagen/Vertraege", ["v1.pdf", "v2.pdf"]);
+        var map = await MapAsync(f);
+
+        var result = LibraryMatcher.Match(map, SummerPhotos(), Options, 3, LibraryWords.Default);
+
+        Assert.Empty(result.Candidates);
+        Assert.Null(result.NewFolder);
+        Assert.Contains("holds no own photos and videos", result.NoTarget);
+    }
+
+    [Fact]
+    public async Task KindOfContent_OwnPicturesAndFilmsAreToldApart()
+    {
+        var map = await MapAsync(WithClosedUnits());
+        var photos = SummerPhotos();
+        var films = photos with { Types = Types(FileType.Video, 2), TimeSource = TimeSource.ModifiedDate };
+
+        Assert.Equal(ContentKind.OwnRecordings, LibraryMatcher.KindOf(photos));
+        Assert.Equal(ContentKind.ForeignMedia, LibraryMatcher.KindOf(films));
+        Assert.Equal(ContentKind.OwnRecordings, LibraryMatcher.KindOf(films with { TimeSource = TimeSource.CaptureDate }));
+        // The four film and episode videos do not count as own recordings.
+        var own = LibraryMatcher.KindShare(map, photos);
+        var foreign = LibraryMatcher.KindShare(map, films);
+        Assert.True(own > foreign, $"{own} vs {foreign}");
     }
 
     [Fact]

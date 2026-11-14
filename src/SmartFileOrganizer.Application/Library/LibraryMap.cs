@@ -77,6 +77,16 @@ public sealed class LibraryMapEntry
 
     public DumpKind? Dump => Node.Dump == Node ? Node.DumpKind : null;
 
+    /// <summary>
+    /// Why this folder is part of a closed unit (a program, a cache, one film), or null when it is open for loose files
+    /// from elsewhere (https://github.com/crack666/smart_file_organizer/issues/85). Set for the folder that closes the unit
+    /// and every folder below it.
+    /// </summary>
+    public ClosedUnitKind? Closed { get; internal set; }
+
+    /// <summary>The folder that closes the unit (relative path): this one, or the one above it.</summary>
+    public string? ClosedAt { get; internal set; }
+
     /// <summary>Pattern for new subfolders: the patterns file wins over what the names show.</summary>
     public string? Pattern => FilePattern ?? ChildrenPattern?.Template;
 
@@ -185,6 +195,17 @@ public sealed partial class LibraryMap
             AssignRole(entries[i], words, patterns, options);
         foreach (var e in entries)
         {
+            // Tree order: a parent is decided before its children, which inherit a closed unit.
+            if (e.Parent is { Closed: { } inherited } p)
+            {
+                e.Closed = inherited;
+                e.ClosedAt = p.ClosedAt;
+            }
+            else if (e.Depth > 0 && e.Dump is null && ClosedKind(e, words) is { } own)
+            {
+                e.Closed = own;
+                e.ClosedAt = e.RelativePath;
+            }
             e.ChildrenPattern = FindChildrenPattern(e, words);
             e.Purpose = RulePurpose(e);
         }
@@ -292,6 +313,12 @@ public sealed partial class LibraryMap
             e.Role = FolderRole.Topic;
             return;
         }
+        // One film or one episode is a title, not an occasion: its posters do not make it a photo folder (Issue 85).
+        if (IsSingleTitle(e, words))
+        {
+            e.Role = FolderRole.MediaTitle;
+            return;
+        }
         if (e.Share(ContentGroup.Media) >= o.RoleShare)
             e.Role = e.Depth > 0 && !patterns.IsGenericName(e.Name) ? FolderRole.Occasion : FolderRole.Topic;
         else if (e.Share(ContentGroup.Document) >= o.RoleShare)
@@ -304,6 +331,66 @@ public sealed partial class LibraryMap
             e.Role = FolderRole.Mixed;
         else
             e.Role = FolderRole.Topic;
+    }
+
+    /// <summary>
+    /// Whether the folder itself closes a unit (https://github.com/crack666/smart_file_organizer/issues/85): the analysis
+    /// judged it a unit, it is a program or project tree, its name is that of a technical part, or it holds one film or
+    /// episode. Null for an open folder.
+    /// </summary>
+    private static ClosedUnitKind? ClosedKind(LibraryMapEntry e, LibraryWords words)
+    {
+        if (string.Equals(e.Node.Verdict, DirectoryVerdictKind.Unit.ToCode(), StringComparison.Ordinal)) return ClosedUnitKind.Unit;
+        // A program or project tree, also when its parts (src, images) make it look like a collection. It closes where its
+        // own files lie (a readme, a project file next to src); a folder of projects with no files of its own stays open.
+        if ((e.Role == FolderRole.Project || e.Files >= 3 && e.Share(ContentGroup.Software) >= 0.5) && (e.DirectFiles > 0 || e.Children.Count == 0)
+            || e.Node.Profile.UnitMarkers.Count > 0)
+            return ClosedUnitKind.Program;
+        if (words.TechnicalNames.Contains(LibraryWords.Normalize(e.Name))) return ClosedUnitKind.Technical;
+        if (e.Role == FolderRole.MediaTitle && IsSingleTitle(e, words)) return ClosedUnitKind.SingleTitle;
+        return null;
+    }
+
+    /// <summary>Extensions of the files that come with a film: subtitles, info files, pictures for the media player.</summary>
+    private static readonly HashSet<string> CompanionExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".nfo", ".srt", ".sub", ".idx", ".ass", ".ssa", ".vtt", ".txt", ".xml", ".tbn", ".jpg", ".jpeg", ".png", ".webp"
+    };
+
+    /// <summary>Words in the names of the pictures a media player shows for a film (poster, fanart, ...).</summary>
+    private static readonly string[] CompanionWords =
+        ["poster", "fanart", "folder", "cover", "thumb", "banner", "landscape", "clearlogo", "clearart", "logo", "disc", "backdrop", "keyart"];
+
+    /// <summary>
+    /// The folder of one film or one episode: at most two videos and twelve files, nothing else of weight below it, and
+    /// either a name like an episode (<c>S01E03</c>, <c>Folge 3</c>) or a film (<c>Title (2009)</c>), or only companions
+    /// next to the video (posters, subtitles, info files), at least one of them. A folder of one phone video with its
+    /// photos is an occasion, not a title: <c>IMG_...</c> is no companion.
+    /// </summary>
+    public static bool IsSingleTitle(LibraryMapEntry e, LibraryWords words)
+    {
+        var videos = e.Types.Length > (int)FileType.Video ? e.Types[(int)FileType.Video] : 0;
+        if (videos is < 1 or > 2 || e.Files > 12) return false;
+        // Below it only extras, subtitles and the like.
+        if (e.Children.Any(c => c.Files > 0 && !words.CommonChildNames.Contains(LibraryWords.Normalize(c.Name))
+                                            && !words.TechnicalNames.Contains(LibraryWords.Normalize(c.Name))))
+            return false;
+        var direct = e.Node.Files;
+        if (!direct.Any(f => f.FileType == (int)FileType.Video)) return false;
+        var others = direct.Where(f => f.FileType != (int)FileType.Video).ToList();
+        if (!others.All(IsCompanion)) return false;
+        var titleName = EpisodeRegex().IsMatch(e.Name) || FilmNameRegex().IsMatch(e.Name)
+                        || direct.Any(f => f.FileType == (int)FileType.Video && EpisodeRegex().IsMatch(Path.GetFileNameWithoutExtension(f.Name)));
+        return titleName || others.Count > 0;
+
+        static bool IsCompanion(DirectoryFileInfo f)
+        {
+            var ext = Path.GetExtension(f.Name);
+            if (!CompanionExtensions.Contains(ext)) return false;
+            if ((FileType)f.FileType != FileType.Image) return true;
+            var stem = LibraryWords.Normalize(Path.GetFileNameWithoutExtension(f.Name));
+            return CompanionWords.Any(w => stem.Contains(w, StringComparison.Ordinal));
+        }
     }
 
     private static string RulePurpose(LibraryMapEntry e)
@@ -322,8 +409,10 @@ public sealed partial class LibraryMap
             FolderRole.Collection => $"{e.Children.Count} folders of different kinds: {counts}{period}.",
             FolderRole.Occasion => $"Photos and videos of one occasion: {counts}{period}.",
             FolderRole.DocumentType => $"Documents of one kind: {counts}{period}.",
+            FolderRole.MediaTitle when e.Closed == ClosedUnitKind.SingleTitle => $"One film or episode with what belongs to it, kept whole: {counts}.",
             FolderRole.MediaTitle => $"Music or recordings: {counts}{period}.",
             FolderRole.Project => $"A program or project, kept whole: {counts}.",
+            _ when e.Closed == ClosedUnitKind.Technical && e.ClosedAt == e.RelativePath => $"A technical folder ({e.Name}), part of what lies around it: {Or(counts, "empty")}.",
             FolderRole.Mixed => $"Mixed content: {counts}{period}.",
             _ => e.Files == 0 ? "Empty folder." : $"Folder of {counts}{period}."
         };
@@ -580,4 +669,12 @@ public sealed partial class LibraryMap
 
     [GeneratedRegex("_+")]
     private static partial Regex MultiUnderscoreRegex();
+
+    /// <summary>One episode: <c>S01E03</c>, <c>1x03</c>, <c>Folge 3</c>, <c>Episode 12</c>, <c>Ep. 4</c>.</summary>
+    [GeneratedRegex(@"(?i)(?<![a-z0-9])(?:s\d{1,2}[ ._-]?e\d{1,3}|\d{1,2}x\d{2}|(?:folge|episode|ep\.?)[ ._-]*\d{1,3})(?![0-9])")]
+    private static partial Regex EpisodeRegex();
+
+    /// <summary>A film folder as media players name it: a title and the year in brackets, <c>Title (2009)</c>.</summary>
+    [GeneratedRegex(@"^\D*[\p{L}].*\((?:19|20)\d{2}\)\s*$")]
+    private static partial Regex FilmNameRegex();
 }

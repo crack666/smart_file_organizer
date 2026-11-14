@@ -47,7 +47,9 @@ public static class LibraryTargetCommands
         string? Pattern,
         IReadOnlyList<FindingRef> Findings,
         bool Weak,
-        string? DumpKind)
+        string? DumpKind,
+        string? Closed = null,
+        string? ClosedAt = null)
     {
         public static MapEntryView From(LibraryMapEntry e) => new(
             e.FullPath, e.RelativePath, e.Name, e.Depth, e.Parent?.RelativePath,
@@ -59,12 +61,15 @@ public static class LibraryTargetCommands
             e.Pattern,
             Refs(e.Findings),
             e.Findings.Count > 0,
-            e.Dump.ToCode());
+            e.Dump.ToCode(),
+            e.Closed.ToCode(),
+            e.ClosedAt);
 
         public string ToLine() =>
             $"{new string(' ', Depth * 2)}{(Depth == 0 ? "." : Name)}  [{Role}{(ChildrenRole is null ? "" : " of " + ChildrenRole)}]  {Files} files"
             + (Pattern is null ? string.Empty : $"  names: {Pattern}")
             + (Weak ? $"  weak: {string.Join(", ", Findings.Select(f => f.Kind).Distinct())}" : string.Empty)
+            + (Closed is null ? string.Empty : ClosedAt == RelativePath ? $"  closed: {Closed}" : $"  closed: {Closed} of {ClosedAt}")
             + $"\n{new string(' ', Depth * 2 + 2)}{Purpose}";
     }
 
@@ -128,6 +133,7 @@ public static class LibraryTargetCommands
     /// <summary>A folder time or names chose, dropped because its content contradicts the unit.</summary>
     public sealed record RejectedView(string TargetRelative, string Reason, DescriptionView? Folder);
 
+
     public sealed record NewFolderView(
         string Placement,
         string Parent,
@@ -181,7 +187,9 @@ public static class LibraryTargetCommands
         IReadOnlyList<JobView>? Libraries = null,
         IReadOnlyList<SpaceView>? Space = null,
         ContentCheckView? ContentCheck = null,
-        IReadOnlyList<RejectedView>? Rejected = null);
+        IReadOnlyList<RejectedView>? Rejected = null,
+        IReadOnlyList<CandidateView>? Unconfirmed = null,
+        string? NoTarget = null);
 
     // ------------------------------------------------------------------ show
 
@@ -399,12 +407,16 @@ public static class LibraryTargetCommands
             new PeriodView(BundlesCommand.Local(u.From), BundlesCommand.Local(u.To), u.TimeSource.ToCode()),
             u.Words, u.States, DescriptionView.From(a.Result?.Content?.Unit));
 
-        var candidates = (a.Result?.Candidates ?? []).Select((c, i) => new CandidateView(
+        CandidateView View(MatchCandidate c, int i, ScanJob? library) => new(
             i + 1, c.Placement.ToCode(), c.Target.FullPath, c.Target.RelativePath, c.Target.Role.ToCode(), c.Target.Purpose,
-            Full(LibraryOf(i)?.RootPath, c.Destination), c.Destination, u.KeepWhole, c.Score, c.Certainty.ToCode(), c.Reason,
+            Full(library?.RootPath, c.Destination), c.Destination, u.KeepWhole, c.Score, c.Certainty.ToCode(), c.Reason,
             c.Signals.Select(s => new SignalView(s.Signal.ToCode(), Math.Round(s.Value, 3), s.Weight, s.Agrees, s.Contradicts, s.Detail)).ToList(),
-            Weak(c.Weak), LibraryOf(i)?.Id,
-            c.Content is { } cc ? new ContentView(cc.Fit.ToCode(), cc.Reason, DescriptionView.From(cc.Folder)) : null)).ToList();
+            Weak(c.Weak), library?.Id,
+            c.Content is { } cc ? new ContentView(cc.Fit.ToCode(), cc.Reason, DescriptionView.From(cc.Folder)) : null);
+
+        var candidates = (a.Result?.Candidates ?? []).Select((c, i) => View(c, i, LibraryOf(i))).ToList();
+        var unconfirmed = (a.Result?.Unconfirmed ?? []).Select((c, i) =>
+            View(c, i, a.UnconfirmedLibraries is { } libs && i < libs.Count ? libs[i] : a.Library)).ToList();
 
         NewFolderView? newFolder = null;
         if (a.Result?.NewFolder is { } n)
@@ -436,7 +448,9 @@ public static class LibraryTargetCommands
                     check.Status == ContentCheckStatus.Checked ? null : check.Note)
                 : null,
             (a.Result?.Rejected ?? []).Select(r => new RejectedView(r.Target.RelativePath,
-                r.Content?.Reason ?? "the content does not fit", DescriptionView.From(r.Content?.Folder))).ToList());
+                r.Content?.Reason ?? "the content does not fit", DescriptionView.From(r.Content?.Folder))).ToList(),
+            unconfirmed,
+            a.Result?.NoTarget);
     }
 
     private static WeakPlaceView? Weak(WeakPlace? w) => w is null ? null : new WeakPlaceView(Refs(w.Findings), w.Note);
@@ -518,6 +532,10 @@ public static class LibraryTargetCommands
         }
         foreach (var x in r.Rejected ?? [])
             sb.AppendLine($"   not {x.TargetRelative}: {x.Reason}");
+        foreach (var x in r.Unconfirmed ?? [])
+            sb.AppendLine($"   unconfirmed {x.DestinationRelative}: {x.Reason}");
+        if (r.NoTarget is { } none)
+            sb.AppendLine($"no_target     {none}");
         if (r.NewFolder is { } n)
         {
             sb.AppendLine($"new_folder    {n.Destination}  [{n.Certainty}, name by {n.NameSource}]");

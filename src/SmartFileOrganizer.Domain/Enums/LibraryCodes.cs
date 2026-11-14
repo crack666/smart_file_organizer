@@ -103,6 +103,26 @@ public enum FolderRole
     [JsonStringEnumMemberName("mixed")] Mixed
 }
 
+/// <summary>
+/// Why a folder of a library belongs to a closed unit and never takes in loose files from elsewhere
+/// (https://github.com/crack666/smart_file_organizer/issues/85). A folder below such a folder is closed for the same
+/// reason. Dumps are closed as well, but carry their own role <see cref="FolderRole.Dump"/>.
+/// </summary>
+public enum ClosedUnitKind
+{
+    /// <summary>A program or project tree: mostly code and programs, or unit markers such as an exe next to its dlls.</summary>
+    [JsonStringEnumMemberName("program")] Program,
+
+    /// <summary>A technical folder by its name: a cache, thumbnails, the css or js of a web page, build output.</summary>
+    [JsonStringEnumMemberName("technical")] Technical,
+
+    /// <summary>The folder of one film or one episode: one or two videos with their posters and subtitles.</summary>
+    [JsonStringEnumMemberName("single_title")] SingleTitle,
+
+    /// <summary>The analysis judged the folder a unit (verdict <c>unit</c>).</summary>
+    [JsonStringEnumMemberName("unit")] Unit
+}
+
 /// <summary>A change the model proposes for a library. Proposals are data; nothing is carried out here.</summary>
 public enum ProposalAction
 {
