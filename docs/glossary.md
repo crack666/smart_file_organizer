@@ -725,6 +725,7 @@ under its own name may go into it. Dumps are closed as well, through their role 
 | `sensitive` | The sensitive markers of a file. |
 | `finding` | The findings of the job against the expected findings of the corpus (`findings.json`). |
 | `target` | The best place `sfo library match` proposes in the corpus library against the known right one (`targets.json`). |
+| `video_kind` | The stored kind of a video (fact `video_kind`) against the truth; measured from corpus version 8 on. |
 
 ### Outcome of a measured item (`EvalOutcome`)
 

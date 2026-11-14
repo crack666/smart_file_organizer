@@ -27,14 +27,16 @@ public sealed record TruthDirectoryEntry(string Path, string? Verdict, string? N
 /// <param name="Category">Expected category code, or null when no single category is right (not measured).</param>
 /// <param name="Sensitive">Expected marker codes; empty means the file must not be marked. Always measured.</param>
 /// <param name="Description">What the file shows (version 5); not measured, the stub answers it so targets can be matched by content.</param>
+/// <param name="VideoKind">Expected video kind code of a video (version 8, Issue 103), or null when it is not measured.</param>
 public sealed record TruthFileEntry(string Path, string? Category, IReadOnlyList<string> Sensitive, string? Note = null,
-    TruthDescription? Description = null);
+    TruthDescription? Description = null, string? VideoKind = null);
 
 /// <summary>A directory of the truth with its parsed verdict.</summary>
 public sealed record TruthDirectory(string Path, DirectoryVerdictKind? Verdict, string? Note);
 
 /// <summary>A file of the truth with its parsed category and markers.</summary>
-public sealed record TruthFile(string Path, FileCategory? Category, SensitiveMarker Sensitive, string? Note, TruthDescription? Description = null);
+public sealed record TruthFile(string Path, FileCategory? Category, SensitiveMarker Sensitive, string? Note, TruthDescription? Description = null,
+    VideoKind? VideoKind = null);
 
 /// <summary>A truth file that is not unambiguous: unknown codes, duplicate or malformed paths.</summary>
 public sealed class EvalTruthException(IReadOnlyList<string> problems)
@@ -131,7 +133,13 @@ public sealed class EvalTruth
                 if (EvalCodes.TryParseMarker(code, out var m)) markers |= m;
                 else problems.Add($"file '{path}': unknown sensitive marker '{code}'");
             }
-            if (!files.TryAdd(path, new TruthFile(path, category, markers, f.Note, f.Description)))
+            VideoKind? videoKind = null;
+            if (f.VideoKind is not null)
+            {
+                if (VerdictCodes.ParseNullable<VideoKind>(f.VideoKind) is { } k) videoKind = k;
+                else problems.Add($"file '{path}': unknown video kind '{f.VideoKind}'");
+            }
+            if (!files.TryAdd(path, new TruthFile(path, category, markers, f.Note, f.Description, videoKind)))
                 problems.Add($"file '{path}' is listed twice");
             if (!directories.ContainsKey(ParentOf(path)))
                 problems.Add($"file '{path}': its folder '{ParentOf(path)}' is not listed");

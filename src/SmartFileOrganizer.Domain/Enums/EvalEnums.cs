@@ -50,7 +50,13 @@ public enum EvalKind
     /// The place <c>sfo library match</c> proposes in the corpus library against the known right place
     /// (<c>targets.json</c>, https://github.com/crack666/smart_file_organizer/issues/56).
     /// </summary>
-    [JsonStringEnumMemberName("target")] Target
+    [JsonStringEnumMemberName("target")] Target,
+
+    /// <summary>
+    /// The stored kind of each video against the truth (<c>video_kind</c> of a file, corpus version 8,
+    /// https://github.com/crack666/smart_file_organizer/issues/103).
+    /// </summary>
+    [JsonStringEnumMemberName("video_kind")] VideoKind
 }
 
 /// <summary>How one measured item turned out.</summary>

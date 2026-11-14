@@ -28,12 +28,16 @@ public sealed class CorpusEvaluator
     private readonly IDirectoryRepository _directories;
     private readonly IFileRepository _files;
     private readonly IDirectoryVerdictRepository _verdicts;
+    private readonly IFileFactRepository? _facts;
 
-    public CorpusEvaluator(IDirectoryRepository directories, IFileRepository files, IDirectoryVerdictRepository verdicts)
+    /// <param name="facts">Stored file facts, for <c>video_kind</c>; without it the kind is not measured.</param>
+    public CorpusEvaluator(IDirectoryRepository directories, IFileRepository files, IDirectoryVerdictRepository verdicts,
+        IFileFactRepository? facts = null)
     {
         _directories = directories;
         _files = files;
         _verdicts = verdicts;
+        _facts = facts;
     }
 
     public Task<EvalReport> EvaluateAsync(EvalTruth truth, long jobId, CancellationToken ct = default) =>
@@ -82,6 +86,8 @@ public sealed class CorpusEvaluator
             ScoreVerdict(report, expected, node, verdict);
         }
 
+        var measureKinds = _facts is not null && truth.Files.Values.Any(f => f.VideoKind is not null);
+        var facts = measureKinds ? await _facts!.GetByJobAsync(jobId, ct) : new Dictionary<long, IReadOnlyList<FileFact>>();
         foreach (var expected in truth.Files.Values.OrderBy(f => f.Path, StringComparer.Ordinal))
         {
             fileByPath.TryGetValue(expected.Path, out var node);
@@ -89,11 +95,14 @@ public sealed class CorpusEvaluator
                 ScoreCategory(report, expected.Path, category, node);
             ScoreSensitive(report, expected.Path, expected.Sensitive, node,
                 node is null ? SkippedMarkedFolder(expected.Path, dirByPath) : null);
+            if (measureKinds && expected.VideoKind is { } kind)
+                ScoreVideoKind(report, expected.Path, kind, node, node is null ? null : facts.GetValueOrDefault(node.Id));
         }
 
         IEnumerable<EvalKind> kinds = Kinds;
         if (expectedFindings is not null) kinds = kinds.Append(EvalKind.Finding);
         if (targets is not null) kinds = kinds.Append(EvalKind.Target);
+        if (measureKinds) kinds = kinds.Append(EvalKind.VideoKind);
         return report.Build(kinds);
     }
 
@@ -156,6 +165,31 @@ public sealed class CorpusEvaluator
         report.Fail(new(EvalKind.FileCategory, key, path, EvalOutcome.Wrong, want, EvalCodes.Category(cls.Category),
             inherited ? "sample" : byRule ? "rule" : $"model {cls.ModelUsed}",
             inherited ? "inherited from the confirmed sample of its directory" : byRule ? cls.Summary : null));
+    }
+
+    /// <summary>
+    /// The stored <c>video_kind</c> of a video against the truth (Issue 103). Decided by the file (metadata, name,
+    /// companions) or by the model; <c>unknown</c> counts as no result.
+    /// </summary>
+    private static void ScoreVideoKind(EvalReportBuilder report, string path, VideoKind expected, FileNode? node, IReadOnlyList<FileFact>? facts)
+    {
+        var key = Key(EvalKind.VideoKind, path);
+        var want = expected.ToCode();
+        var fact = facts?.FirstOrDefault(f => f.Key == FileFactKey.VideoKind);
+        if (node is null || fact is null || fact.Value == VideoKind.Unknown.ToCode())
+        {
+            report.Fail(new(EvalKind.VideoKind, key, path, EvalOutcome.Missing, want, fact?.Value, fact?.Source.ToCode(),
+                node is null ? "file not in the scan" : fact is null ? "no video kind stored (not analysed, or not read as a video)" : "the kind stayed unknown"));
+            return;
+        }
+        if (fact.Value == want)
+        {
+            report.Hit(EvalKind.VideoKind);
+            return;
+        }
+        var disputed = facts!.FirstOrDefault(f => f.Key == FileFactKey.VideoKindDisputed)?.Value;
+        report.Fail(new(EvalKind.VideoKind, key, path, EvalOutcome.Wrong, want, fact.Value, fact.Source.ToCode(),
+            $"{fact.Certainty?.ToCode() ?? "no certainty"}{(disputed is null ? string.Empty : $", the other side said {disputed}")}"));
     }
 
     /// <summary>

@@ -51,8 +51,10 @@ public static class SmallCorpusGenerator
     /// Version 7 (https://github.com/crack666/smart_file_organizer/issues/85): a folder of two different things (split
     /// by content), a folder under a random string with photos nobody described (no target), account pictures in a
     /// system folder (left out of the match), and the folder of a person in the library that shares only general
-    /// features (everyday, indoor, winter) with photos of the same week.</remarks>
-    public const int GeneratorVersion = 7;
+    /// features (everyday, indoor, winter) with photos of the same week.
+    /// Version 8 (https://github.com/crack666/smart_file_organizer/issues/103): the clips are small real containers with
+    /// metadata, and folders of films, a season, screen recordings and clips of others; <c>video_kind</c> in the truth.</remarks>
+    public const int GeneratorVersion = 8;
 
     public const int DefaultSeed = 36;
     public const string RootFolder = "tree";
@@ -91,6 +93,13 @@ public static class SmallCorpusGenerator
         Finance = "finance", Health = "health";
 
     private static readonly string[] None = [];
+
+    // Video kind codes (version 8, Issue 103).
+    private const string OwnRecording = "own_recording", Movie = "movie", SeriesEpisode = "series_episode",
+        ScreenRecording = "screen_recording", WebClip = "web_clip", MusicVideo = "music_video";
+
+    /// <summary>A small video container with the given metadata (MP4, or Matroska with <paramref name="mkv"/>).</summary>
+    private static byte[] Clip(SyntheticVideoSpec spec, bool mkv = false) => mkv ? SyntheticVideo.Mkv(spec) : SyntheticVideo.Mp4(spec);
 
     private static void Populate(Builder b)
     {
@@ -159,7 +168,8 @@ public static class SmallCorpusGenerator
         b.Dir("Fotos/Sommerfest 2022", Uniform, "Photos and a phone clip of one occasion; a clip there is no mix.");
         for (var i = 0; i < 5; i++)
             b.File($"Fotos/Sommerfest 2022/IMG_20220716_{180112 + i * 305}.jpg", PhotoOf(b, Scene.Garden), D(2022, 7, 16, 18, 1 + i * 5), Photo, None);
-        b.File("Fotos/Sommerfest 2022/VID_20220716_183001.mp4", Mp4(b, 48_000), D(2022, 7, 16, 18, 30), Video, None);
+        b.File("Fotos/Sommerfest 2022/VID_20220716_183001.mp4", Clip(new SyntheticVideoSpec { Make = "samsung", Model = "SM-G991B", Location = true, MediaBytes = 48_000 }),
+            D(2022, 7, 16, 18, 30), Video, None, videoKind: OwnRecording);
         b.Dir("Fotos/hochzeit anna und ben", Uniform, "Photos of one occasion; lower-case name without a date.");
         for (var i = 0; i < 5; i++)
             b.File($"Fotos/hochzeit anna und ben/DSC_{412 + i:0000}.jpg", PhotoOf(b, Scene.Wedding), D(2021, 9, 4, 14, 10 + i * 7), Photo, None);
@@ -304,9 +314,40 @@ public static class SmallCorpusGenerator
         foreach (var song in songs)
             b.File($"Musik/{song}", Mp3(b), D(2017, 8, 1), null, None);
         b.Dir("Videos", Uniform, "Family videos.");
-        b.File("Videos/Geburtstag_Opa_2018.mp4", Mp4(b, 64_000), D(2018, 10, 7), Video, None);
-        b.File("Videos/Schulauffuehrung_2019.mp4", Mp4(b, 64_000), D(2019, 6, 28), Video, None);
-        b.File("Videos/VID_20200101_000512.mp4", Mp4(b, 64_000), D(2020, 1, 1), Video, None);
+        // Version 8 (Issue 103): what each clip carries decides its kind; the second says nothing, there the model does.
+        b.File("Videos/Geburtstag_Opa_2018.mp4", Clip(new SyntheticVideoSpec { Make = "Apple", Model = "iPhone 8", AsMetadataKeys = true, MediaBytes = 64_000 }),
+            D(2018, 10, 7), Video, None, "Phone metadata keys: own recording, certain.", videoKind: OwnRecording);
+        b.File("Videos/Schulauffuehrung_2019.mp4", Clip(new SyntheticVideoSpec { DurationSeconds = 300, MediaBytes = 64_100 }), D(2019, 6, 28), Video, None,
+            "Nothing in container or name: the model names the kind.", videoKind: OwnRecording);
+        b.File("Videos/VID_20200101_000512.mp4", Clip(new SyntheticVideoSpec { MediaBytes = 64_200 }), D(2020, 1, 1), Video, None,
+            "Phone name scheme only: own recording, likely.", videoKind: OwnRecording);
+        b.File("Videos/GX010042.MP4", Clip(new SyntheticVideoSpec { Make = "GoPro", Model = "HERO9 Black", Width = 2704, Height = 1520, FrameRate = 50, MediaBytes = 64_300 }),
+            D(2020, 8, 2), Video, None, "Action cam: maker name scheme and metadata.", videoKind: OwnRecording);
+
+        // Version 8 (Issue 103): videos of the other kinds, read from container, name and companions without a model.
+        b.Dir("Filme", Uniform, "Films only.");
+        b.Dir("Filme/Ein Beispielfilm (2015)", Uniform, "One film in its folder; a folder with one file follows its file (rule single-file).");
+        b.File("Filme/Ein Beispielfilm (2015)/Ein.Beispielfilm.2015.1080p.BluRay.x264-GRP.mkv",
+            Clip(new SyntheticVideoSpec { DurationSeconds = 5700, AudioLanguages = ["ger", "eng"], SubtitleLanguages = ["ger"], Chapters = 8, MediaBytes = 90_000 }, mkv: true),
+            D(2021, 1, 3), Video, None, "Release name with source and codec: a film, certain; no model call.", videoKind: Movie);
+        b.Dir("Serien", Uniform, "Series only.");
+        b.Dir("Serien/Beispielserie", Uniform, "One series.");
+        b.Dir("Serien/Beispielserie/Staffel 2", Uniform, "Episodes of one season; each stands on its own, so the folder is uniform, not a unit.");
+        for (var e = 1; e <= 2; e++)
+            b.File($"Serien/Beispielserie/Staffel 2/Beispielserie S02E0{e}.mkv", Clip(new SyntheticVideoSpec { DurationSeconds = 1400, AudioLanguages = ["ger"], MediaBytes = 70_000 + e }, mkv: true),
+                D(2021, 3, 7 + e), Video, None, "Season and episode in the name: an episode, certain; no model call.", videoKind: SeriesEpisode);
+        b.Dir("Aufnahmen", Uniform, "Screen and game recordings.");
+        b.File("Aufnahmen/2023-03-04 20-15-33.mkv", Clip(new SyntheticVideoSpec { Software = "OBS Studio 29.1", Width = 2560, Height = 1440, FrameRate = 60, MediaBytes = 50_000 }, mkv: true),
+            D(2023, 3, 4, 20, 15), Video, None, "Recording program in the container: screen recording, certain.", videoKind: ScreenRecording);
+        b.File("Aufnahmen/Screen Recording 2023-04-01 at 10.00.00.mov", Clip(new SyntheticVideoSpec { MediaBytes = 50_100 }),
+            D(2023, 4, 1, 10, 0), Video, None, "Name of a screen recorder: screen recording, likely.", videoKind: ScreenRecording);
+        b.Dir("Clips", Uniform, "Clips of others: received in a messenger, downloaded, a music video.");
+        b.File("Clips/VID-20230716-WA0003.mp4", Clip(new SyntheticVideoSpec { DurationSeconds = 20, MediaBytes = 30_000 }), D(2023, 7, 16), Video, None,
+            "Messenger name scheme: web clip, likely.", videoKind: WebClip);
+        b.File("Clips/Papierboot falten [aB3dE5fG7hJ].webm", Clip(new SyntheticVideoSpec { DurationSeconds = 240, MediaBytes = 30_100 }, mkv: true), D(2023, 9, 2), Video, None,
+            "Video id of a download in brackets: web clip, likely.", videoKind: WebClip);
+        b.File("Clips/Beispielband - Beispiellied (Official Video).mp4", Clip(new SyntheticVideoSpec { DurationSeconds = 210, MediaBytes = 30_200 }), D(2022, 5, 1), Video, None,
+            "Music video by its name: music video, likely.", videoKind: MusicVideo);
         b.Dir("Screenshots", Uniform, "Screenshots only.");
         for (var i = 0; i < 4; i++)
             b.File($"Screenshots/Screenshot_2023-0{i + 2}-1{i}_09{10 + i}00.png", Screen(b, 2 + i), D(2023, 2 + i, 10 + i), Screenshot, None);
@@ -378,8 +419,8 @@ public static class SmallCorpusGenerator
             b.File($"Import/IMG_20220305_18{15 + i * 5}00.jpg", PhotoOf(b, Scene.Garden), D(2022, 3, 5, 18, 15 + i * 5), Photo, None,
                 "Taken while a game wrote its cache; no folder for it yet.", GardenDay);
         for (var i = 0; i < 2; i++)
-            b.File($"Import/VID_20200510_21{15 + i * 5}00.mp4", Mp4(b, 64_000), D(2020, 5, 10, 21, 15 + i * 5), Video, None,
-                "Own clip of the evening an episode was saved; no folder for it yet.", EveningClip);
+            b.File($"Import/VID_20200510_21{15 + i * 5}00.mp4", Clip(new SyntheticVideoSpec { MediaBytes = 64_400 + i }), D(2020, 5, 10, 21, 15 + i * 5), Video, None,
+                "Own clip of the evening an episode was saved; no folder for it yet.", EveningClip, OwnRecording);
         for (var i = 0; i < 2; i++)
             b.File($"Import/IMG_20180901_12{05 + i * 5:00}00.jpg", PhotoOf(b, Scene.Coast), D(2018, 9, 1, 12, 5 + i * 5), Photo, None,
                 "Taken the day a program was installed; no folder for it yet.", CoastDay);
@@ -891,12 +932,12 @@ public static class SmallCorpusGenerator
         }
 
         public void File(string path, byte[] content, DateTime modified, string? category, string[] sensitive, string? note = null,
-            TruthDescription? description = null)
+            TruthDescription? description = null, string? videoKind = null)
         {
             var full = Full(path);
             System.IO.File.WriteAllBytes(full, content);
             System.IO.File.SetLastWriteTimeUtc(full, modified);
-            Files.Add(new TruthFileEntry(path, category, sensitive, note, description));
+            Files.Add(new TruthFileEntry(path, category, sensitive, note, description, videoKind));
             _dirTimes.Add((EvalTruth.ParentOf(path), modified));
         }
 
