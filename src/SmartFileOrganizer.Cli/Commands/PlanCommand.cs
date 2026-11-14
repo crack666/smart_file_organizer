@@ -13,7 +13,8 @@ namespace SmartFileOrganizer.Cli.Commands;
 
 /// <summary>
 /// <c>sfo plan</c> (https://github.com/crack666/smart_file_organizer/issues/11): a plan from the accepted findings of a
-/// source, to read, change and confirm action by action. Nothing is moved, copied or removed.
+/// source, to read, change and confirm action by action. Only <c>apply</c>, <c>undo</c> and <c>purge</c> with
+/// <c>--execute</c> change files (https://github.com/crack666/smart_file_organizer/issues/12).
 /// </summary>
 public static class PlanCommand
 {
@@ -101,7 +102,7 @@ public static class PlanCommand
     public static Command Create(CliHost host, GlobalOptions globals)
     {
         var command = new Command("plan",
-            "Plans: actions from accepted findings, to read, change and confirm. Nothing is moved, copied or removed.");
+            "Plans: actions from accepted findings, to read, change and confirm; apply, undo and purge execute confirmed actions (dry run unless --execute).");
         command.Subcommands.Add(CreateCreate(host, globals));
         command.Subcommands.Add(CreateShow(host, globals));
         command.Subcommands.Add(CreateSummary(host, globals));
@@ -110,7 +111,109 @@ public static class PlanCommand
         command.Subcommands.Add(CreateDecision(host, globals, "approve", approve: true,
             "Confirm actions. Only actions without problems; sensitive ones only by --action."));
         command.Subcommands.Add(CreateDecision(host, globals, "reject", approve: false, "Reject actions: they are not executed."));
+        command.Subcommands.Add(CreateRun(host, globals, "apply",
+            "Execute confirmed actions. Without --execute a dry run. Step 1 copies and checks; --remove-sources (step 2) moves the checked originals into the hold folder.",
+            withRemove: true));
+        command.Subcommands.Add(CreateRun(host, globals, "undo",
+            "Take back what apply did, newest first: originals back, own copies and folders removed. Without --execute a dry run.",
+            withRemove: false));
+        command.Subcommands.Add(CreateRun(host, globals, "purge",
+            "Remove held originals for good, only where the copy at the target still has their checksum. Cannot be undone. Without --execute a dry run.",
+            withRemove: false));
+        command.Subcommands.Add(CreateKeepSource(host, globals));
         return command;
+    }
+
+    // ------------------------------------------------------------------ apply, undo, purge
+
+    private static Command CreateRun(CliHost host, GlobalOptions globals, string name, string description, bool withRemove)
+    {
+        var plan = PlanArgument();
+        var action = new Option<long[]>("--action")
+        {
+            Description = "Only this action; repeatable. A sensitive action runs only when named here.",
+            HelpName = "action"
+        };
+        var execute = new Option<bool>("--execute") { Description = "Really change files. Without it: a dry run that only reads and reports." };
+        var remove = new Option<bool>("--remove-sources")
+        {
+            Description = "Step 2: move the originals of verified actions into the hold folder, after reading both files again."
+        };
+        var command = new Command(name, description) { plan, action, execute };
+        if (withRemove)
+            command.Options.Add(remove);
+
+        CommandRunner.SetHandler(command, host, globals, async (ctx, ct) =>
+        {
+            var services = await ctx.GetServicesAsync(ct);
+            var p = ctx.ParseResult;
+            var options = new PlanRunOptions((p.GetValue(action) ?? []).Distinct().ToList(), p.GetValue(execute));
+            var executor = services.GetRequiredService<PlanExecutor>();
+            var id = p.GetValue(plan);
+            var report = await Run(() => name switch
+            {
+                "apply" when p.GetValue(remove) => executor.RemoveSourcesAsync(id, options, ct),
+                "apply" => executor.ApplyAsync(id, options, ct),
+                "undo" => executor.UndoAsync(id, options, ct),
+                _ => executor.PurgeAsync(id, options, ct)
+            });
+            var incomplete = report.Items.Where(i => i.Outcome is "failed" or "partial" or "would_fail").ToList();
+            if (report.Executed && incomplete.Count > 0)
+            {
+                return CommandOutcome.Fail(ExitCodes.Failure, ErrorCodes.PlanRunIncomplete,
+                    $"{incomplete.Count} actions failed or were not fully done; see items.", report, () => RenderRun(report));
+            }
+            return CommandOutcome.Success(report, () => RenderRun(report));
+        });
+        return command;
+    }
+
+    private static Command CreateKeepSource(CliHost host, GlobalOptions globals)
+    {
+        var job = JobArguments.Create("Job id of a source (see sfo jobs).");
+        var off = new Option<bool>("--off") { Description = "Allow removing originals again." };
+        var command = new Command("keep-source",
+            "Leave the sources of a job untouched: a move then only copies, nothing is removed. --off lifts it.")
+        {
+            job, off
+        };
+        CommandRunner.SetHandler(command, host, globals, async (ctx, ct) =>
+        {
+            var services = await ctx.GetServicesAsync(ct);
+            var p = ctx.ParseResult;
+            var executor = services.GetRequiredService<PlanExecutor>();
+            var id = p.GetValue(job);
+            await Run(async () =>
+            {
+                await executor.SetKeepSourceAsync(id, !p.GetValue(off), ct);
+                return true;
+            });
+            var result = new KeepSourceResult(id, await executor.GetKeepSourceAsync(id, ct));
+            return CommandOutcome.Success(result, () => $"Job {result.JobId}: keep_source {(result.KeepSource ? "on" : "off")}");
+        });
+        return command;
+    }
+
+    public sealed record KeepSourceResult(long JobId, bool KeepSource);
+
+    private static string RenderRun(PlanRunReport r)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine($"Plan {r.PlanId}, {r.Mode}{(r.Executed ? string.Empty : " (dry run: nothing changed; add --execute)")}"
+                      + (r.KeepSource ? ", sources kept (keep_source)" : string.Empty));
+        foreach (var i in r.Items)
+        {
+            sb.AppendLine($"  {i.ActionId,5} {i.Outcome,-10} {i.Kind,-13} {i.State,-9} {i.Files,5} files {ReadFormat.Size(i.Bytes),10}"
+                          + (i.Reasons.Count > 0 ? $" [{string.Join(", ", i.Reasons)}]" : string.Empty));
+            if (i.Detail is { } d)
+                sb.AppendLine($"        {d}");
+        }
+        if (r.Removal.Actions > 0)
+            sb.AppendLine($"  waiting for removal: {r.Removal.Actions} actions, {r.Removal.Files} files, {ReadFormat.Size(r.Removal.Bytes)} "
+                          + $"(sfo plan apply {r.PlanId} --remove-sources)");
+        foreach (var folder in r.EmptyFolders)
+            sb.AppendLine($"  left empty (stays): {folder}");
+        return sb.ToString().TrimEnd();
     }
 
     private static Argument<long> PlanArgument() => new("plan") { Description = "Plan id (see sfo plan create).", HelpName = "plan" };

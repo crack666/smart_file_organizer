@@ -57,5 +57,6 @@ public static class ErrorCodes
     public const string PlanChangeRefused = "plan_change_refused";
     public const string LibraryInvalid = "library_invalid";
     public const string ImportInvalid = "import_invalid";
+    public const string PlanRunIncomplete = "plan_run_incomplete";
     public const string InternalError = "internal_error";
 }
