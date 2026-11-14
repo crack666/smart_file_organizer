@@ -54,7 +54,8 @@ public static class PlanCommand
 
         public string ToLine() =>
             $"  {Id,5} {State,-9} {Kind,-13} {RelativePath}"
-            + (Target is { } t ? $" -> {t}" : string.Empty)
+            // discard writes nothing anywhere; a target it still carries is not where the file goes.
+            + (Kind == "discard" ? " -> hold folder, no copy" : Target is { } t ? $" -> {t}" : string.Empty)
             + (Sensitive ? " [sensitive, one by one]" : string.Empty)
             + (IntoManagedArea ? " [into managed area]" : string.Empty)
             + (Problems.Count > 0 ? $" [problems: {string.Join(", ", Problems)}]" : string.Empty);
@@ -82,7 +83,16 @@ public static class PlanCommand
         IReadOnlyList<LibraryView> Libraries,
         long Units,
         IReadOnlyList<UnitView> TopUnits,
-        IReadOnlyList<string> Notes);
+        IReadOnlyList<string> Notes,
+        HoldView? Hold = null);
+
+    /// <summary>
+    /// The hold folder of the plan (https://github.com/crack666/smart_file_organizer/issues/105): what the actions still to
+    /// run would put there (every kind that takes the original away, not rejected), of that what <c>discard</c> puts there
+    /// without a copy, and what lies there now. It lies on the drive of the source: only <c>sfo plan purge</c> frees room.
+    /// </summary>
+    public sealed record HoldView(string Folder, bool KeepSource, long Actions, long Files, long Bytes,
+        long DiscardActions, long DiscardFiles, long DiscardBytes, long HeldFiles, long HeldBytes);
 
     public sealed record ListResult(long PlanId, long JobId, long Total, int Limit, int Offset, int? NextOffset, IReadOnlyList<ActionView> Items);
 
@@ -118,7 +128,8 @@ public static class PlanCommand
             "Take back what apply did, newest first: originals back, own copies and folders removed. Without --execute a dry run.",
             withRemove: false));
         command.Subcommands.Add(CreateRun(host, globals, "purge",
-            "Remove held originals for good, only where the copy at the target still has their checksum. Cannot be undone. Without --execute a dry run.",
+            "Remove held originals for good (empty the hold folder), only where the copy at the target still has their checksum; "
+            + "discarded originals have no copy and go as they are. Cannot be undone. Without --execute a dry run.",
             withRemove: false));
         command.Subcommands.Add(CreateKeepSource(host, globals));
         return command;
@@ -219,6 +230,10 @@ public static class PlanCommand
         if (r.Removal.Actions > 0)
             sb.AppendLine($"  waiting for removal: {r.Removal.Actions} actions, {r.Removal.Files} files, {ReadFormat.Size(r.Removal.Bytes)} "
                           + $"(sfo plan apply {r.PlanId} --remove-sources)");
+        if (r.Held is { Files: > 0 } h)
+            sb.AppendLine($"  in the hold folder{(r.Executed ? string.Empty : " after this run")}: {h.Files} files, {ReadFormat.Size(h.Bytes)}"
+                          + (h.DiscardedFiles > 0 ? $" ({h.DiscardedFiles} discarded, no copy exists)" : string.Empty)
+                          + $"; on the drive of the source, freed only by sfo plan purge {r.PlanId}");
         foreach (var folder in r.EmptyFolders)
             sb.AppendLine($"  left empty (stays): {folder}");
         foreach (var n in r.Notices ?? [])
@@ -268,7 +283,7 @@ public static class PlanCommand
             var p = ctx.ParseResult;
             var options = new PlanCreateOptions((p.GetValue(against) ?? []).Distinct().ToList(), p.GetValue(library));
             var state = await Run(() => services.GetRequiredService<PlanService>().CreateAsync(p.GetValue(job), options, ct));
-            var result = Summary(state, services.GetService<IFreeSpaceProbe>(), DefaultTopUnits);
+            var result = await SummaryWithHoldAsync(services, state, DefaultTopUnits, ct);
             return CommandOutcome.Success(result, () => RenderSummary(result));
         });
         return command;
@@ -367,7 +382,7 @@ public static class PlanCommand
             var services = await ctx.GetServicesAsync(ct);
             var p = ctx.ParseResult;
             var s = await Run(() => services.GetRequiredService<PlanService>().GetAsync(p.GetValue(plan), ct));
-            var result = Summary(s, services.GetService<IFreeSpaceProbe>(), p.GetValue(top));
+            var result = await SummaryWithHoldAsync(services, s, p.GetValue(top), ct);
             return CommandOutcome.Success(result, () => RenderSummary(result));
         });
         return command;
@@ -571,6 +586,25 @@ public static class PlanCommand
 
     // ------------------------------------------------------------------ summary
 
+    /// <summary>The summary with its hold folder: what goes there, what lies there and what the purge frees.</summary>
+    private static async Task<SummaryResult> SummaryWithHoldAsync(IServiceProvider services, PlanState s, int top, CancellationToken ct)
+    {
+        var executor = services.GetRequiredService<PlanExecutor>();
+        var held = await executor.GetHeldAsync(s.Plan.Id, ct);
+        var keep = await executor.GetKeepSourceAsync(s.Job.Id, ct);
+        return Summary(s, services.GetService<IFreeSpaceProbe>(), top) with { Hold = Hold(s, held, keep) };
+    }
+
+    public static HoldView Hold(PlanState s, PlanHoldSummary held, bool keepSource)
+    {
+        var going = s.Actions.Select(a => a.Action)
+            .Where(a => PlanChecks.RemovesSource(a.Kind) && a.State is PlanActionState.Proposed or PlanActionState.Approved or PlanActionState.Verified)
+            .ToList();
+        var discard = going.Where(a => a.Kind == PlanActionKind.Discard).ToList();
+        return new HoldView(held.Folder, keepSource, going.Count, going.Sum(a => a.Files), going.Sum(a => a.Bytes),
+            discard.Count, discard.Sum(a => a.Files), discard.Sum(a => a.Bytes), held.Files, held.Bytes);
+    }
+
     public static SummaryResult Summary(PlanState s, IFreeSpaceProbe? probe, int top)
     {
         var actions = s.Actions;
@@ -620,6 +654,14 @@ public static class PlanCommand
         foreach (var l in r.Libraries)
             sb.AppendLine($"  library job {l.JobId} {l.RootPath}: {ReadFormat.Size(l.NeededBytes)} needed, "
                           + $"{(l.FreeBytes is { } free ? ReadFormat.Size(free) : "unknown")} free ({l.Space})");
+        if (r.Hold is { } h && (h.Actions > 0 || h.HeldFiles > 0))
+        {
+            sb.AppendLine($"  hold folder {h.Folder}: {h.Actions} actions, {h.Files} files, {ReadFormat.Size(h.Bytes)} still to go there"
+                          + (h.DiscardActions > 0 ? $" ({h.DiscardActions} discard, {ReadFormat.Size(h.DiscardBytes)}, without a copy)" : string.Empty)
+                          + (h.KeepSource ? "; keep_source is on, nothing is removed" : string.Empty));
+            sb.AppendLine($"    held now: {h.HeldFiles} files, {ReadFormat.Size(h.HeldBytes)}. The hold folder lies on the drive of the source: "
+                          + $"room there is freed only by sfo plan purge {r.PlanId}.");
+        }
         foreach (var u in r.TopUnits)
             sb.AppendLine($"  {u.FindingKey,-24} {u.Actions,5} actions {ReadFormat.Size(u.Bytes),10}  {u.Unit}");
         foreach (var note in r.Notes)

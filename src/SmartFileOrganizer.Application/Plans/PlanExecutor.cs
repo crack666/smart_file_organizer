@@ -54,6 +54,16 @@ public sealed record PlanRunItem(long ActionId, string Kind, string Outcome, str
 /// <summary>Originals that wait for removal (<c>verified</c>): what <c>--remove-sources</c> would take away and the room it frees.</summary>
 public sealed record PlanRemovalSummary(long Actions, long Files, long Bytes);
 
+/// <summary>
+/// The originals of a plan that lie in its hold folder (https://github.com/crack666/smart_file_organizer/issues/105): put
+/// there by step 2, put back by <c>sfo plan undo</c>, removed for good only by <c>sfo plan purge</c>. The hold folder
+/// lies on the drive of the source, so <paramref name="Bytes"/> is the room only the purge frees there.
+/// </summary>
+/// <param name="Folder">The hold folder of the job (<c>&lt;job root&gt;/.sfo-hold</c>).</param>
+/// <param name="DiscardedFiles">Of them, originals of <c>discard</c>: no copy of them exists, the purge removes the last one.</param>
+public sealed record PlanHoldSummary(string Folder, long Files, long Bytes, long DiscardedFiles, long DiscardedBytes);
+
+/// <param name="Held">What lies in the hold folder after the run (a dry run: as it would); always set by the executor.</param>
 public sealed record PlanRunReport(
     long PlanId,
     string Mode,
@@ -62,7 +72,8 @@ public sealed record PlanRunReport(
     IReadOnlyList<PlanRunItem> Items,
     PlanRemovalSummary Removal,
     IReadOnlyList<string> EmptyFolders,
-    IReadOnlyList<PlanNoticeItem>? Notices = null);
+    IReadOnlyList<PlanNoticeItem>? Notices = null,
+    PlanHoldSummary? Held = null);
 
 /// <summary>
 /// Executes and takes back a plan (https://github.com/crack666/smart_file_organizer/issues/12). Only confirmed actions
@@ -160,7 +171,7 @@ public sealed class PlanExecutor
 
     private async Task<PlanRunItem> CopyActionAsync(RunState run, PlanAction a, CancellationToken ct)
     {
-        if (Guard(run, a, removes: a.Kind is PlanActionKind.DeleteSource or PlanActionKind.Quarantine) is { } refused)
+        if (Guard(run, a, removes: a.Kind is PlanActionKind.DeleteSource or PlanActionKind.Quarantine or PlanActionKind.Discard) is { } refused)
             return refused;
 
         var (files, missing) = ListSource(run, a);
@@ -169,6 +180,19 @@ public sealed class PlanExecutor
         var bytes = files.Sum(f => f.Size);
         if (!await UnchangedSinceScanAsync(run, a, files, ct))
             return Item(a, "skipped", [PlanRunReason.SourceChanged.ToCode()], files.Count, bytes);
+
+        // discard copies nothing: step 1 only checks that the source is as the scan saw it, so that step 2, confirmed on its
+        // own, is the one that takes the original away. Nothing is written, not even a journal step.
+        if (a.Kind == PlanActionKind.Discard)
+        {
+            if (!run.Execute)
+                return Item(a, "would_run", [], files.Count, bytes);
+            a.State = PlanActionState.Verified;
+            a.Note = $"Checked ({files.Count} files); nothing is copied. The original waits for sfo plan apply {run.Plan.Id} --remove-sources, "
+                     + "which puts it into the hold folder.";
+            await SaveAsync(a, ct);
+            return Item(a, "done", [], files.Count, bytes);
+        }
 
         var pairs = files.Select(f => (File: f, Target: TargetOf(a, f))).ToList();
         if (a.Kind == PlanActionKind.DeleteSource)
@@ -387,6 +411,8 @@ public sealed class PlanExecutor
     {
         if (Guard(run, a, removes: true) is { } refused)
             return refused;
+        if (a.Kind == PlanActionKind.Discard)
+            return await DiscardActionAsync(run, a, emptied, ct);
 
         var pending = run.Checked(a.Id).Where(s => run.ActiveHold(a.Id, s.SourcePath) is null).ToList();
         var bytes = pending.Sum(s => s.Bytes);
@@ -447,6 +473,97 @@ public sealed class PlanExecutor
         return Item(a, "done", [], pending.Count, bytes);
     }
 
+    /// <summary>
+    /// <c>discard</c>, step 2 (https://github.com/crack666/smart_file_organizer/issues/105): every file of the source the
+    /// scan saw and that is not held yet is read whole for its checksum and renamed into the hold folder on its own drive.
+    /// There is no copy anywhere, so nothing is compared with a target: the file must be as the scan saw it, the source
+    /// may hold no file the scan did not see, and its size and modification time must not change while its checksum is
+    /// read, so that the undo puts back exactly what went. A run cut off between two files leaves the action <c>verified</c> with the held
+    /// files journalled; the next run takes the rest.
+    /// </summary>
+    private async Task<PlanRunItem> DiscardActionAsync(RunState run, PlanAction a, ISet<string> emptied, CancellationToken ct)
+    {
+        var scanned = await _journal.GetScannedFilesAsync(run.Job.Id, a.SourcePath, ct);
+        var pending = scanned.Where(f => run.ActiveHold(a.Id, f.FullPath) is null && !IsNotice(f.FullPath))
+            .OrderBy(f => f.FullPath, StringComparer.Ordinal).ToList();
+        var bytes = pending.Sum(f => f.Size);
+
+        // What lies in the source now: only files the scan saw, unchanged, and no link.
+        var (present, missing) = ListSource(run, a);
+        if (missing == PlanRunReason.SourceHasLink)
+            return await FailAsync(run, a, PlanRunReason.SourceHasLink, $"{a.SourcePath} is or holds a link; links are never followed.", pending.Count, bytes, ct);
+        if (missing is null)
+        {
+            var known = pending.ToDictionary(f => f.FullPath, PathComparer);
+            foreach (var f in present)
+            {
+                if (!known.TryGetValue(f.Path, out var seen))
+                    return await FailAsync(run, a, PlanRunReason.SourceChanged, $"{f.Path} was not there when the source was scanned.", pending.Count, bytes, ct);
+                if (seen.Size != f.Size || seen.LastWriteTime.Ticks != f.LastWriteTicks)
+                    return await FailAsync(run, a, PlanRunReason.SourceChanged, $"{f.Path} is not as the scan saw it.", pending.Count, bytes, ct);
+            }
+        }
+        var there = present.Select(p => p.Path).ToHashSet(PathComparer);
+        var gone = pending.Where(f => !there.Contains(f.FullPath)).ToList();
+        if (gone.Count > 0)
+            return await FailAsync(run, a, PlanRunReason.SourceMissing, $"{gone[0].FullPath} is gone.", pending.Count, bytes, ct);
+
+        foreach (var f in pending)
+        {
+            var hold = HoldPath(run, a, f.FullPath);
+            if (!SameVolume(f.FullPath, hold))
+                return await FailAsync(run, a, PlanRunReason.OtherVolume, $"{hold} is not on the drive of {f.FullPath}.", pending.Count, bytes, ct);
+        }
+
+        if (!run.Execute)
+        {
+            var now = DateTime.UtcNow;
+            run.WouldHold.AddRange(pending.Select(f => new PlanStep
+            {
+                PlanId = run.Plan.Id, ActionId = a.Id, Kind = PlanStepKind.Hold, State = PlanStepState.Done,
+                SourcePath = f.FullPath, TargetPath = null, Bytes = f.Size, StartedAt = now, FinishedAt = now
+            }));
+            return Item(a, "would_run", [], pending.Count, bytes);
+        }
+
+        foreach (var f in pending)
+        {
+            var source = f.FullPath;
+            var hold = HoldPath(run, a, source);
+            if (File.Exists(hold) || Directory.Exists(hold))
+                return await FailAsync(run, a, PlanRunReason.IoError, $"{hold} is taken.", pending.Count, bytes, ct);
+            var hash = await HashAsync(source, ct);
+            var after = _hasher.Stat(source);
+            if (hash is null || !after.Exists)
+                return await FailAsync(run, a, PlanRunReason.SourceMissing, $"{source} could not be read.", pending.Count, bytes, ct);
+            if (after.Size != f.Size || after.LastWriteTicks != f.LastWriteTime.Ticks)
+                return await FailAsync(run, a, PlanRunReason.SourceChanged, $"{source} changed while it was read.", pending.Count, bytes, ct);
+
+            var step = await StartAsync(run, a, PlanStepKind.Hold, source, null, hold, f.Size, hash, ct);
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(hold)!);
+                _hooks.Hit(PlanExecutionHooks.BeforeHold, source);
+                File.Move(source, hold, overwrite: false);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                await FinishAsync(run, step, PlanStepState.Failed, $"{PlanRunReason.IoError.ToCode()}: {ex.Message}", ct);
+                return await FailAsync(run, a, PlanRunReason.IoError, ex.Message, pending.Count, bytes, ct);
+            }
+            await FinishAsync(run, step, PlanStepState.Done, "Discarded: nothing was copied.", ct);
+            NoteEmptyFolders(run, Path.GetDirectoryName(source)!, emptied);
+        }
+
+        var held = run.Steps.Count(s => s.ActionId == a.Id && s.Kind == PlanStepKind.Hold && s.State == PlanStepState.Done
+                                        && run.ActiveHold(a.Id, s.SourcePath)?.Id == s.Id);
+        a.State = PlanActionState.Executed;
+        a.Note = $"Discarded: the originals ({held} files) lie in the hold folder until sfo plan purge {run.Plan.Id}; nothing was copied. "
+                 + "sfo plan undo puts them back.";
+        await SaveAsync(a, ct);
+        return Item(a, "done", [], pending.Count, bytes);
+    }
+
     // ------------------------------------------------------------------ undo
 
     /// <summary>
@@ -462,7 +579,9 @@ public sealed class PlanExecutor
         foreach (var a in run.Actions.OrderByDescending(a => a.Id))
         {
             if (!run.Selected(a) || a.State is PlanActionState.Undone) continue;
-            if (!run.Steps.Any(s => s.ActionId == a.Id && s.State == PlanStepState.Done)) continue;
+            // A discard after step 1 has no journal step yet; taking it back only means it no longer waits for step 2.
+            var checkedDiscard = a.Kind == PlanActionKind.Discard && a.State == PlanActionState.Verified;
+            if (!checkedDiscard && !run.Steps.Any(s => s.ActionId == a.Id && s.State == PlanStepState.Done)) continue;
             Add(run, items,await UndoActionAsync(run, a, ct));
         }
         var notices = await UpdateNoticesAsync(run, create: false, ct);
@@ -481,9 +600,12 @@ public sealed class PlanExecutor
         if (!run.Execute)
         {
             run.WouldReturn.Add(a.Id);
-            var purged = holds.Count(h => run.Purged(h));
-            return Item(a, "would_run", [], files, bytes,
-                purged > 0 ? $"{purged} originals were purged; they are copied back from the target" : null);
+            var purged = holds.Count(h => run.Purged(h) && h.TargetPath is not null);
+            var lost = holds.Count(h => run.Purged(h) && h.TargetPath is null);
+            var notes = new List<string>();
+            if (purged > 0) notes.Add($"{purged} originals were purged; they are copied back from the target");
+            if (lost > 0) notes.Add($"{lost} discarded originals were purged; there is no copy to bring them back from");
+            return Item(a, lost > 0 ? "would_fail" : "would_run", lost > 0 ? [PlanRunReason.NotUndoable.ToCode()] : [], files, bytes, Join(notes));
         }
 
         var reasons = new List<string>();
@@ -520,9 +642,15 @@ public sealed class PlanExecutor
                 else
                 {
                     // Purged: the checked file at the target is the original's content; copy it back.
-                    if (h.TargetPath is not { } target || await HashAsync(target, ct) != h.Hash)
+                    if (h.TargetPath is null)
                     {
-                        Refuse(PlanRunReason.NotUndoable, $"{source} was purged and {h.TargetPath} no longer has its content.");
+                        Refuse(PlanRunReason.NotUndoable, $"{source} was discarded and purged; no copy of it was ever made.");
+                        continue;
+                    }
+                    var target = h.TargetPath;
+                    if (await HashAsync(target, ct) != h.Hash)
+                    {
+                        Refuse(PlanRunReason.NotUndoable, $"{source} was purged and {target} no longer has its content.");
                         continue;
                     }
                     var step = await StartAsync(run, a, PlanStepKind.Restore, source, target, null, h.Bytes, h.Hash, ct);
@@ -643,7 +771,9 @@ public sealed class PlanExecutor
 
     /// <summary>
     /// Removes held originals for good; this cannot be taken back from the hold folder. Only an original whose file at
-    /// the target still has its checksum and is another file is purged: the last copy of anything is never removed.
+    /// the target still has its checksum and is another file is purged: the last copy of anything is never removed. The
+    /// exception is <c>discard</c>, whose originals have no copy by intent; this is the only place where they are removed
+    /// for good, and only when called on purpose.
     /// </summary>
     public async Task<PlanRunReport> PurgeAsync(long planId, PlanRunOptions options, CancellationToken ct = default)
     {
@@ -658,6 +788,7 @@ public sealed class PlanExecutor
             var bytes = held.Sum(h => h.Bytes);
             if (!run.Execute)
             {
+                run.WouldPurge.UnionWith(held.Select(h => h.Id));
                 Add(run, items, Item(a, "would_run", [], held.Count, bytes));
                 continue;
             }
@@ -668,8 +799,12 @@ public sealed class PlanExecutor
             var purgedBytes = 0L;
             foreach (var h in held)
             {
-                var target = h.TargetPath!;
-                PlanRunReason? refuse = !File.Exists(target) ? PlanRunReason.TargetMissing
+                var target = h.TargetPath;
+                // A discarded original has no copy by intent: the person wanted it gone, and purging is that decision.
+                // Every other held original goes only while its checked copy is there.
+                PlanRunReason? refuse = target is null
+                    ? (a.Kind == PlanActionKind.Discard ? null : PlanRunReason.TargetMissing)
+                    : !File.Exists(target) ? PlanRunReason.TargetMissing
                     : await HashAsync(target, ct) != h.Hash ? PlanRunReason.TargetChanged
                     : SameFile(h.HoldPath!, target);
                 if (refuse is { } r)
@@ -721,6 +856,9 @@ public sealed class PlanExecutor
 
         /// <summary>Dry run only: actions whose originals the undo would put back.</summary>
         public HashSet<long> WouldReturn { get; } = [];
+
+        /// <summary>Dry run only: hold steps whose originals the purge would remove.</summary>
+        public HashSet<long> WouldPurge { get; } = [];
 
         public bool Named(PlanAction a) => Options.ActionIds.Contains(a.Id);
         public bool Selected(PlanAction a) => a.Kind != PlanActionKind.Leave && (Options.ActionIds.Count == 0 || Named(a));
@@ -1081,12 +1219,44 @@ public sealed class PlanExecutor
     private static PlanRunReport Report(RunState run, string mode, IReadOnlyList<PlanRunItem> items, IReadOnlyList<string> emptied,
         IReadOnlyList<PlanNoticeItem>? notices = null)
     {
-        // What --remove-sources would take away now: the originals of every verified action not yet held.
+        // What --remove-sources would take away now: the originals of every verified action not yet held. A discard has no
+        // checked pair; its originals are the files of its source less those already held.
         var waiting = run.Actions.Where(a => a.State == PlanActionState.Verified).ToList();
-        var files = waiting.SelectMany(a => run.Checked(a.Id).Where(s => run.ActiveHold(a.Id, s.SourcePath) is null)).ToList();
+        var files = waiting.Where(a => a.Kind != PlanActionKind.Discard)
+            .SelectMany(a => run.Checked(a.Id).Where(s => run.ActiveHold(a.Id, s.SourcePath) is null)).ToList();
+        long count = files.Count, bytes = files.Sum(s => s.Bytes);
+        foreach (var a in waiting.Where(a => a.Kind == PlanActionKind.Discard))
+        {
+            var held = HeldSteps(run, a.Id).ToList();
+            count += Math.Max(0, a.Files - held.Count);
+            bytes += Math.Max(0, a.Bytes - held.Sum(h => h.Bytes));
+        }
         return new PlanRunReport(run.Plan.Id, mode, run.Execute, run.KeepSource, items,
-            new PlanRemovalSummary(waiting.Count, files.Count, files.Sum(s => s.Bytes)), emptied, notices ?? []);
+            new PlanRemovalSummary(waiting.Count, count, bytes), emptied, notices ?? [], Held(run));
     }
+
+    /// <summary>The hold steps of an action whose original lies in the hold folder now: not put back, not purged.</summary>
+    private static IEnumerable<PlanStep> HeldSteps(RunState run, long actionId) => run.Steps
+        .Where(s => s.ActionId == actionId && s.Kind == PlanStepKind.Hold && s.State == PlanStepState.Done
+                    && run.ActiveHold(actionId, s.SourcePath)?.Id == s.Id && !run.Purged(s));
+
+    /// <summary>
+    /// What lies in the hold folder of the plan after the run (a dry run: as it would): the room only
+    /// <see cref="PurgeAsync"/> frees, on the drive of the source.
+    /// </summary>
+    private static PlanHoldSummary Held(RunState run)
+    {
+        var held = run.Actions.SelectMany(a => HeldSteps(run, a.Id))
+            .Where(s => !run.WouldReturn.Contains(s.ActionId) && !run.WouldPurge.Contains(s.Id))
+            .Concat(run.WouldHold)
+            .ToList();
+        return new PlanHoldSummary(PlanChecks.Join(run.Job.RootPath, HoldFolderName), held.Count, held.Sum(s => s.Bytes),
+            held.Count(s => s.TargetPath is null), held.Where(s => s.TargetPath is null).Sum(s => s.Bytes));
+    }
+
+    /// <summary>What lies in the hold folder of a plan now (no run, nothing is read but the journal).</summary>
+    public async Task<PlanHoldSummary> GetHeldAsync(long planId, CancellationToken ct = default) =>
+        Held(await LoadAsync(planId, new PlanRunOptions([], Execute: false), ct));
 
     // ------------------------------------------------------------------ move notices
 

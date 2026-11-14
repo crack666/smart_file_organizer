@@ -1949,6 +1949,10 @@ Order of work: overview (`sfo findings --summary`), where to (`sfo findings targ
   `--action`, never by `--dir` or `--all`.
 - A library is never a source. Nothing in a managed area (`Plan:ManagedAreas`) is moved, renamed or removed; an action
   whose target lies in one is marked `into_managed_area`: the program that manages it must read it in again.
+- `discard` (since 14.11.2026, https://github.com/crack666/smart_file_organizer/issues/105) is clutter: it needs no
+  target and no library, and only the rules of its source apply (no library, no managed area; a sensitive file only
+  when a person sets it, and confirmed only by `--action`). A target it still carries from before is kept, so that
+  switching back to `move` finds it again, but is neither checked nor used.
 
 Settings, section `Plan` of the settings file:
 
@@ -2011,11 +2015,23 @@ there against its free space (`space`: `enough`, `not_enough`, `unknown`), the u
 largest first (`--top`, default 10, at most 50), and the notes of the creation (files left out because a library
 holds them, no library, no accepted finding). Errors: `plan_not_found` (1).
 
+`hold` (since 14.11.2026, https://github.com/crack666/smart_file_organizer/issues/105) is the hold folder of the plan:
+
+```json
+"hold": { "folder": "/media/stick/.sfo-hold", "keep_source": false, "actions": 5, "files": 9, "bytes": 812345,
+          "discard_actions": 2, "discard_files": 3, "discard_bytes": 40960, "held_files": 0, "held_bytes": 0 }
+```
+
+`actions`, `files`, `bytes`: what the actions still to run (`proposed`, `approved`, `verified`; every kind that takes the
+original away) would put there; `discard_*` the part of it that `discard` puts there without a copy anywhere;
+`held_*` what lies there now. The hold folder lies on the drive of the source: **putting files there frees no room on
+that drive; only `sfo plan purge` does**, by `held_bytes`. With `keep_source` on, nothing goes there.
+
 ### `sfo plan set <plan> <action>`
 
 | Option | Meaning |
 |---|---|
-| `--kind <code>` | `move`, `copy`, `quarantine`, `delete_source` or `leave`. |
+| `--kind <code>` | `move`, `copy`, `quarantine`, `delete_source`, `discard` or `leave`. `discard` needs no `--target`. |
 | `--target <path>` | Full path of the file or folder at the target; a relative path lies below the only library of the plan. |
 | `--clear-target` | Remove the target. |
 | `--reason <text>` | Why; replaces the reason. |
@@ -2029,7 +2045,9 @@ The GUI plan view (since 14.11.2026) changes the same plan through the same `Pla
 it switches an action to `quarantine` without a target of its own, the target is
 `<library>/<Plan:QuarantineFolder>/<rest of the path>`; `Plan:QuarantineFolder` defaults to `_sfo-quarantine`.
 Since 14.11.2026 (Issue 102) the GUI names outcomes instead of kinds ("Umziehen", "In den Papierkorb", "Hier lassen";
-see [glossary](glossary.md#the-plan-view-outcomes-and-release)) and never sets `rejected` itself.
+see [glossary](glossary.md#the-plan-view-outcomes-and-release)) and never sets `rejected` itself. "In den Papierkorb"
+sets `discard` (since Issue 105; until then `delete_source` where a library held the content, else `quarantine`, which
+first wrote a copy of the clutter into the library).
 
 ### `sfo plan import <plan> <file>`
 
@@ -2086,7 +2104,9 @@ sfo plan purge 1                              # dry run of removing the held ori
   reason.
 - An original is only renamed into the hold folder `<job root>/.sfo-hold/plan-<id>/action-<id>/` on its own drive, from
   where `undo` puts it back. Only `purge` removes it for good, and only while the copy at the target still has its
-  checksum: the last copy of anything is never removed. The hold folder lies in the job root; a new scan of the source
+  checksum: the last copy of anything is never removed, except a `discard`, which has no copy by intent and is removed
+  by `purge` as it is. The hold folder lies in the job root, **on the drive of the source: holding frees no room there,
+  only `purge` does** (`held` in the result says how much). A new scan of the source
   leaves it out (since https://github.com/crack666/smart_file_organizer/issues/86; until then a new scan counted the
   held originals as content). Deleting the job drops the journal but not the hold folder; the move history of
   `sfo where` stays.
@@ -2123,19 +2143,29 @@ and the original whole and compares them. The action becomes `verified` (its ori
 content counts as `already_present`; with other content the action fails (`target_collision`). A source changed since
 the scan is skipped (`source_changed`). Step 2 runs `verified` actions and makes them `executed`.
 
+`discard` (since 14.11.2026, Issue 105) copies nothing. Step 1 only checks that the source is as the scan saw it and
+makes the action `verified`; no file is written and no journal step either. Step 2 reads each file whole for its
+checksum (it must not change meanwhile, and the source may hold no file the scan did not see), journals a `hold` step
+without a target and renames the file into the hold folder. Nothing is written into any library. A run cut off between
+two files of a folder keeps the action `verified`; the next run takes the rest.
+
 ```json
 { "plan_id": 1, "mode": "apply", "executed": true, "keep_source": false,
   "items": [ { "action_id": 3, "kind": "move", "outcome": "done", "state": "verified", "reasons": [],
                "files": 1, "bytes": 18234, "detail": null } ],
   "removal": { "actions": 4, "files": 6, "bytes": 81234 },
   "empty_folders": [],
-  "notices": [ { "path": "/media/usb-stick/DCIM/_moved-files.txt", "outcome": "written", "entries": 6, "detail": null } ] }
+  "notices": [ { "path": "/media/usb-stick/DCIM/_moved-files.txt", "outcome": "written", "entries": 6, "detail": null } ],
+  "held": { "folder": "/media/usb-stick/.sfo-hold", "files": 0, "bytes": 0, "discarded_files": 0, "discarded_bytes": 0 } }
 ```
 
 `outcome` is `done`, `would_run` or `would_fail` (dry run), `skipped` (left as it was), `failed` (state `failed`, the
 original stays) or `partial` (undo and purge: not all of it). `reasons` are `PlanRunReason` codes, `PlanProblem` codes
 or the state of an action named by `--action` that cannot run. `removal` is what step 2 would take away now: the
-originals of every `verified` action and the bytes they free. `mode` is `apply`, `remove_sources`, `undo` or `purge`.
+originals of every `verified` action and the bytes they free. `held` (since 14.11.2026, Issue 105) is what lies in the
+hold folder of the plan after the run, a dry run counting what it would put there, put back or purge: the room only
+`purge` frees on the drive of the source; `discarded_*` is the part of it no copy exists of. `mode` is `apply`,
+`remove_sources`, `undo` or `purge`.
 `notices` (step 2 and undo) lists the move notices the run wrote (`written`), removed (`removed`) or left alone because
 a file that is not a notice carries the name (`skipped`), or could not write (`failed`); a dry run says what it would
 do (`would_write`, `would_remove`), counting the originals it would take away or put back. A folder whose notice needed
@@ -2151,20 +2181,23 @@ Errors: `plan_run_incomplete` (1, with the result: an action failed or an undo o
 then the copies this tool wrote are removed, but only once their original is back with its checksum and the copy is
 unchanged; then the target folders it created, when empty. A file it did not write is never removed. A fully taken
 back action is `undone`; otherwise it keeps its state and the reasons (`target_changed`: the copy was edited and
-stays; `original_occupied`: something lies at the place of the original; `not_undoable`). Result and errors as
-`apply`.
+stays; `original_occupied`: something lies at the place of the original; `not_undoable`). A `discard` comes back from
+the hold folder with its place, name, content and modification time; a `discard` that is only `verified` (step 1)
+becomes `undone` without touching a file; a purged `discard` cannot come back (`not_undoable`, a dry run says
+`would_fail`). Result and errors as `apply`.
 
 ### `sfo plan purge <plan>`
 
-`--execute`, `--action <id>` as in `apply`. Removes the held originals of the plan for good, each only while the file at
-its target still has its checksum and is another file; the rest stay held (`target_changed`, `target_missing`,
-`same_file`). This cannot be undone from the hold folder, but `undo` can still copy an original back from its target.
-Result and errors as `apply`.
+`--execute`, `--action <id>` as in `apply`. Empties the hold folder of the plan: removes the held originals for good,
+each only while the file at its target still has its checksum and is another file; the rest stay held
+(`target_changed`, `target_missing`, `same_file`). A held `discard` has no target by intent and is removed as it is.
+This cannot be undone from the hold folder, but `undo` can still copy an original back from its target (not a
+`discard`). Only this command frees room on the drive of the source. Result and errors as `apply`.
 
 ### `sfo plan keep-source <job>`
 
 The person's switch "leave the source untouched" for a whole job: a move then only copies and becomes `executed`,
-`delete_source` and `quarantine` are skipped (`keep_source`), step 2 removes nothing. `--off` lifts it. Result:
+`delete_source`, `quarantine` and `discard` are skipped (`keep_source`), step 2 removes nothing. `--off` lifts it. Result:
 `{ "job_id", "keep_source" }`. Errors: `job_not_found` (1).
 
 ## Memory
@@ -2214,7 +2247,8 @@ folder for everything below it) or a full SHA-256 checksum (64 hex digits).
 file (`scan`), or for a checksum every path with that stored checksum (`checksum`). `exists` says whether the path is
 there now (`false` also when its drive is not attached). `history` lists the moves, oldest first, from the move
 history (`journal`) and from move notices a scan found (`notice`); `state` is `moved` or `returned` (put back by
-`undo`), `purged` says the held original was removed for good. Both lists are empty when nothing is known.
+`undo`), `purged` says the held original was removed for good. A file a plan discarded (`discard`, or a notice entry
+`removed`) has `to` null: it has no new place, and `now` does not list it. Both lists are empty when nothing is known.
 
 ## Machine contract
 

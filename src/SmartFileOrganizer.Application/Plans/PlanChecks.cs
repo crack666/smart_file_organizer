@@ -45,7 +45,8 @@ public sealed record PlanCheckContext(
 /// The hard rules of a plan (https://github.com/crack666/smart_file_organizer/issues/11), as pure functions: every target
 /// lies below a library root, never in the source, never in the user profile, on the system drive or in a protected
 /// place; content a library holds already is not moved or copied; a sensitive file never goes to quarantine; a library
-/// and a managed area are never the source of a move, a quarantine or a removal. <c>leave</c> needs no check.
+/// and a managed area are never the source of a move, a quarantine or a removal. <c>leave</c> needs no check;
+/// <c>discard</c> has no target, so only the checks of its source apply.
 /// </summary>
 public static class PlanChecks
 {
@@ -53,7 +54,11 @@ public static class PlanChecks
     public static bool Writes(PlanActionKind kind) => kind is PlanActionKind.Move or PlanActionKind.Copy or PlanActionKind.Quarantine;
 
     /// <summary>Kinds that take the original away from its place.</summary>
-    public static bool RemovesSource(PlanActionKind kind) => kind is PlanActionKind.Move or PlanActionKind.Quarantine or PlanActionKind.DeleteSource;
+    public static bool RemovesSource(PlanActionKind kind) =>
+        kind is PlanActionKind.Move or PlanActionKind.Quarantine or PlanActionKind.DeleteSource or PlanActionKind.Discard;
+
+    /// <summary>Kinds that need a target below a library root; <c>discard</c> and <c>leave</c> need none.</summary>
+    public static bool NeedsTarget(PlanActionKind kind) => kind is not (PlanActionKind.Discard or PlanActionKind.Leave);
 
     /// <summary>
     /// The problems of one action. <paramref name="takenByOther"/> says whether another action already writes to a
@@ -70,10 +75,13 @@ public static class PlanChecks
         if (RemovesSource(a.Kind) && ctx.ManagedAreas.Any(area => IsAtOrBelow(a.SourcePath, area)))
             problems.Add(PlanProblem.SourceInManagedArea);
         if (a.Sensitive && (a.Kind == PlanActionKind.Quarantine
-                            || a.Kind == PlanActionKind.DeleteSource && a.Origin != PlanActionOrigin.Human))
+                            || a.Kind is PlanActionKind.DeleteSource or PlanActionKind.Discard && a.Origin != PlanActionOrigin.Human))
             problems.Add(PlanProblem.SensitiveKind);
         if (Writes(a.Kind) && HoldsBackedUp(a, ctx))
             problems.Add(PlanProblem.AlreadyInLibrary);
+        // discard writes nothing anywhere: a target it still carries (kept so that "move" brings it back) is not checked.
+        if (!NeedsTarget(a.Kind))
+            return problems;
 
         if (a.TargetPath is not { Length: > 0 } target)
         {
