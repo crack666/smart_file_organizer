@@ -28,13 +28,16 @@ public class JobReadService
     private readonly IDirectoryVerdictRepository _verdicts;
     private readonly IBundleRepository _bundles;
     private readonly SensitiveOutputOptions _output;
+    private readonly IFileFactRepository? _facts;
 
     /// <param name="output">The configured disclosure (<c>Sensitive:Disclosure</c>); used where a call passes none.</param>
+    /// <param name="facts">Stored file facts, for the origin of videos and the fact list of <c>show</c>; without it neither is filled.</param>
     public JobReadService(
         IScanJobRepository jobs, IJobReadRepository read, IDirectoryVerdictRepository verdicts, IBundleRepository bundles,
-        SensitiveOutputOptions? output = null)
+        SensitiveOutputOptions? output = null, IFileFactRepository? facts = null)
     {
         _output = output ?? SensitiveOutputOptions.Default;
+        _facts = facts;
         _jobs = jobs;
         _read = read;
         _verdicts = verdicts;
@@ -147,6 +150,7 @@ public class JobReadService
 
         var (limit, offset) = Paging(query);
         var page = new List<FileItem>(Math.Min(limit, 256));
+        var videoIds = new Dictionary<int, long>();
         long total = 0;
 
         await foreach (var row in _read.StreamFilesAsync(filter, ct))
@@ -156,8 +160,18 @@ public class JobReadService
                 continue;
 
             if (total >= offset && page.Count < limit)
+            {
+                if (row.File.FileType == FileType.Video) videoIds[page.Count] = row.File.Id;
                 page.Add(new FileItem(record, row.DirectoryVerdict, row.DirectoryRetention));
+            }
             total++;
+        }
+
+        // The origin of the videos on the page only: one read per video, never for the whole job.
+        if (_facts is not null)
+        {
+            foreach (var (i, id) in videoIds)
+                page[i] = page[i] with { Origin = Media.VideoOriginSummary.From(await _facts.GetByFileNodeIdAsync(id, ct), page[i].Record.Protected) };
         }
 
         return new ReadPage<FileItem>(total, limit, offset, page);
@@ -175,9 +189,16 @@ public class JobReadService
         {
             var record = SensitiveOutputGuard.Project(file.File, output);
             var checks = await _read.GetResultChecksAsync(file.File.Id, ct);
+            var facts = _facts is null ? [] : await _facts.GetByFileNodeIdAsync(file.File.Id, ct);
             return new PathDetail(null, new FileItem(record, file.DirectoryVerdict, file.DirectoryRetention)
             {
-                Checks = checks.Select(c => ToCheckItem(c, record.Protected)).ToList()
+                Checks = checks.Select(c => ToCheckItem(c, record.Protected)).ToList(),
+                Origin = file.File.FileType == FileType.Video ? Media.VideoOriginSummary.From(facts, record.Protected) : null,
+                // A protected file shows no free text and no description of its content, as the store never keeps one.
+                Facts = facts
+                    .Where(f => !record.Protected || (!f.Key.IsFreeText() && !f.Key.IsDescription()))
+                    .Select(f => new FactItem(f.Key.ToCode(), f.Value, f.Source.ToCode(), f.Certainty?.ToCode()))
+                    .ToList()
             });
         }
 

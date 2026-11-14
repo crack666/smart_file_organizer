@@ -234,6 +234,16 @@ public class FileRepository : IFileRepository
         return nodes.AsList();
     }
 
+    public async Task<IReadOnlyList<FileNode>> GetByTypeAsync(long jobId, Domain.Enums.FileType type, CancellationToken ct = default)
+    {
+        await using var conn = _db.CreateConnection();
+        await conn.OpenAsync(ct);
+        var nodes = await conn.QueryAsync<FileNode>(new CommandDefinition(
+            "SELECT * FROM file_nodes WHERE job_id = @jobId AND file_type = @type ORDER BY id",
+            new { jobId, type }, cancellationToken: ct));
+        return nodes.AsList();
+    }
+
     public async Task UpdateSensitiveAsync(IReadOnlyList<FileNode> nodes, CancellationToken ct = default)
     {
         if (nodes.Count == 0) return;

@@ -232,7 +232,7 @@ public class OllamaService : IOllamaService
                 stream = false,
                 think = false,
                 keep_alive = _options.KeepAlive,
-                format = BuildClassificationSchema(input.AskKeepHint, DescriptionOf(input)),
+                format = BuildClassificationSchema(input.AskKeepHint, DescriptionOf(input), VideoKindsOf(input)),
                 options = new { num_predict = _options.ClassificationMaxAnswerTokens },
                 messages = new object[]
                 {
@@ -325,6 +325,7 @@ public class OllamaService : IOllamaService
             parts.AddRange([m.System, m.User]);
             foreach (var kind in Enum.GetValues<DescriptionKind>())
                 parts.Add(JsonSerializer.Serialize(BuildClassificationSchema(keepHint, kind)));
+            parts.Add(JsonSerializer.Serialize(BuildClassificationSchema(keepHint, DescriptionKind.Picture, Enum.GetValues<VideoKind>())));
         }
         var hash = System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(string.Join("\u0000", parts)));
         return Convert.ToHexString(hash, 0, 8).ToLowerInvariant();
@@ -369,6 +370,7 @@ public class OllamaService : IOllamaService
             JsonSerializer.Serialize(BuildClassificationSchema(askKeepHint: true)),
             JsonSerializer.Serialize(BuildClassificationSchema(askKeepHint: false, DescriptionKind.Picture)),
             JsonSerializer.Serialize(BuildClassificationSchema(askKeepHint: false, DescriptionKind.Document)),
+            JsonSerializer.Serialize(BuildClassificationSchema(askKeepHint: false, DescriptionKind.Picture, Enum.GetValues<VideoKind>())),
             JsonSerializer.Serialize(BuildPreAssessmentSchema()),
             JsonSerializer.Serialize(BuildSummarySchema())
         ]);
@@ -504,6 +506,11 @@ public class OllamaService : IOllamaService
                       $"occasion ({string.Join(", ", VerdictCodes.All<OccasionKind>())}), people (true if a person is visible)");
         sb.AppendLine($"- document: document_kind ({string.Join(", ", VerdictCodes.All<DocumentKind>())}), " +
                       "issuer (company, authority or person that issued it, as written; empty if none), year (the year it is dated, 0 if none)");
+        // Issue 103: asked only for a video whose container, name and companion files leave the kind open; the schema
+        // lists only the kinds that remain. A sure fact about the kind wins over this answer.
+        sb.AppendLine("- video, when the schema asks for video_kind: movie (a feature film), series_episode, own_recording (filmed by the person: " +
+                      "phone, camera, action cam, drone), screen_recording (a screen or a game), web_clip (downloaded or received clip), " +
+                      "music_video; unknown if the frames and facts do not show it");
         if (!string.IsNullOrWhiteSpace(summaryLanguage) &&
             !string.Equals(summaryLanguage, "English", StringComparison.OrdinalIgnoreCase))
         {
@@ -574,12 +581,22 @@ public class OllamaService : IOllamaService
     }
 
     /// <summary>
+    /// The kinds of video the model may choose from (Issue 103): only for a video whose facts leave the kind open, and
+    /// never for a file the rules marked sensitive. Null: <c>video_kind</c> is not asked.
+    /// </summary>
+    public static IReadOnlyList<VideoKind>? VideoKindsOf(OllamaClassificationInput input) =>
+        input.File.FileType == FileType.Video && input.VideoKindChoices is { Count: > 0 } kinds && !SensitiveOutputGuard.IsSensitive(input.File)
+            ? kinds
+            : null;
+
+    /// <summary>
     /// JSON schema of the classification answer; with <paramref name="askKeepHint"/> also the keep hint and,
     /// optional, the reason (asked for <c>temporary</c> only); with <paramref name="describe"/> the description
     /// fields of a picture or a document, all required, so the answer grows only by a few codes and words for
     /// the files that have them. No target: targets come from the library match and <c>sfo decide</c>.
     /// </summary>
-    public static object BuildClassificationSchema(bool askKeepHint, DescriptionKind describe = DescriptionKind.None)
+    public static object BuildClassificationSchema(bool askKeepHint, DescriptionKind describe = DescriptionKind.None,
+        IReadOnlyList<VideoKind>? videoKinds = null)
     {
         var properties = new Dictionary<string, object>
         {
@@ -636,6 +653,16 @@ public class OllamaService : IOllamaService
                 break;
         }
 
+        if (videoKinds is { Count: > 0 })
+        {
+            properties["video_kind"] = new
+            {
+                type = "string",
+                @enum = videoKinds.Where(k => k != VideoKind.Unknown).Select(k => k.ToCode()).Append(VideoKind.Unknown.ToCode()).ToArray()
+            };
+            required.Add("video_kind");
+        }
+
         return new { type = "object", properties, required };
     }
 
@@ -670,6 +697,9 @@ public class OllamaService : IOllamaService
         if (inner.TryGetProperty("people", out var people) && people.ValueKind is JsonValueKind.True or JsonValueKind.False)
             facts.Add(new FileFact(FileFactKey.People, people.ValueKind == JsonValueKind.True ? "true" : "false", FactSource.Model));
         Code<DocumentKind>("document_kind", FileFactKey.DocumentKind);
+        if (inner.TryGetProperty("video_kind", out var vk) && vk.ValueKind == JsonValueKind.String
+            && VerdictCodes.TryParse<VideoKind>(vk.GetString()?.Trim().ToLowerInvariant(), out var videoKind) && videoKind != VideoKind.Unknown)
+            facts.Add(new FileFact(FileFactKey.VideoKind, videoKind.ToCode(), FactSource.Model, ResultCertainty.Likely));
         Text("issuer", FileFactKey.Issuer, IssuerMaxLength);
         if (inner.TryGetProperty("year", out var year))
         {

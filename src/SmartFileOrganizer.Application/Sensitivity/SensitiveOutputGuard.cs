@@ -95,7 +95,7 @@ public sealed record SensitiveOutputOptions
         if (ShowsContent(markers)) return facts;
         if (!ShowsClassification(markers)) return [];
         return facts.Where(f => f.Key is not (FileFactKey.Scene or FileFactKey.Activity or FileFactKey.Title
-            or FileFactKey.Author or FileFactKey.Artist or FileFactKey.Album)).ToList();
+            or FileFactKey.Author or FileFactKey.Artist or FileFactKey.Album or FileFactKey.VideoTitle)).ToList();
     }
 
     /// <summary>

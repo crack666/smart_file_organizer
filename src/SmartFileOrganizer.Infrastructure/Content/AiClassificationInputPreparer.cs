@@ -1,4 +1,5 @@
 using System.Globalization;
+using SmartFileOrganizer.Application.Media;
 using SmartFileOrganizer.Application.Sensitivity;
 using SmartFileOrganizer.Domain.Enums;
 using SmartFileOrganizer.Domain.Interfaces;
@@ -25,16 +26,28 @@ public class AiClassificationInputPreparer : IClassificationInputPreparer
     private readonly FileContentExtractor _extractor;
     private readonly OllamaOptions _options;
     private readonly VideoFrameExtractor _frames;
+    private readonly IVideoOriginReader _videos;
 
     public AiClassificationInputPreparer(FileContentExtractor extractor, OllamaOptions options)
         : this(extractor, options, new VideoFrameExtractor()) { }
 
     public AiClassificationInputPreparer(FileContentExtractor extractor, OllamaOptions options, VideoFrameExtractor frames)
+        : this(extractor, options, frames, new VideoOriginReader()) { }
+
+    public AiClassificationInputPreparer(FileContentExtractor extractor, OllamaOptions options, VideoFrameExtractor frames, IVideoOriginReader videos)
     {
         _extractor = extractor;
         _options = options;
         _frames = frames;
+        _videos = videos;
     }
+
+    /// <summary>
+    /// Kinds of video that a rule settles without a model when the facts are certain: published works, whose title, year,
+    /// season and episode decide where they go; a picture of a frame adds nothing to that (Issue 103). Own and screen
+    /// recordings and clips are still described by the model, which then is not asked for the kind.
+    /// </summary>
+    private static readonly HashSet<VideoKind> RuleSettledKinds = [VideoKind.Movie, VideoKind.SeriesEpisode, VideoKind.MusicVideo];
 
     // Raster formats that Ollama vision models reliably accept
     private static readonly HashSet<string> RasterVisionExtensions =
@@ -216,6 +229,11 @@ public class AiClassificationInputPreparer : IClassificationInputPreparer
     private async Task AddVideoAsync(FileNode file, Evidence ev, CancellationToken ct)
     {
         AddMediaMetadata(file, file.Extension?.ToLowerInvariant() ?? string.Empty, ev, isVideo: true);
+        if (AddVideoOrigin(file, ev) is { } settled)
+        {
+            ev.RuleResult = settled;
+            return;
+        }
         ev.Lacks("video and sound content: the video file itself is never uploaded");
 
         if (!_frames.IsAvailable)
@@ -233,6 +251,84 @@ public class AiClassificationInputPreparer : IClassificationInputPreparer
             ev.Image(frames[i], $"still frame at {TimeSpan.FromSeconds(positions[Math.Min(i, positions.Length - 1)]):h\\:mm\\:ss}");
         if (frames.Count == 0)
             ev.Lacks($"still frames: {VideoFrameExtractor.ToolName} could not decode the video");
+    }
+
+    /// <summary>
+    /// The kind and origin of the video from container, name and companions (Issue 103), as facts with source and certainty.
+    /// Fills what the photo metadata reader could not read (Matroska), lists the tracks for the model, and sets the kinds
+    /// the model may choose from when the facts leave the kind open. Returns a rule result for a published work whose
+    /// kind is certain: then no model is called at all.
+    /// </summary>
+    private FileClassification? AddVideoOrigin(FileNode file, Evidence ev)
+    {
+        VideoOriginReading? reading;
+        try
+        {
+            reading = _videos.Read(file);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            ev.Lacks($"video kind: the container could not be read ({ex.GetType().Name})");
+            ev.VideoKindChoices = VideoKindRules.RemainingKinds(null);
+            return null;
+        }
+        if (reading is null) return null;
+
+        if (reading.Container is { } c)
+        {
+            if (!ev.HasFact(FileFactKey.Width) && c.Width is { } w) ev.Fact(FileFactKey.Width, w);
+            if (!ev.HasFact(FileFactKey.Height) && c.Height is { } h) ev.Fact(FileFactKey.Height, h);
+            if (!ev.HasFact(FileFactKey.DurationSeconds) && c.DurationSeconds is { } d) ev.Fact(FileFactKey.DurationSeconds, (long)Math.Round(d));
+            if (!ev.HasFact(FileFactKey.TakenAt) && c.CreatedAt is { } at && (c.Make is not null || c.Model is not null))
+                ev.Fact(FileFactKey.TakenAt, at.ToString("yyyy-MM-ddTHH:mm:ss", CultureInfo.InvariantCulture));
+            if (!ev.HasFact(FileFactKey.Device)) ev.Fact(FileFactKey.Device, c.Device);
+            if (c.HasLocation && !ev.HasFact(FileFactKey.HasLocation)) ev.Fact(FileFactKey.HasLocation, true);
+
+            var lines = c.Tracks.Select(t => $"{t.Type}: language {VideoKindRules.Language(t.Language) ?? "undetermined"}{(t.Name is null ? string.Empty : $", name '{t.Name}'")}").ToList();
+            if (c.ChapterCount > 0) lines.Add($"chapters: {c.ChapterCount}");
+            if (c.Title is not null && !SensitiveOutputGuard.IsSensitive(file)) lines.Add($"title in the container: {c.Title}");
+            if (ev.Section($"Video container ({c.Format})", string.Join(Environment.NewLine, lines)))
+                ev.Has("video container tracks");
+        }
+
+        foreach (var fact in reading.Facts)
+            ev.Fact(fact.Key, fact.Value, fact.Source, fact.Certainty);
+
+        var origin = reading.Origin;
+        if (!origin.IsSettled)
+        {
+            ev.VideoKindChoices = origin.Remaining ?? VideoKindRules.RemainingKinds(reading.Container);
+            ev.Lacks($"video kind: {origin.Reason}; judge it from the frames and the facts");
+            return null;
+        }
+        ev.Has($"video kind {origin.Kind.ToCode()} ({origin.KindSource.ToCode()}, {origin.KindCertainty.ToCode()}): {origin.Reason}");
+        if (origin.KindCertainty != ResultCertainty.Certain || !RuleSettledKinds.Contains(origin.Kind)) return null;
+
+        var what = origin.Kind switch
+        {
+            VideoKind.Movie => "Film",
+            VideoKind.SeriesEpisode => "Series episode",
+            _ => "Music video"
+        };
+        var title = SensitiveOutputGuard.IsSensitive(file) ? null : origin.Title;
+        var detail = string.Join(", ", new[]
+        {
+            title is null ? null : $"'{title}'",
+            origin.Year is { } y ? y.ToString(CultureInfo.InvariantCulture) : null,
+            origin.Season is { } s && origin.Episode is { } e ? $"season {s}, episode {e}" : null
+        }.Where(x => x is not null));
+        ev.Lacks("still frames: not needed, the kind of the video is certain from its facts");
+        return new FileClassification
+        {
+            FileNodeId = file.Id,
+            Category = FileCategory.Video,
+            Importance = Importance.Medium,
+            Confidence = 0.95,
+            Summary = $"{what}{(detail.Length == 0 ? string.Empty : " " + detail)}; kind from {origin.KindSource.ToCode()} ({origin.Reason}).",
+            ModelUsed = $"rule:video-kind-{origin.Kind.ToCode()}",
+            AnalyzedAt = DateTime.UtcNow,
+            IsAiResult = false
+        };
     }
 
     // ─── Audio ───────────────────────────────────────────────────────────────

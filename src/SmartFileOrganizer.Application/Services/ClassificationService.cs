@@ -615,6 +615,9 @@ public class ClassificationService
     /// </summary>
     public static IReadOnlyList<FileFact> FactsToStore(FileNode file, FileClassification result, IReadOnlyList<FileFact> facts)
     {
+        // The kind of a video the model chose where the rules could not (Issue 103); a sure fact of the rules wins.
+        if (result.Error is null && result.DescribedFacts.Count > 0)
+            facts = Media.VideoKindMerge.Merge(facts, result.DescribedFacts);
         IEnumerable<FileFact> all = result.Error is null && result.DescribedFacts.Count > 0
             ? facts.Concat(result.DescribedFacts.Where(f => f.Key.IsDescription()))
             : facts;

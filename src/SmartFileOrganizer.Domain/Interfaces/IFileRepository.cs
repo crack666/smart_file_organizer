@@ -29,6 +29,8 @@ public interface IFileRepository
     Task<int> ReleaseFailedAsync(long jobId, CancellationToken ct = default);
     /// <summary>Files of a job whose stored rule version is missing or lower than <paramref name="version"/>.</summary>
     Task<IReadOnlyList<FileNode>> GetBelowRulesVersionAsync(long jobId, int version, CancellationToken ct = default);
+    /// <summary>The files of a job of one type, by id.</summary>
+    Task<IReadOnlyList<FileNode>> GetByTypeAsync(long jobId, Enums.FileType type, CancellationToken ct = default);
     /// <summary>Writes markers, rule id and rule version of the given files; nothing else.</summary>
     Task UpdateSensitiveAsync(IReadOnlyList<FileNode> nodes, CancellationToken ct = default);
     /// <summary>Records files that are themselves links (<c>file_links</c>); a path already recorded is kept.</summary>

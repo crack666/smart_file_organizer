@@ -181,7 +181,16 @@ public sealed record FileItem(FileOutputRecord Record, string? DirectoryVerdict,
     /// <summary>Second checks of the file (only filled by <c>show</c>). For a protected file the answers
     /// carry no model text.</summary>
     public IReadOnlyList<CheckItem> Checks { get; init; } = [];
+
+    /// <summary>Kind and origin of a video from its stored facts (Issue 103); null for other files and unread videos.</summary>
+    public Media.VideoOriginSummary? Origin { get; init; }
+
+    /// <summary>The stored facts of the file (only filled by <c>show</c>); free text is left out for a protected file.</summary>
+    public IReadOnlyList<FactItem> Facts { get; init; } = [];
 }
+
+/// <summary>One stored fact as the read side shows it: key, value, source and certainty as codes.</summary>
+public sealed record FactItem(string Fact, string Value, string Source, string? Certainty);
 
 /// <summary>One second check as the read side shows it; codes throughout.</summary>
 public sealed record CheckItem(

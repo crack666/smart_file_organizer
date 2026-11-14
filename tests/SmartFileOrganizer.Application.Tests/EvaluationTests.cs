@@ -47,11 +47,21 @@ public class EvaluationTests : IDisposable
 
         Assert.Equal(onDiskDirs, truth.Directories.Keys.Order(StringComparer.Ordinal));
         Assert.Equal(onDiskFiles, truth.Files.Keys.Order(StringComparer.Ordinal));
-        Assert.InRange(truth.Directories.Count, 30, 80);
+        Assert.InRange(truth.Directories.Count, 30, 100);
         Assert.Equal(corpus.Directories, truth.Directories.Count);
         Assert.Equal(corpus.Files, truth.Files.Count);
         Assert.Equal("small", truth.Corpus.Name);
         Assert.Equal(SmallCorpusGenerator.DefaultSeed, truth.Corpus.Seed);
+    }
+
+    /// <summary>Version 8 (Issue 103): every video kind but <c>unknown</c> is in the truth, so <c>video_kind</c> measures each.</summary>
+    [Fact]
+    public void Generator_CoversEveryVideoKind()
+    {
+        var truth = EvalTruth.Load(SmallCorpusGenerator.Generate(Path.Combine(_dir, "c")).TruthPath);
+        var kinds = truth.Files.Values.Where(f => f.VideoKind is not null).Select(f => f.VideoKind!.Value).ToHashSet();
+        Assert.Equal(Enum.GetValues<SmartFileOrganizer.Domain.Enums.VideoKind>().Where(k => k != SmartFileOrganizer.Domain.Enums.VideoKind.Unknown).ToHashSet(), kinds);
+        Assert.All(truth.Files.Values.Where(f => f.VideoKind is not null), f => Assert.Equal(SmartFileOrganizer.Domain.Enums.FileCategory.Video, f.Category));
     }
 
     [Fact]

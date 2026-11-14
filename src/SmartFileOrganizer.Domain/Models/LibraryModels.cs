@@ -5,6 +5,8 @@ namespace SmartFileOrganizer.Domain.Models;
 /// <summary>One file as the library review needs it: where it lies and what the scan recorded, no content.</summary>
 public sealed class StructureFileRow
 {
+    /// <summary>The file's id; joins the tree with the stored facts (the origin of the videos of a folder, Issue 103).</summary>
+    public long Id { get; set; }
     public string ParentPath { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
     public long Size { get; set; }

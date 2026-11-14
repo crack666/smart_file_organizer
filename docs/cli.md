@@ -961,9 +961,20 @@ sfo files 7 --dir photos --max-confidence 0.5 --json
       "file_type": "image", "size_bytes": 482113, "last_write_time": "2019-07-02T10:14:00.000Z",
       "status": "ai_analyzed", "category": "document_scan", "category_source": "model",
       "confidence": 0.42, "summary": "Scanned page of a rental contract.",
-      "sensitive": [], "protected": false, "dir_verdict": "...", "certainty": "likely" }
+      "sensitive": [], "protected": false, "dir_verdict": "...", "certainty": "likely", "origin": null }
   ]
 }
+```
+
+`origin` (since 14.11.2026, https://github.com/crack666/smart_file_organizer/issues/103): for a video, its kind and origin
+from the stored facts, else `null`. `kind` is a video kind code, `source` a fact source code (`metadata`, `name`,
+`companion`, `model`), `certainty` a result certainty code; `device` a recording device code, `title`, `year`, `season`
+and `episode` of a published work (the title is `null` for a protected file), `disputed` the kind the model named against
+a sure one. Codes in [glossary.md](glossary.md#video-kind-videokind).
+
+```json
+{ "kind": "series_episode", "source": "name", "certainty": "certain", "device": null,
+  "title": "Example Show", "year": null, "season": 2, "episode": 5, "disputed": null }
 ```
 
 `category_source` is an origin code (see [glossary.md](glossary.md)): `model`, `human` (an override), `rule` (forced to review by a marker; until 12.11.2026 `ai`, `user` and `sensitive`) or
@@ -983,7 +994,10 @@ One directory or file with everything that is known about it. `kind` is `directo
   (the error a retry replaced) and `checks`: every second check with `reasons`, `outcome`
   (`agreed`, `disagreed`, `corrected`, `rule_wins`, `failed`, `skipped`), `rule_note`, `first` and
   `second` (category, importance, confidence, keep hint, summary, target (always `null`), keep reason, model, error,
-  raw response; for a protected file only the codes, model texts are `null`) and `checked_at`.
+  raw response; for a protected file only the codes, model texts are `null`) and `checked_at`; `facts` (since
+  14.11.2026): every stored fact as `{ "fact", "value", "source", "certainty" }` (codes of
+  [glossary.md](glossary.md#file-facts); `certainty` where the fact carries one, so far the video facts, else `null`), without free text and
+  description for a protected file.
 
 `suggested_target` is deprecated (https://github.com/crack666/smart_file_organizer/issues/74): the model is no
 longer asked for a target per file, and older runs stored paths it made up. The key stays in the JSON of `sfo show`
@@ -1257,7 +1271,8 @@ root scanned as `\\server\share\` or `D:\Photos\` listed no subfolders).
   "files": [ { "name", "relative_path", "size_bytes", "file_type", "modified", "markers" } ] }
 ```
 
-`folder` has the fields of a candidate folder in `findings candidates`; `files` is one page (`--limit` 1 to 1000,
+`folder` has the fields of a candidate folder in `findings candidates`, `origin` included (the videos of the folder
+and below); `files` is one page (`--limit` 1 to 1000,
 default 50, `--offset`) of the folder's own files, a marked one with its `markers`. With `Sensitive:Disclosure`
 `restricted` a sensitive folder (`withheld` true) lists no subfolders and only its marked files (path and markers);
 `total` then counts those. Until 14.11.2026 that held for every sensitive folder, so a marked file in the root hid the
@@ -1602,11 +1617,16 @@ folders of the rules (time, names, kinds of files, the same files already there)
   "libraries": [ { "library_job_id": 1, "root_path": "/nas/photos", "reachable": true,
                    "free_bytes": 93616517120, "inbox_folder": "_Inbox", "root_sensitive": false,
                    "top_level_withheld": false, "root_marked_files": [],
+                   "hints": { "file": "/home/user/.local/share/SmartFileOrganizer/library-hints/photos.txt",
+                              "lines": [ "Films go to Films, one folder per film with its year." ], "truncated": false },
                    "top_level": [
                      { "name": "Photos", "relative_path": "Photos", "role": "collection", "files": 1250, "subdirs": 14,
                        "bytes": 3221225472, "by_file_type": { "image": 1200, "video": 50 },
                        "period": { "from": "2009-07-04T10:12:00", "to": "2024-12-26T18:40:00", "time_source": "mixed" },
-                       "sensitive": false } ] } ],
+                       "sensitive": false,
+                       "origin": { "videos": 50, "kinds": { "own_recording": 50 }, "devices": { "phone": 41, "action_cam": 9 },
+                                   "works": [], "certain": 47, "disputed": 0,
+                                   "text": "50 video(s): 50 own_recording (phone 41, action_cam 9)" } } ] } ],
   "inbox_name": "Holiday stick - DCIM",
   "total": 1, "offset": 0, "next_offset": null, "truncated": false,
   "items": [
@@ -1639,7 +1659,7 @@ folders of the rules (time, names, kinds of files, the same files already there)
           ],
           "new_folder": { "library_job_id": 1, "parent_relative": "Photos", "name": "2015-02 {occasion}",
                           "name_complete": false, "pattern": "{yyyy}-{mm} {occasion}" },
-          "not_matched": null }
+          "not_matched": null, "origin": null }
       ],
       "candidates_kept": null }
   ]
@@ -1658,9 +1678,24 @@ folders of the rules (time, names, kinds of files, the same files already there)
   and markers). With `Sensitive:Disclosure` `restricted` `top_level` is then empty and `top_level_withheld` true, as in
   `library folder`; until 14.11.2026 that held for every sensitive root (the fields `top_level_withheld` and
   `root_marked_files` were added on that date).
-- `groups`: one for the finding as a whole, or one per part when its files do not belong together by content
-  (`split` true, `part` = the index `sfo findings place --part` takes). `described` condenses the stored description
-  facts of the files (`described` of `sampled` carried one); a part lists `examples` of its own files.
+- `libraries[].hints` (since 14.11.2026, https://github.com/crack666/smart_file_organizer/issues/103): what a person
+  wrote about the library in its hints file, the lines that are neither empty nor comments (`#`), at most
+  `LibraryMatch:MaxHintChars` characters (default 4000; `truncated` true when the file held more). The file is
+  `<LibraryMatch:HintsDirectory>/<folder name of the root>.txt` (default directory `library-hints` next to the
+  database; for a drive root the drive letter, `E.txt`), or the `File` of an entry `{ "Root", "File" }` in
+  `LibraryMatch:Hints`. `null` when there is none. The file is only read, never written.
+- `groups`: one for the finding as a whole, or one per part when its files do not belong together (`split` true,
+  `part` = the index `sfo findings place --part` takes). Since 14.11.2026 a finding is split by the known kinds of its
+  videos first (a film, episodes and own clips are three parts; files without a known kind join the own recordings),
+  then each kind by content. `described` condenses the stored description facts of the files (`described` of
+  `sampled` carried one); a part lists `examples` of its own files.
+- `origin` of a group, of `top_level` entries and of `candidates[].folder` (since 14.11.2026, Issue 103): the kinds of
+  the videos, from the stored facts of the source scan or of the library scan, `null` without a video with a kind.
+  `kinds` counts videos per video kind code, `devices` own recordings per recording device code, `works` names films,
+  series and music videos by title (`Example Show S01-S02`, `Some Film (2009)`, at most 5), `certain` the videos whose
+  kind is certain, `disputed` those where the model named another kind; `text` is the same in one line. A marked file
+  adds what the disclosure shows of it (no title for access data; nothing with `restricted`). Read the kinds of a job
+  stored before that date with [`sfo facts refresh`](#sfo-facts-refresh-job).
 - `candidates[].folder`: the folder as the scan holds it, a few `file_names` (direct files first) and `subfolders`, and
   its stored description (`described`, `description`, `described_at`) from `folder_descriptions`. Nothing is described
   here; [`sfo library describe`](#sfo-library-describe-job-path) describes one folder on demand.
@@ -1823,6 +1858,24 @@ or changed rules this is all that has to run; the description of stage 1 stays a
 
 Errors: `job_not_found` (1), `wrong_role` (1, a library), `path_not_found` (1, the target file), `targets_invalid` (1,
 the target file is not a valid target structure), `settings_invalid` (1, a `Findings` value), `usage` (2).
+
+### `sfo facts refresh <job>`
+
+Issue: https://github.com/crack666/smart_file_organizer/issues/103. Reads the kind and origin of every video of a job
+again from what costs no model: container metadata, file name and companion files (`.nfo`, `tvshow.nfo`, subtitles,
+a drone's telemetry subtitle, a download sidecar, artwork). No model call and no GPU, the files are only read. For a job analysed before 14.11.2026, or one whose
+videos sat in a folder the analysis skipped. A kind the model gave earlier is kept where the files say nothing sure; a
+sure kind replaces it and the model's kind becomes `video_kind_disputed`. Only the video facts are replaced, the
+descriptions stay.
+
+```json
+{ "job_id": 4, "videos": 120, "read": 118, "missing": 2,
+  "kinds": { "movie": 12, "series_episode": 64, "own_recording": 30, "unknown": 12 },
+  "model_kinds_kept": 9, "disputed": 1 }
+```
+
+`missing` counts videos gone or unreadable (their facts stay as they were), `model_kinds_kept` earlier model kinds that stayed, `disputed` sure kinds
+against which the model had named another. Errors: `job_not_found` (1), `usage` (2).
 
 ## Content store
 

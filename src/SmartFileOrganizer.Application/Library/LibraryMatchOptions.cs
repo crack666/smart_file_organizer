@@ -147,6 +147,35 @@ public sealed class LibraryMatchOptions
     /// </summary>
     public string? PatternsDirectory { get; set; }
 
+    // Notes of a person about a library (https://github.com/crack666/smart_file_organizer/issues/103).
+
+    /// <summary>
+    /// Folder of the hints files: free sentences of a person about a library (what goes where, what a folder is for), one
+    /// text file per library named after the folder name of its root (<c>Media.txt</c> for <c>X:\Media</c>, the drive letter
+    /// for a drive root). Shown in the head of <c>sfo findings candidates</c>. Set by the host to <c>library-hints</c> next
+    /// to the database; null shows no hints.
+    /// </summary>
+    public string? HintsDirectory { get; set; }
+
+    /// <summary>A hints file of single libraries, by the root path of the library; the others use <see cref="HintsDirectory"/>.</summary>
+    public List<LibraryHintsFile> Hints { get; set; } = [];
+
+    /// <summary>Characters of a hints file that are shown; the rest is cut off and marked as truncated.</summary>
+    public int MaxHintChars { get; set; } = 4000;
+
+    /// <summary>The hints file of the library at <paramref name="root"/>, or null when none is configured.</summary>
+    public string? HintsFileOf(string root)
+    {
+        var own = Hints.FirstOrDefault(h => !string.IsNullOrWhiteSpace(h.Root) && SameFolder(h.Root, root));
+        if (own is { File.Length: > 0 }) return own.File;
+        if (string.IsNullOrWhiteSpace(HintsDirectory)) return null;
+        var trimmed = Path.TrimEndingDirectorySeparator(root.Trim());
+        var name = Path.GetFileName(trimmed);
+        if (string.IsNullOrEmpty(name)) name = trimmed.TrimEnd(':', '\\', '/');
+        name = string.Concat(name.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c));
+        return name.Length == 0 ? null : Path.Combine(HintsDirectory, name + ".txt");
+    }
+
     /// <exception cref="ArgumentException">A value is out of range; the message names every problem.</exception>
     public void Validate()
     {
@@ -180,6 +209,12 @@ public sealed class LibraryMatchOptions
             if (string.IsNullOrWhiteSpace(i.Root)) problems.Add($"{nameof(Inboxes)}: an entry has no Root");
             if (InboxProblem(i.Folder) is { } own) problems.Add($"{nameof(Inboxes)}: Folder of {i.Root} {own}");
         }
+        if (MaxHintChars is < 0 or > 100_000) problems.Add($"{nameof(MaxHintChars)} must be between 0 and 100000");
+        foreach (var h in Hints)
+        {
+            if (string.IsNullOrWhiteSpace(h.Root)) problems.Add($"{nameof(Hints)}: an entry has no Root");
+            if (string.IsNullOrWhiteSpace(h.File)) problems.Add($"{nameof(Hints)}: the entry of {h.Root} has no File");
+        }
         Share(nameof(WeightContentFit), WeightContentFit);
         foreach (var (name, w) in new[]
                  {
@@ -204,4 +239,55 @@ public sealed class LibraryInbox
 
     /// <summary>Folder below the root, with <c>/</c>.</summary>
     public string Folder { get; set; } = string.Empty;
+}
+
+/// <summary>The hints file of one library (<c>LibraryMatch:Hints</c>, Issue 103).</summary>
+public sealed class LibraryHintsFile
+{
+    /// <summary>Root path of the library as it was scanned.</summary>
+    public string Root { get; set; } = string.Empty;
+
+    /// <summary>Full path of a text file with the hints.</summary>
+    public string File { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// What a person wrote about a library in its hints file: the lines that are not empty and not comments (<c>#</c>), at
+/// most <see cref="LibraryMatchOptions.MaxHintChars"/> characters.
+/// </summary>
+/// <param name="File">The hints file read.</param>
+/// <param name="Truncated">The file held more than is shown.</param>
+public sealed record LibraryHints(string File, IReadOnlyList<string> Lines, bool Truncated)
+{
+    /// <summary>The hints of a file, or null when it does not exist, cannot be read or holds nothing.</summary>
+    public static LibraryHints? Read(string? file, int maxChars)
+    {
+        if (string.IsNullOrWhiteSpace(file) || !System.IO.File.Exists(file)) return null;
+        string[] all;
+        try
+        {
+            all = System.IO.File.ReadAllLines(file);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return null;
+        }
+        var lines = new List<string>();
+        var used = 0;
+        var truncated = false;
+        foreach (var raw in all)
+        {
+            var line = raw.Trim();
+            if (line.Length == 0 || line.StartsWith('#')) continue;
+            if (used + line.Length > maxChars)
+            {
+                truncated = true;
+                if (maxChars - used > 0) lines.Add(line[..(maxChars - used)]);
+                break;
+            }
+            lines.Add(line);
+            used += line.Length;
+        }
+        return lines.Count == 0 && !truncated ? null : new LibraryHints(file, lines, truncated);
+    }
 }

@@ -110,6 +110,9 @@ public sealed class ScriptedAnswerOllamaService : IOllamaService
             result.Summary = "scripted answer";
             if (answer.Description is { } d)
                 result.DescribedFacts = d.ToFacts().ToList();
+            // The kind of a video, only where the rules left it open and a model would be asked (Issue 103).
+            if (answer.VideoKind is { } kind && input.VideoKindChoices is not null)
+                result.DescribedFacts = [.. result.DescribedFacts, new FileFact(FileFactKey.VideoKind, kind.ToCode(), FactSource.Model, ResultCertainty.Likely)];
         }
         else
         {

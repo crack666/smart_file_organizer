@@ -25,7 +25,8 @@ public enum FakeServerMode
 /// <summary>One request the fake server saw.</summary>
 /// <param name="Kind"><c>tags</c>, <c>warm</c>, <c>pre_assessment</c>, <c>classification</c>, <c>second_check</c>, <c>summary</c>.</param>
 /// <param name="Name">File name (classification), relative path (pre-assessment, summary), else null.</param>
-public sealed record FakeRequest(string Kind, string? Name, FakeServerMode Answer);
+/// <param name="Fields">The fields of the answer schema the request asked for (empty without a schema).</param>
+public sealed record FakeRequest(string Kind, string? Name, FakeServerMode Answer, IReadOnlySet<string>? Fields = null);
 
 /// <summary>
 /// Stand-in for an Ollama server at the HTTP level, plugged in as the primary handler of the real
@@ -71,7 +72,7 @@ public sealed class FakeModelServer : HttpMessageHandler
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
     {
         var (kind, name, fields) = await ReadAsync(request, ct);
-        var probe = new FakeRequest(kind, name, Mode);
+        var probe = new FakeRequest(kind, name, Mode, fields);
         var answer = Script?.Invoke(probe) ?? Mode;
         lock (_sync) _log.Add(probe with { Answer = answer });
 
@@ -107,11 +108,15 @@ public sealed class FakeModelServer : HttpMessageHandler
         });
     }
 
+    /// <summary>The kind of video named when the schema asks for <c>video_kind</c> (Issue 103).</summary>
+    public string VideoKind { get; set; } = "own_recording";
+
     private string Describe(string? name, IReadOnlySet<string> fields)
     {
-        if (!fields.Contains("scene") && !fields.Contains("document_kind")) return string.Empty;
-        if (name is not null && Descriptions.TryGetValue(name, out var own)) return "," + own;
-        return "," + (fields.Contains("scene") ? DefaultPicture : DefaultDocument);
+        var kind = fields.Contains("video_kind") ? $",\"video_kind\":\"{VideoKind}\"" : string.Empty;
+        if (!fields.Contains("scene") && !fields.Contains("document_kind")) return kind;
+        if (name is not null && Descriptions.TryGetValue(name, out var own)) return "," + own + kind;
+        return "," + (fields.Contains("scene") ? DefaultPicture : DefaultDocument) + kind;
     }
 
     private static HttpResponseMessage Json(string body) =>
