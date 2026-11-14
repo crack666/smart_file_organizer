@@ -307,7 +307,7 @@ public static class FindingsCommand
         var job = JobArguments.Create("Job id of a source (see sfo jobs).");
         var key = new Argument<string>("key") { Description = "Finding key (see sfo findings).", HelpName = "key" };
         var read = new ReadOptions();
-        var command = new Command("show", "One finding with its files, one page at a time; marked files show path and marker only.")
+        var command = new Command("show", "One finding with its files, one page at a time; marked files carry their markers (Sensitive:Disclosure decides what else they show).")
         {
             job, key
         };

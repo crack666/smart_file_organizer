@@ -7,18 +7,107 @@ using SmartFileOrganizer.Domain.Models;
 namespace SmartFileOrganizer.Application.Sensitivity;
 
 /// <summary>
-/// Options for everything that leaves the process (CLI output, exports).
+/// How much of a marked file leaves the process, setting <c>Sensitive:Disclosure</c>
+/// (https://github.com/crack666/smart_file_organizer/issues/99, 14.11.2026).
+/// </summary>
+public enum SensitiveDisclosure
+{
+    /// <summary><c>open</c> (default): a marker is a hint, nothing is hidden, except the literal text of a file with an access data marker.</summary>
+    Open,
+
+    /// <summary><c>restricted</c>: the behaviour before 14.11.2026; a marked file shows path, type and marker only, and a folder
+    /// holding one lists no names, no subfolders and no description.</summary>
+    Restricted
+}
+
+/// <summary>
+/// Options for everything that leaves the process (CLI output, exports), and the one place that decides what of a marked
+/// file or folder is shown (https://github.com/crack666/smart_file_organizer/issues/99). Every command asks these
+/// methods instead of deciding per command.
 /// </summary>
 public sealed record SensitiveOutputOptions
 {
-    /// <summary>Protected output: marked files show path, type, marker and a neutral summary only.</summary>
-    public static SensitiveOutputOptions Default { get; } = new();
+    /// <summary>Configuration section of the setting.</summary>
+    public const string Section = "Sensitive";
+
+    /// <summary>Codes of <see cref="SensitiveDisclosure"/> in the settings.</summary>
+    public const string OpenCode = "open";
+
+    public const string RestrictedCode = "restricted";
 
     /// <summary>
-    /// <c>--include-sensitive</c>: also show model summary, target, text excerpt and raw response
-    /// of marked files. Only for a human at the local machine; never set it for an external caller.
+    /// The markers that mean access data: <c>credentials</c> (passwords, logins, tokens, API keys, <c>.env</c>) and <c>keys</c>
+    /// (private keys, wallets, seed phrases). The literal text of such a file is never shown, whatever the setting.
+    /// </summary>
+    public const SensitiveMarker AccessDataMarkers = SensitiveMarker.Credentials | SensitiveMarker.Keys;
+
+    /// <summary>The default of the setting: <see cref="SensitiveDisclosure.Open"/>.</summary>
+    public static SensitiveOutputOptions Default { get; } = new();
+
+    /// <summary>The behaviour before 14.11.2026.</summary>
+    public static SensitiveOutputOptions Restricted { get; } = new() { Disclosure = SensitiveDisclosure.Restricted };
+
+    /// <summary>Setting <c>Sensitive:Disclosure</c>.</summary>
+    public SensitiveDisclosure Disclosure { get; init; } = SensitiveDisclosure.Open;
+
+    /// <summary>
+    /// <c>--include-sensitive</c>: with <see cref="SensitiveDisclosure.Restricted"/>, also show model summary, text excerpt
+    /// and raw response of marked files. Only for a human at the local machine. It never shows the literal text of a file
+    /// with an access data marker (<see cref="AccessDataMarkers"/>).
     /// </summary>
     public bool IncludeSensitive { get; init; }
+
+    /// <summary>True when <paramref name="markers"/> hold an access data marker.</summary>
+    public static bool IsAccessData(SensitiveMarker markers) => (markers & AccessDataMarkers) != 0;
+
+    /// <summary>
+    /// Names, subfolders, purpose and stored descriptions of a folder that is marked or holds a marked file, and the
+    /// name of a marked file in a listing of names or in a model text about a folder. Withheld only with
+    /// <see cref="SensitiveDisclosure.Restricted"/> without <see cref="IncludeSensitive"/>.
+    /// </summary>
+    public bool ShowsStructure(SensitiveMarker markers) =>
+        markers == SensitiveMarker.None || Disclosure == SensitiveDisclosure.Open || IncludeSensitive;
+
+    /// <summary>
+    /// The short classification of a marked file: category, importance, confidence and the stored description facts
+    /// with codes and short words (document kind, issuer or service, year, occasion, setting, season, people).
+    /// </summary>
+    public bool ShowsClassification(SensitiveMarker markers) =>
+        markers == SensitiveMarker.None || Disclosure == SensitiveDisclosure.Open || IncludeSensitive;
+
+    /// <summary>
+    /// Fields that can carry the literal content of a marked file: the model summary, a text excerpt, the raw model
+    /// response, error texts, free description texts (<c>scene</c>, <c>activity</c>) and model texts naming the file.
+    /// Never for access data; otherwise withheld only with <see cref="SensitiveDisclosure.Restricted"/> without
+    /// <see cref="IncludeSensitive"/>.
+    /// </summary>
+    public bool ShowsContent(SensitiveMarker markers) =>
+        markers == SensitiveMarker.None
+        || (!IsAccessData(markers) && (Disclosure == SensitiveDisclosure.Open || IncludeSensitive));
+
+    /// <summary>
+    /// The description facts of a file that may be shown: all of them when <see cref="ShowsContent"/>, the short ones
+    /// (codes, issuer, year; not the free texts <c>scene</c> and <c>activity</c>) when only
+    /// <see cref="ShowsClassification"/>, none otherwise.
+    /// </summary>
+    public IReadOnlyList<FileFact> ShownFacts(SensitiveMarker markers, IReadOnlyList<FileFact> facts)
+    {
+        if (ShowsContent(markers)) return facts;
+        if (!ShowsClassification(markers)) return [];
+        return facts.Where(f => f.Key is not (FileFactKey.Scene or FileFactKey.Activity or FileFactKey.Title
+            or FileFactKey.Author or FileFactKey.Artist or FileFactKey.Album)).ToList();
+    }
+
+    /// <summary>
+    /// Reads <c>Sensitive:Disclosure</c>: <c>open</c> (also when not set) or <c>restricted</c>, case ignored.
+    /// </summary>
+    /// <exception cref="ArgumentException">Any other value.</exception>
+    public static SensitiveOutputOptions FromSetting(string? disclosure) => disclosure?.Trim().ToLowerInvariant() switch
+    {
+        null or "" or OpenCode => Default,
+        RestrictedCode => Restricted,
+        _ => throw new ArgumentException($"Sensitive:Disclosure must be '{OpenCode}' or '{RestrictedCode}', not '{disclosure}'.")
+    };
 }
 
 /// <summary>
@@ -84,10 +173,13 @@ public sealed record FileOutputRecord
 /// export builds its output with <see cref="Project"/>.
 /// </summary>
 /// <remarks>
-/// <para>Boundary: only the local model may read the content of a sensitive file. A model or
-/// person outside the machine sees, for a marked file, path, type, marker and a neutral summary
-/// written here, never the model's own summary, a text excerpt, the raw response, the suggested
-/// target or an error text (an Ollama error body can echo the prompt).</para>
+/// <para>What a marked file shows is decided by <see cref="SensitiveOutputOptions"/>
+/// (https://github.com/crack666/smart_file_organizer/issues/99, 14.11.2026). With <c>Sensitive:Disclosure</c>
+/// <c>open</c> (default) a marked file is shown like any other, with its markers as a hint. A file with an access data
+/// marker (<see cref="SensitiveOutputOptions.AccessDataMarkers"/>) keeps its classification but never shows the model's
+/// own summary, a text excerpt, the raw response or an error text (an Ollama error body can echo the prompt); its
+/// summary is the neutral one written here. With <c>restricted</c>, the behaviour before that date, every marked file
+/// shows path, type, marker and the neutral summary only.</para>
 /// <para>A file counts as marked if any source marks it: the stored rule markers
 /// (<see cref="FileNode.SensitiveMarkers"/>), the model markers
 /// (<see cref="FileClassification.SensitiveMarkers"/>), or the name rules evaluated again right
@@ -144,7 +236,7 @@ public static class SensitiveOutputGuard
 
     /// <summary>Builds the output record for one file.</summary>
     /// <param name="file">File with <see cref="FileNode.Classification"/> and <see cref="FileNode.Override"/> loaded.</param>
-    /// <param name="options">Null means <see cref="SensitiveOutputOptions.Default"/> (protected).</param>
+    /// <param name="options">Null means <see cref="SensitiveOutputOptions.Default"/> (<c>open</c>).</param>
     /// <param name="textExcerpt">Optional text excerpt a command wants to show. Dropped for protected records.</param>
     public static FileOutputRecord Project(
         FileNode file, SensitiveOutputOptions? options = null, string? textExcerpt = null)
@@ -153,7 +245,8 @@ public static class SensitiveOutputGuard
         options ??= SensitiveOutputOptions.Default;
 
         var match = GetMatch(file);
-        var isProtected = match.IsMatch && !options.IncludeSensitive;
+        var isProtected = !options.ShowsContent(match.Markers);
+        var classified = options.ShowsClassification(match.Markers);
         var ai = file.Classification;
         var ovr = file.Override;
 
@@ -174,9 +267,9 @@ public static class SensitiveOutputGuard
             Attempts = ai?.Attempts
         };
 
-        if (isProtected)
+        if (isProtected && !classified)
         {
-            // Whitelist: nothing derived from the content except the markers themselves.
+            // Restricted: nothing derived from the content except the markers themselves.
             return record with
             {
                 Category = ovr is not null ? ovr.OverriddenCategory.ToString() : nameof(FileCategory.ReviewNeeded),
@@ -202,6 +295,22 @@ public static class SensitiveOutputGuard
         {
             category = match.IsMatch ? nameof(FileCategory.ReviewNeeded) : null;
             categorySource = match.IsMatch ? ResultOrigin.Rule.ToCode() : null;
+        }
+
+        if (isProtected)
+        {
+            // Access data: the classification, but no field that can carry the literal text of the file (model summary,
+            // excerpt, raw response, error texts, which can echo the prompt).
+            return record with
+            {
+                Category = category,
+                CategorySource = categorySource,
+                Importance = ai?.Importance.ToString(),
+                Confidence = ai?.Confidence,
+                Summary = NeutralSummary(match.Markers, file.FileType),
+                ModelUsed = ai?.ModelUsed,
+                AnalyzedAt = ai is null || ai.AnalyzedAt == default ? null : ai.AnalyzedAt
+            };
         }
 
         return record with

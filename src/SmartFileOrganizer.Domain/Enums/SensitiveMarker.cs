@@ -2,9 +2,10 @@ namespace SmartFileOrganizer.Domain.Enums;
 
 /// <summary>
 /// Why a file is sensitive. A file can carry several markers.
-/// Only the local model may read the content of a marked file; everything that leaves the
-/// machine sees path, type, marker and a neutral summary (see
-/// <c>SmartFileOrganizer.Application.Sensitivity.SensitiveOutputGuard</c>).
+/// Only the local model may read the content of a marked file. What leaves the machine is decided by
+/// <c>SmartFileOrganizer.Application.Sensitivity.SensitiveOutputOptions</c> (setting <c>Sensitive:Disclosure</c>, since
+/// 14.11.2026): by default the marker is a hint and only the text of access data (<see cref="Credentials"/>,
+/// <see cref="Keys"/>) is withheld; with <c>restricted</c> a marked file shows path, type, marker and a neutral summary.
 /// </summary>
 /// <remarks>
 /// The member names are C# names. Database and JSON use the fixed codes from

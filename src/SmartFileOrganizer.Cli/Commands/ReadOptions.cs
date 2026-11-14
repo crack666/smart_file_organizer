@@ -53,7 +53,7 @@ public sealed class ReadOptions
 
     public Option<bool> IncludeSensitive { get; } = new("--include-sensitive")
     {
-        Description = "Also show model texts of marked files and of directories naming them. For a person at this machine only."
+        Description = "With Sensitive:Disclosure restricted: also show model texts of marked files and of directories naming them (never the text of access data). For a person at this machine only."
     };
 
     public ReadOptions()
@@ -84,12 +84,14 @@ public sealed class ReadOptions
         _ => null
     };
 
+    /// <summary>The configured disclosure (<c>Sensitive:Disclosure</c>) with <c>--include-sensitive</c> on top.</summary>
     public SensitiveOutputOptions GetOutput(CommandContext ctx)
     {
         var include = ctx.ParseResult.GetValue(IncludeSensitive);
-        if (include)
-            ctx.Note("--include-sensitive: model texts of marked files are shown. Do not pass this output on.");
-        return new SensitiveOutputOptions { IncludeSensitive = include };
+        var configured = ctx.BuildServices().GetRequiredService<SensitiveOutputOptions>();
+        if (include && configured.Disclosure == SensitiveDisclosure.Restricted)
+            ctx.Note("--include-sensitive: model texts of marked files are shown (never the text of access data). Do not pass this output on.");
+        return configured with { IncludeSensitive = include };
     }
 
     /// <summary>Fills the shared fields of a query.</summary>

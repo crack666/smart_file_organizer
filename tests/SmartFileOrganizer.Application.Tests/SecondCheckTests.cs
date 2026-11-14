@@ -1,6 +1,7 @@
 using Dapper;
 using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging.Abstractions;
+using SmartFileOrganizer.Application.Sensitivity;
 using SmartFileOrganizer.Application.Services;
 using SmartFileOrganizer.Domain.Enums;
 using SmartFileOrganizer.Domain.Interfaces;
@@ -453,7 +454,7 @@ public class SecondCheckTests : IDisposable
         Assert.Equal("looks like DocumentScan", openCheck.Second!.Summary);
         Assert.Equal("review", open.Record.Certainty);
 
-        var guarded = (await read.ShowAsync(job.Id, Path.Combine(_dir, "pass.jpg"), null)).File!;
+        var guarded = (await read.ShowAsync(job.Id, Path.Combine(_dir, "pass.jpg"), SensitiveOutputOptions.Restricted)).File!;
         Assert.True(guarded.Record.Protected);
         var check = Assert.Single(guarded.Checks);
         Assert.Equal("Photo", check.First.Category);
@@ -461,6 +462,12 @@ public class SecondCheckTests : IDisposable
         Assert.Null(check.Second!.Summary);
         Assert.Null(check.Second.RawResponse);
         Assert.Null(check.Second.SuggestedTarget);
+
+        // Open (default since 14.11.2026, Issue 99): an identity marker is a hint, the answers are shown.
+        var shown = (await read.ShowAsync(job.Id, Path.Combine(_dir, "pass.jpg"), null)).File!;
+        Assert.False(shown.Record.Protected);
+        Assert.Equal(["identity"], shown.Record.Sensitive);
+        Assert.Equal("looks like DocumentScan", Assert.Single(shown.Checks).Second!.Summary);
     }
 
     // ------------------------------------------------------------------ stop between the calls

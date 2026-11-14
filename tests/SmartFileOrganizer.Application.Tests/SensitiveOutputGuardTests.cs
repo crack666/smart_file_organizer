@@ -84,13 +84,13 @@ public class SensitiveOutputGuardTests
     }
 
     [Fact]
-    public void Json_WithIncludeSensitive_ShowsEverything()
+    public void Json_WithIncludeSensitive_ShowsEverything_ExceptTheTextOfAccessData()
     {
         var file = MakeFile("notes.txt");
-        file.SensitiveMarkers = SensitiveMarker.Keys;
+        file.SensitiveMarkers = SensitiveMarker.Health;
 
         var record = SensitiveOutputGuard.Project(
-            file, new SensitiveOutputOptions { IncludeSensitive = true }, Excerpt);
+            file, SensitiveOutputOptions.Restricted with { IncludeSensitive = true }, Excerpt);
         var json = SensitiveOutputGuard.ToJson(record);
 
         Assert.False(record.Protected);
@@ -98,10 +98,113 @@ public class SensitiveOutputGuardTests
         Assert.Contains("RAW-RESPONSE", json);
         Assert.Contains(ModelSummary, json);
         // Still marked, and still never proposed as disposable.
-        Assert.Equal(["keys"], record.Sensitive);
+        Assert.Equal(["health"], record.Sensitive);
+        Assert.Equal(nameof(FileCategory.ReviewNeeded), record.Category);
+        Assert.Equal("rule", record.CategorySource);
+
+        // Access data: --include-sensitive does not lift it (since 14.11.2026, Issue 99).
+        file.SensitiveMarkers = SensitiveMarker.Keys;
+        var keys = SensitiveOutputGuard.Project(file, SensitiveOutputOptions.Restricted with { IncludeSensitive = true }, Excerpt);
+        Assert.True(keys.Protected);
+        AssertNoContent(SensitiveOutputGuard.ToJson(keys));
+    }
+
+    // ------------------------------------------------------------------ disclosure (Issue 99)
+
+    [Fact]
+    public void Open_ShowsAMarkedFileLikeAnyOther_WithTheMarkerAsAHint()
+    {
+        var file = MakeFile("Befund_2018.pdf");
+
+        var record = SensitiveOutputGuard.Project(file, SensitiveOutputOptions.Default, Excerpt);
+
+        Assert.False(record.Protected);
+        Assert.Equal(["health"], record.Sensitive);
+        Assert.Equal(ModelSummary, record.Summary);
+        Assert.Equal(Excerpt, record.TextExcerpt);
+        Assert.Equal(RawResponse, record.RawResponse);
+        Assert.Equal("Low", record.Importance);
+        // The review rule is no hiding: a marked file is still never proposed as disposable.
         Assert.Equal(nameof(FileCategory.ReviewNeeded), record.Category);
         Assert.Equal("rule", record.CategorySource);
     }
+
+    [Fact]
+    public void Open_AccessData_KeepsTheClassification_ButNoFieldThatCanCarryItsText()
+    {
+        foreach (var marker in new[] { SensitiveMarker.Credentials, SensitiveMarker.Keys, SensitiveMarker.Credentials | SensitiveMarker.Finance })
+        {
+            var file = MakeFile("logins.txt");
+            file.SensitiveMarkers = marker;
+            file.Classification!.Category = FileCategory.PersonalDocument;
+            file.Classification.PreviousError = ErrorText;
+
+            var record = SensitiveOutputGuard.Project(file, SensitiveOutputOptions.Default, Excerpt);
+            var json = SensitiveOutputGuard.ToJson(record);
+
+            AssertNoContent(json);
+            Assert.True(record.Protected);
+            Assert.Equal("logins.txt", record.Name);
+            Assert.Equal(nameof(FileCategory.PersonalDocument), record.Category);
+            Assert.Equal("model", record.CategorySource);
+            Assert.Equal("Low", record.Importance);
+            Assert.Equal(0.7, record.Confidence);
+            Assert.Null(record.PreviousError);
+            Assert.Contains("Content withheld", record.Summary);
+        }
+    }
+
+    [Fact]
+    public void Policy_AccessDataMarkers_AreCredentialsAndKeys()
+    {
+        Assert.Equal(SensitiveMarker.Credentials | SensitiveMarker.Keys, SensitiveOutputOptions.AccessDataMarkers);
+        foreach (var marker in new[] { SensitiveMarker.PrivateMessage, SensitiveMarker.Identity, SensitiveMarker.Finance, SensitiveMarker.Health })
+        {
+            Assert.False(SensitiveOutputOptions.IsAccessData(marker));
+            Assert.True(SensitiveOutputOptions.Default.ShowsContent(marker));
+            Assert.False(SensitiveOutputOptions.Restricted.ShowsContent(marker));
+            Assert.False(SensitiveOutputOptions.Restricted.ShowsStructure(marker));
+        }
+        foreach (var options in new[] { SensitiveOutputOptions.Default, SensitiveOutputOptions.Restricted, SensitiveOutputOptions.Restricted with { IncludeSensitive = true } })
+        {
+            Assert.False(options.ShowsContent(SensitiveMarker.Credentials));
+            Assert.False(options.ShowsContent(SensitiveMarker.Keys));
+            Assert.True(options.ShowsContent(SensitiveMarker.None));
+        }
+        Assert.True(SensitiveOutputOptions.Default.ShowsStructure(SensitiveMarker.Keys));
+        Assert.True(SensitiveOutputOptions.Default.ShowsClassification(SensitiveMarker.Credentials));
+        Assert.False(SensitiveOutputOptions.Restricted.ShowsClassification(SensitiveMarker.Credentials));
+    }
+
+    [Fact]
+    public void Policy_ShownFacts_OfAccessData_DropTheFreeTexts()
+    {
+        IReadOnlyList<FileFact> facts =
+        [
+            new FileFact(FileFactKey.DocumentKind, "contract", FactSource.Model),
+            new FileFact(FileFactKey.Issuer, "Example Code Hosting", FactSource.Model),
+            new FileFact(FileFactKey.Year, "2024", FactSource.Model),
+            new FileFact(FileFactKey.Scene, "token ghp_FAKE0000 on screen", FactSource.Model),
+            new FileFact(FileFactKey.Title, "pw FAKE0000")
+        ];
+
+        var shown = SensitiveOutputOptions.Default.ShownFacts(SensitiveMarker.Credentials, facts);
+        Assert.Equal([FileFactKey.DocumentKind, FileFactKey.Issuer, FileFactKey.Year], shown.Select(f => f.Key));
+        Assert.Equal(5, SensitiveOutputOptions.Default.ShownFacts(SensitiveMarker.Finance, facts).Count);
+        Assert.Empty(SensitiveOutputOptions.Restricted.ShownFacts(SensitiveMarker.Finance, facts));
+    }
+
+    [Theory]
+    [InlineData(null, SensitiveDisclosure.Open)]
+    [InlineData("", SensitiveDisclosure.Open)]
+    [InlineData("open", SensitiveDisclosure.Open)]
+    [InlineData(" Restricted ", SensitiveDisclosure.Restricted)]
+    public void Setting_IsReadAsOpenOrRestricted(string? value, SensitiveDisclosure expected) =>
+        Assert.Equal(expected, SensitiveOutputOptions.FromSetting(value).Disclosure);
+
+    [Fact]
+    public void Setting_RejectsAnyOtherValue() =>
+        Assert.Throws<ArgumentException>(() => SensitiveOutputOptions.FromSetting("hidden"));
 
     [Fact]
     public void Json_OfUnmarkedFile_IsUnchanged()
@@ -127,7 +230,7 @@ public class SensitiveOutputGuardTests
         var file = MakeFile("scan_0042.pdf");
         file.Classification!.SensitiveMarkers = SensitiveMarker.Identity;
 
-        var record = SensitiveOutputGuard.Project(file, textExcerpt: Excerpt);
+        var record = SensitiveOutputGuard.Project(file, SensitiveOutputOptions.Restricted, Excerpt);
 
         Assert.True(record.Protected);
         Assert.Equal(["identity"], record.Sensitive);
@@ -214,7 +317,7 @@ public class SensitiveOutputGuardTests
         var file = MakeFile("Befund_2018.pdf");
 
         var sw = new StringWriter();
-        ScanExportService.WriteRow(sw, file);
+        ScanExportService.WriteRow(sw, file, SensitiveOutputOptions.Restricted);
         var row = sw.ToString();
 
         AssertNoContent(row);
@@ -227,7 +330,7 @@ public class SensitiveOutputGuardTests
     public void CsvRow_WithIncludeSensitive_HasModelSummary()
     {
         var sw = new StringWriter();
-        ScanExportService.WriteRow(sw, MakeFile("Befund_2018.pdf"), new SensitiveOutputOptions { IncludeSensitive = true });
+        ScanExportService.WriteRow(sw, MakeFile("Befund_2018.pdf"), SensitiveOutputOptions.Restricted with { IncludeSensitive = true });
         Assert.Contains(ModelSummary, sw.ToString());
     }
 
