@@ -5,6 +5,7 @@ using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
 using SmartFileOrganizer.Application.Bundles;
 using SmartFileOrganizer.Application.Findings;
+using SmartFileOrganizer.Application.Sensitivity;
 using SmartFileOrganizer.Application.Services;
 using SmartFileOrganizer.Domain.Enums;
 using SmartFileOrganizer.Domain.Interfaces;
@@ -162,6 +163,7 @@ public sealed partial class LibraryTargetService
     private readonly IOllamaService? _ollama;
     private readonly ILibraryRootProbe _rootProbe;
     private readonly IFolderDescriptionRepository? _folderDescriptions;
+    private readonly SensitiveOutputOptions _disclosure;
 
     public LibraryTargetService(
         LibraryService library,
@@ -178,9 +180,11 @@ public sealed partial class LibraryTargetService
         IEnumerable<IFolderDescriptionSource>? descriptionSources = null,
         IOllamaService? ollama = null,
         ILibraryRootProbe? rootProbe = null,
-        IFolderDescriptionRepository? folderDescriptions = null)
+        IFolderDescriptionRepository? folderDescriptions = null,
+        SensitiveOutputOptions? disclosure = null)
     {
         _folderDescriptions = folderDescriptions;
+        _disclosure = disclosure ?? SensitiveOutputOptions.Default;
         _rootProbe = rootProbe ?? FileSystemLibraryRootProbe.Instance;
         _freeSpace = freeSpace;
         _facts = facts;
@@ -199,6 +203,9 @@ public sealed partial class LibraryTargetService
     }
 
     public LibraryMatchOptions Options => _options;
+
+    /// <summary>The configured disclosure of marked files (<c>Sensitive:Disclosure</c>, https://github.com/crack666/smart_file_organizer/issues/99).</summary>
+    public SensitiveOutputOptions Disclosure => _disclosure;
 
     // ------------------------------------------------------------------ show
 

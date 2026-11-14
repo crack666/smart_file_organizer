@@ -27,9 +27,14 @@ public class JobReadService
     private readonly IJobReadRepository _read;
     private readonly IDirectoryVerdictRepository _verdicts;
     private readonly IBundleRepository _bundles;
+    private readonly SensitiveOutputOptions _output;
 
-    public JobReadService(IScanJobRepository jobs, IJobReadRepository read, IDirectoryVerdictRepository verdicts, IBundleRepository bundles)
+    /// <param name="output">The configured disclosure (<c>Sensitive:Disclosure</c>); used where a call passes none.</param>
+    public JobReadService(
+        IScanJobRepository jobs, IJobReadRepository read, IDirectoryVerdictRepository verdicts, IBundleRepository bundles,
+        SensitiveOutputOptions? output = null)
     {
+        _output = output ?? SensitiveOutputOptions.Default;
         _jobs = jobs;
         _read = read;
         _verdicts = verdicts;
@@ -163,7 +168,7 @@ public class JobReadService
     {
         var job = await RequireJobAsync(jobId, ct);
         var fullPath = ResolvePath(job, path);
-        output ??= SensitiveOutputOptions.Default;
+        output ??= _output;
 
         var file = await _read.GetFileByPathAsync(job.Id, fullPath, ct);
         if (file is not null)
@@ -178,7 +183,7 @@ public class JobReadService
 
         var index = await BuildIndexAsync(job.Id, visit: null, ct);
         var entry = RequireDirectory(index, fullPath, path);
-        var marked = index.MarkedNamesBelow(entry);
+        var marked = entry.NamesWithheld(output);
 
         var verdict = await _verdicts.GetByNodeIdAsync(entry.Row.Id, ct);
         var analyses = await _read.GetDirectoryAnalysesAsync(entry.Row.Id, ct);
@@ -188,10 +193,10 @@ public class JobReadService
             unitPath = unit.Row.FullPath;
 
         var item = ToItem(entry, index, protect: true, output);
-        var rawResponse = DirectoryTextGuard.Protect(verdict?.RawResponse, marked, output, out var rawWithheld);
+        var rawResponse = DirectoryTextGuard.Protect(verdict?.RawResponse, marked, null, out var rawWithheld);
 
         var analysisItems = analyses
-            .Select(a => ToAnalysis(a, marked, output, stale: a.Phase == "summary" && !entry.SummaryIsCurrent, ref rawWithheld))
+            .Select(a => ToAnalysis(a, marked, entry.ContentWithheld(output), stale: a.Phase == "summary" && !entry.SummaryIsCurrent(output), ref rawWithheld))
             .ToList();
 
         return new PathDetail(new DirectoryDetail
@@ -225,7 +230,7 @@ public class JobReadService
             bytes += file.Size;
 
             // Same category the files command reports, so the numbers add up for the caller.
-            var record = SensitiveOutputGuard.Project(file);
+            var record = SensitiveOutputGuard.Project(file, _output);
             Increment(byCategory, record.Category ?? "unclassified");
             Increment(byType, file.FileType.ToString());
             Increment(byStatus, file.Status.ToString());
@@ -409,22 +414,25 @@ public class JobReadService
         if (!protect || entry.SensitiveFiles == 0)
             return item;
 
-        var marked = index.MarkedNamesBelow(entry);
-        var purpose = DirectoryTextGuard.Protect(item.Purpose, marked, output, out var w1);
-        var reason = DirectoryTextGuard.Protect(item.Reason, marked, output, out var w2);
+        // Only the names whose content the disclosure withholds count (https://github.com/crack666/smart_file_organizer/issues/99).
+        output ??= SensitiveOutputOptions.Default;
+        var marked = entry.NamesWithheld(output);
+        var current = entry.SummaryIsCurrent(output);
+        var purpose = DirectoryTextGuard.Protect(item.Purpose, marked, null, out var w1);
+        var reason = DirectoryTextGuard.Protect(item.Reason, marked, null, out var w2);
         string? summary;
         bool w3;
-        if (output?.IncludeSensitive != true && item.Summary is not null && !entry.SummaryIsCurrent)
+        if (item.Summary is not null && !current)
             (summary, w3) = (DirectorySummaryGuard.StaleHint, true);
         else
-            summary = DirectoryTextGuard.Protect(item.Summary, marked, output, out w3);
-        var verdictError = DirectoryTextGuard.Protect(item.VerdictError, marked, output, out var w4);
+            summary = DirectoryTextGuard.Protect(item.Summary, marked, null, out w3);
+        var verdictError = DirectoryTextGuard.Protect(item.VerdictError, marked, null, out var w4);
         string? summaryError;
         bool w5;
-        if (output?.IncludeSensitive != true && item.SummaryError is not null && !entry.SummaryIsCurrent)
+        if (item.SummaryError is not null && !current)
             (summaryError, w5) = (DirectorySummaryGuard.StaleHint, true);
         else
-            summaryError = DirectoryTextGuard.Protect(item.SummaryError, marked, output, out w5);
+            summaryError = DirectoryTextGuard.Protect(item.SummaryError, marked, null, out w5);
 
         return item with
         {
@@ -438,10 +446,10 @@ public class JobReadService
     }
 
     private static DirectoryAnalysisItem ToAnalysis(
-        DirectoryClassificationResult a, IReadOnlyCollection<string> marked, SensitiveOutputOptions output, bool stale, ref bool withheld)
+        DirectoryClassificationResult a, IReadOnlyCollection<string> marked, IReadOnlyCollection<string> contentWithheld, bool stale, ref bool withheld)
     {
         // A model summary written before a file of the directory was marked: none of its texts is shown.
-        if (stale && !output.IncludeSensitive)
+        if (stale)
         {
             withheld = true;
             return new DirectoryAnalysisItem
@@ -459,24 +467,24 @@ public class JobReadService
             };
         }
 
-        var summary = DirectoryTextGuard.Protect(a.Summary, marked, output, out var w1);
-        var theme = DirectoryTextGuard.Protect(a.Theme, marked, output, out var w2);
-        var error = DirectoryTextGuard.Protect(a.Error, marked, output, out var w3);
+        var summary = DirectoryTextGuard.Protect(a.Summary, marked, null, out var w1);
+        var theme = DirectoryTextGuard.Protect(a.Theme, marked, null, out var w2);
+        var error = DirectoryTextGuard.Protect(a.Error, marked, null, out var w3);
         withheld |= w1 || w2 || w3;
 
         var anomalies = new List<AnomalyItem>();
         foreach (var (name, reason) in ParseAnomalies(a.AnomalousFileIds))
         {
-            // The reason is about this file's content; withhold it when the file is marked.
+            // The reason is about this file's content; withhold it when the disclosure withholds the file's content.
             string? shown;
-            if (!output.IncludeSensitive && marked.Contains(name, StringComparer.OrdinalIgnoreCase))
+            if (contentWithheld.Contains(name, StringComparer.OrdinalIgnoreCase))
             {
                 shown = DirectoryTextGuard.NeutralHint;
                 withheld = true;
             }
             else
             {
-                shown = DirectoryTextGuard.Protect(reason, marked, output, out var w4);
+                shown = DirectoryTextGuard.Protect(reason, marked, null, out var w4);
                 withheld |= w4;
             }
             anomalies.Add(new AnomalyItem(name, shown));
@@ -572,11 +580,11 @@ public class JobReadService
             if (!match.IsMatch) continue;
 
             if (index.ByPath.TryGetValue(row.File.ParentPath, out var parent))
-                parent.DirectMarkedNames.Add(row.File.Name);
+                parent.DirectMarked[row.File.Name] = parent.DirectMarked.GetValueOrDefault(row.File.Name) | match.Markers;
             foreach (var entry in index.SelfAndAncestors(row.File.ParentPath))
             {
                 entry.SensitiveFiles++;
-                entry.MarkedNames.Add(row.File.Name);
+                entry.Marked[row.File.Name] = entry.Marked.GetValueOrDefault(row.File.Name) | match.Markers;
             }
         }
 
@@ -597,15 +605,33 @@ public class JobReadService
         /// <summary>Marked folders in the subtree, this one included.</summary>
         public long SensitiveDirs { get; set; }
 
-        /// <summary>Names of marked files in the subtree.</summary>
-        public HashSet<string> MarkedNames { get; } = new(StringComparer.OrdinalIgnoreCase);
+        /// <summary>Names of marked files in the subtree with their markers.</summary>
+        public Dictionary<string, SensitiveMarker> Marked { get; } = new(StringComparer.OrdinalIgnoreCase);
 
-        /// <summary>Names of marked files stored directly in this directory: the ones a Phase 3 summary saw.</summary>
-        public HashSet<string> DirectMarkedNames { get; } = new(StringComparer.OrdinalIgnoreCase);
+        /// <summary>Names of marked files stored directly in this directory (the ones a Phase 3 summary saw) with their markers.</summary>
+        public Dictionary<string, SensitiveMarker> DirectMarked { get; } = new(StringComparer.OrdinalIgnoreCase);
 
-        /// <summary>False when the model summary was written before a file of this directory was marked.</summary>
-        public bool SummaryIsCurrent =>
-            DirectorySummaryGuard.IsCurrent(Row.AiSummaryModel, Row.AiSummaryMarkedInputs, DirectMarkedNames);
+        /// <summary>
+        /// Names of marked files in the subtree whose names <paramref name="output"/> withholds: a model text naming one is
+        /// withheld (<see cref="DirectoryTextGuard"/>). With <c>open</c> none, with <c>restricted</c> all of them.
+        /// </summary>
+        public IReadOnlyCollection<string> NamesWithheld(SensitiveOutputOptions output) =>
+            Marked.Where(m => !output.ShowsStructure(m.Value)).Select(m => m.Key).ToList();
+
+        /// <summary>
+        /// Names of marked files in the subtree whose content <paramref name="output"/> withholds: the model's reason about
+        /// one of them is withheld. Always the files with an access data marker; with <c>restricted</c> all of them.
+        /// </summary>
+        public IReadOnlyCollection<string> ContentWithheld(SensitiveOutputOptions output) =>
+            Marked.Where(m => !output.ShowsContent(m.Value)).Select(m => m.Key).ToList();
+
+        /// <summary>
+        /// False when the model summary was written before a file of this directory was marked whose content
+        /// <paramref name="output"/> withholds.
+        /// </summary>
+        public bool SummaryIsCurrent(SensitiveOutputOptions output) =>
+            DirectorySummaryGuard.IsCurrent(Row.AiSummaryModel, Row.AiSummaryMarkedInputs,
+                DirectMarked.Where(m => !output.ShowsContent(m.Value)).Select(m => m.Key).ToList());
     }
 
     private sealed class DirectoryIndex
@@ -625,8 +651,6 @@ public class JobReadService
         public List<DirectoryEntry> Entries { get; }
         public Dictionary<string, DirectoryEntry> ByPath { get; }
         public Dictionary<long, DirectoryEntry> ById { get; }
-
-        public IReadOnlyCollection<string> MarkedNamesBelow(DirectoryEntry entry) => entry.MarkedNames;
 
         /// <summary>The directory at <paramref name="path"/> and every ancestor that belongs to the job.</summary>
         public IEnumerable<DirectoryEntry> SelfAndAncestors(string path)

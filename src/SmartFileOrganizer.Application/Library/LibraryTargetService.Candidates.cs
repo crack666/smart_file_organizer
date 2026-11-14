@@ -1,3 +1,4 @@
+using SmartFileOrganizer.Application.Findings;
 using SmartFileOrganizer.Application.Sensitivity;
 using SmartFileOrganizer.Application.Services;
 using SmartFileOrganizer.Domain.Enums;
@@ -16,12 +17,19 @@ public sealed record CandidateQuery(long SourceJobId, IReadOnlyList<long> Librar
 
 /// <summary>
 /// Facts about one library folder, read from the scan and the stored folder descriptions, never from a model
-/// (https://github.com/crack666/smart_file_organizer/issues/95). A sensitive folder (marked itself or below a marked
-/// folder, or holding a marked file) shows no file names, no subfolder names and no description.
+/// (https://github.com/crack666/smart_file_organizer/issues/95). A sensitive folder is marked itself, lies below a marked
+/// folder or holds a marked file; the markers are a hint (https://github.com/crack666/smart_file_organizer/issues/99).
+/// Only with <c>Sensitive:Disclosure</c> <c>restricted</c> does such a folder show no file names, no subfolder names and
+/// no description (<see cref="Withheld"/>); that was the behaviour for every sensitive folder before 14.11.2026.
 /// </summary>
-/// <param name="Description">The stored description (<c>folder_descriptions</c>); null when none is stored or the folder is sensitive.</param>
-/// <param name="FileNames">A few names of its own files (direct files first), never of a marked file.</param>
+/// <param name="Description">The stored description (<c>folder_descriptions</c>); null when none is stored or <paramref name="Withheld"/>.</param>
+/// <param name="FileNames">A few names of its own files (direct files first); with <c>restricted</c> never of a marked file.</param>
 /// <param name="Subfolders">Names of its subfolders, at most a few.</param>
+/// <param name="Withheld">Names, subfolders, purpose and description are withheld (<c>restricted</c> and sensitive).</param>
+/// <param name="MarkedFiles">
+/// Its own marked files with their markers (path relative to the library root, at most <see cref="LibraryTargetService.MaxMarkedListed"/>),
+/// the hint where something important lies; empty when <paramref name="Withheld"/>.
+/// </param>
 public sealed record FolderFacts(
     ScanJob Library,
     LibraryMapEntry Entry,
@@ -30,7 +38,9 @@ public sealed record FolderFacts(
     ContentDescription? Description,
     DateTime? DescribedAt,
     IReadOnlyList<string> FileNames,
-    IReadOnlyList<string> Subfolders);
+    IReadOnlyList<string> Subfolders,
+    bool Withheld = false,
+    IReadOnlyList<SensitiveFileRef>? MarkedFiles = null);
 
 /// <summary>A candidate folder of the rules with what it holds.</summary>
 public sealed record FolderCandidate(MatchCandidate Candidate, FolderFacts Folder);
@@ -67,7 +77,7 @@ public sealed record UnitCandidates(string Key, MatchUnit Unit, string? Excluded
 }
 
 /// <summary>A library root: free space, its inbox folder and its top level.</summary>
-/// <param name="Root">The root folder; when it is sensitive, <paramref name="TopLevel"/> is empty, as in <c>sfo library folder</c>.</param>
+/// <param name="Root">The root folder; when it is withheld (<see cref="FolderFacts.Withheld"/>), <paramref name="TopLevel"/> is empty, as in <c>sfo library folder</c>.</param>
 /// <param name="TopLevel">The folders directly below the root (Issue 97), so a controller sees the order of the library at once.</param>
 public sealed record LibraryRootFacts(ScanJob Library, long? FreeBytes, string InboxFolder, FolderFacts? Root = null, IReadOnlyList<FolderFacts>? TopLevel = null);
 
@@ -135,7 +145,7 @@ public sealed partial class LibraryTargetService
             // The top level once per library instead of the same broad folders as a candidate of nearly every unit.
             var root = await FolderFactsAsync(side.Library, side.Map, side.Map.Root, side.Markers, 0, ct);
             var top = new List<FolderFacts>();
-            if (!root.Sensitive)
+            if (!root.Withheld)
             {
                 foreach (var child in side.Map.Root.Children)
                     top.Add(await FolderFactsAsync(side.Library, side.Map, child, side.Markers, 0, ct));
@@ -144,8 +154,8 @@ public sealed partial class LibraryTargetService
                 _options.InboxFolderOf(side.Library.RootPath), root, top));
         }
 
-        // A file counts as marked when it is marked itself or lies in a marked folder of the source: neither gives a name
-        // or a description.
+        // A file counts as marked when it is marked itself or lies in a marked folder of the source. The disclosure decides
+        // whether its name and its description facts are shown (https://github.com/crack666/smart_file_organizer/issues/99).
         var sourceDirMarkers = await DirectoryMarkersAsync(source.Id, ct);
         var marked = new Dictionary<long, SensitiveMarker>();
         foreach (var file in query.Units.SelectMany(u => u.Files))
@@ -197,16 +207,17 @@ public sealed partial class LibraryTargetService
         {
             var described = Describe(files);
             if (!described.IsEmpty) return described.Gist();
-            var named = files.FirstOrDefault(f => !marked.ContainsKey(f.Id));
+            var named = files.FirstOrDefault(f => _disclosure.ShowsStructure(marked.GetValueOrDefault(f.Id)));
             return named is null
                 ? $"{files.Count} marked file(s) (not described)"
                 : $"{named.Name}{(files.Count > 1 ? $" and {files.Count - 1} more" : string.Empty)} (not described)";
         }
 
-        // What the unmarked files show; a marked file never adds to a description.
+        // What the files show. A marked file adds what the disclosure shows of it: with open all its facts, for access data
+        // only the short ones (no free text); with restricted nothing, as before 14.11.2026.
         ContentDescription Describe(IReadOnlyList<FileNode> files) => ContentDescription.From(files
-            .Where(f => !marked.ContainsKey(f.Id))
-            .Select(f => facts.TryGetValue(f.Id, out var x) ? x : (IReadOnlyList<FileFact>)[])
+            .Where(f => _disclosure.ShowsClassification(marked.GetValueOrDefault(f.Id)))
+            .Select(f => _disclosure.ShownFacts(marked.GetValueOrDefault(f.Id), facts.TryGetValue(f.Id, out var x) ? x : []))
             .ToList());
 
         async Task<CandidateGroup> GroupAsync(int? index, MatchUnit unit, IReadOnlyList<FileNode> files, string? label, string? notMatched)
@@ -287,8 +298,9 @@ public sealed partial class LibraryTargetService
         .ToDictionary(g => g.Key, g => g.Aggregate(SensitiveMarker.None, (m, d) => m | d.SensitiveMarkers), PathKey.Comparer);
 
     /// <summary>
-    /// What a library folder holds, from the scan: whether it is sensitive, a few names of its own unmarked files and of
-    /// its subfolders, and its stored description. A sensitive folder gives no names and no description.
+    /// What a library folder holds, from the scan: whether it is sensitive, a few names of its own files and of its
+    /// subfolders, and its stored description. With <c>restricted</c> a sensitive folder gives no names and no description,
+    /// and no marked file is named.
     /// </summary>
     private async Task<FolderFacts> FolderFactsAsync(
         ScanJob library, LibraryMap map, LibraryMapEntry entry, IReadOnlyDictionary<string, SensitiveMarker> dirMarkers, int names, CancellationToken ct)
@@ -299,17 +311,20 @@ public sealed partial class LibraryTargetService
         foreach (var s in map.Tree.SensitiveFiles.Where(s => s.Dir == entry.Node))
             markers |= s.Markers;
 
-        // Direct files first: every marker counts, names only of unmarked files.
+        // Direct files first: every marker counts; the disclosure decides whose names are listed.
         var fileNames = new List<string>();
+        var markedFiles = new List<SensitiveFileRef>();
         await foreach (var row in _reads.StreamFilesAsync(new FileListFilter { JobId = library.Id, Directory = entry.FullPath }, ct))
         {
             var fileMarkers = SensitiveOutputGuard.GetMarkers(row.File);
             markers |= fileMarkers;
-            if (fileMarkers == SensitiveMarker.None && fileNames.Count < names)
+            if (fileMarkers != SensitiveMarker.None && markedFiles.Count < MaxMarkedListed)
+                markedFiles.Add(new SensitiveFileRef(Path.GetRelativePath(library.RootPath, row.File.FullPath).Replace('\\', '/'), fileMarkers));
+            if (_disclosure.ShowsStructure(fileMarkers) && fileNames.Count < names)
                 fileNames.Add(row.File.Name);
         }
-        // A folder that only holds folders: names from below, never of a marked file.
-        if (fileNames.Count < names && entry.Children.Count > 0 && markers == SensitiveMarker.None)
+        // A folder that only holds folders: names from below.
+        if (fileNames.Count < names && entry.Children.Count > 0 && _disclosure.ShowsStructure(markers))
         {
             var prefix = entry.FullPath.EndsWith(Path.DirectorySeparatorChar) ? entry.FullPath : entry.FullPath + Path.DirectorySeparatorChar;
             await foreach (var row in _reads.StreamFilesAsync(new FileListFilter
@@ -319,29 +334,35 @@ public sealed partial class LibraryTargetService
             {
                 if (fileNames.Count >= names) break;
                 if (string.Equals(row.File.ParentPath, entry.FullPath, PathComparison)) continue;
-                if (SensitiveOutputGuard.GetMarkers(row.File) != SensitiveMarker.None || dirMarkers.ContainsKey(row.File.ParentPath)) continue;
+                if (!_disclosure.ShowsStructure(SensitiveOutputGuard.GetMarkers(row.File) | dirMarkers.GetValueOrDefault(row.File.ParentPath))) continue;
                 fileNames.Add(Path.GetRelativePath(entry.FullPath, row.File.FullPath).Replace('\\', '/'));
             }
         }
 
         var sensitive = markers != SensitiveMarker.None;
+        var withheld = !_disclosure.ShowsStructure(markers);
         ContentDescription? description = null;
         DateTime? describedAt = null;
-        if (!sensitive && _folderDescriptions is not null
+        if (!withheld && _folderDescriptions is not null
             && await _folderDescriptions.GetAsync(library.Id, entry.RelativePath, FolderDescriptionSource.Sample, ct) is { } stored)
         {
             description = ContentDescription.FromJson(stored.FactsJson);
             describedAt = stored.DescribedAt;
         }
         return new FolderFacts(library, entry, sensitive, markers, description, describedAt,
-            sensitive ? [] : fileNames,
-            sensitive ? [] : entry.Children.Select(c => c.Name).Take(Math.Max(names, 1) * 2).ToList());
+            withheld ? [] : fileNames,
+            withheld ? [] : entry.Children.Select(c => c.Name).Take(Math.Max(names, 1) * 2).ToList(),
+            withheld,
+            withheld ? [] : markedFiles);
     }
+
+    /// <summary>Marked files listed per folder as a hint (<see cref="FolderFacts.MarkedFiles"/>).</summary>
+    public const int MaxMarkedListed = 20;
 
     /// <summary>
     /// One folder of a library as the scan holds it (<c>sfo library folder</c>, Issue 95): its facts, its subfolders and a
-    /// page of its own files. No model. A marked file is listed with path and markers only; a sensitive folder lists none of
-    /// its other files by name.
+    /// page of its own files. No model. A marked file is listed with its markers; with <c>restricted</c> a sensitive folder
+    /// lists none of its other files by name and none of its subfolders.
     /// </summary>
     public async Task<FolderDetail> FolderAsync(long libraryJobId, string path, int limit, int offset, CancellationToken ct = default)
     {
@@ -355,20 +376,21 @@ public sealed partial class LibraryTargetService
         var files = new List<FileNode>();
         await foreach (var row in _reads.StreamFilesAsync(new FileListFilter { JobId = job.Id, Directory = entry.FullPath }, ct))
         {
-            // In a sensitive folder only the marked files are listed (path and markers); the others are counted.
-            if (facts.Sensitive && SensitiveOutputGuard.GetMarkers(row.File) == SensitiveMarker.None) continue;
+            // Restricted: in a sensitive folder only the marked files are listed (path and markers); the others are counted.
+            if (facts.Withheld && SensitiveOutputGuard.GetMarkers(row.File) == SensitiveMarker.None) continue;
             files.Add(row.File);
         }
         limit = Math.Clamp(limit, 1, JobReadService.MaxLimit);
         offset = Math.Max(0, offset);
         var page = files.Skip(offset).Take(limit).ToList();
         int? next = offset + page.Count < files.Count ? offset + page.Count : null;
-        return new FolderDetail(facts, facts.Sensitive ? [] : entry.Children, page, files.Count, limit, offset, next);
+        return new FolderDetail(facts, facts.Withheld ? [] : entry.Children, page, files.Count, limit, offset, next);
     }
 
     /// <summary>
     /// Describes one library folder with the local model, and only this one (<c>sfo library describe</c>, Issue 95): a small
-    /// sample of its own files, stored in <c>folder_descriptions</c>. A sensitive folder is not described. No other folder
+    /// sample of its own files, stored in <c>folder_descriptions</c>. A sensitive folder is not described, whatever
+    /// <c>Sensitive:Disclosure</c> says: the setting is about the output, not about what goes to the model. No other folder
     /// is touched.
     /// </summary>
     public async Task<FolderDescribeAnswer> DescribeFolderAsync(long libraryJobId, string path, bool refresh, CancellationToken ct = default)

@@ -17,8 +17,9 @@ namespace SmartFileOrganizer.Application.Services;
 /// The export is deliberately read-only: it never touches a file on disk other than the
 /// output stream, and it never writes back into the database.
 ///
-/// Every row goes through <see cref="SensitiveOutputGuard"/>: for a marked file the export
-/// contains path, type, marker and a neutral summary only, unless
+/// Every row goes through <see cref="SensitiveOutputGuard"/> with the configured disclosure
+/// (<see cref="SensitiveOutputOptions"/>): a file with an access data marker never carries its text;
+/// with <c>restricted</c> a marked file has path, type, marker and a neutral summary only, unless
 /// <see cref="SensitiveOutputOptions.IncludeSensitive"/> is set.
 /// </summary>
 public class ScanExportService

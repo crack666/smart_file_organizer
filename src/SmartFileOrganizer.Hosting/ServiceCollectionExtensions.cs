@@ -10,6 +10,7 @@ using SmartFileOrganizer.Application.Decisions;
 using SmartFileOrganizer.Application.Findings;
 using SmartFileOrganizer.Application.Places;
 using SmartFileOrganizer.Application.Plans;
+using SmartFileOrganizer.Application.Sensitivity;
 using SmartFileOrganizer.Application.Services;
 using SmartFileOrganizer.Domain.Interfaces;
 using SmartFileOrganizer.Infrastructure;
@@ -207,6 +208,11 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ScanExportService>();
         services.AddSingleton<FocusedRescanService>();
         services.AddSingleton<ContentComparisonService>();
+
+        // Section "Sensitive": what of a marked file the output shows (https://github.com/crack666/smart_file_organizer/issues/99).
+        // Read by every read command, the candidates and the folder view; never by what goes to the model.
+        services.AddSingleton(sp => SensitiveOutputOptions.FromSetting(
+            sp.GetRequiredService<IConfiguration>()[$"{SensitiveOutputOptions.Section}:Disclosure"]));
 
         // Duplicates over a whole holding (https://github.com/crack666/smart_file_organizer/issues/87): reports only.
         services.AddSingleton<IDuplicateRepository, DuplicateRepository>();

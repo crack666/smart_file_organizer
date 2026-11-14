@@ -241,9 +241,41 @@ and health records. Two kinds of reader see the results:
   may read the content of any file.
 - **External:** anything that receives output of the tool, in particular a
   model outside the machine that drives the tool through the CLI, and anyone
-  who gets an export. For a marked file it sees path, file type, marker and
-  a neutral summary only. Never a text excerpt, the raw model response, the
-  model's own summary, the suggested target or an error text.
+  who gets an export. What it sees of a marked file is decided by the setting
+  `Sensitive:Disclosure` (below, since 14.11.2026). Until that date it saw,
+  for every marked file, path, file type, marker and a neutral summary only,
+  never a text excerpt, the raw model response, the model's own summary, the
+  suggested target or an error text; and a folder holding a marked file
+  showed no names, subfolders or description.
+
+Revised 14.11.2026 in
+[#99](https://github.com/crack666/smart_file_organizer/issues/99): a marker
+is a hint on something important, not a reason to hide it. On a real holding
+one marked file in the root of a library hid that library's whole top level
+from the controlling model, which then chose targets blind. Names, structure
+and descriptions are no secret; the literal text of access data is.
+
+- `open` (default): a marked file shows what any other file shows, with its
+  markers. Folders, subfolders, file names and stored descriptions appear
+  everywhere, also in and next to marked folders.
+- **Access data**, the markers `credentials` and `keys`
+  (`SensitiveOutputOptions.AccessDataMarkers`): the literal text of such a
+  file never leaves the process, whatever the setting and also with
+  `--include-sensitive`. That covers the model summary, text excerpt, raw
+  response, error texts, free-text description facts (`scene`, `activity`,
+  `title`, ...) and the full checksum. Name, path, markers and the short
+  classification (category, importance, confidence; document kind, issuer or
+  service, year) are shown: the output says what lies there, never the value.
+  The first judgement "this is access data" is trusted; nothing more is read
+  to decide it.
+- `restricted`: the behaviour before 14.11.2026, kept selectable.
+- The decision is made in one place, `SensitiveOutputOptions`
+  (`ShowsStructure`, `ShowsClassification`, `ShowsContent`, `ShownFacts`);
+  every command asks it instead of deciding per command.
+- What goes to the local model is not part of this setting and did not
+  change: Phase 1 sees names, Phase 3 the neutral line of a marked file, no
+  description is asked for a marked file, and `sfo library describe` refuses
+  a sensitive folder.
 
 How it is enforced:
 
@@ -263,8 +295,9 @@ How it is enforced:
   it, and the next analysis runs the rules again for older rows before any
   model call (`SensitiveRulesBackfill`). Markers are only ever added.
 - `--include-sensitive` (`SensitiveOutputOptions.IncludeSensitive`) lifts the
-  protection on purpose. It is meant for a human at the machine, never set by
-  an external caller.
+  protection of `restricted` on purpose, except for the text of access data
+  (until 14.11.2026 it lifted that too). It is meant for a human at the
+  machine, never set by an external caller.
 - Marked files are never proposed as disposable: a model `TrashCandidate`
   becomes `ReviewNeeded`. A user override stays as the user set it.
 - Directory output is protected at the source. Phase 1 (verdict, purpose,
@@ -272,12 +305,17 @@ How it is enforced:
   content. Phase 3 gives a marked file to the model as its neutral line and
   stores which marked files entered that way; a summary written before a
   file of its directory was marked is withheld and written again by the next
-  analysis (`DirectorySummaryGuard`). `DirectoryTextGuard` stays as a second
-  net: a directory text that names a marked file is withheld.
+  analysis (`DirectorySummaryGuard`), when the disclosure withholds the
+  content of that file (access data always). `DirectoryTextGuard` stays as a
+  second net with `restricted`: a directory text that names a marked file is
+  withheld; with `open` names are no secret.
 - A directory sample inherits its suggested target from unmarked members
   only; a target suggested for a marked file is model text about it.
-- `sfo compare` leaves out the full checksum of a marked file (and of a file
-  whose match is marked): for a short secret it confirms a guess offline.
+- `sfo compare` and `sfo duplicates` leave out the full checksum of a file
+  whose content the disclosure withholds (and of a file whose match is one):
+  for a short secret it confirms a guess offline. With `open` that is access
+  data, with `restricted` every marked file (until 14.11.2026 every marked
+  file).
 - Folders the scan skips without entering (`.ssh`, `.gnupg`, wallets,
   `AppData`, ...) are marked by their name, so a caller learns that a
   sensitive folder exists without the scan ever reading it.

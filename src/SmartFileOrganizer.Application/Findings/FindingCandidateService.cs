@@ -27,19 +27,19 @@ public sealed record FindingCandidateQuery
     public const int DefaultNames = 5;
 }
 
-/// <summary>A marked file of a finding: path and markers, never content (Issue 95).</summary>
+/// <summary>A marked file of a finding: path and markers as a hint, never content (Issue 95).</summary>
 public sealed record SensitiveFileRef(string RelativePath, SensitiveMarker Markers);
 
 /// <summary>One finding with the facts a controlling model decides from.</summary>
-/// <param name="Examples">A few unmarked files of the finding (relative paths).</param>
-/// <param name="SensitiveFiles">The marked files of the finding (marked themselves or in a marked folder): path and markers only.</param>
-/// <param name="Marked">Ids of the marked files; their names are never listed as examples.</param>
+/// <param name="Examples">A few files of the finding (relative paths); with <c>Sensitive:Disclosure</c> <c>restricted</c> no marked one.</param>
+/// <param name="SensitiveFiles">The marked files of the finding (marked themselves or in a marked folder): path and markers.</param>
+/// <param name="Marked">The marked files by id with their markers; with <c>restricted</c> their names are never listed as examples.</param>
 public sealed record FindingCandidateItem(
     Finding Finding,
     UnitCandidates Candidates,
     IReadOnlyList<string> Examples,
     IReadOnlyList<SensitiveFileRef> SensitiveFiles,
-    IReadOnlySet<long> Marked);
+    IReadOnlyDictionary<long, SensitiveMarker> Marked);
 
 /// <summary>The answer of <c>sfo findings candidates</c>.</summary>
 /// <param name="InboxName">The subfolder the source gets in an inbox (<see cref="InboxNames"/>); null without a library.</param>
@@ -56,7 +56,8 @@ public sealed record FindingCandidateRun(
 /// move, what it is (kind, size, period, kinds of files, what its files show by their stored descriptions, the parts of a
 /// mixture) and the candidate folders of the rules in every library, with what they hold and their stored description.
 /// The controlling model decides from this and stores its decision with <see cref="FindingPlacementService"/>. No model
-/// is asked; a marked file shows path and markers only.
+/// is asked. A marked file carries its markers as a hint; what else it shows is decided by <see cref="SensitiveOutputOptions"/>
+/// (https://github.com/crack666/smart_file_organizer/issues/99).
 /// </summary>
 public sealed class FindingCandidateService
 {
@@ -100,15 +101,16 @@ public sealed class FindingCandidateService
                 x.Finding.BundleKind is BundleKind.Folder or BundleKind.Dump ? x.Finding.Path : null)).ToList(),
             Math.Clamp(query.Limit, 0, FindingCandidateQuery.MaxLimit), Math.Clamp(query.Names, 0, 20)), ct);
 
+        var disclosure = _targets.Disclosure;
         var items = new List<FindingCandidateItem>(todo.Count);
         for (var i = 0; i < todo.Count; i++)
         {
             var (finding, nodes) = todo[i];
             var marked = nodes.Select(n => (Node: n, Markers: answer.Marked.GetValueOrDefault(n.Id) | SensitiveOutputGuard.GetMarkers(n))).ToList();
             items.Add(new FindingCandidateItem(finding, answer.Units[i],
-                marked.Where(m => m.Markers == SensitiveMarker.None).Select(m => Rel(m.Node)).Take(Math.Max(0, query.Names)).ToList(),
+                marked.Where(m => disclosure.ShowsStructure(m.Markers)).Select(m => Rel(m.Node)).Take(Math.Max(0, query.Names)).ToList(),
                 marked.Where(m => m.Markers != SensitiveMarker.None).Select(m => new SensitiveFileRef(Rel(m.Node), m.Markers)).ToList(),
-                answer.Marked.Keys.ToHashSet()));
+                answer.Marked));
         }
         return new FindingCandidateRun(report.Job, StorageStatus.Known, null, answer.Libraries, items, await _inboxNames.SubfolderAsync(report.Job, ct));
     }

@@ -87,6 +87,13 @@ public class ReadCommandTests : IDisposable
 
     private string P(params string[] parts) => Path.Combine([_root, .. parts]);
 
+    /// <summary><c>Sensitive:Disclosure restricted</c>: the behaviour before 14.11.2026 (Issue 99).</summary>
+    private void Restricted()
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(_dbPath)!);
+        File.WriteAllText(Path.Combine(Path.GetDirectoryName(_dbPath)!, "settings.json"), """{ "Sensitive": { "Disclosure": "restricted" } }""");
+    }
+
     private ServiceProvider CoreServices()
     {
         var services = new ServiceCollection();
@@ -208,6 +215,7 @@ public class ReadCommandTests : IDisposable
     [Fact]
     public async Task Dirs_WithholdsPurposeNamingAMarkedFile_UnlessIncludeSensitive()
     {
+        Restricted();
         var job = (await PrepareAsync()).ToString();
 
         var docs = (await OkAsync("dirs", job, "--under", "docs")).Result().GetProperty("items")[0];
@@ -222,11 +230,23 @@ public class ReadCommandTests : IDisposable
         Assert.Contains(".env", open.GetProperty("purpose").GetString());
     }
 
+    [Fact]
+    public async Task Dirs_Open_ShowsAPurposeNamingAMarkedFile()
+    {
+        var job = (await PrepareAsync()).ToString();
+
+        var docs = (await OkAsync("dirs", job, "--under", "docs")).Result().GetProperty("items")[0];
+        Assert.Equal("Letters and the .env of a project.", docs.GetProperty("purpose").GetString());
+        Assert.False(docs.GetProperty("text_withheld").GetBoolean());
+        Assert.Equal(1, docs.GetProperty("sensitive_files").GetInt64());
+    }
+
     // ------------------------------------------------------------------ files
 
     [Fact]
     public async Task Files_FiltersAndProtectsMarkedFiles()
     {
+        Restricted();
         var job = (await PrepareAsync()).ToString();
 
         var all = (await OkAsync("files", job)).Result();
@@ -261,14 +281,26 @@ public class ReadCommandTests : IDisposable
         Assert.Equal(JsonValueKind.Null, paged.GetProperty("next_offset").ValueKind);
     }
 
-    [Fact]
-    public async Task Files_IncludeSensitive_ShowsModelSummary()
+    /// <summary>
+    /// Until 14.11.2026 <c>--include-sensitive</c> showed the model summary of every marked file, the .env above included.
+    /// The text of access data is now withheld whatever the setting (Issue 99); its classification stays.
+    /// </summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Files_IncludeSensitive_NeverShowsTheTextOfAccessData(bool restricted)
     {
+        if (restricted) Restricted();
         var job = (await PrepareAsync()).ToString();
 
         var run = await OkAsync("files", job, "--sensitive", "yes", "--include-sensitive");
 
-        Assert.Contains(EnvSecret, run.Stdout);
+        Assert.DoesNotContain(EnvSecret, run.Stdout);
+        Assert.DoesNotContain(EnvSecret, run.Stderr);
+        var env = run.Result().GetProperty("items").EnumerateArray().Single(i => i.GetProperty("name").GetString() == ".env");
+        Assert.True(env.GetProperty("protected").GetBoolean());
+        Assert.Equal(["credentials"], env.GetProperty("sensitive").EnumerateArray().Select(t => t.GetString()));
+        Assert.Equal(JsonValueKind.Number, env.GetProperty("confidence").ValueKind);
     }
 
     // ------------------------------------------------------------------ show
@@ -296,6 +328,7 @@ public class ReadCommandTests : IDisposable
     [Fact]
     public async Task Show_Directory_HasVerdictProfileAndWithheldTexts()
     {
+        Restricted();
         var job = (await PrepareAsync()).ToString();
 
         var dir = (await OkAsync("show", job, "docs")).Result().GetProperty("directory");

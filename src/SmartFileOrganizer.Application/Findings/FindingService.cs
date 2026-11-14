@@ -845,7 +845,7 @@ public sealed class FindingService
                 : new Unit($"dir|{rel}|{string.Join(",", tokens)}", first.File.ParentPath, rel, $"folder {rel}", null, null);
             var finding = NewFinding(job, FindingKind.Sensitive, string.Empty, unit, files, certainty,
                 $"{n} marked {string.Join(", ", tokens)} in {where}",
-                $"{n} in {where}{(folders > 1 ? $" ({folders} folders)" : string.Empty)} {(files.Count == 1 ? "is" : "are")} marked {string.Join(", ", tokens)} by the rule{(rules.Count == 1 ? "" : "s")} {shownRules}; only path and marker are shown, never the content.",
+                $"{n} in {where}{(folders > 1 ? $" ({folders} folders)" : string.Empty)} {(files.Count == 1 ? "is" : "are")} marked {string.Join(", ", tokens)} by the rule{(rules.Count == 1 ? "" : "s")} {shownRules}; a person decides them one by one.",
                 SensitiveAction, withComparison: withLibrary);
             finding.Markers = tokens;
             finding.SensitiveRules = rules;

@@ -1,6 +1,7 @@
 using System.CommandLine;
 using System.Text;
 using Microsoft.Extensions.DependencyInjection;
+using SmartFileOrganizer.Application.Sensitivity;
 using SmartFileOrganizer.Application.Services;
 using SmartFileOrganizer.Cli.Contract;
 using SmartFileOrganizer.Domain.Enums;
@@ -120,11 +121,13 @@ public static class CompareCommand
                     "Comparison interrupted. Checksums computed so far are saved; run the command again to continue.");
             }
 
-            // The full checksum of a short secret file confirms a guess of its content: none for marked files.
+            // The full checksum of a short secret file confirms a guess of its content: none for a file whose content the
+            // disclosure withholds (access data always, every marked file with restricted; until 14.11.2026 every marked file).
             var reads = services.GetRequiredService<JobReadService>();
-            var marked = new HashSet<long>(await reads.GetMarkedFileIdsAsync(report.Source.Id, ct));
-            foreach (var library in report.Libraries?.Select(l => l.Library) ?? (report.Against is { } a ? [a] : []))
-                marked.UnionWith(await reads.GetMarkedFileIdsAsync(library.Id, ct));
+            var disclosure = services.GetRequiredService<SensitiveOutputOptions>();
+            var marked = new HashSet<long>();
+            foreach (var jobId in new[] { report.Source.Id }.Concat((report.Libraries?.Select(l => l.Library) ?? (report.Against is { } a ? [a] : [])).Select(l => l.Id)))
+                marked.UnionWith((await reads.GetMarkedFilesAsync(jobId, ct)).Where(m => !disclosure.ShowsContent(m.Value.Markers)).Select(m => m.Key));
 
             var result = Map(report, ParseStates(ctx.ParseResult.GetValue(files)), ctx.ParseResult.GetValue(limit), marked);
             if (!result.Complete)
@@ -148,7 +151,7 @@ public static class CompareCommand
         return names.Select(ContentStateValues.Parse).ToHashSet();
     }
 
-    /// <param name="markedFileIds">Marked files of both jobs; their match checksum is left out.</param>
+    /// <param name="markedFileIds">Files of both jobs whose content the disclosure withholds; their match checksum is left out.</param>
     public static CompareResult Map(
         ComparisonReport report, IReadOnlySet<ContentState> listStates, int limit, IReadOnlySet<long>? markedFileIds = null)
     {
