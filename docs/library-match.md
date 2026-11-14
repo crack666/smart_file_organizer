@@ -301,6 +301,12 @@ Per finding one answer is stored in `finding_targets` (step 26):
    `target_parts`. `sfo plan create` moves each file with its part: files of a part without a place stay, and a
    whole-folder move is never made for a folder whose files lie in several parts.
 
+**Files nobody described** (Issue 85). When no file of a finding carries a description yet, the match describes up to
+6 of its pictures and documents itself (spread over their time, never a marked file) with the same model call as
+`sfo analyze`, and keeps the description facts next to the facts the file has; the call counts as `classification`.
+The input hash is then taken from the new facts, so a second run asks nothing again. With `--no-model`, or when a file
+of the finding is described already, nothing is asked.
+
 Since Issue 85 an existing folder is only stored when content confirms it (`RequireContent` above); without a model
 that means the same files already lie there. A library that cannot be read ends the run with `library_unreachable`
 before any answer is stored.

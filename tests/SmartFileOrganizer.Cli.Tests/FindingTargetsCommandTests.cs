@@ -78,6 +78,8 @@ public partial class FindingTargetsCommandTests : IDisposable
     private static IReadOnlyList<FileFact> LibraryFacts(string relativePath) => relativePath switch
     {
         _ when relativePath.Contains("Skifahrt", StringComparison.Ordinal) => Ski,
+        // The loose photos of the source, when the match describes them itself (Issue 85).
+        _ when relativePath.StartsWith("Neuer Ordner/", StringComparison.Ordinal) => Ski,
         _ when relativePath.Contains("Grillen", StringComparison.Ordinal) =>
             [F(FileFactKey.Occasion, "celebration"), F(FileFactKey.Scene, "garden grill"), F(FileFactKey.Season, "summer")],
         _ when relativePath.Contains("Stadtwerke", StringComparison.Ordinal) =>
@@ -526,6 +528,46 @@ public partial class FindingTargetsCommandTests : IDisposable
         Assert.Contains("system clutter", Str(match, "excluded"));
         Assert.Empty(match.GetProperty("candidates").EnumerateArray());
         Assert.Equal(JsonValueKind.Null, match.GetProperty("new_folder").ValueKind);
+    }
+
+    /// <summary>
+    /// Issue 85, finding 6: the loose photos were never described, so nothing could choose a folder by content. The match
+    /// now describes a small sample itself, keeps the facts, and finds the ski trip; a second run asks nothing again.
+    /// </summary>
+    [Fact]
+    public async Task UndescribedFiles_AreDescribedByTheMatch_AndASecondRunAsksNothing()
+    {
+        var library = (await OkAsync("scan", _library, "--role", "library", "--structure-only")).GetProperty("job").GetProperty("id").GetInt64();
+        var source = (await OkAsync("scan", _source, "--role", "source")).GetProperty("job").GetProperty("id").GetInt64();
+        await OkAsync("compare", source.ToString(), "--against", library.ToString());
+        await OkAsync("bundles", "build", source.ToString());
+        var (configure, model, judge) = WithModel();
+
+        var run = await OkAsync(configure, "findings", "targets", source.ToString());
+        var item = run.GetProperty("items").EnumerateArray().Single(i => Str(i, "kind") == "not_backed_up");
+        Assert.Equal("existing_folder", Str(item, "status"));
+        Assert.Equal("Fotos/Skifahrt 2015", Str(item, "relative_path"));
+        var described = model.Described.Where(p => p.StartsWith("Neuer Ordner/", StringComparison.Ordinal)).ToList();
+        Assert.InRange(described.Count, 1, 6);
+
+        // The facts are kept like those of sfo analyze.
+        var db = new DatabaseContext(_dbPath, NullLogger<DatabaseContext>.Instance);
+        await using (var conn = db.CreateConnection())
+        {
+            await conn.OpenAsync();
+            var withFacts = await conn.ExecuteScalarAsync<long>(
+                "SELECT COUNT(DISTINCT f.file_node_id) FROM file_facts f JOIN file_nodes n ON n.id = f.file_node_id WHERE n.job_id = @source AND f.fact = 'scene'",
+                new { source });
+            Assert.Equal(described.Count, withFacts);
+        }
+
+        var asked = model.Described.Count;
+        var questions = judge.Requests.Count;
+        var second = await OkAsync(configure, "findings", "targets", source.ToString());
+        Assert.Equal(0, second.GetProperty("matched").GetInt32());
+        Assert.Equal(asked, model.Described.Count);
+        Assert.Equal(questions, judge.Requests.Count);
+        Assert.Equal("Fotos/Skifahrt 2015", Str(second.GetProperty("items").EnumerateArray().Single(i => Str(i, "kind") == "not_backed_up"), "relative_path"));
     }
 
     /// <summary>Loose photos and a library of papers only: no folder, and no new folder either, on purpose (Issue 85).</summary>

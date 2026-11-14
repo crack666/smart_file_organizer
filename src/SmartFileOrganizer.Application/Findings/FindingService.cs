@@ -1248,6 +1248,18 @@ public sealed class FindingService
         }
     }
 
+    /// <summary>
+    /// The input hash of a target match for these files as the facts stand now (after the match described some of them;
+    /// Issue 85), the same the findings compute.
+    /// </summary>
+    public async Task<string> TargetInputAsync(long jobId, IReadOnlyList<long> fileIds, IReadOnlyList<long> libraryIds, CancellationToken ct = default)
+    {
+        var facts = new Dictionary<long, IReadOnlyList<FileFact>>();
+        foreach (var id in fileIds)
+            facts[id] = await _facts.GetByFileNodeIdAsync(id, ct);
+        return TargetInputHash(fileIds, facts, libraryIds);
+    }
+
     /// <summary>What a target match rests on: the files, the description facts of each, and the libraries, in order.</summary>
     private static string TargetInputHash(
         IEnumerable<long> fileIds, IReadOnlyDictionary<long, IReadOnlyList<FileFact>> factsByFile, IReadOnlyList<long> libraries)

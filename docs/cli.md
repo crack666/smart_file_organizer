@@ -1487,8 +1487,9 @@ libraries is not matched again (`reused`), unless this run may ask the model and
 - `status` is `known`, or `no_library` with a `message` and no items: without a library there is no target.
 - `items[].status` is a `FindingTargetStatus` code ([glossary](glossary.md#target-match-of-a-finding-findingtargetstatus));
   `content_status` the `ContentCheckStatus` of the match ([library-match.md](library-match.md#content-check)).
-- `model_calls` counts the calls of this run per kind (`classification` for describing a library folder's sample,
-  `content_fit`, `folder_name`); empty when every answer was stored already.
+- `model_calls` counts the calls of this run per kind (`classification` for describing a library folder's sample and,
+  since Issue 85, a sample of up to 6 files of a finding nobody described yet, whose facts are kept; `content_fit`,
+  `folder_name`); empty when every answer was stored already.
 - `items[].parts` (for `split`; `null` otherwise): the parts of the finding by content with their own answer, as
   `target_parts` of `sfo findings`. `excluded` items name why they were left out (system clutter, worth unclear).
 - Since Issue 85 an existing folder is stored only when content confirms it (the same files there, or `fits`); else a

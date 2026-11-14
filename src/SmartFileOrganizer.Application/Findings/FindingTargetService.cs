@@ -80,6 +80,12 @@ public sealed class FindingTargetService
     private readonly IContentComparisonRepository _comparisons;
     private readonly ILogger<FindingTargetService> _logger;
     private readonly TimeProvider _time;
+    private readonly IFileFactRepository? _facts;
+    private readonly IClassificationInputPreparer? _preparer;
+    private readonly IOllamaService? _ollama;
+
+    /// <summary>How many files of a finding nobody described are described by the match itself (Issue 85).</summary>
+    public const int DescribeSampleSize = 6;
 
     public FindingTargetService(
         FindingService findings,
@@ -87,6 +93,9 @@ public sealed class FindingTargetService
         IFindingTargetRepository store,
         IContentComparisonRepository comparisons,
         ILogger<FindingTargetService> logger,
+        IFileFactRepository? facts = null,
+        IClassificationInputPreparer? preparer = null,
+        IOllamaService? ollama = null,
         TimeProvider? time = null)
     {
         _findings = findings;
@@ -94,6 +103,9 @@ public sealed class FindingTargetService
         _store = store;
         _comparisons = comparisons;
         _logger = logger;
+        _facts = facts;
+        _preparer = preparer;
+        _ollama = ollama;
         _time = time ?? TimeProvider.System;
     }
 
@@ -150,6 +162,11 @@ public sealed class FindingTargetService
             {
                 var nodes = finding.FileIds.Where(files.ContainsKey).Select(id => files[id]).ToList();
                 if (nodes.Count == 0) continue;
+                // Nobody described the files yet: describe a small sample now and keep the facts, so the content can
+                // choose (Issue 85). The hash then rests on the new facts, and the next run asks nothing again.
+                var inputHash = finding.TargetInput!;
+                if (query.UseModel && await DescribeSampleAsync(nodes, ct))
+                    inputHash = await _findings.TargetInputAsync(query.JobId, finding.FileIds, libraries, ct);
                 var answer = await _targets.MatchAsync(new LibraryMatchQuery
                 {
                     SourceJobId = query.JobId,
@@ -162,6 +179,7 @@ public sealed class FindingTargetService
                     Model = query.Model
                 }, ct);
                 record = ToRecord(finding, answer, nodes, rows, query.UseModel, _time.GetUtcNow().UtcDateTime);
+                record.InputHash = inputHash;
                 await _store.UpsertAsync(record, ct);
                 fromStore = false;
                 matched++;
@@ -177,6 +195,44 @@ public sealed class FindingTargetService
             .OrderBy(g => g.Key, StringComparer.Ordinal)
             .ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
         return new FindingTargetRun(report.Job, StorageStatus.Known, null, libraries, todo.Count, matched, reused, byStatus, items);
+    }
+
+    /// <summary>
+    /// When no file of the finding is described: describes up to <see cref="DescribeSampleSize"/> of its pictures and
+    /// documents, spread over their time, never a marked file, and stores the description facts next to the facts the
+    /// file has. True when a file got facts. Without a model, or when a file is described already, nothing is asked.
+    /// </summary>
+    private async Task<bool> DescribeSampleAsync(IReadOnlyList<FileNode> nodes, CancellationToken ct)
+    {
+        if (_facts is null || _preparer is null || _ollama is null) return false;
+        var known = new Dictionary<long, IReadOnlyList<FileFact>>();
+        foreach (var n in nodes)
+        {
+            var facts = await _facts.GetByFileNodeIdAsync(n.Id, ct);
+            if (facts.Any(f => f.Key.IsDescription() && !string.IsNullOrWhiteSpace(f.Value))) return false;
+            known[n.Id] = facts;
+        }
+        var candidates = nodes
+            .Where(n => n.SensitiveMarkers == SensitiveMarker.None && n.FileType is FileType.Image or FileType.Document)
+            .ToList();
+        var stored = false;
+        foreach (var file in SampleFolderDescriptionSource.Spread(candidates, DescribeSampleSize))
+        {
+            ct.ThrowIfCancellationRequested();
+            var input = await _preparer.PrepareAsync(file, ct);
+            var answer = await _ollama.ClassifyAsync(input, ct);
+            if (answer.Error is not null)
+            {
+                _logger.LogInformation("Target match: {Path} not described ({Error})", file.RelativePath, answer.Error);
+                continue;
+            }
+            var described = answer.DescribedFacts.Where(f => f.Key.IsDescription() && !string.IsNullOrWhiteSpace(f.Value)).ToList();
+            if (described.Count == 0) continue;
+            var keep = known.GetValueOrDefault(file.Id) ?? [];
+            await _facts.ReplaceAsync(file.Id, [.. keep.Where(f => !f.Key.IsDescription()), .. described], ct);
+            stored = true;
+        }
+        return stored;
     }
 
     /// <summary>
