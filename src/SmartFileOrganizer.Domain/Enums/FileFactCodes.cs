@@ -70,6 +70,50 @@ public enum FileFactKey
     /// <summary><c>true</c> when an archive or document is password protected.</summary>
     [JsonStringEnumMemberName("encrypted")] Encrypted,
 
+    // ── Kind and origin of a video (https://github.com/crack666/smart_file_organizer/issues/103) ──
+    // Read from the container, the name and the files next to it; the model decides the kind only where these do not.
+    // Each carries its source (metadata, name, companion, model) and a certainty. Not a description: a video with only
+    // these facts still gets described.
+
+    /// <summary>What kind of video a file is, as a <see cref="Enums.VideoKind"/> code.</summary>
+    [JsonStringEnumMemberName("video_kind")] VideoKind,
+
+    /// <summary>What kind of device recorded an own recording, as a <see cref="Enums.RecordingDevice"/> code.</summary>
+    [JsonStringEnumMemberName("recording_device")] RecordingDevice,
+
+    /// <summary>Title of a film, a series or a music video, from the name, a companion file or the container (free text).</summary>
+    [JsonStringEnumMemberName("video_title")] VideoTitle,
+
+    /// <summary>Release year of a film or series, from the name or a companion file (four digits).</summary>
+    [JsonStringEnumMemberName("release_year")] ReleaseYear,
+
+    /// <summary>Season number of a series episode.</summary>
+    [JsonStringEnumMemberName("season_number")] SeasonNumber,
+
+    /// <summary>Episode number of a series episode (the first one for a double episode).</summary>
+    [JsonStringEnumMemberName("episode_number")] EpisodeNumber,
+
+    /// <summary>Program that recorded, encoded or wrote the container, from the metadata (<c>OBS 30.1</c>, <c>GoPro AVC</c>).</summary>
+    [JsonStringEnumMemberName("encoder")] Encoder,
+
+    /// <summary>Frames per second of the video track, rounded to two decimals.</summary>
+    [JsonStringEnumMemberName("frame_rate")] FrameRate,
+
+    /// <summary>Average bitrate of the whole file in kbit/s (size over duration).</summary>
+    [JsonStringEnumMemberName("bitrate_kbps")] BitrateKbps,
+
+    /// <summary>Languages of the audio tracks, as written in the container, comma separated (<c>de,en</c>).</summary>
+    [JsonStringEnumMemberName("audio_languages")] AudioLanguages,
+
+    /// <summary>Languages of the subtitle tracks and of subtitle files next to the video, comma separated.</summary>
+    [JsonStringEnumMemberName("subtitle_languages")] SubtitleLanguages,
+
+    /// <summary>Number of chapters in the container.</summary>
+    [JsonStringEnumMemberName("chapter_count")] ChapterCount,
+
+    /// <summary>The kind the losing side named when the model and a sure fact disagree: the sure fact stays in <c>video_kind</c>.</summary>
+    [JsonStringEnumMemberName("video_kind_disputed")] VideoKindDisputed,
+
     // ── Description by the model (stage 1, https://github.com/crack666/smart_file_organizer/issues/37) ──
     // Asked in the same call as the category, stored with source model, never for a marked file.
 
@@ -111,7 +155,60 @@ public enum FactSource
     [JsonStringEnumMemberName("rule")] Rule,
 
     /// <summary>Reported by the local model.</summary>
-    [JsonStringEnumMemberName("model")] Model
+    [JsonStringEnumMemberName("model")] Model,
+
+    /// <summary>Read from the file name or its folder: a camera or program naming scheme, a release name, season and episode.</summary>
+    [JsonStringEnumMemberName("name")] Name,
+
+    /// <summary>Read from a file next to it: an info file, subtitles, a preview or side file of a camera.</summary>
+    [JsonStringEnumMemberName("companion")] Companion
+}
+
+/// <summary>What kind of video a file is (https://github.com/crack666/smart_file_organizer/issues/103).</summary>
+public enum VideoKind
+{
+    /// <summary>A feature film: a release name with title and year, or an info file of a media library.</summary>
+    [JsonStringEnumMemberName("movie")] Movie,
+
+    /// <summary>An episode of a series: season and episode in the name, or an info file of an episode.</summary>
+    [JsonStringEnumMemberName("series_episode")] SeriesEpisode,
+
+    /// <summary>Recorded by the person with a camera, phone, action cam, drone or 360-degree camera.</summary>
+    [JsonStringEnumMemberName("own_recording")] OwnRecording,
+
+    /// <summary>A recording of a screen or a game, by a recording program.</summary>
+    [JsonStringEnumMemberName("screen_recording")] ScreenRecording,
+
+    /// <summary>A clip downloaded from a website or video platform, or received through a messenger.</summary>
+    [JsonStringEnumMemberName("web_clip")] WebClip,
+
+    /// <summary>The video of a piece of music.</summary>
+    [JsonStringEnumMemberName("music_video")] MusicVideo,
+
+    /// <summary>Neither the facts nor the model could tell.</summary>
+    [JsonStringEnumMemberName("unknown")] Unknown
+}
+
+/// <summary>What kind of device recorded an own recording.</summary>
+public enum RecordingDevice
+{
+    /// <summary>A mobile phone.</summary>
+    [JsonStringEnumMemberName("phone")] Phone,
+
+    /// <summary>An action cam (helmet or body camera).</summary>
+    [JsonStringEnumMemberName("action_cam")] ActionCam,
+
+    /// <summary>A 360-degree camera.</summary>
+    [JsonStringEnumMemberName("camera_360")] Camera360,
+
+    /// <summary>A drone.</summary>
+    [JsonStringEnumMemberName("drone")] Drone,
+
+    /// <summary>A photo or video camera, a camcorder.</summary>
+    [JsonStringEnumMemberName("camera")] Camera,
+
+    /// <summary>A dashboard camera of a car.</summary>
+    [JsonStringEnumMemberName("dashcam")] Dashcam
 }
 
 /// <summary>Where an image comes from, decided from its metadata and name without the model.</summary>
@@ -226,8 +323,15 @@ public static class FileFactKeys
     /// </summary>
     public static bool IsFreeText(this FileFactKey key) =>
         key is FileFactKey.Title or FileFactKey.Author or FileFactKey.Artist or FileFactKey.Album
-            or FileFactKey.Scene or FileFactKey.Activity or FileFactKey.Issuer;
+            or FileFactKey.Scene or FileFactKey.Activity or FileFactKey.Issuer or FileFactKey.VideoTitle;
 
     /// <summary>Facts the model describes in stage 1 (scene, occasion, document kind, ...), always with source model.</summary>
     public static bool IsDescription(this FileFactKey key) => key >= FileFactKey.Scene;
+
+    /// <summary>
+    /// The facts about kind and origin of a video (Issue 103), read again by <c>sfo facts refresh</c> without the model; a
+    /// refresh replaces exactly these and keeps every other fact. <c>video_kind</c> and <c>video_kind_disputed</c> from the
+    /// model are kept by a refresh as long as the metadata still leave the kind open.
+    /// </summary>
+    public static bool IsVideoOrigin(this FileFactKey key) => key is >= FileFactKey.VideoKind and <= FileFactKey.VideoKindDisputed;
 }
