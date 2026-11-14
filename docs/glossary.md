@@ -358,6 +358,19 @@ Counted per run in `model_calls` of `sfo analyze --json`, `sfo eval --json` and 
 | `unpacked_bytes` | Sum of the uncompressed sizes of the listed archive entries. |
 | `archive_content` | What an archive mostly holds, as an archive content code. |
 | `encrypted` | `true` when an archive or document is password protected. |
+| `video_kind` | What a video is, as a video kind code. From container, name or companion files; the model only names it when those leave it open. |
+| `recording_device` | The kind of device that recorded a video, as a recording device code. |
+| `video_title` | Title of a film, series or music video, from the name or an info file. Free text, at most 80 characters. |
+| `release_year` | Year of a film or series, from the name or an info file. |
+| `season_number` | Season of a series episode. |
+| `episode_number` | Episode of a series episode. |
+| `encoder` | The recording or encoding program named in the container (`OBS Studio 30.1`). |
+| `frame_rate` | Frames per second of a video, two decimals. |
+| `bitrate_kbps` | Overall bitrate of a video in kbit/s. |
+| `audio_languages` | Languages of the audio tracks as two-letter codes, comma separated (`de,en`). |
+| `subtitle_languages` | Languages of the subtitle tracks or subtitle files of the same name, comma separated. |
+| `chapter_count` | Number of chapters in the container. |
+| `video_kind_disputed` | A video kind the model named against a sure kind from the container, name or companion files. The sure kind stays in `video_kind`; this keeps the contradiction visible. |
 | `scene` | What a picture shows, in a few words of the summary language (`beach with sea`); source `model`. Free text, at most 40 characters. |
 | `activity` | What the people in a picture do, in a few words (`skiing`); source `model`. Free text, at most 40 characters. |
 | `setting` | Indoors or outdoors, as a scene setting code; source `model`. |
@@ -373,7 +386,12 @@ model gives them in the same call as the category, only for pictures it sees (`s
 documents (`document_kind` to `year`). An answer `unknown`, an empty text or a year 0 is not stored. A file marked
 sensitive is not described: no description is asked for a file the rules marked, and none is stored for a file
 the model marks, so the marker stays the only statement about its content. Free-text facts (`title`, `author`,
-`artist`, `album`, `scene`, `activity`, `issuer`) are never stored for a marked file.
+`artist`, `album`, `scene`, `activity`, `issuer`, `video_title`) are never stored for a marked file.
+
+The video facts from `video_kind` to `video_kind_disputed`
+(https://github.com/crack666/smart_file_organizer/issues/103) carry a certainty (a result certainty code: `certain`,
+`likely`, `uncertain`) next to the source. They are read without a model and can be read again for a stored job with
+`sfo facts refresh`.
 
 ### Source of a fact (`FactSource`)
 
@@ -382,6 +400,31 @@ the model marks, so the marker stays the only statement about its content. Free-
 | `metadata` | Read directly from the file: metadata, tags, properties, page count, archive listing, first bytes. |
 | `rule` | Derived by a deterministic rule from metadata, name and path. |
 | `model` | Reported by the local model. |
+| `name` | Read from the file or folder name by a naming scheme (episode `S01E02`, release name, a camera maker's numbering). |
+| `companion` | Read from a file next to it: an info file (`.nfo`), subtitles, cover art, a camera's side file, a download's `.info.json`. |
+
+### Video kind (`VideoKind`)
+
+| Code | Meaning |
+|---|---|
+| `movie` | A feature film. |
+| `series_episode` | An episode of a series. |
+| `own_recording` | Recorded with an own camera, phone, action cam or drone. |
+| `screen_recording` | A recording of a screen or a game. |
+| `web_clip` | A clip downloaded from the web or received in a messenger. |
+| `music_video` | A music video. |
+| `unknown` | Neither the file nor the model settle the kind. |
+
+### Recording device (`RecordingDevice`)
+
+| Code | Meaning |
+|---|---|
+| `phone` | A phone. |
+| `action_cam` | An action camera. |
+| `camera_360` | A 360-degree camera. |
+| `drone` | A drone. |
+| `camera` | A photo or video camera. |
+| `dashcam` | A dashboard camera in a car. |
 
 ### Image origin (`ImageOrigin`)
 

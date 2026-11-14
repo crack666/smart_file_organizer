@@ -35,12 +35,17 @@ public sealed class Evidence
 
     public bool Extended => Depth == EvidenceDepth.Extended;
 
-    public void Fact(FileFactKey key, string? value, FactSource source = FactSource.Metadata)
+    public void Fact(FileFactKey key, string? value, FactSource source = FactSource.Metadata) => Fact(key, value, source, null);
+
+    public void Fact(FileFactKey key, string? value, FactSource source, ResultCertainty? certainty)
     {
         if (string.IsNullOrWhiteSpace(value)) return;
         _facts.RemoveAll(f => f.Key == key);
-        _facts.Add(new FileFact(key, value.Trim(), source));
+        _facts.Add(new FileFact(key, value.Trim(), source, certainty));
     }
+
+    /// <summary>The kinds the model may choose from for a video whose kind the facts leave open; set by the preparer.</summary>
+    public IReadOnlyList<VideoKind>? VideoKindChoices { get; set; }
 
     public void Fact(FileFactKey key, long value, FactSource source = FactSource.Metadata) =>
         Fact(key, value.ToString(System.Globalization.CultureInfo.InvariantCulture), source);
@@ -86,6 +91,7 @@ public sealed class Evidence
         RuleResult = RuleResult,
         ContentMarkers = ContentMarkers,
         ContentMarkerRule = ContentMarkerRule,
-        Depth = Depth
+        Depth = Depth,
+        VideoKindChoices = VideoKindChoices
     };
 }

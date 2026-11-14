@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using SmartFileOrganizer.Application.Duplicates;
 using SmartFileOrganizer.Application.Library;
+using SmartFileOrganizer.Application.Media;
 using SmartFileOrganizer.Application.Bundles;
 using SmartFileOrganizer.Application.Evaluation;
 using SmartFileOrganizer.Application.Decisions;
@@ -86,10 +87,13 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IFileSystemAccessor, FileSystemAccessor>();
         services.AddSingleton<FileContentExtractor>();
         services.AddSingleton(_ => new VideoFrameExtractor());
+        // Kind and origin of a video from container, name and companions, without a model (Issue 103).
+        services.TryAddSingleton<IVideoOriginReader, VideoOriginReader>();
         services.AddSingleton<IClassificationInputPreparer>(sp => new AiClassificationInputPreparer(
             sp.GetRequiredService<FileContentExtractor>(),
             sp.GetRequiredService<OllamaOptions>(),
-            sp.GetRequiredService<VideoFrameExtractor>()));
+            sp.GetRequiredService<VideoFrameExtractor>(),
+            sp.GetRequiredService<IVideoOriginReader>()));
         services.AddSingleton<IContentHasher, ContentHasher>();
         services.TryAddSingleton<IFreeSpaceProbe, FreeSpaceProbe>();
         services.TryAddSingleton<ILibraryRootProbe>(SmartFileOrganizer.Application.Library.FileSystemLibraryRootProbe.Instance);

@@ -40,6 +40,13 @@ public class OllamaClassificationInput
 
     /// <summary>The directory around the file, given to the second call of a check only. Null for the first call.</summary>
     public ClassificationContext? Context { get; set; }
+
+    /// <summary>
+    /// For a video whose kind container, name and companions leave open: the kinds the model may choose from
+    /// (https://github.com/crack666/smart_file_organizer/issues/103). Null or empty: the kind is known, the model is
+    /// not asked for it.
+    /// </summary>
+    public IReadOnlyList<Enums.VideoKind>? VideoKindChoices { get; init; }
 }
 
 /// <summary>

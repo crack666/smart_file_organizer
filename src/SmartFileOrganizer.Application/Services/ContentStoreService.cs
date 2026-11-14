@@ -137,7 +137,7 @@ public sealed class ContentStoreService
             KeepReason = result.KeepReason,
             SensitiveMarkers = result.SensitiveMarkers,
             DescribedFacts = result.SensitiveMarkers == SensitiveMarker.None
-                ? result.DescribedFacts.Where(f => f.Key.IsDescription()).ToList()
+                ? result.DescribedFacts.Where(f => f.Key.IsDescription() || (f.Key == FileFactKey.VideoKind && f.Source == FactSource.Model)).ToList()
                 : [],
             CreatedAt = DateTime.UtcNow
         }, ct);

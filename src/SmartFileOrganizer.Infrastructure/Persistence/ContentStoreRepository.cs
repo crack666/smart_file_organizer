@@ -173,7 +173,9 @@ public class ContentStoreRepository : IContentStoreRepository
         return (JsonSerializer.Deserialize<List<FactJson>>(json) ?? [])
             .Select(f => (Key: VerdictCodes.ParseNullable<FileFactKey>(f.Key), f.Value, Source: VerdictCodes.ParseNullable<FactSource>(f.Source)))
             .Where(f => f.Key is not null && f.Source is not null)
-            .Select(f => new FileFact(f.Key!.Value, f.Value, f.Source!.Value))
+            // The kind of a video the model chose is always "likely" (Issue 103); the other kept facts carry no certainty.
+            .Select(f => new FileFact(f.Key!.Value, f.Value, f.Source!.Value,
+                f.Key == FileFactKey.VideoKind && f.Source == FactSource.Model ? ResultCertainty.Likely : null))
             .ToList();
     }
 
