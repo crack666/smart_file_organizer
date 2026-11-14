@@ -105,6 +105,56 @@ public class LibraryMatcherTests
         Assert.Contains("but taken", first.Reason);
     }
 
+    /// <summary>
+    /// Issue 85, findings 3 and 4: a new folder only on a level where the library keeps occasions side by side, never
+    /// under foreign material (films, downloads, games) and never inside a game folder with its own program.
+    /// </summary>
+    [Fact]
+    public async Task ANewFolder_OnlyWhereTheLibraryKeepsOccasions_NeverUnderForeignMaterial()
+    {
+        // Occasions only under a film folder and a downloads folder: no level qualifies, rather no target.
+        var foreign = new LibraryTreeFixture();
+        foreach (var title in new[] { "Sommer am See", "Winterreise", "Am Strand" })
+            foreign.Files($"Filme/{title}", Enumerable.Range(0, 3).Select(i => $"IMG_2015020{i + 1}_100000.jpg"));
+        foreign.Files("Downloads/Urlaub", Enumerable.Range(0, 3).Select(i => $"IMG_20160101_1{i}0000.jpg"));
+        foreign.Files("Downloads/Feier", Enumerable.Range(0, 3).Select(i => $"IMG_20170101_1{i}0000.jpg"));
+        var map = await MapAsync(foreign);
+        var result = LibraryMatcher.Match(map, Loose(new DateTime(2021, 8, 14), new DateTime(2021, 8, 14, 18, 0, 0)), Options, 3, LibraryWords.Default);
+        Assert.Null(result.NewFolder);
+        Assert.Contains("no level of the library keeps", result.NoTarget);
+
+        // With an own photo folder next to them, the new folder goes there.
+        foreign.Files("Fotos/Skifahrt 2015", Enumerable.Range(0, 3).Select(i => $"IMG_20150207_1{i}0000.jpg"));
+        foreign.Files("Fotos/Ostern 2018", Enumerable.Range(0, 3).Select(i => $"IMG_20180401_1{i}0000.jpg"));
+        var withOwn = LibraryMatcher.Match(await MapAsync(foreign), Loose(new DateTime(2021, 8, 14), new DateTime(2021, 8, 14, 18, 0, 0)),
+            Options, 3, LibraryWords.Default);
+        Assert.Equal("Fotos", withOwn.NewFolder!.Parent.RelativePath);
+    }
+
+    [Fact]
+    public async Task AGameFolderWithItsOwnProgram_IsClosed_AFolderWithOwnPhotosAndAProgramIsNot()
+    {
+        var f = new LibraryTreeFixture();
+        f.Files("Sachen/Kartenspiel", ["kartenspiel.exe", "readme.txt"]);
+        f.Files("Sachen/Kartenspiel/textures", ["karo.jpg", "herz.jpg", "pik.jpg"]);
+        f.Files("Sachen/Urlaub mit Installer", ["setup.exe", "IMG_20190801_100000.jpg", "IMG_20190801_110000.jpg"]);
+        var map = await MapAsync(f);
+        Assert.Equal(ClosedUnitKind.Program, map.ByRelativePath["Sachen/Kartenspiel"].Closed);
+        Assert.Equal(ClosedUnitKind.Program, map.ByRelativePath["Sachen/Kartenspiel/textures"].Closed);
+        Assert.False(LibraryMap.IsOwnProgramFolder(map.ByRelativePath["Sachen/Urlaub mit Installer"]));
+    }
+
+    [Theory]
+    [InlineData("c7e2a9f4", true)]
+    [InlineData("3f2a-91bc-0d4e", true)]
+    [InlineData("tmp8x2k9q1z", true)]
+    [InlineData("asdf", true)]
+    [InlineData("Skifahrt 2015", false)]
+    [InlineData("DSC_0001", false)]
+    [InlineData("2021", false)]
+    [InlineData("Hochzeit Anna", false)]
+    public void ARandomString_IsNoName(string name, bool random) => Assert.Equal(random, LibraryText.IsRandomName(name));
+
     [Fact]
     public async Task NothingFits_ANewFolderNamedLikeItsNeighbours_WithTheOccasionLeftOpen()
     {

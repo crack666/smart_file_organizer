@@ -220,7 +220,7 @@ public static partial class LibraryMatcher
                 noTarget = $"No existing folder is confirmed by content, and the library holds no {KindWords(KindOf(unit))} "
                            + $"({LibraryText.Percent(share)} of its files): a new folder there would be a guess as well.";
             else
-                newFolder = NewFolder(map, unit, o, words, rejected, unconfirmed);
+                (newFolder, noTarget) = NewFolder(map, unit, o, words, rejected, unconfirmed);
         }
         return new MatchResult(top, considered, newFolder, rejected, content, unconfirmed, noTarget);
     }
@@ -449,12 +449,18 @@ public static partial class LibraryMatcher
 
     // ------------------------------------------------------------------ new folder
 
-    private static NewFolderProposal NewFolder(LibraryMap map, MatchUnit unit, LibraryMatchOptions o, LibraryWords words,
+    /// <summary>
+    /// A new folder, or why there is none (Issue 85). Only on a level where the library itself keeps folders like the
+    /// unit side by side (the signal of the siblings agrees), never inside a closed unit, a catch-all, or foreign material
+    /// (films, series, downloads, games, programs: <c>foreign_names</c> of the word file, and below them).
+    /// </summary>
+    private static (NewFolderProposal? Proposal, string? NoTarget) NewFolder(LibraryMap map, MatchUnit unit, LibraryMatchOptions o, LibraryWords words,
         IReadOnlyList<MatchCandidate>? rejected = null, IReadOnlyList<MatchCandidate>? unconfirmed = null)
     {
-        // The parent: the folder whose subfolders are most like the unit; the root when none is. Never inside a closed unit.
+        // The parent: the folder whose subfolders are most like the unit. Never inside a closed unit or foreign material.
         var parents = map.Entries
             .Where(e => e.Dump is null && e.Closed is null && (e.Depth == 0 || e.Children.Count > 0 && e.Role != FolderRole.CatchAll))
+            .Where(e => !Foreign(map, e, words))
             .Select(e => (Entry: e, Signals: SubfolderSignals(e, unit, o)))
             .Where(x => !x.Signals.Single(s => s.Signal == MatchSignal.FileType).Contradicts)
             // Where the neighbours are named in several ways, the habit for a new name is unclear: a weaker home.
@@ -464,9 +470,12 @@ public static partial class LibraryMatcher
             .ThenBy(x => x.Entry.Depth)
             .ThenBy(x => x.Entry.RelativePath, StringComparer.Ordinal)
             .ToList();
-        var best = parents.FirstOrDefault(x => x.Signals.Any(s => s.Signal is MatchSignal.Siblings or MatchSignal.FileType && s.Agrees));
-        var parent = best.Entry ?? map.Root;
-        var signals = best.Signals ?? [];
+        var best = parents.FirstOrDefault(x => x.Signals.Any(s => s.Signal == MatchSignal.Siblings && s.Agrees));
+        if (best.Entry is null)
+            return (null, $"No existing folder is confirmed by content, and no level of the library keeps {LibraryMap.RoleWords(unit.Role)} "
+                          + "side by side (outside closed units and foreign material): a new folder anywhere would be a guess as well.");
+        var parent = best.Entry;
+        var signals = best.Signals;
 
         string name;
         bool complete;
@@ -504,8 +513,19 @@ public static partial class LibraryMatcher
         foreach (var u in (unconfirmed ?? []).Take(2))
             reason = reason.TrimEnd('.') + $"; {u.Target.RelativePath} fits by time, name or kind of files only, and no content confirms it.";
 
-        return new NewFolderProposal(parent, name, AdviceOrigin.Rule, complete, pattern, Join(parent.RelativePath, name),
-            certainty, reason, weak.Place);
+        return (new NewFolderProposal(parent, name, AdviceOrigin.Rule, complete, pattern, Join(parent.RelativePath, name),
+            certainty, reason, weak.Place), null);
+    }
+
+    /// <summary>
+    /// Foreign material (Issue 85): a folder whose name, or the name of a folder above it, is one of <c>foreign_names</c>
+    /// (films, series, downloads, games, programs, wallpapers, ...). Own things never get a new folder there.
+    /// </summary>
+    public static bool Foreign(LibraryMap map, LibraryMapEntry e, LibraryWords words)
+    {
+        if (e.Depth == 0) return false;
+        var parts = e.RelativePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        return parts.Any(p => words.ForeignNames.Contains(LibraryWords.Normalize(p)));
     }
 
     private static string DefaultPattern(MatchUnit unit) => unit.Group switch

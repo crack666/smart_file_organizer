@@ -354,9 +354,18 @@ public sealed partial class LibraryTargetService
         var patterns = homeMatch.Patterns;
 
         var advice = LibraryModelPart.Skipped;
+        // The name of a new folder comes from the content (Issue 85): from a meaningful source folder, or from what the
+        // files show. Neither there: no new folder, rather no target than "{occasion} 2021" or a name made up from nothing.
+        if (result.NewFolder is { NameComplete: false } && unitDescription.IsEmpty)
+            result = result with
+            {
+                NewFolder = null,
+                NoTarget = "No existing folder is confirmed by content, and nothing names a new folder: the source folder says "
+                           + "nothing about the content and the files are not described yet (sfo analyze describes them)."
+            };
         if (result.NewFolder is { NameComplete: false } proposal && query.UseModel)
         {
-            var (named, part) = await NameAsync(source, homeMap, unit, proposal, query.Model, query.Refresh, ct);
+            var (named, part) = await NameAsync(source, homeMap, unit, proposal, unitDescription, query.Words, query.Model, query.Refresh, ct);
             advice = part;
             result = result with { NewFolder = named };
         }
@@ -772,10 +781,13 @@ public sealed partial class LibraryTargetService
         {
             case MatchUnitKind.Bundle when b.Bundle!.Kind is BundleKind.Folder or BundleKind.Dump && b.Bundle.RootPath is { } root:
                 name = Path.GetFileName(Path.TrimEndingDirectorySeparator(root));
-                keepWhole = true;
+                // A random string (a hash, an id) is no meaningful name, even for a folder bundle (Issue 85).
+                keepWhole = isDump || !LibraryText.IsRandomName(name);
                 keepReason = isDump
                     ? "A device copy is kept whole under its own name."
-                    : "A folder with a meaningful name is kept whole under its own name: never renamed, never split.";
+                    : keepWhole
+                        ? "A folder with a meaningful name is kept whole under its own name: never renamed, never split."
+                        : $"'{name}' is a random string and says nothing about its content; its files need a place.";
                 break;
             case MatchUnitKind.Bundle:
                 name = b.Bundle!.SuggestedName;
@@ -784,7 +796,8 @@ public sealed partial class LibraryTargetService
                 break;
             case MatchUnitKind.Folder:
                 name = b.Directory!.Depth == 0 ? Path.GetFileName(Path.TrimEndingDirectorySeparator(b.FullPath!)) : b.Directory.Name;
-                keepWhole = b.Directory.Depth > 0 && !patterns.IsGenericName(name) && LibraryRules.PlaceholderKind(name, words) is null;
+                keepWhole = b.Directory.Depth > 0 && !patterns.IsGenericName(name) && LibraryRules.PlaceholderKind(name, words) is null
+                            && !LibraryText.IsRandomName(name);
                 keepReason = keepWhole
                     ? "A folder with a meaningful name is kept whole under its own name: never renamed, never split."
                     : b.Directory.Depth == 0
@@ -828,6 +841,7 @@ public sealed partial class LibraryTargetService
             var mainFolder = folders.Count > 0 ? Path.GetFileName(Path.TrimEndingDirectorySeparator(folders[0].Path)) : null;
             var meaningful = mainFolder is not null && folders[0].Path != source.RootPath
                              && !patterns.IsGenericName(mainFolder) && LibraryRules.PlaceholderKind(mainFolder, words) is null
+                             && !LibraryText.IsRandomName(mainFolder) && !words.ForeignNames.Contains(LibraryWords.Normalize(mainFolder))
                 ? mainFolder
                 : null;
             occasion = meaningful is null ? null : StripDates(meaningful);
@@ -1038,10 +1052,11 @@ public sealed partial class LibraryTargetService
     /// not fit (path characters, a sibling's name, missing year) is refused and the rule's name kept.
     /// </summary>
     private async Task<(NewFolderProposal Proposal, LibraryModelPart Part)> NameAsync(
-        ScanJob source, LibraryMap map, MatchUnit unit, NewFolderProposal proposal, string? model, bool refresh, CancellationToken ct)
+        ScanJob source, LibraryMap map, MatchUnit unit, NewFolderProposal proposal, ContentDescription described, LibraryWords words,
+        string? model, bool refresh, CancellationToken ct)
     {
         var parent = proposal.Parent;
-        var facts = NameFacts(parent, unit, proposal);
+        var facts = NameFacts(parent, unit, proposal, described);
         var (status, record) = await _library.AskAsync(source.Id, NameTask, LibraryAdviceTask.Name, facts, model, refresh, ct);
         if (record is null) return (proposal, new LibraryModelPart(status, null, null, 0));
         if (record.Error is not null) return (proposal, new LibraryModelPart(AdviceStatus.Failed, record.Model, record.Error, 0));
@@ -1049,7 +1064,7 @@ public sealed partial class LibraryTargetService
             return (proposal, new LibraryModelPart(AdviceStatus.Failed, record.Model, error, 0));
 
         var name = Str(doc, "name");
-        var problem = CheckName(name, parent, unit, proposal.Pattern);
+        var problem = CheckName(name, parent, unit, proposal.Pattern, words);
         if (problem is not null)
             return (proposal, new LibraryModelPart(AdviceStatus.Failed, record.Model, $"The model's name was not used: {problem}.", 1));
 
@@ -1067,7 +1082,7 @@ public sealed partial class LibraryTargetService
         }, new LibraryModelPart(status, record.Model, null, 0));
     }
 
-    public static string NameFacts(LibraryMapEntry parent, MatchUnit unit, NewFolderProposal proposal)
+    public static string NameFacts(LibraryMapEntry parent, MatchUnit unit, NewFolderProposal proposal, ContentDescription? described = null)
     {
         var sb = new StringBuilder();
         sb.AppendLine($"Parent folder: {(parent.Depth == 0 ? "(top of the archive)" : parent.RelativePath)}");
@@ -1078,12 +1093,20 @@ public sealed partial class LibraryTargetService
             sb.AppendLine($"Taken: {LibraryMap.Day(f)} to {LibraryMap.Day(t)} ({unit.TimeSource.ToCode()})");
         sb.AppendLine($"Folders it came from: {string.Join("; ", unit.SourceFolders.Take(8))}");
         sb.AppendLine($"Name by the rules: {proposal.Name}");
+        // What the files show, so the name comes from the content (Issue 85).
+        if (described is { IsEmpty: false })
+            foreach (var key in ContentDescription.Order)
+                if (described.Of(key) is { Count: > 0 } values)
+                    sb.AppendLine($"Content, {key.ToCode()}: {string.Join("; ", values.Take(3).Select(v => v.Value))}");
         return sb.ToString();
     }
 
-    private static string? CheckName(string? name, LibraryMapEntry parent, MatchUnit unit, string? pattern)
+    private static string? CheckName(string? name, LibraryMapEntry parent, MatchUnit unit, string? pattern, LibraryWords words)
     {
         if (string.IsNullOrWhiteSpace(name)) return "it is empty";
+        if (LibraryText.IsRandomName(name)) return "it is a random string, not a name from the content";
+        if (LibraryRules.PlaceholderKind(name, words) is not null || words.ForeignNames.Contains(LibraryWords.Normalize(name)))
+            return "it is a word for storage (new, misc, downloads, ...), not a name from the content";
         if (name.Length > 80) return "it is longer than 80 characters";
         if (name.IndexOfAny([.. Path.GetInvalidFileNameChars(), '/', '\\', ':', '*', '?', '"', '<', '>', '|', '{', '}']) >= 0)
             return "it holds characters a folder name cannot have, or a placeholder";
