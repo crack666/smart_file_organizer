@@ -1,5 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using SmartFileOrganizer.Application.Plans;
+using SmartFileOrganizer.Application.Sensitivity;
 using SmartFileOrganizer.Application.Services;
 using SmartFileOrganizer.Desktop.Services;
 using SmartFileOrganizer.Desktop.ViewModels;
@@ -15,18 +17,27 @@ namespace SmartFileOrganizer.Desktop;
 /// </summary>
 public static class ServiceConfigurator
 {
-    public static IServiceProvider Build()
+    public static IServiceProvider Build() => Build(configure: null, overrides: null);
+
+    /// <summary>
+    /// The GUI's services. <paramref name="configure"/> sets the host options; without it the database comes from
+    /// <c>SFO_DB</c> and the settings from <c>SFO_SETTINGS</c> (else next to an overridden database, else the defaults),
+    /// as in the CLI. <paramref name="overrides"/> replaces services after the core registered them (tests: a stand-in
+    /// model server, the protected places of a temp folder).
+    /// </summary>
+    public static IServiceProvider Build(Action<SmartFileOrganizerHostOptions>? configure, Action<IServiceCollection>? overrides)
     {
         var services = new ServiceCollection();
 
         // Logging — AddDebug() writes to the VS "Output > Debug" channel (works with WinExe)
         services.AddLogging(b => b.AddConsole().AddDebug().SetMinimumLevel(LogLevel.Debug));
 
-        // Core: database (SFO_DB or %APPDATA%), settings, repositories, scanning, Ollama, app services
-        services.AddSmartFileOrganizerCore();
+        // Core: database (option, else SFO_DB, else %APPDATA%), settings, repositories, scanning, Ollama, app services
+        services.AddSmartFileOrganizerCore(configure);
 
         // GUI-only services
         services.AddSingleton<FilePreviewService>();
+        services.AddSingleton<IShellLauncher, ShellLauncher>();
 
         // ViewModels
         services.AddTransient<MainViewModel>(sp => new MainViewModel(
@@ -42,7 +53,8 @@ public static class ServiceConfigurator
             sp.GetRequiredService<ScanProgressViewModel>(),
             sp.GetRequiredService<AiProgressViewModel>(),
             sp.GetRequiredService<IDirectoryClassificationRepository>(),
-            sp.GetRequiredService<FocusedRescanService>()));
+            sp.GetRequiredService<FocusedRescanService>(),
+            sp.GetRequiredService<PlanViewModel>()));
         services.AddTransient<FolderTreeViewModel>();
         services.AddTransient<FileTableViewModel>(sp => new FileTableViewModel(
             sp.GetRequiredService<FileQueryService>(),
@@ -52,6 +64,19 @@ public static class ServiceConfigurator
             sp.GetRequiredService<ReviewService>()));
         services.AddTransient<ScanProgressViewModel>();
         services.AddTransient<AiProgressViewModel>();
+        // The plan of a job (https://github.com/crack666/smart_file_organizer/issues/15): only the plan services.
+        services.AddTransient<PlanViewModel>(sp => new PlanViewModel(
+            sp.GetRequiredService<PlanService>(),
+            sp.GetRequiredService<PlanExecutor>(),
+            sp.GetRequiredService<ScanJobService>(),
+            sp.GetRequiredService<FileQueryService>(),
+            sp.GetRequiredService<IFileFactRepository>(),
+            sp.GetRequiredService<FilePreviewService>(),
+            sp.GetRequiredService<IShellLauncher>(),
+            sp.GetRequiredService<SensitiveOutputOptions>(),
+            sp.GetRequiredService<SmartFileOrganizerPaths>()));
+
+        overrides?.Invoke(services);
 
         var provider = services.BuildServiceProvider();
 

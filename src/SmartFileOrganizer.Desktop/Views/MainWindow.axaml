@@ -48,6 +48,12 @@
 
                 <Button Content="🏠 Home"
                     Command="{Binding BackToHomeCommand}"
+                    Margin="0,0,4,0" />
+
+                <Button Content="Plan"
+                    ToolTip.Tip="Pläne der geöffneten Datenbank durchsehen, bestätigen und ausführen"
+                    Command="{Binding OpenPlanCommand}"
+                    CommandParameter="{x:Null}"
                     Margin="0,0,12,0" />
 
                 <!-- Progress -->
@@ -142,6 +148,10 @@
                 Background="{DynamicResource SystemControlBackgroundChromeLowBrush}"
                 Padding="8,2">
             <StackPanel Spacing="2">
+                <TextBlock Text="{Binding DatabaseText}"
+                           FontSize="11"
+                           TextTrimming="CharacterEllipsis"
+                           ToolTip.Tip="SFO_DB setzt die Datenbank, wie in der CLI" />
                 <TextBlock Text="{Binding OllamaStatusText}"
                            FontSize="11"
                            TextTrimming="CharacterEllipsis" />
@@ -157,7 +167,7 @@
 
         <!-- Welcome / recent scans screen -->
         <Grid Background="#1E1E1E"
-              IsVisible="{Binding IsShowingWelcome}"
+              IsVisible="{Binding IsWelcomeVisible}"
               VerticalAlignment="Stretch"
               HorizontalAlignment="Stretch">
             <StackPanel HorizontalAlignment="Center"
@@ -237,6 +247,10 @@
                                             <Button Content="Öffnen"
                                                     Command="{Binding $parent[ListBox].DataContext.OpenRecentScanCommand}"
                                                     CommandParameter="{Binding Job}" />
+                                            <Button Content="Plan"
+                                                    ToolTip.Tip="Pläne dieses Jobs"
+                                                    Command="{Binding $parent[ListBox].DataContext.OpenPlanCommand}"
+                                                    CommandParameter="{Binding Job}" />
                                             <Button Content="🗑"
                                                     ToolTip.Tip="Scan restlos löschen"
                                                     Foreground="#FF5722"
@@ -264,7 +278,7 @@
 
         <!-- Browser (tree + table + detail) -->
         <Grid ColumnDefinitions="260,4,*" Background="#1E1E1E"
-              IsVisible="{Binding !IsShowingWelcome}">
+              IsVisible="{Binding IsBrowserVisible}">
 
             <!-- Left: Folder Tree -->
             <Border Grid.Column="0"
@@ -481,6 +495,11 @@
             </Grid>
 
         </Grid>
+
+        <!-- Plan: review, confirm, execute (https://github.com/crack666/smart_file_organizer/issues/15) -->
+        <Border IsVisible="{Binding IsShowingPlan}" Background="#1E1E1E">
+            <views:PlanView DataContext="{Binding Plan}" />
+        </Border>
 
         </Panel>
 

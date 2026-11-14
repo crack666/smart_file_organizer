@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="6.0.4" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+    <!-- Renders the views without a screen (Windows and Linux CI), with Skia, so a frame can be checked and saved. -->
+    <PackageReference Include="Avalonia.Headless.XUnit" Version="11.3.23" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\SmartFileOrganizer.Desktop\SmartFileOrganizer.Desktop.csproj" />
+    <!-- The plan under review is made the way an agent makes it: through the CLI, in-process. -->
+    <ProjectReference Include="..\..\src\SmartFileOrganizer.Cli\SmartFileOrganizer.Cli.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Same Ollama stand-in as the hosting tests; never touches the network. -->
+    <Compile Include="..\SmartFileOrganizer.Hosting.Tests\FakeOllamaService.cs" Link="FakeOllamaService.cs" />
+    <!-- Temp folders removed without following links; shared with the application tests. -->
+    <Compile Include="..\SmartFileOrganizer.Application.Tests\FileSystemLinks.cs" Link="FileSystemLinks.cs" />
+    <!-- No test reaches a real model server through the shipped default address. -->
+    <Compile Include="..\SmartFileOrganizer.Cli.Tests\NoRealModelServer.cs" Link="NoRealModelServer.cs" />
+  </ItemGroup>
+
+</Project>
