@@ -59,5 +59,6 @@ public static class ErrorCodes
     public const string LibraryUnreachable = "library_unreachable";
     public const string ImportInvalid = "import_invalid";
     public const string PlanRunIncomplete = "plan_run_incomplete";
+    public const string PlacementRefused = "placement_refused";
     public const string InternalError = "internal_error";
 }

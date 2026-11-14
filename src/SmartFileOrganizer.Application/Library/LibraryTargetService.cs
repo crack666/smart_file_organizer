@@ -161,6 +161,7 @@ public sealed partial class LibraryTargetService
     private readonly IReadOnlyList<IFolderDescriptionSource> _descriptionSources;
     private readonly IOllamaService? _ollama;
     private readonly ILibraryRootProbe _rootProbe;
+    private readonly IFolderDescriptionRepository? _folderDescriptions;
 
     public LibraryTargetService(
         LibraryService library,
@@ -176,8 +177,10 @@ public sealed partial class LibraryTargetService
         IContentFitJudge? judge = null,
         IEnumerable<IFolderDescriptionSource>? descriptionSources = null,
         IOllamaService? ollama = null,
-        ILibraryRootProbe? rootProbe = null)
+        ILibraryRootProbe? rootProbe = null,
+        IFolderDescriptionRepository? folderDescriptions = null)
     {
+        _folderDescriptions = folderDescriptions;
         _rootProbe = rootProbe ?? FileSystemLibraryRootProbe.Instance;
         _freeSpace = freeSpace;
         _facts = facts;

@@ -241,7 +241,7 @@ public partial class FindingTargetsCommandTests : IDisposable
         Assert.Contains($"sfo findings targets {job}", before.GetProperty("missing_steps").EnumerateArray().Select(s => s.GetString()));
 
         var (configure, _, _) = WithModel();
-        var run = await OkAsync(configure, "findings", "targets", job);
+        var run = await OkAsync(configure, "findings", "targets", job, "--local-model");
         var item = run.GetProperty("items").EnumerateArray().Single(i => Str(i, "key") == Str(brief, "key"));
         Assert.Equal("existing_folder", Str(item, "status"));
         Assert.Equal("Fotos/Skifahrt 2015", Str(item, "relative_path"));
@@ -289,13 +289,13 @@ public partial class FindingTargetsCommandTests : IDisposable
         var (_, source) = await PrepareAsync();
         var (configure, model, judge) = WithModel();
 
-        var first = await OkAsync(configure, "findings", "targets", source.ToString());
+        var first = await OkAsync(configure, "findings", "targets", source.ToString(), "--local-model");
         Assert.True(first.GetProperty("matched").GetInt32() > 0);
         var asked = judge.Requests.Count;
         var described = model.Described.Count;
         Assert.True(asked > 0);
 
-        var second = await OkAsync(configure, "findings", "targets", source.ToString());
+        var second = await OkAsync(configure, "findings", "targets", source.ToString(), "--local-model");
         Assert.Equal(asked, judge.Requests.Count);
         Assert.Equal(described, model.Described.Count);
         Assert.Equal(0, second.GetProperty("matched").GetInt32());
@@ -311,7 +311,7 @@ public partial class FindingTargetsCommandTests : IDisposable
             var id = await conn.ExecuteScalarAsync<long>("SELECT id FROM file_nodes WHERE job_id = @source ORDER BY id LIMIT 1", new { source });
             await new FileFactRepository(db).ReplaceAsync(id, [.. Ski, F(FileFactKey.People, "true")]);
         }
-        var third = await OkAsync(configure, "findings", "targets", source.ToString());
+        var third = await OkAsync(configure, "findings", "targets", source.ToString(), "--local-model");
         Assert.Equal(1, third.GetProperty("matched").GetInt32());
     }
 
@@ -368,7 +368,7 @@ public partial class FindingTargetsCommandTests : IDisposable
         Assert.Equal("not_checked", Str(item, "content_check"));
 
         var (configure, _, judge) = WithModel();
-        var withModel = await OkAsync(configure, "findings", "targets", source.ToString());
+        var withModel = await OkAsync(configure, "findings", "targets", source.ToString(), "--local-model");
         Assert.Equal(1, withModel.GetProperty("matched").GetInt32());
         Assert.Contains(judge.Requests, r => r.Task == LibraryAdviceTask.Fit);
     }
@@ -386,7 +386,7 @@ public partial class FindingTargetsCommandTests : IDisposable
         Directory.Move(_library, _library + "-weg");
         var (configure, model, judge) = WithModel();
 
-        var (exit, doc) = await RunAsync(configure, "findings", "targets", source.ToString());
+        var (exit, doc) = await RunAsync(configure, "findings", "targets", source.ToString(), "--local-model");
 
         Assert.Equal(ExitCodes.Failure, exit);
         Assert.Equal("library_unreachable", doc.GetProperty("error").GetProperty("code").GetString());
@@ -410,7 +410,7 @@ public partial class FindingTargetsCommandTests : IDisposable
 
         // Connected again: the run goes through.
         Directory.Move(_library + "-weg", _library);
-        var run = await OkAsync(configure, "findings", "targets", source.ToString());
+        var run = await OkAsync(configure, "findings", "targets", source.ToString(), "--local-model");
         Assert.True(run.GetProperty("matched").GetInt32() > 0);
     }
 
@@ -452,7 +452,7 @@ public partial class FindingTargetsCommandTests : IDisposable
         await DescribeMixedSourceAsync(source);
         var (configure, model, judge) = WithModel();
 
-        var run = await OkAsync(configure, "findings", "targets", job);
+        var run = await OkAsync(configure, "findings", "targets", job, "--local-model");
         var item = run.GetProperty("items").EnumerateArray().Single(i => Str(i, "kind") == "not_backed_up");
         Assert.Equal("split", Str(item, "status"));
         Assert.Equal(JsonValueKind.Null, item.GetProperty("relative_path").ValueKind);
@@ -484,7 +484,7 @@ public partial class FindingTargetsCommandTests : IDisposable
 
         // A second run keeps the split and asks nothing.
         var asked = judge.Requests.Count;
-        var second = await OkAsync(configure, "findings", "targets", job);
+        var second = await OkAsync(configure, "findings", "targets", job, "--local-model");
         Assert.Equal(0, second.GetProperty("matched").GetInt32());
         Assert.Equal(asked, judge.Requests.Count);
         Assert.Equal(2, second.GetProperty("items").EnumerateArray().Single().GetProperty("parts").GetArrayLength());
@@ -511,7 +511,7 @@ public partial class FindingTargetsCommandTests : IDisposable
         }
         var (configure, model, judge) = WithModel();
 
-        var run = await OkAsync(configure, "findings", "targets", source.ToString());
+        var run = await OkAsync(configure, "findings", "targets", source.ToString(), "--local-model");
         var item = run.GetProperty("items").EnumerateArray().Single(i => Str(i, "kind") == "not_backed_up");
         Assert.Equal("excluded", Str(item, "status"));
         Assert.Contains("worth unclear", Str(item, "reason"));
@@ -543,7 +543,7 @@ public partial class FindingTargetsCommandTests : IDisposable
         await OkAsync("bundles", "build", source.ToString());
         var (configure, model, judge) = WithModel();
 
-        var run = await OkAsync(configure, "findings", "targets", source.ToString());
+        var run = await OkAsync(configure, "findings", "targets", source.ToString(), "--local-model");
         var item = run.GetProperty("items").EnumerateArray().Single(i => Str(i, "kind") == "not_backed_up");
         Assert.Equal("existing_folder", Str(item, "status"));
         Assert.Equal("Fotos/Skifahrt 2015", Str(item, "relative_path"));
@@ -563,7 +563,7 @@ public partial class FindingTargetsCommandTests : IDisposable
 
         var asked = model.Described.Count;
         var questions = judge.Requests.Count;
-        var second = await OkAsync(configure, "findings", "targets", source.ToString());
+        var second = await OkAsync(configure, "findings", "targets", source.ToString(), "--local-model");
         Assert.Equal(0, second.GetProperty("matched").GetInt32());
         Assert.Equal(asked, model.Described.Count);
         Assert.Equal(questions, judge.Requests.Count);
@@ -584,7 +584,7 @@ public partial class FindingTargetsCommandTests : IDisposable
         await DescribeSourceAsync(source);
         var (configure, _, _) = WithModel();
 
-        var run = await OkAsync(configure, "findings", "targets", source.ToString());
+        var run = await OkAsync(configure, "findings", "targets", source.ToString(), "--local-model");
 
         var item = run.GetProperty("items").EnumerateArray().Single(i => Str(i, "kind") == "not_backed_up");
         Assert.Equal("no_target", Str(item, "status"));

@@ -117,6 +117,12 @@ public sealed class Finding
     /// </summary>
     public IReadOnlyList<FindingTargetPart> TargetParts { get; set; } = [];
 
+    /// <summary>
+    /// Who decided the stored target (https://github.com/crack666/smart_file_organizer/issues/95): rules, local model or
+    /// controller; null while no stored target applies.
+    /// </summary>
+    public TargetDecidedBy? TargetDecidedBy { get; set; }
+
     public FindingDuplicates? Duplicates { get; set; }
 
     /// <summary>A few file paths relative to the job root, so the finding can be checked at a glance.</summary>

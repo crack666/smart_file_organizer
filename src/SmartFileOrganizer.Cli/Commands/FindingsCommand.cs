@@ -55,7 +55,8 @@ public static class FindingsCommand
         DateTime? DecidedAt,
         string? DecisionNote,
         string? TargetStatus = null,
-        IReadOnlyList<TargetPartView>? TargetParts = null)
+        IReadOnlyList<TargetPartView>? TargetParts = null,
+        string? TargetDecidedBy = null)
     {
         public static FindingView From(Finding f) => new(
             f.Rank, f.Key, f.Kind.ToCode(), f.Certainty.ToCode(), f.Unsure ? "unsure" : "sure", f.State.ToCode(),
@@ -68,7 +69,7 @@ public static class FindingsCommand
                     t.LibraryJobId, t.LibraryRoot)
                 : null,
             f.Duplicates, f.Examples, f.Notes, f.DecidedBy.ToCode(), f.DecidedAt, f.DecisionNote, f.TargetStatus.ToCode(),
-            TargetPartView.From(f.TargetParts));
+            TargetPartView.From(f.TargetParts), f.TargetDecidedBy.ToCode());
 
         public string ToLine() =>
             $"{Rank,4}  {Key,-24} {Certainty,-9} {Files,7} files {ReadFormat.Size(Bytes),10}  {Action.Kind,-13}"
@@ -288,6 +289,8 @@ public static class FindingsCommand
 
         command.Subcommands.Add(CreateShow(host, globals));
         command.Subcommands.Add(CreateTargets(host, globals));
+        command.Subcommands.Add(ControllerCommands.CreateCandidates(host, globals));
+        command.Subcommands.Add(ControllerCommands.CreatePlace(host, globals));
         command.Subcommands.Add(CreateDecision(host, globals, "accept", FindingState.Accepted,
             "Accept findings: the plan turns them into actions. Changes no file."));
         command.Subcommands.Add(CreateDecision(host, globals, "reject", FindingState.Rejected,
@@ -354,19 +357,20 @@ public static class FindingsCommand
 
     public sealed record TargetItemView(
         string Key, string Kind, string Title, string Status, bool Reused, long? LibraryJobId, string? Path, string? RelativePath,
-        string? Certainty, string ContentCheck, string ContentStatus, string Reason, IReadOnlyList<TargetPartView>? Parts = null);
+        string? Certainty, string ContentCheck, string ContentStatus, string Reason, IReadOnlyList<TargetPartView>? Parts = null,
+        string? DecidedBy = null);
 
     /// <summary>
     /// One part of a finding whose files do not belong together (target status <c>split</c>, Issue 85): its files and its
     /// own place, or why it has none. <c>status</c> is a <c>FindingTargetStatus</c> code.
     /// </summary>
     public sealed record TargetPartView(int Index, int Files, string Label, string Status, long? LibraryJobId, string? Path,
-        string? RelativePath, string? Certainty, string ContentCheck, string Reason)
+        string? RelativePath, string? Certainty, string ContentCheck, string Reason, string? DecidedBy = null)
     {
         public static IReadOnlyList<TargetPartView>? From(IReadOnlyList<FindingTargetPart>? parts) =>
             parts is not { Count: > 0 } ? null
             : parts.Select(p => new TargetPartView(p.Index, p.FileIds.Count, p.Label, p.Status.ToCode(), p.LibraryJobId, p.Path,
-                p.RelativePath, p.Certainty.ToCode(), p.ContentCheck.ToCode(), p.Reason)).ToList();
+                p.RelativePath, p.Certainty.ToCode(), p.ContentCheck.ToCode(), p.Reason, p.DecidedBy.ToCode())).ToList();
     }
 
     public sealed record TargetsResult(
@@ -399,17 +403,29 @@ public static class FindingsCommand
             Description = "Only this finding (see sfo findings). Repeatable. Default: every open or accepted finding of the kinds not_backed_up, in_noise and misplaced.",
             HelpName = "key"
         };
-        var noModel = LibraryCommand.NoModelOption();
+        var localModel = new Option<bool>("--local-model")
+        {
+            Description = "Let the local model judge as well: describe candidate folders, check content, name new folders. Off by default: the rules only, and a controlling model decides the rest (sfo findings candidates, sfo findings place)."
+        };
+        var noModel = new Option<bool>("--no-model")
+        {
+            Description = "Rules only. The default since Issue 95; kept for older calls."
+        };
         var model = LibraryCommand.ModelOption();
         var refresh = new Option<bool>("--refresh")
         {
-            Description = "Match every finding again and ask the model again, even where a stored match still fits."
+            Description = "Match every finding again (and with --local-model ask the model again), even where a stored match still fits. Decisions of the controller stay."
         };
         var command = new Command("targets",
-            "Find a place in the libraries for every finding that should move (the match of sfo library match: time, names, kinds of files, content), and store it per finding. Resumable.")
+            "Find a place in the libraries for every finding that should move by the rules (time, names, kinds of files, the same files already there), and store it per finding. With --local-model the local model checks content too. Resumable; decisions of sfo findings place stay.")
         {
-            job, against, key, noModel, model, refresh
+            job, against, key, localModel, noModel, model, refresh
         };
+        command.Validators.Add(r =>
+        {
+            if (r.GetValue(localModel) && r.GetValue(noModel))
+                r.AddError("--local-model and --no-model exclude each other.");
+        });
 
         CommandRunner.SetHandler(command, host, globals, async (ctx, ct) =>
         {
@@ -420,7 +436,7 @@ public static class FindingsCommand
                 JobId = p.GetValue(job),
                 Libraries = (p.GetValue(against) ?? []).Distinct().ToList(),
                 Keys = (p.GetValue(key) ?? []).Distinct(StringComparer.Ordinal).ToList(),
-                UseModel = !p.GetValue(noModel),
+                UseModel = p.GetValue(localModel),
                 Refresh = p.GetValue(refresh),
                 Model = p.GetValue(model)
             };
@@ -446,7 +462,7 @@ public static class FindingsCommand
                 run.Reused, run.ByStatus,
                 run.Items.Select(i => new TargetItemView(i.Key, i.Kind.ToCode(), i.Title, i.Status.ToCode(), i.Reused, i.LibraryJobId,
                     i.Path, i.RelativePath, i.Certainty.ToCode(), i.ContentCheck.ToCode(), i.ContentStatus.ToCode(), i.Reason,
-                    TargetPartView.From(i.Parts))).ToList(),
+                    TargetPartView.From(i.Parts), i.DecidedBy.ToCode())).ToList(),
                 services.GetRequiredService<ModelUsageMeter>().Snapshot());
             return CommandOutcome.Success(result, () => RenderTargets(result));
         });
@@ -465,7 +481,8 @@ public static class FindingsCommand
         foreach (var i in r.Items)
         {
             sb.AppendLine($"  {i.Key,-24} {i.Status,-18} "
-                          + (i.RelativePath is { } rel ? $"{rel} (library job {i.LibraryJobId}, {i.Certainty}, content {i.ContentCheck})" : "-"));
+                          + (i.RelativePath is { } rel ? $"{rel} (library job {i.LibraryJobId}, {i.Certainty}, content {i.ContentCheck})" : "-")
+                          + (i.DecidedBy == "controller" ? "  [decided by the controller]" : string.Empty));
             sb.AppendLine($"      {i.Reason}");
             foreach (var p in i.Parts ?? [])
                 sb.AppendLine($"      part {p.Index + 1}: {p.Files} files, {p.Label} -> {p.RelativePath ?? "none"} ({p.Status})");

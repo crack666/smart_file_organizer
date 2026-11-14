@@ -250,7 +250,7 @@ public static class PlanBuilder
             var parts = ids.Select(id => f.TargetParts.FirstOrDefault(p => p.FileIds.Contains(id))).Distinct().ToList();
             if (parts.Count != 1 || parts[0] is not { } part)
                 return (null, null, "The files of this folder belong to different parts of the finding; each moves on its own.");
-            if (part.Status is not (FindingTargetStatus.ExistingFolder or FindingTargetStatus.NewFolder) || part.Path is null || part.LibraryJobId is null)
+            if (!FindingRules.HasPlace(part.Status) || part.Path is null || part.LibraryJobId is null)
                 return (null, null, $"This part of the finding ({part.Label}) has no target: {part.Reason}");
             if (folder && string.Equals(Path.GetFileName(Path.TrimEndingDirectorySeparator(part.Path)), name, StringComparison.OrdinalIgnoreCase))
                 return (part.Path, part.LibraryJobId, null);
@@ -265,6 +265,10 @@ public static class PlanBuilder
                 return (t.Path, lib, null);
             return (PlanChecks.Join(t.Path, name), lib, null);
         }
+
+        // The controller decided on no target (Issue 95): no target of sfo decide either.
+        if (f.TargetDecidedBy == TargetDecidedBy.Controller)
+            return (null, null, "The controller decided on no target for these files (sfo findings place); they stay.");
 
         var paths = ids.Select(id => inputs.Decisions.TryGetValue(id, out var d) ? d.Target?.Path : null).Distinct(StringComparer.Ordinal).ToList();
         if (paths.Count != 1 || paths[0] is not { } rel)

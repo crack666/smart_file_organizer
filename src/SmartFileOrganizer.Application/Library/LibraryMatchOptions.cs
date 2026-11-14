@@ -96,6 +96,44 @@ public sealed class LibraryMatchOptions
     /// </summary>
     public bool MatchUnclearWorth { get; set; }
 
+    // The inbox of a library (https://github.com/crack666/smart_file_organizer/issues/95).
+
+    /// <summary>
+    /// Folder below each library root for files without a fitting home (target status <c>inbox</c>), relative to the root
+    /// with <c>/</c>. Each source gets a subfolder of its own there. <see cref="Inboxes"/> sets another one per library.
+    /// </summary>
+    public string InboxFolder { get; set; } = "_Inbox";
+
+    /// <summary>The inbox folder of single libraries, by the root path of the library; the others use <see cref="InboxFolder"/>.</summary>
+    public List<LibraryInbox> Inboxes { get; set; } = [];
+
+    /// <summary>The inbox folder of the library at <paramref name="root"/>, relative to the root with <c>/</c>.</summary>
+    public string InboxFolderOf(string root)
+    {
+        var own = Inboxes.FirstOrDefault(i => !string.IsNullOrWhiteSpace(i.Root) && SameFolder(i.Root, root));
+        return (own?.Folder ?? InboxFolder).Replace('\\', '/').Trim('/');
+    }
+
+    private static bool SameFolder(string a, string b) => string.Equals(
+        Path.TrimEndingDirectorySeparator(a.Trim()), Path.TrimEndingDirectorySeparator(b.Trim()), StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Whether a relative folder can hold an inbox: not empty, not rooted, no <c>..</c> and no character a folder name
+    /// cannot have; null when it can, else why not.
+    /// </summary>
+    public static string? InboxProblem(string? folder)
+    {
+        if (string.IsNullOrWhiteSpace(folder)) return "is empty";
+        if (Path.IsPathRooted(folder) || folder.Contains(':')) return "must be relative to the library root";
+        foreach (var part in folder.Split(['/', '\\'], StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (part.Trim().Trim('.').Length == 0) return "holds '.' or '..'";
+            if (part.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 || part.IndexOfAny(['*', '?', '"', '<', '>', '|']) >= 0)
+                return "holds characters a folder name cannot have";
+        }
+        return null;
+    }
+
     /// <summary>
     /// Folder for the patterns files (one per library job, editable by hand). Set by the host to
     /// <c>library-patterns</c> next to the database; null keeps the patterns in memory only.
@@ -129,6 +167,12 @@ public sealed class LibraryMatchOptions
         if (UnitSampleSize is < 1 or > 100) problems.Add($"{nameof(UnitSampleSize)} must be between 1 and 100");
         if (UnitGapHours is < 0 or > 720 || double.IsNaN(UnitGapHours)) problems.Add($"{nameof(UnitGapHours)} must be between 0 and 720");
         if (MaxUnitParts is < 2 or > 100) problems.Add($"{nameof(MaxUnitParts)} must be between 2 and 100");
+        if (InboxProblem(InboxFolder) is { } inbox) problems.Add($"{nameof(InboxFolder)} {inbox}");
+        foreach (var i in Inboxes)
+        {
+            if (string.IsNullOrWhiteSpace(i.Root)) problems.Add($"{nameof(Inboxes)}: an entry has no Root");
+            if (InboxProblem(i.Folder) is { } own) problems.Add($"{nameof(Inboxes)}: Folder of {i.Root} {own}");
+        }
         Share(nameof(WeightContentFit), WeightContentFit);
         foreach (var (name, w) in new[]
                  {
@@ -143,4 +187,14 @@ public sealed class LibraryMatchOptions
         if (problems.Count > 0)
             throw new ArgumentException("LibraryMatch: " + string.Join("; ", problems));
     }
+}
+
+/// <summary>The inbox folder of one library (<c>LibraryMatch:Inboxes</c>, Issue 95).</summary>
+public sealed class LibraryInbox
+{
+    /// <summary>Root path of the library as it was scanned.</summary>
+    public string Root { get; set; } = string.Empty;
+
+    /// <summary>Folder below the root, with <c>/</c>.</summary>
+    public string Folder { get; set; } = string.Empty;
 }

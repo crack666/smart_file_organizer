@@ -52,6 +52,13 @@ public static class FindingRules
         FindingKind.NotBackedUp, FindingKind.InNoise, FindingKind.Misplaced
     ];
 
+    /// <summary>
+    /// A stored target status that names a place: an existing folder, a new folder, or the inbox of a library
+    /// (https://github.com/crack666/smart_file_organizer/issues/95).
+    /// </summary>
+    public static bool HasPlace(FindingTargetStatus status) =>
+        status is FindingTargetStatus.ExistingFolder or FindingTargetStatus.NewFolder or FindingTargetStatus.Inbox;
+
     private static readonly FileCategory[] KeptCategories =
     [
         FileCategory.Photo, FileCategory.Video, FileCategory.DocumentScan, FileCategory.Document,

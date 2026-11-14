@@ -1168,11 +1168,18 @@ public sealed class FindingService
             finding.TargetInput = TargetInputHash(files.Select(x => x.File.Id), factsByFile, libraryIds);
             finding.TargetStatus = FindingTargetStatus.NotMatched;
             if (files.Any(x => x.Match.IsMatch)) continue;
-            if (!stored.TryGetValue(finding.Key, out var row) || row.InputHash != finding.TargetInput) continue;
+            if (!stored.TryGetValue(finding.Key, out var row)) continue;
+            // A decision of the controller holds until it is withdrawn (Issue 95), also when descriptions of the files
+            // changed since; the finding says so. A match of the rules or the local model counts only while it fits.
+            var decided = row.DecidedBy == TargetDecidedBy.Controller;
+            if (!decided && row.InputHash != finding.TargetInput) continue;
+            if (decided && row.InputHash != finding.TargetInput)
+                finding.Notes.Add("The files or their descriptions changed since the controller decided the target; the decision stays until it is withdrawn (sfo findings place --withdraw).");
+            finding.TargetDecidedBy = row.DecidedBy;
 
             var fileCertainty = FindingRules.Weakest(
                 files.Select(x => x.Value.Worth == FileWorth.None ? ResultCertainty.Uncertain : x.Value.Certainty), ResultCertainty.Uncertain);
-            if (row.Status is FindingTargetStatus.ExistingFolder or FindingTargetStatus.NewFolder)
+            if (FindingRules.HasPlace(row.Status))
             {
                 var home = row.Path is { } path
                     ? libraries.FirstOrDefault(l => l.Id == row.LibraryJobId && IsAtOrBelow(path, Path.TrimEndingDirectorySeparator(l.RootPath)))
@@ -1189,7 +1196,12 @@ public sealed class FindingService
                 finding.Target = target;
                 finding.TargetStatus = row.Status;
                 finding.Action = new FindingAction(PlanActionKind.Move,
-                    $"Move to {target.RelativePath}{(row.Status == FindingTargetStatus.NewFolder ? " (a new folder)" : string.Empty)} in library job {home.Id}: {target.Reason}");
+                    $"Move to {target.RelativePath}{row.Status switch
+                    {
+                        FindingTargetStatus.NewFolder => " (a new folder)",
+                        FindingTargetStatus.Inbox => " (the inbox of the library)",
+                        _ => string.Empty
+                    }} in library job {home.Id}: {target.Reason}");
                 finding.Notes.RemoveAll(n => n == NoFolderFitsNote || n.StartsWith("No place looked up", StringComparison.Ordinal));
                 if (finding.Kind == FindingKind.Misplaced)
                 {
@@ -1205,7 +1217,7 @@ public sealed class FindingService
                 // The files do not belong together (Issue 85): each part keeps its own place, inside a library root only.
                 var parts = row.Parts.Select(p =>
                 {
-                    if (p.Status is not (FindingTargetStatus.ExistingFolder or FindingTargetStatus.NewFolder)) return p;
+                    if (!FindingRules.HasPlace(p.Status)) return p;
                     var inRoot = p.Path is { } partPath
                                  && libraries.Any(l => l.Id == p.LibraryJobId && IsAtOrBelow(partPath, Path.TrimEndingDirectorySeparator(l.RootPath)));
                     return inRoot ? p : new FindingTargetPart
@@ -1216,7 +1228,7 @@ public sealed class FindingService
                 }).ToList();
                 finding.TargetStatus = FindingTargetStatus.Split;
                 finding.TargetParts = parts;
-                var placed = parts.Where(p => p.Status is FindingTargetStatus.ExistingFolder or FindingTargetStatus.NewFolder).ToList();
+                var placed = parts.Where(p => FindingRules.HasPlace(p.Status)).ToList();
                 finding.Notes.Add($"Split by content ({parts.Count} parts, {placed.Count} with a place): {row.Reason}");
                 if (placed.Count > 0)
                 {
@@ -1239,7 +1251,15 @@ public sealed class FindingService
             finding.TargetStatus = row.Status;
             finding.Notes.Add($"No target ({row.Status.ToCode()}): {row.Reason}");
             // The match by content found no fitting folder: a place the rules alone proposed does not count either.
-            if (row.Status == FindingTargetStatus.NoFittingFolder && finding.Kind == FindingKind.Misplaced && finding.Target is not null)
+            // The controller decided no target: no place of the rules counts either (Issue 95).
+            if (decided)
+            {
+                finding.Target = null;
+                finding.Action = new FindingAction(PlanActionKind.Leave, $"The controller decided on no target: {row.Reason}");
+                if (finding.Kind == FindingKind.Misplaced)
+                    finding.Certainty = FindingRules.MisplacedCertainty(fileCertainty, null);
+            }
+            else if (row.Status == FindingTargetStatus.NoFittingFolder && finding.Kind == FindingKind.Misplaced && finding.Target is not null)
             {
                 finding.Target = null;
                 finding.Action = new FindingAction(PlanActionKind.Leave, "No folder of the library fits these files; decide where they belong.");

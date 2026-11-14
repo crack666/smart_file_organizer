@@ -90,6 +90,8 @@ public static class LibraryCommand
         command.Subcommands.Add(CreatePropose(host, globals));
         command.Subcommands.Add(LibraryTargetCommands.CreateShow(host, globals));
         command.Subcommands.Add(LibraryTargetCommands.CreateMatch(host, globals));
+        command.Subcommands.Add(ControllerCommands.CreateFolder(host, globals));
+        command.Subcommands.Add(ControllerCommands.CreateDescribe(host, globals));
         return command;
     }
 

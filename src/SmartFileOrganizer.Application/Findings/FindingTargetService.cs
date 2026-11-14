@@ -19,10 +19,17 @@ public sealed record FindingTargetQuery
     /// <summary>Only these findings; empty for every open or accepted finding that should move.</summary>
     public IReadOnlyCollection<string> Keys { get; init; } = [];
 
-    /// <summary>The model may describe candidate folders, compare content and name new folders.</summary>
-    public bool UseModel { get; init; } = true;
+    /// <summary>
+    /// The local model may describe candidate folders, compare content and name new folders (<c>--local-model</c>). Off by
+    /// default since https://github.com/crack666/smart_file_organizer/issues/95: the rules alone, and the controller decides
+    /// the rest with <c>sfo findings place</c>.
+    /// </summary>
+    public bool UseModel { get; init; }
 
-    /// <summary>Match again, and ask the model again, even where a stored match fits the finding.</summary>
+    /// <summary>
+    /// Match again, and ask the model again, even where a stored match fits the finding. A decision of the controller stays
+    /// all the same.
+    /// </summary>
     public bool Refresh { get; init; }
 
     public string? Model { get; init; }
@@ -43,7 +50,8 @@ public sealed record FindingTargetItem(
     TargetContentCheck ContentCheck,
     ContentCheckStatus ContentStatus,
     string Reason,
-    IReadOnlyList<FindingTargetPart>? Parts = null);
+    IReadOnlyList<FindingTargetPart>? Parts = null,
+    TargetDecidedBy DecidedBy = TargetDecidedBy.Rules);
 
 /// <summary>Progress of a run, one report per finding.</summary>
 public sealed record FindingTargetProgress(int Done, int Total, string Key, FindingTargetStatus Status, bool Reused);
@@ -152,7 +160,15 @@ public sealed class FindingTargetService
             var finding = todo[i];
             FindingTargetRecord record;
             bool fromStore;
-            if (!query.Refresh && stored.TryGetValue(finding.Key, out var known) && StillValid(known, finding, query.UseModel))
+            if (stored.TryGetValue(finding.Key, out var decided) && decided.DecidedBy == TargetDecidedBy.Controller)
+            {
+                // A decision of the controller is never replaced by a run (Issue 95), not even with --refresh; only another
+                // decision or its withdrawal (sfo findings place --withdraw) changes it.
+                record = decided;
+                fromStore = true;
+                reused++;
+            }
+            else if (!query.Refresh && stored.TryGetValue(finding.Key, out var known) && StillValid(known, finding, query.UseModel))
             {
                 record = known;
                 fromStore = true;
@@ -162,24 +178,7 @@ public sealed class FindingTargetService
             {
                 var nodes = finding.FileIds.Where(files.ContainsKey).Select(id => files[id]).ToList();
                 if (nodes.Count == 0) continue;
-                // Nobody described the files yet: describe a small sample now and keep the facts, so the content can
-                // choose (Issue 85). The hash then rests on the new facts, and the next run asks nothing again.
-                var inputHash = finding.TargetInput!;
-                if (query.UseModel && await DescribeSampleAsync(nodes, ct))
-                    inputHash = await _findings.TargetInputAsync(query.JobId, finding.FileIds, libraries, ct);
-                var answer = await _targets.MatchAsync(new LibraryMatchQuery
-                {
-                    SourceJobId = query.JobId,
-                    Libraries = libraries,
-                    Files = nodes,
-                    // A named folder or a device copy keeps its name, as in sfo library match --bundle.
-                    Path = finding.BundleKind is BundleKind.Folder or BundleKind.Dump ? finding.Path : null,
-                    UseModel = query.UseModel,
-                    Refresh = query.Refresh,
-                    Model = query.Model
-                }, ct);
-                record = ToRecord(finding, answer, nodes, rows, query.UseModel, _time.GetUtcNow().UtcDateTime);
-                record.InputHash = inputHash;
+                record = await MatchOneAsync(query, finding, nodes, libraries, rows, ct);
                 await _store.UpsertAsync(record, ct);
                 fromStore = false;
                 matched++;
@@ -187,7 +186,8 @@ public sealed class FindingTargetService
             }
 
             items.Add(new FindingTargetItem(finding.Key, finding.Kind, finding.Title, record.Status, fromStore, record.LibraryJobId,
-                record.Path, record.RelativePath, record.Certainty, record.ContentCheck, record.ContentStatus, record.Reason, record.Parts));
+                record.Path, record.RelativePath, record.Certainty, record.ContentCheck, record.ContentStatus, record.Reason, record.Parts,
+                record.DecidedBy));
             progress?.Report(new FindingTargetProgress(i + 1, todo.Count, finding.Key, record.Status, fromStore));
         }
 
@@ -195,6 +195,35 @@ public sealed class FindingTargetService
             .OrderBy(g => g.Key, StringComparer.Ordinal)
             .ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
         return new FindingTargetRun(report.Job, StorageStatus.Known, null, libraries, todo.Count, matched, reused, byStatus, items);
+    }
+
+    /// <summary>
+    /// The match of one finding as it would be stored, not stored yet. <see cref="FindingPlacementService"/> takes the parts
+    /// of a mixed finding from it when the controller decides a part that no stored match holds yet.
+    /// </summary>
+    internal async Task<FindingTargetRecord> MatchOneAsync(
+        FindingTargetQuery query, Finding finding, IReadOnlyList<FileNode> nodes, IReadOnlyList<long> libraries,
+        IReadOnlyDictionary<long, FileComparison> rows, CancellationToken ct)
+    {
+        // Nobody described the files yet: describe a small sample now and keep the facts, so the content can
+        // choose (Issue 85). The hash then rests on the new facts, and the next run asks nothing again.
+        var inputHash = finding.TargetInput!;
+        if (query.UseModel && await DescribeSampleAsync(nodes, ct))
+            inputHash = await _findings.TargetInputAsync(query.JobId, finding.FileIds, libraries, ct);
+        var answer = await _targets.MatchAsync(new LibraryMatchQuery
+        {
+            SourceJobId = query.JobId,
+            Libraries = libraries,
+            Files = nodes,
+            // A named folder or a device copy keeps its name, as in sfo library match --bundle.
+            Path = finding.BundleKind is BundleKind.Folder or BundleKind.Dump ? finding.Path : null,
+            UseModel = query.UseModel,
+            Refresh = query.Refresh,
+            Model = query.Model
+        }, ct);
+        var record = ToRecord(finding, answer, nodes, rows, query.UseModel, _time.GetUtcNow().UtcDateTime);
+        record.InputHash = inputHash;
+        return record;
     }
 
     /// <summary>
@@ -254,6 +283,7 @@ public sealed class FindingTargetService
         record.InputHash = finding.TargetInput!;
         record.WithModel = useModel;
         record.MatchedAt = now;
+        record.DecidedBy = useModel ? TargetDecidedBy.LocalModel : TargetDecidedBy.Rules;
         if (answer.Parts is { Count: > 0 } parts)
         {
             // The files do not belong together: the mixture gets no target, each part its own (Issue 85).
@@ -277,7 +307,8 @@ public sealed class FindingTargetService
                     RelativePath = placed?.RelativePath,
                     Certainty = placed?.Certainty,
                     ContentCheck = placed?.ContentCheck ?? TargetContentCheck.NotChecked,
-                    Reason = placed?.Reason ?? p.NotMatched ?? "Not matched."
+                    Reason = placed?.Reason ?? p.NotMatched ?? "Not matched.",
+                    DecidedBy = record.DecidedBy
                 });
             }
         }
@@ -352,7 +383,7 @@ public sealed class FindingTargetService
         record.Reason = record.Status switch
         {
             FindingTargetStatus.NoModel =>
-                $"No folder of the libraries fits; a new folder {proposal!.Destination} needs a name the rules cannot complete, and no model was {(useModel ? "reachable" : "asked (--no-model)")}.",
+                $"No folder of the libraries fits; a new folder {proposal!.Destination} needs a name the rules cannot complete, and no model was {(useModel ? "reachable" : "asked (rules only)")}; the controller decides it (sfo findings candidates, sfo findings place).",
             FindingTargetStatus.ContentUnclear =>
                 "No folder of the libraries fits by time, name or kind of files, and the files are not described yet, so their content cannot choose one (sfo analyze describes them).",
             _ => proposal is not null
