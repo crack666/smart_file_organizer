@@ -136,6 +136,27 @@ public static partial class LibraryText
         return true;
     }
 
+    /// <summary>
+    /// A name that is a random string rather than words (Issue 85): a hash or id such as <c>c7e2a9f4</c>,
+    /// <c>3f2a-91bc-0d4e</c> or <c>tmp8x2k9q1z</c>, a keyboard mash, or a name of digits and letters mixed without a
+    /// word of three letters or more. Such a name says nothing about the content and never names a new folder.
+    /// </summary>
+    public static bool IsRandomName(string name)
+    {
+        var n = name.Trim();
+        if (n.Length == 0) return false;
+        if (IsKeyboardMash(n)) return true;
+        if (HexIdRegex().IsMatch(n)) return true;
+        var tokens = TokenRegex().Matches(n).Select(m => m.Value).ToList();
+        if (tokens.Count == 0) return true;
+        // A word: three letters or more, not mixed with digits.
+        if (tokens.Any(t => t.Length >= 3 && t.All(char.IsLetter))) return false;
+        return tokens.Any(t => t.Any(char.IsLetter) && t.Any(char.IsDigit) && t.Length >= 6);
+    }
+
+    [GeneratedRegex(@"^(?=[0-9a-fA-F-]*\d)(?=[0-9a-fA-F-]*[a-fA-F])[0-9a-fA-F]{4,}(?:-[0-9a-fA-F]{2,})*$")]
+    private static partial Regex HexIdRegex();
+
     private static readonly string[] KeyRows = ["qwertzuiop", "qwertyuiop", "asdfghjkl", "yxcvbnm", "zxcvbnm"];
 
     private static bool Neighbours(char a, char b) =>

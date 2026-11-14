@@ -779,6 +779,24 @@ https://github.com/crack666/smart_file_organizer/issues/83). Stored per finding 
 | `content_unclear` | No folder fits by time, name or kind of files, and the files are not described, so their content cannot choose one. |
 | `no_model` | A new folder needs a name the rules cannot complete, and no model was used (`--no-model`) or reachable. |
 | `no_target` | No target on purpose: no existing folder is confirmed by content, and no library holds this kind of content (own photos and videos, documents, films), so a new folder would be a guess as well (Issue 85). |
+| `split` | The files of the finding show different things (a ski trip and a crack in a wall), so the finding as a whole gets no target; each part by content is matched on its own and carries its own target or reason in `target_parts` (`finding_target_parts`). `sfo plan create` moves each file with its part (Issue 85). A part never has this status. |
+| `excluded` | Left out of the target match on purpose, with the reason named: most files lie in a folder judged system clutter (`system`), or in a folder judged as a whole (`uniform`, `unit`) whose worth is unclear (retention `review`). No model is asked. The setting `LibraryMatch:MatchUnclearWorth` matches them anyway (Issue 85). |
+
+### Kind of a shared feature (`SharedFeatureKind`)
+
+What a content check named as the feature the files and a folder have in common (`shared_kind` of the content check;
+https://github.com/crack666/smart_file_organizer/issues/85). The model must name the feature itself in `shared`; a
+`fits` without a concrete one, or with only general features (indoor, everyday, winter, people, ...; the list
+`general_features` of the word file), is turned into `unclear` by the rules after the answer.
+
+| Code | Meaning |
+|---|---|
+| `occasion` | The same named occasion: this birthday, this trip, this wedding. |
+| `person` | The same named person or group. |
+| `place` | The same named place: a town, a house, a lake. |
+| `topic` | The same specific topic or activity: skiing, a renovation, a car. |
+| `issuer` | The same issuer of documents: a provider, an authority, an employer. |
+| `none` | Nothing concrete in common; never a fit. |
 
 ### Coverage of a kind of finding (`FindingCoverage`)
 

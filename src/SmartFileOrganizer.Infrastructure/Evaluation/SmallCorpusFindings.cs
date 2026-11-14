@@ -20,6 +20,7 @@ public static class SmallCorpusFindings
         new("in_noise", "Import", Group: "documents", Note: "Two invoices waiting for a place under a generic name (version 5)."),
         new("in_noise", "Import", Group: "images", Note: "Photos of three occasions waiting for a place under a generic name (version 5)."),
         new("in_noise", "Import", Group: "videos", Note: "Own clips of an evening waiting for a place under a generic name (version 6)."),
+        new("in_noise", "Import/Neuer Ordner", Group: "images", Note: "Photos of two different things under a placeholder name (version 7)."),
         new("in_noise", "alt", Group: "documents", Note: "A scanned letter and a table in an old mixed folder."),
         new("in_noise", "alt", Group: "images", Note: "An application photo in the old mixed folder."),
 

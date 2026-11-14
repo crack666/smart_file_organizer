@@ -117,6 +117,7 @@ public class ScanJobRepository : IScanJobRepository
             DELETE FROM folder_descriptions WHERE job_id = @id;
             DELETE FROM finding_decisions   WHERE job_id = @id;
             DELETE FROM finding_targets     WHERE job_id = @id;
+            DELETE FROM finding_target_parts WHERE job_id = @id;
             DELETE FROM plan_steps          WHERE plan_id IN (SELECT id FROM plans WHERE job_id = @id);
             DELETE FROM plan_actions        WHERE plan_id IN (SELECT id FROM plans WHERE job_id = @id);
             DELETE FROM plans               WHERE job_id = @id;

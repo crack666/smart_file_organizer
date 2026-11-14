@@ -181,7 +181,11 @@ public partial class ContentMatchCommandTests : IDisposable
             {
                 var id = l[..l.IndexOf(' ')];
                 var fit = Key(l) == unit ? "fits" : "contradicts";
-                return new { id, fit, reason = fit == "fits" ? $"both show {unit}" : $"the files show {unit}, the folder {Key(l)}" };
+                return new
+                {
+                    id, fit, shared = fit == "fits" ? unit : "", shared_kind = fit == "fits" ? "occasion" : "none",
+                    reason = fit == "fits" ? $"both show {unit}" : $"the files show {unit}, the folder {Key(l)}"
+                };
             });
             var content = JsonSerializer.Serialize(new { verdicts });
             return Task.FromResult(new LibraryAdviceReply(content, "scripted-judge", content, null));

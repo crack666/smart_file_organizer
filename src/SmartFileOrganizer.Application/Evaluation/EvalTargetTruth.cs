@@ -55,8 +55,11 @@ public sealed record EvalTargetTruthDocument(int SchemaVersion, string Library, 
 /// <param name="Destination">The best existing folder (relative to the library root), or the new folder.</param>
 /// <param name="NoTarget">Why no folder is proposed at all (Issue 85), when that is the answer.</param>
 /// <param name="Failure">The code of a named failure of the match, such as <c>library_unreachable</c>.</param>
+/// <param name="Excluded">Why the unit was left out of the match on purpose (system clutter, worth unclear; Issue 85).</param>
+/// <param name="Parts">How many parts the unit was split into by content (Issue 85); null when it was matched whole. The
+/// other fields then hold the answer for the part of the file named in the truth.</param>
 public sealed record TargetResult(ExpectedTarget Expected, string? Destination, bool NewFolder, string? Certainty, string? Reason,
-    string? DecidedBy, string? Error, string? NoTarget = null, string? Failure = null);
+    string? DecidedBy, string? Error, string? NoTarget = null, string? Failure = null, string? Excluded = null, int? Parts = null);
 
 /// <summary>
 /// Target proposals against the truth of a library (https://github.com/crack666/smart_file_organizer/issues/56). Kept
@@ -71,7 +74,17 @@ public static class EvalTargetTruth
 
     /// <summary>The expected outcome of a match against a library that cannot be read (Issue 85).</summary>
     public const string LibraryUnreachable = "library_unreachable";
-    public static readonly string[] Outcomes = [LibraryUnreachable];
+
+    /// <summary>The unit holds different things and is matched part by part, never as a whole (Issue 85).</summary>
+    public const string Split = "split";
+
+    /// <summary>The unit is left out of the match on purpose: system clutter or worth unclear (Issue 85).</summary>
+    public const string Excluded = "excluded";
+
+    /// <summary>Neither an existing nor a new folder is right: no target at all (Issue 85).</summary>
+    public const string NoTargetOutcome = "no_target";
+
+    public static readonly string[] Outcomes = [LibraryUnreachable, Split, Excluded, NoTargetOutcome];
 
     public static EvalTargetTruthDocument? LoadBeside(string truthPath)
     {
@@ -113,11 +126,20 @@ public static class EvalTargetTruth
             var key = CorpusEvaluator.Key(EvalKind.Target, r.Expected.Outcome is { } o ? $"{r.Expected.Unit}:{path}:{o}" : $"{r.Expected.Unit}:{path}");
             if (r.Expected.Outcome is { } outcome)
             {
-                if (r.Failure == outcome)
+                var met = outcome switch
+                {
+                    Split => r.Parts is > 1 && r.Error is null,
+                    Excluded => r.Excluded is not null,
+                    NoTargetOutcome => r.NoTarget is not null && r.Destination is null && r.Error is null,
+                    _ => r.Failure == outcome
+                };
+                if (met)
                     report.Hit(EvalKind.Target);
                 else
                     report.Fail(new EvalFailure(EvalKind.Target, key, path, EvalOutcome.Wrong, outcome,
-                        r.Failure ?? (r.NewFolder ? $"new folder {r.Destination}" : r.Destination ?? (r.NoTarget is null ? "nothing" : "no target")),
+                        r.Failure ?? (r.Excluded is not null ? "excluded"
+                            : r.NewFolder ? $"new folder {r.Destination}" : r.Destination ?? (r.NoTarget is null ? "nothing" : "no target"))
+                        + (r.Parts is > 1 && outcome != Split ? $" (part of {r.Parts})" : r.Parts is null && outcome == Split ? " (whole)" : ""),
                         r.DecidedBy, r.Error ?? r.NoTarget ?? $"{r.Certainty}: {r.Reason}"));
                 continue;
             }
@@ -182,6 +204,7 @@ public sealed class TargetEvaluator
             }
             var library = e.Outcome == EvalTargetTruth.LibraryUnreachable ? unreachableLibraryJobId!.Value : libraryJobId;
             var query = new LibraryMatchQuery { SourceJobId = sourceJobId, Libraries = [library], UseModel = useModel, Limit = 1 };
+            long? anchor = null;
             if (e.Unit == "bundle")
             {
                 var full = Path.Combine(source.RootPath, relative.Replace('/', Path.DirectorySeparatorChar));
@@ -192,6 +215,7 @@ public sealed class TargetEvaluator
                     continue;
                 }
                 query = query with { BundleId = bundleId };
+                anchor = file.File.Id;
             }
             else
             {
@@ -200,18 +224,35 @@ public sealed class TargetEvaluator
 
             try
             {
-                var answer = await _targets.MatchAsync(query, ct);
+                var whole = await _targets.MatchAsync(query, ct);
+                var answer = whole;
+                // A finding split by content (Issue 85): the file named in the truth is judged by the answer of its own part.
+                if (whole.Parts is { Count: > 0 } parts && anchor is { } id
+                    && parts.FirstOrDefault(p => p.Files.Any(f => f.Id == id)) is { } part)
+                {
+                    if (part.Answer is null)
+                    {
+                        results.Add(new TargetResult(e, null, false, null, null, "matched per part", null, NoTarget: part.NotMatched,
+                            Parts: parts.Count));
+                        continue;
+                    }
+                    answer = part.Answer;
+                }
+                var split = whole.Parts?.Count;
                 var content = answer.Result?.Content;
                 var by = content is null ? null
                     : content.Status == ContentCheckStatus.Checked ? $"content {content.Note ?? "checked"}" : $"content {content.Status.ToCode()}";
-                if (answer.Result?.Candidates is { Count: > 0 } candidates)
-                    results.Add(new TargetResult(e, candidates[0].Destination, false, candidates[0].Certainty.ToCode(), candidates[0].Reason, by, null));
+                if (answer.Excluded is { } excluded)
+                    results.Add(new TargetResult(e, null, false, null, null, "excluded", null, NoTarget: excluded, Excluded: excluded, Parts: split));
+                else if (answer.Result?.Candidates is { Count: > 0 } candidates)
+                    results.Add(new TargetResult(e, candidates[0].Destination, false, candidates[0].Certainty.ToCode(), candidates[0].Reason, by, null,
+                        Parts: split));
                 else if (answer.Result?.NewFolder is { } n)
-                    results.Add(new TargetResult(e, n.Destination, true, n.Certainty.ToCode(), n.Reason, by, null));
+                    results.Add(new TargetResult(e, n.Destination, true, n.Certainty.ToCode(), n.Reason, by, null, Parts: split));
                 else if (answer.Result?.NoTarget is { } none)
-                    results.Add(new TargetResult(e, null, false, null, null, by, null, NoTarget: none));
+                    results.Add(new TargetResult(e, null, false, null, null, by, null, NoTarget: none, Parts: split));
                 else
-                    results.Add(new TargetResult(e, null, false, null, null, by, answer.Message ?? "no proposal"));
+                    results.Add(new TargetResult(e, null, false, null, null, by, answer.Message ?? "no proposal", Parts: split));
             }
             catch (LibraryServiceException ex) when (ex.Failure == LibraryFailure.LibraryUnreachable)
             {

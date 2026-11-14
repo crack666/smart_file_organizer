@@ -111,6 +111,12 @@ public sealed class Finding
     /// </summary>
     public string? TargetInput { get; set; }
 
+    /// <summary>
+    /// For target status <c>split</c> (Issue 85): the parts of the finding by content, each with its own place or why it
+    /// has none. The plan moves each file to the place of its part. Empty otherwise.
+    /// </summary>
+    public IReadOnlyList<FindingTargetPart> TargetParts { get; set; } = [];
+
     public FindingDuplicates? Duplicates { get; set; }
 
     /// <summary>A few file paths relative to the job root, so the finding can be checked at a glance.</summary>

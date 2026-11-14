@@ -125,7 +125,9 @@ public static class LibraryTargetCommands
     }
 
     /// <summary>The content check of one candidate: fits, contradicts or unclear, why, and what the folder shows.</summary>
-    public sealed record ContentView(string Fit, string Reason, DescriptionView? Folder);
+    /// <param name="Shared">The concrete feature both share (Issue 85: <c>fits</c> needs one); null when none was named.</param>
+    /// <param name="SharedKind">A <c>SharedFeatureKind</c> code: occasion, person, place, topic, issuer or none.</param>
+    public sealed record ContentView(string Fit, string Reason, DescriptionView? Folder, string? Shared = null, string? SharedKind = null);
 
     /// <summary>Whether the content was checked; <c>status</c> is a <see cref="ContentCheckStatus"/> code.</summary>
     public sealed record ContentCheckView(string Status, string? Model, string? Note);
@@ -189,7 +191,16 @@ public static class LibraryTargetCommands
         ContentCheckView? ContentCheck = null,
         IReadOnlyList<RejectedView>? Rejected = null,
         IReadOnlyList<CandidateView>? Unconfirmed = null,
-        string? NoTarget = null);
+        string? NoTarget = null,
+        string? Excluded = null,
+        IReadOnlyList<PartView>? Parts = null);
+
+    /// <summary>
+    /// One part of a unit whose files do not belong together (Issue 85), with its own answer: <c>status</c> is
+    /// <c>existing_folder</c>, <c>new_folder</c> or <c>no_target</c>; <c>destination_relative</c> null without a place.
+    /// </summary>
+    public sealed record PartView(int Files, string Label, IReadOnlyList<string> Examples, string Status, long? LibraryJobId,
+        string? Destination, string? DestinationRelative, string? Certainty, string Reason);
 
     // ------------------------------------------------------------------ show
 
@@ -412,7 +423,7 @@ public static class LibraryTargetCommands
             Full(library?.RootPath, c.Destination), c.Destination, u.KeepWhole, c.Score, c.Certainty.ToCode(), c.Reason,
             c.Signals.Select(s => new SignalView(s.Signal.ToCode(), Math.Round(s.Value, 3), s.Weight, s.Agrees, s.Contradicts, s.Detail)).ToList(),
             Weak(c.Weak), library?.Id,
-            c.Content is { } cc ? new ContentView(cc.Fit.ToCode(), cc.Reason, DescriptionView.From(cc.Folder)) : null);
+            c.Content is { } cc ? new ContentView(cc.Fit.ToCode(), cc.Reason, DescriptionView.From(cc.Folder), cc.Shared, cc.SharedKind.ToCode()) : null);
 
         var candidates = (a.Result?.Candidates ?? []).Select((c, i) => View(c, i, LibraryOf(i))).ToList();
         var unconfirmed = (a.Result?.Unconfirmed ?? []).Select((c, i) =>
@@ -450,7 +461,24 @@ public static class LibraryTargetCommands
             (a.Result?.Rejected ?? []).Select(r => new RejectedView(r.Target.RelativePath,
                 r.Content?.Reason ?? "the content does not fit", DescriptionView.From(r.Content?.Folder))).ToList(),
             unconfirmed,
-            a.Result?.NoTarget);
+            a.Result?.NoTarget,
+            a.Excluded,
+            a.Parts?.Select(PartOf).ToList());
+    }
+
+    private static PartView PartOf(LibraryMatchPart p)
+    {
+        var examples = p.Files.Take(3).Select(f => f.RelativePath.Replace('\\', '/')).ToList();
+        var r = p.Answer?.Result;
+        if (r?.Candidates is { Count: > 0 } c && p.Answer!.CandidateLibraries is { Count: > 0 } libs)
+            return new PartView(p.Files.Count, p.Label, examples, "existing_folder", libs[0].Id,
+                Path.Combine(libs[0].RootPath, c[0].Destination.Replace('/', Path.DirectorySeparatorChar)), c[0].Destination,
+                c[0].Certainty.ToCode(), c[0].Reason);
+        if (r?.NewFolder is { } n && p.Answer!.NewFolderLibrary is { } home)
+            return new PartView(p.Files.Count, p.Label, examples, "new_folder", home.Id,
+                Path.Combine(home.RootPath, n.Destination.Replace('/', Path.DirectorySeparatorChar)), n.Destination, n.Certainty.ToCode(), n.Reason);
+        return new PartView(p.Files.Count, p.Label, examples, "no_target", null, null, null, null,
+            p.NotMatched ?? r?.NoTarget ?? "No folder of the libraries fits these files.");
     }
 
     private static WeakPlaceView? Weak(WeakPlace? w) => w is null ? null : new WeakPlaceView(Refs(w.Findings), w.Note);
@@ -536,6 +564,11 @@ public static class LibraryTargetCommands
             sb.AppendLine($"   unconfirmed {x.DestinationRelative}: {x.Reason}");
         if (r.NoTarget is { } none)
             sb.AppendLine($"no_target     {none}");
+        foreach (var p in r.Parts ?? [])
+        {
+            sb.AppendLine($"  part: {p.Files} files, {p.Label} -> {p.DestinationRelative ?? "none"} ({p.Status}{(p.Certainty is { } pc ? ", " + pc : string.Empty)})");
+            sb.AppendLine($"     {p.Reason}");
+        }
         if (r.NewFolder is { } n)
         {
             sb.AppendLine($"new_folder    {n.Destination}  [{n.Certainty}, name by {n.NameSource}]");

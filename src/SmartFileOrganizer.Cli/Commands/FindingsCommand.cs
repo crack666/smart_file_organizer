@@ -54,7 +54,8 @@ public static class FindingsCommand
         string? DecidedBy,
         DateTime? DecidedAt,
         string? DecisionNote,
-        string? TargetStatus = null)
+        string? TargetStatus = null,
+        IReadOnlyList<TargetPartView>? TargetParts = null)
     {
         public static FindingView From(Finding f) => new(
             f.Rank, f.Key, f.Kind.ToCode(), f.Certainty.ToCode(), f.Unsure ? "unsure" : "sure", f.State.ToCode(),
@@ -66,7 +67,8 @@ public static class FindingsCommand
                 ? new TargetView(t.Path, t.RelativePath, t.Certainty.ToCode(), t.Reason, t.SameContentFiles, t.ContentCheck.ToCode(),
                     t.LibraryJobId, t.LibraryRoot)
                 : null,
-            f.Duplicates, f.Examples, f.Notes, f.DecidedBy.ToCode(), f.DecidedAt, f.DecisionNote, f.TargetStatus.ToCode());
+            f.Duplicates, f.Examples, f.Notes, f.DecidedBy.ToCode(), f.DecidedAt, f.DecisionNote, f.TargetStatus.ToCode(),
+            TargetPartView.From(f.TargetParts));
 
         public string ToLine() =>
             $"{Rank,4}  {Key,-24} {Certainty,-9} {Files,7} files {ReadFormat.Size(Bytes),10}  {Action.Kind,-13}"
@@ -352,7 +354,20 @@ public static class FindingsCommand
 
     public sealed record TargetItemView(
         string Key, string Kind, string Title, string Status, bool Reused, long? LibraryJobId, string? Path, string? RelativePath,
-        string? Certainty, string ContentCheck, string ContentStatus, string Reason);
+        string? Certainty, string ContentCheck, string ContentStatus, string Reason, IReadOnlyList<TargetPartView>? Parts = null);
+
+    /// <summary>
+    /// One part of a finding whose files do not belong together (target status <c>split</c>, Issue 85): its files and its
+    /// own place, or why it has none. <c>status</c> is a <c>FindingTargetStatus</c> code.
+    /// </summary>
+    public sealed record TargetPartView(int Index, int Files, string Label, string Status, long? LibraryJobId, string? Path,
+        string? RelativePath, string? Certainty, string ContentCheck, string Reason)
+    {
+        public static IReadOnlyList<TargetPartView>? From(IReadOnlyList<FindingTargetPart>? parts) =>
+            parts is not { Count: > 0 } ? null
+            : parts.Select(p => new TargetPartView(p.Index, p.FileIds.Count, p.Label, p.Status.ToCode(), p.LibraryJobId, p.Path,
+                p.RelativePath, p.Certainty.ToCode(), p.ContentCheck.ToCode(), p.Reason)).ToList();
+    }
 
     public sealed record TargetsResult(
         long JobId,
@@ -430,7 +445,8 @@ public static class FindingsCommand
             var result = new TargetsResult(run.Job.Id, run.Status.ToCode(), run.Message, run.LibraryJobIds, run.Considered, run.Matched,
                 run.Reused, run.ByStatus,
                 run.Items.Select(i => new TargetItemView(i.Key, i.Kind.ToCode(), i.Title, i.Status.ToCode(), i.Reused, i.LibraryJobId,
-                    i.Path, i.RelativePath, i.Certainty.ToCode(), i.ContentCheck.ToCode(), i.ContentStatus.ToCode(), i.Reason)).ToList(),
+                    i.Path, i.RelativePath, i.Certainty.ToCode(), i.ContentCheck.ToCode(), i.ContentStatus.ToCode(), i.Reason,
+                    TargetPartView.From(i.Parts))).ToList(),
                 services.GetRequiredService<ModelUsageMeter>().Snapshot());
             return CommandOutcome.Success(result, () => RenderTargets(result));
         });
@@ -451,6 +467,8 @@ public static class FindingsCommand
             sb.AppendLine($"  {i.Key,-24} {i.Status,-18} "
                           + (i.RelativePath is { } rel ? $"{rel} (library job {i.LibraryJobId}, {i.Certainty}, content {i.ContentCheck})" : "-"));
             sb.AppendLine($"      {i.Reason}");
+            foreach (var p in i.Parts ?? [])
+                sb.AppendLine($"      part {p.Index + 1}: {p.Files} files, {p.Label} -> {p.RelativePath ?? "none"} ({p.Status})");
         }
         if (r.ModelCalls.Count > 0)
             AnalyzeCommand.AppendModelCalls(sb.AppendLine("Model calls:"), r.ModelCalls);

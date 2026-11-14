@@ -105,6 +105,56 @@ public class LibraryMatcherTests
         Assert.Contains("but taken", first.Reason);
     }
 
+    /// <summary>
+    /// Issue 85, findings 3 and 4: a new folder only on a level where the library keeps occasions side by side, never
+    /// under foreign material (films, downloads, games) and never inside a game folder with its own program.
+    /// </summary>
+    [Fact]
+    public async Task ANewFolder_OnlyWhereTheLibraryKeepsOccasions_NeverUnderForeignMaterial()
+    {
+        // Occasions only under a film folder and a downloads folder: no level qualifies, rather no target.
+        var foreign = new LibraryTreeFixture();
+        foreach (var title in new[] { "Sommer am See", "Winterreise", "Am Strand" })
+            foreign.Files($"Filme/{title}", Enumerable.Range(0, 3).Select(i => $"IMG_2015020{i + 1}_100000.jpg"));
+        foreign.Files("Downloads/Urlaub", Enumerable.Range(0, 3).Select(i => $"IMG_20160101_1{i}0000.jpg"));
+        foreign.Files("Downloads/Feier", Enumerable.Range(0, 3).Select(i => $"IMG_20170101_1{i}0000.jpg"));
+        var map = await MapAsync(foreign);
+        var result = LibraryMatcher.Match(map, Loose(new DateTime(2021, 8, 14), new DateTime(2021, 8, 14, 18, 0, 0)), Options, 3, LibraryWords.Default);
+        Assert.Null(result.NewFolder);
+        Assert.Contains("no level of the library keeps", result.NoTarget);
+
+        // With an own photo folder next to them, the new folder goes there.
+        foreign.Files("Fotos/Skifahrt 2015", Enumerable.Range(0, 3).Select(i => $"IMG_20150207_1{i}0000.jpg"));
+        foreign.Files("Fotos/Ostern 2018", Enumerable.Range(0, 3).Select(i => $"IMG_20180401_1{i}0000.jpg"));
+        var withOwn = LibraryMatcher.Match(await MapAsync(foreign), Loose(new DateTime(2021, 8, 14), new DateTime(2021, 8, 14, 18, 0, 0)),
+            Options, 3, LibraryWords.Default);
+        Assert.Equal("Fotos", withOwn.NewFolder!.Parent.RelativePath);
+    }
+
+    [Fact]
+    public async Task AGameFolderWithItsOwnProgram_IsClosed_AFolderWithOwnPhotosAndAProgramIsNot()
+    {
+        var f = new LibraryTreeFixture();
+        f.Files("Sachen/Kartenspiel", ["kartenspiel.exe", "readme.txt"]);
+        f.Files("Sachen/Kartenspiel/textures", ["karo.jpg", "herz.jpg", "pik.jpg"]);
+        f.Files("Sachen/Urlaub mit Installer", ["setup.exe", "IMG_20190801_100000.jpg", "IMG_20190801_110000.jpg"]);
+        var map = await MapAsync(f);
+        Assert.Equal(ClosedUnitKind.Program, map.ByRelativePath["Sachen/Kartenspiel"].Closed);
+        Assert.Equal(ClosedUnitKind.Program, map.ByRelativePath["Sachen/Kartenspiel/textures"].Closed);
+        Assert.False(LibraryMap.IsOwnProgramFolder(map.ByRelativePath["Sachen/Urlaub mit Installer"]));
+    }
+
+    [Theory]
+    [InlineData("c7e2a9f4", true)]
+    [InlineData("3f2a-91bc-0d4e", true)]
+    [InlineData("tmp8x2k9q1z", true)]
+    [InlineData("asdf", true)]
+    [InlineData("Skifahrt 2015", false)]
+    [InlineData("DSC_0001", false)]
+    [InlineData("2021", false)]
+    [InlineData("Hochzeit Anna", false)]
+    public void ARandomString_IsNoName(string name, bool random) => Assert.Equal(random, LibraryText.IsRandomName(name));
+
     [Fact]
     public async Task NothingFits_ANewFolderNamedLikeItsNeighbours_WithTheOccasionLeftOpen()
     {
@@ -472,5 +522,49 @@ public class LibraryMatcherTests
         Assert.Null(error);
         Assert.Equal(new FitVerdict(ContentFit.Contradicts, "a party, not skiing"), Assert.Single(verdicts).Value);
         Assert.NotNull(ModelContentFitJudge.Parse("no json", new HashSet<string>()).Error);
+    }
+
+    /// <summary>
+    /// Issue 85, finding 1 of the second real run: the model called loose videos fitting to a course folder because both
+    /// were "indoors, everyday life". The answer names the concrete shared feature and its kind; a fit without one, or
+    /// with general features only, is unclear.
+    /// </summary>
+    [Fact]
+    public void AFitNeedsAConcreteSharedFeature_GeneralFeaturesAreUnclear()
+    {
+        var (verdicts, _) = ModelContentFitJudge.Parse("""
+            { "verdicts": [ { "id": "c1", "fit": "fits", "shared": "indoors, everyday life", "shared_kind": "topic", "reason": "both inside" },
+                            { "id": "c2", "fit": "fits", "shared": "", "shared_kind": "none", "reason": "looks alike" },
+                            { "id": "c3", "fit": "fits", "shared": "skiing on a snowy slope", "shared_kind": "topic", "reason": "both skiing" },
+                            { "id": "c4", "fit": "fits", "reason": "an old answer without the new fields" } ] }
+            """, new HashSet<string> { "c1", "c2", "c3", "c4" });
+        Assert.Equal("skiing on a snowy slope", verdicts["c3"].Shared);
+        Assert.Equal(SharedFeatureKind.Topic, verdicts["c3"].SharedKind);
+
+        var words = LibraryWords.Default;
+        var general = FitRules.Enforce(verdicts["c1"], words);
+        Assert.Equal(ContentFit.Unclear, general.Fit);
+        Assert.Contains("only general features", general.Reason);
+        Assert.Equal(ContentFit.Unclear, FitRules.Enforce(verdicts["c2"], words).Fit);
+        Assert.Equal(ContentFit.Unclear, FitRules.Enforce(verdicts["c4"], words).Fit);
+        Assert.Equal(ContentFit.Fits, FitRules.Enforce(verdicts["c3"], words).Fit);
+        // contradicts and unclear stay as they are.
+        Assert.Equal(ContentFit.Contradicts, FitRules.Enforce(new FitVerdict(ContentFit.Contradicts, "x"), words).Fit);
+    }
+
+    /// <summary>The rules judge of sfo eval --stub follows the same rule: the same everyday occasion in the same season is no fit.</summary>
+    [Fact]
+    public void RulesJudge_SameEverydayOccasionAndSeason_IsNoFit()
+    {
+        var kitchen = Describe((FileFactKey.Occasion, "everyday"), (FileFactKey.Scene, "kitchen table"), (FileFactKey.Setting, "indoor"),
+            (FileFactKey.Season, "winter"));
+        var sofa = Describe((FileFactKey.Occasion, "everyday"), (FileFactKey.Scene, "sofa by the window"), (FileFactKey.Setting, "indoor"),
+            (FileFactKey.Season, "winter"));
+        var judged = FitRules.Enforce(DescriptionRulesFitJudge.Judge(kitchen, sofa), LibraryWords.Default);
+        Assert.Equal(ContentFit.Unclear, judged.Fit);
+
+        var ski = FitRules.Enforce(DescriptionRulesFitJudge.Judge(SkiTrip, SkiTrip), LibraryWords.Default);
+        Assert.Equal(ContentFit.Fits, ski.Fit);
+        Assert.NotNull(ski.Shared);
     }
 }

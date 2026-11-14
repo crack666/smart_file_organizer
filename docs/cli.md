@@ -1189,7 +1189,8 @@ source root or full) or a bundle (`--bundle <id>`), exactly one of them.
   described files show, `{ "sampled", "described", "values": { "<fact key>": [ { "value", "count" } ] }, "text" }`,
   or `null`. `content_check` is `{ "status", "model", "note" }` with `status` `checked`, `no_model`, `unavailable`,
   `no_description`, `no_candidates` or `failed`. A checked candidate has `content`:
-  `{ "fit": "fits"|"unclear", "reason", "folder": <description of the folder> }`, and the signal `content_fit` when
+  `{ "fit": "fits"|"unclear", "reason", "shared", "shared_kind", "folder": <description of the folder> }` (`shared`:
+  the concrete feature both have in common, `shared_kind` its kind; Issue 85), and the signal `content_fit` when
   it fits; an unchecked one has `content: null`. `rejected` lists the candidates whose content contradicts the unit:
   `{ "target_relative", "reason", "folder" }`. Without a check (`--no-model`, no model, no description) no existing
   folder is proposed without the same files at the target, and `notes` says so.
@@ -1197,7 +1198,14 @@ source root or full) or a bundle (`--bundle <id>`), exactly one of them.
   `unconfirmed` (`null` when empty) lists, like `candidates`, the existing folders loose files would go into that only
   time, name or kind of files support, without the same files there and without `fits`; they are never the proposal.
   `no_target` (`null` otherwise) is the reason why not even a new folder is proposed: no library holds this kind of
-  content. Then `candidates` is empty and `new_folder` is `null`; the text output shows both as lines.
+  content, no level keeps such folders side by side, nothing names a new folder, the unit was split, or it was left
+  out. Then `candidates` is empty and `new_folder` is `null`; the text output shows both as lines.
+- `excluded` (`null` otherwise): why the unit is left out of the match on purpose, system clutter or a folder of
+  unclear worth (Issue 85, [library-match.md](library-match.md#left-out-on-purpose-system-clutter-and-unclear-worth)).
+- `parts` (`null` otherwise): the unit holds different things and was matched part by part
+  ([library-match.md](library-match.md#units-that-are-no-unit-matched-part-by-part)). Each part:
+  `{ "files", "label", "examples", "status", "library_job_id", "destination", "destination_relative", "certainty",
+  "reason" }`, `status` a `FindingTargetStatus` code; the text output lists them under the unit.
 - `status: "no_library"` with a `message` and no proposals, exit code 0, when there is no library
   to match against: no permanent storage is known, so there is no target path at all, never a folder of the
   user profile or the system drive instead. `notes` says when there is no or an incomplete comparison, when the newest
@@ -1356,8 +1364,11 @@ which asks the model as `sfo library match` does and stores its answer per findi
   outside every root is dropped with a note, and without a library no finding has a target.
 - `target_status` (for `not_backed_up`, `in_noise`, `misplaced`; `null` for the others): what the target match found,
   `existing_folder`, `new_folder`, or why there is no target: `not_matched`, `no_fitting_folder`, `content_unclear`,
-  `no_model` ([glossary](glossary.md#target-match-of-a-finding-findingtargetstatus)). The text list ends a line with
-  `-> <target>` or `-> none (<code>)`.
+  `no_model`, `no_target`, `excluded`, `split` ([glossary](glossary.md#target-match-of-a-finding-findingtargetstatus)).
+  The text list ends a line with `-> <target>` or `-> none (<code>)`.
+- `target_parts` (for `split`; `null` otherwise): `[ { "index", "files", "label", "status", "library_job_id", "path",
+  "relative_path", "certainty", "content_check", "reason" } ]`, one per part of the finding by content (Issue 85).
+  `sfo plan create` moves each file with its part.
 - `inputs.library_job_ids` lists every library the findings rest on; `library_job_id` and `library_compared_at` are
   those of the first one.
 - `sensitive` findings name path, marker and rule ids, never content.
@@ -1476,8 +1487,11 @@ libraries is not matched again (`reused`), unless this run may ask the model and
 - `status` is `known`, or `no_library` with a `message` and no items: without a library there is no target.
 - `items[].status` is a `FindingTargetStatus` code ([glossary](glossary.md#target-match-of-a-finding-findingtargetstatus));
   `content_status` the `ContentCheckStatus` of the match ([library-match.md](library-match.md#content-check)).
-- `model_calls` counts the calls of this run per kind (`classification` for describing a library folder's sample,
-  `content_fit`, `folder_name`); empty when every answer was stored already.
+- `model_calls` counts the calls of this run per kind (`classification` for describing a library folder's sample and,
+  since Issue 85, a sample of up to 6 files of a finding nobody described yet, whose facts are kept; `content_fit`,
+  `folder_name`); empty when every answer was stored already.
+- `items[].parts` (for `split`; `null` otherwise): the parts of the finding by content with their own answer, as
+  `target_parts` of `sfo findings`. `excluded` items name why they were left out (system clutter, worth unclear).
 - Since Issue 85 an existing folder is stored only when content confirms it (the same files there, or `fits`); else a
   new folder in the library that holds this kind of content, else `no_target` with the reason
   ([library-match.md](library-match.md#for-every-finding-sfo-findings-targets)). With `--no-model` that means: no

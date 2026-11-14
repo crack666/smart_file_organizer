@@ -12,8 +12,52 @@ namespace SmartFileOrganizer.Application.Library;
 /// <param name="Key">Library job and relative path, to find the candidate again.</param>
 public sealed record FitCandidate(string Id, string Key, MatchPlacement Placement, string RelativePath, string? Period, ContentDescription Description);
 
-/// <summary>The judgement for one candidate, with one sentence why.</summary>
-public sealed record FitVerdict(ContentFit Fit, string Reason);
+/// <summary>
+/// The judgement for one candidate, with one sentence why, and the concrete feature both share
+/// (https://github.com/crack666/smart_file_organizer/issues/85): <c>fits</c> only stands with one of them, see
+/// <see cref="FitRules.Enforce"/>.
+/// </summary>
+/// <param name="Shared">The concrete feature both sides share, in a few words ("skiing in the Alps"); null when none.</param>
+/// <param name="SharedKind">What kind of feature it is; null when the judge named none.</param>
+public sealed record FitVerdict(ContentFit Fit, string Reason, string? Shared = null, SharedFeatureKind? SharedKind = null);
+
+/// <summary>
+/// The rule after every content check (https://github.com/crack666/smart_file_organizer/issues/85): the second real run
+/// showed a model that called loose videos fitting to the course folder of a study because both were "indoors, everyday
+/// life". <c>fits</c> stands only when a concrete feature is named (the same occasion, person or group, place, topic or
+/// issuer) and that feature is more than general words (<c>general_features</c> of the word file: indoors, outdoors,
+/// everyday life, people, a season). Otherwise the answer becomes <c>unclear</c>, with the reason.
+/// </summary>
+public static class FitRules
+{
+    public static FitVerdict Enforce(FitVerdict verdict, LibraryWords words)
+    {
+        if (verdict.Fit != ContentFit.Fits) return verdict;
+        if (verdict.SharedKind is null or SharedFeatureKind.None || string.IsNullOrWhiteSpace(verdict.Shared))
+            return verdict with
+            {
+                Fit = ContentFit.Unclear,
+                Reason = $"no concrete feature in common was named, so it does not count as fitting ({verdict.Reason.TrimEnd('.')})"
+            };
+        if (IsGeneral(verdict.Shared, words))
+            return verdict with
+            {
+                Fit = ContentFit.Unclear,
+                Reason = $"only general features in common ({verdict.Shared}), which say nothing about the occasion ({verdict.Reason.TrimEnd('.')})"
+            };
+        return verdict;
+    }
+
+    /// <summary>True when every word of <paramref name="text"/> is a general feature, a stop word or too short to say anything.</summary>
+    public static bool IsGeneral(string text, LibraryWords words)
+    {
+        var tokens = text.Split([' ', ',', ';', '/', '-', '(', ')', '.', ':', '+', '&'], StringSplitOptions.RemoveEmptyEntries)
+            .Select(LibraryWords.Normalize)
+            .Where(t => t.Length >= 3 && !words.StopWords.Contains(t))
+            .ToList();
+        return tokens.Count == 0 || tokens.All(t => words.GeneralFeatures.Contains(t));
+    }
+}
 
 /// <summary>The answer of a content check: per candidate id a verdict; <see cref="Status"/> says whether it ran.</summary>
 public sealed record FitAnswer(ContentCheckStatus Status, IReadOnlyDictionary<string, FitVerdict> Verdicts, string? Model, string? Error)
@@ -87,10 +131,17 @@ public sealed class ModelContentFitJudge : IContentFitJudge
                 var id = item.TryGetProperty("id", out var i) && i.ValueKind == JsonValueKind.String ? i.GetString()!.Trim() : null;
                 var code = item.TryGetProperty("fit", out var f) && f.ValueKind == JsonValueKind.String ? f.GetString()!.Trim().ToLowerInvariant() : null;
                 var reason = item.TryGetProperty("reason", out var r) && r.ValueKind == JsonValueKind.String ? r.GetString()!.Trim() : null;
+                var shared = item.TryGetProperty("shared", out var s) && s.ValueKind == JsonValueKind.String ? s.GetString()!.Trim() : null;
+                var sharedCode = item.TryGetProperty("shared_kind", out var k) && k.ValueKind == JsonValueKind.String
+                    ? k.GetString()!.Trim().ToLowerInvariant()
+                    : null;
                 if (id is null || !ids.Contains(id) || !VerdictCodes.TryParse<ContentFit>(code, out var fit)) continue;
                 if (string.IsNullOrWhiteSpace(reason)) reason = "no reason given";
                 if (reason.Length > 300) reason = reason[..300].TrimEnd();
-                verdicts.TryAdd(id, new FitVerdict(fit, reason));
+                if (string.IsNullOrWhiteSpace(shared)) shared = null;
+                else if (shared.Length > 120) shared = shared[..120].TrimEnd();
+                SharedFeatureKind? kind = VerdictCodes.TryParse<SharedFeatureKind>(sharedCode, out var parsed) ? parsed : null;
+                verdicts.TryAdd(id, new FitVerdict(fit, reason, shared, kind));
             }
             return (verdicts, null);
         }
@@ -136,7 +187,7 @@ public sealed class DescriptionRulesFitJudge : IContentFitJudge
             var fi = folder.Top(FileFactKey.Issuer);
             if (ui is not null && fi is not null)
                 return Same(ui, fi) || ui.Contains(fi, StringComparison.OrdinalIgnoreCase) || fi.Contains(ui, StringComparison.OrdinalIgnoreCase)
-                    ? new FitVerdict(ContentFit.Fits, $"{u}; the folder holds the same: {f}.")
+                    ? new FitVerdict(ContentFit.Fits, $"{u}; the folder holds the same: {f}.", ui, SharedFeatureKind.Issuer)
                     : new FitVerdict(ContentFit.Contradicts, $"The files come from {ui}; the folder holds papers of {fi}.");
             return new FitVerdict(ContentFit.Unclear, $"Both are {uk ?? fk ?? "documents"}, the issuer is not known on both sides.");
         }
@@ -145,11 +196,17 @@ public sealed class DescriptionRulesFitJudge : IContentFitJudge
         var fo = folder.Top(FileFactKey.Occasion);
         if (uo is not null && fo is not null && !Same(uo, fo))
             return new FitVerdict(ContentFit.Contradicts, $"The files show {u} ({uo}); the folder shows {f} ({fo}).");
-        var shared = Words(unit).Intersect(Words(folder), StringComparer.OrdinalIgnoreCase).ToList();
+        // Words a person would name as what both show; general ones (indoors, room, people) do not count (Issue 85).
+        var words = LibraryWords.Default;
+        var shared = Words(unit).Intersect(Words(folder), StringComparer.OrdinalIgnoreCase)
+            .Where(w => !words.GeneralFeatures.Contains(LibraryWords.Normalize(w))).ToList();
         var us = unit.Top(FileFactKey.Season);
         var fs = folder.Top(FileFactKey.Season);
-        if (shared.Count > 0 || uo is not null && us is not null && fs is not null && Same(us, fs))
-            return new FitVerdict(ContentFit.Fits, $"{u}; the folder shows the same: {f}.");
+        if (shared.Count > 0)
+            return new FitVerdict(ContentFit.Fits, $"{u}; the folder shows the same: {f}.", string.Join(", ", shared), SharedFeatureKind.Topic);
+        // The same occasion in the same season: the occasion is the shared feature, unless it is a general one (everyday life).
+        if (uo is not null && us is not null && fs is not null && Same(us, fs))
+            return new FitVerdict(ContentFit.Fits, $"{u}; the folder shows the same: {f}.", uo, SharedFeatureKind.Occasion);
         if (us is not null && fs is not null && !Same(us, fs))
             return new FitVerdict(ContentFit.Contradicts, $"The files show {us} ({u}); the folder shows {fs} ({f}).");
         return new FitVerdict(ContentFit.Unclear, $"The files show {u}; the folder shows {f}; nothing in common to tell.");

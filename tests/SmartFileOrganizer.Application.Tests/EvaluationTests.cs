@@ -134,8 +134,13 @@ public class EvaluationTests : IDisposable
         // Issue 85: closed units of the library with loose files of their time, and a library that is gone.
         foreach (var unit in new[] { "Filme/Sommer am See (2009)", "Serien/Beispielserie/Staffel 1", "Spiele/Beispielspiel/cache", "Programme/Bildbetrachter" })
             Assert.True(Directory.Exists(Path.Combine(library, unit)), unit);
-        Assert.Equal(4, targets.Targets.Count(t => t.Destination is null && t.Note!.StartsWith("Trap (Issue 85)", StringComparison.Ordinal) && t.Outcome is null));
+        // Version 7 adds the folder of a person sharing only general features: five traps without an outcome.
+        Assert.Equal(5, targets.Targets.Count(t => t.Destination is null && t.Note!.StartsWith("Trap (Issue 85)", StringComparison.Ordinal) && t.Outcome is null));
         Assert.Contains(targets.Targets, t => t.Outcome == EvalTargetTruth.LibraryUnreachable);
+        // Version 7: a unit of two things, a random name without descriptions, system clutter.
+        foreach (var outcome in new[] { EvalTargetTruth.Split, EvalTargetTruth.NoTargetOutcome, EvalTargetTruth.Excluded })
+            Assert.Contains(targets.Targets, t => t.Outcome == outcome);
+        Assert.True(Directory.Exists(Path.Combine(library, "Bilder", "Lena")));
     }
 
     [Fact]

@@ -1,11 +1,15 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
+using Dapper;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using SmartFileOrganizer.Application.Library;
 using SmartFileOrganizer.Cli.Contract;
+using SmartFileOrganizer.Domain.Enums;
 using SmartFileOrganizer.Domain.Interfaces;
 using SmartFileOrganizer.Domain.Models;
 using SmartFileOrganizer.Hosting.Tests;
+using SmartFileOrganizer.Infrastructure.Persistence;
 
 namespace SmartFileOrganizer.Cli.Tests;
 
@@ -123,6 +127,22 @@ public class LibraryMatchCommandTests : IDisposable
         return (library, source);
     }
 
+    /// <summary>Stores a description for the files of one source folder, as the analysis would.</summary>
+    private async Task DescribeAsync(long job, string folder, params (FileFactKey Key, string Value)[] facts)
+    {
+        var db = new DatabaseContext(_dbPath, NullLogger<DatabaseContext>.Instance);
+        var repo = new FileFactRepository(db);
+        var dir = Path.Combine(_source, folder.Replace('/', Path.DirectorySeparatorChar));
+        await using var conn = db.CreateConnection();
+        await conn.OpenAsync();
+        foreach (var (id, path) in await conn.QueryAsync<(long, string)>("SELECT id, full_path FROM file_nodes WHERE job_id = @job", new { job }))
+            if (string.Equals(Path.GetDirectoryName(path), dir, StringComparison.OrdinalIgnoreCase))
+                await repo.ReplaceAsync(id, facts.Select(f => new FileFact(f.Key, f.Value, FactSource.Model)).ToList());
+    }
+
+    private static readonly (FileFactKey, string)[] SummerDay =
+        [(FileFactKey.Scene, "lake beach"), (FileFactKey.Activity, "swimming"), (FileFactKey.Setting, "outdoor"), (FileFactKey.Season, "summer")];
+
     private sealed class FixedProbe(long? free) : IFreeSpaceProbe
     {
         public long? AvailableBytes(string path) => free;
@@ -197,7 +217,8 @@ public class LibraryMatchCommandTests : IDisposable
 
     /// <summary>
     /// Loose photos from the days of an occasion find the occasion folder first, but without a look at the content it is
-    /// no proposal: it is listed as unconfirmed and a new folder is proposed (Issue 85). Until Issue 56 this test asked for
+    /// no proposal: it is listed as unconfirmed; and as nothing names a new folder, there is no target (Issue 85). Until
+    /// 14.11.2026 a new folder <c>{occasion} 2015</c> was proposed here; until Issue 56 this test asked for
     /// <c>likely</c> from the period and file type alone, then for <c>uncertain</c>; the acceptance test for content is
     /// ContentMatchCommandTests (a birthday of the same days does not get the trip's folder).
     /// </summary>
@@ -219,9 +240,9 @@ public class LibraryMatchCommandTests : IDisposable
         Assert.Contains("2015-02-08", Str(first, "reason"));
         Assert.Contains("the content was not checked", Str(first, "reason"));
         Assert.Contains(first.GetProperty("signals").EnumerateArray(), s => Str(s, "signal") == "period" && s.GetProperty("agrees").GetBoolean());
-        var proposal = byPath.GetProperty("new_folder");
-        Assert.Equal("Fotos", Str(proposal, "parent_relative"));
-        Assert.Contains("Fotos/Skifahrt 2015 fits by time, name or kind of files only", Str(proposal, "reason"));
+        // Not described, in a folder whose name says nothing: no new folder either, rather no target (Issue 85).
+        Assert.Equal(JsonValueKind.Null, byPath.GetProperty("new_folder").ValueKind);
+        Assert.Contains("nothing names a new folder", Str(byPath, "no_target"));
 
         // The same photos as an event bundle.
         var events = (await OkAsync("bundles", "list", source.ToString(), "--all", "--kind", "event", "--limit", "100"))
@@ -313,6 +334,13 @@ public class LibraryMatchCommandTests : IDisposable
     {
         var (_, source) = await PrepareAsync();
 
+        // Not described, and the camera folder says nothing: nothing names a new folder, so there is none (Issue 85).
+        var unnamed = await OkAsync("library", "match", source.ToString(), "DCIM/100CANON", "--no-model");
+        Assert.Empty(Candidates(unnamed));
+        Assert.Equal(JsonValueKind.Null, unnamed.GetProperty("new_folder").ValueKind);
+        Assert.Contains("nothing names a new folder", Str(unnamed, "no_target"));
+
+        await DescribeAsync(source, "DCIM/100CANON", SummerDay);
         var rules = await OkAsync("library", "match", source.ToString(), "DCIM/100CANON", "--no-model");
 
         Assert.Empty(Candidates(rules));
@@ -332,11 +360,21 @@ public class LibraryMatchCommandTests : IDisposable
         Assert.Equal("Fotos/Sommer 2021", Str(withModel, "destination_relative"));
         Assert.Equal("ok", Str(named.GetProperty("advice"), "status"));
 
-        // The model saw names, counts and the pattern, never a file name.
+        // The model saw names, counts, the pattern and what the files show, never a file name.
         var facts = Assert.Single(advisor.Requests).Facts;
         Assert.Contains("{occasion} {year}", facts);
         Assert.Contains("Skifahrt 2015", facts);
+        Assert.Contains("swimming", facts);
         Assert.DoesNotContain("IMG_", facts);
+
+        // A random string or a storage word is no name from the content: refused, the rule's name stays.
+        foreach (var made in new[] { "a7f3c9e2", "Neuer Ordner" })
+        {
+            var odd = await OkAsync(WithModel(new ScriptedAdvisor($$"""{ "name": "{{made}}", "reason": "x" }""")),
+                "library", "match", source.ToString(), "DCIM/100CANON", "--refresh");
+            Assert.Equal("{occasion} 2021", Str(odd.GetProperty("new_folder"), "name"));
+            Assert.Equal("failed", Str(odd.GetProperty("advice"), "status"));
+        }
 
         // A name that breaks the pattern is refused; the rule's name stays.
         var bad = new ScriptedAdvisor("""{ "name": "Fotos/Sommer", "reason": "x" }""");
@@ -421,6 +459,7 @@ public class LibraryMatchCommandTests : IDisposable
         var again = await OkAsync("library", "show", library.ToString(), "--no-model", "--search", "fotos");
         Assert.False(again.GetProperty("patterns").GetProperty("created").GetBoolean());
         Assert.Equal("{year} {occasion}", Str(again.GetProperty("items")[0], "pattern"));
+        await DescribeAsync(source, "DCIM/100CANON", SummerDay);
         var newFolder = (await OkAsync("library", "match", source.ToString(), "DCIM/100CANON", "--no-model", "--against", library.ToString()))
             .GetProperty("new_folder");
         Assert.Equal("2021 {occasion}", Str(newFolder, "name"));

@@ -348,8 +348,32 @@ public sealed partial class LibraryMap
             return ClosedUnitKind.Program;
         if (words.TechnicalNames.Contains(LibraryWords.Normalize(e.Name))) return ClosedUnitKind.Technical;
         if (e.Role == FolderRole.MediaTitle && IsSingleTitle(e, words)) return ClosedUnitKind.SingleTitle;
+        if (IsOwnProgramFolder(e)) return ClosedUnitKind.Program;
         return null;
     }
+
+    /// <summary>
+    /// A game or program folder (Issue 85): a program lies directly in it (<c>.exe</c>, <c>.app</c>, ...) and nothing
+    /// below it looks like own recordings (camera names such as <c>IMG_</c>, <c>DSC</c>, <c>VID_</c>, a date as name). Its
+    /// pictures are textures, screenshots of the game or samples; own photos never go there.
+    /// </summary>
+    public static bool IsOwnProgramFolder(LibraryMapEntry e)
+    {
+        if (!e.Node.Files.Any(f => ProgramExtensions.Contains(Path.GetExtension(f.Name)))) return false;
+        var stack = new Stack<LibraryNode>([e.Node]);
+        while (stack.Count > 0)
+        {
+            var n = stack.Pop();
+            if (n.Files.Any(f => OwnRecordingRegex().IsMatch(Path.GetFileNameWithoutExtension(f.Name)))) return false;
+            foreach (var c in n.Children) stack.Push(c);
+        }
+        return true;
+    }
+
+    private static readonly HashSet<string> ProgramExtensions = new(StringComparer.OrdinalIgnoreCase) { ".exe", ".app", ".bat", ".x86_64", ".appimage" };
+
+    [GeneratedRegex(@"^(?:IMG|DSC|DSCF|DSCN|VID|MVI|MOV|PXL|GOPR|DJI|P\d{3})[_-]?\d|^(?:19|20)\d{2}[-_.]?(?:0[1-9]|1[0-2])[-_.]?(?:0[1-9]|[12]\d|3[01])", RegexOptions.IgnoreCase)]
+    private static partial Regex OwnRecordingRegex();
 
     /// <summary>Extensions of the files that come with a film: subtitles, info files, pictures for the media player.</summary>
     private static readonly HashSet<string> CompanionExtensions = new(StringComparer.OrdinalIgnoreCase)

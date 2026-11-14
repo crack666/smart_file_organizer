@@ -42,7 +42,8 @@ public sealed record FindingTargetItem(
     ResultCertainty? Certainty,
     TargetContentCheck ContentCheck,
     ContentCheckStatus ContentStatus,
-    string Reason);
+    string Reason,
+    IReadOnlyList<FindingTargetPart>? Parts = null);
 
 /// <summary>Progress of a run, one report per finding.</summary>
 public sealed record FindingTargetProgress(int Done, int Total, string Key, FindingTargetStatus Status, bool Reused);
@@ -79,6 +80,12 @@ public sealed class FindingTargetService
     private readonly IContentComparisonRepository _comparisons;
     private readonly ILogger<FindingTargetService> _logger;
     private readonly TimeProvider _time;
+    private readonly IFileFactRepository? _facts;
+    private readonly IClassificationInputPreparer? _preparer;
+    private readonly IOllamaService? _ollama;
+
+    /// <summary>How many files of a finding nobody described are described by the match itself (Issue 85).</summary>
+    public const int DescribeSampleSize = 6;
 
     public FindingTargetService(
         FindingService findings,
@@ -86,6 +93,9 @@ public sealed class FindingTargetService
         IFindingTargetRepository store,
         IContentComparisonRepository comparisons,
         ILogger<FindingTargetService> logger,
+        IFileFactRepository? facts = null,
+        IClassificationInputPreparer? preparer = null,
+        IOllamaService? ollama = null,
         TimeProvider? time = null)
     {
         _findings = findings;
@@ -93,6 +103,9 @@ public sealed class FindingTargetService
         _store = store;
         _comparisons = comparisons;
         _logger = logger;
+        _facts = facts;
+        _preparer = preparer;
+        _ollama = ollama;
         _time = time ?? TimeProvider.System;
     }
 
@@ -149,6 +162,11 @@ public sealed class FindingTargetService
             {
                 var nodes = finding.FileIds.Where(files.ContainsKey).Select(id => files[id]).ToList();
                 if (nodes.Count == 0) continue;
+                // Nobody described the files yet: describe a small sample now and keep the facts, so the content can
+                // choose (Issue 85). The hash then rests on the new facts, and the next run asks nothing again.
+                var inputHash = finding.TargetInput!;
+                if (query.UseModel && await DescribeSampleAsync(nodes, ct))
+                    inputHash = await _findings.TargetInputAsync(query.JobId, finding.FileIds, libraries, ct);
                 var answer = await _targets.MatchAsync(new LibraryMatchQuery
                 {
                     SourceJobId = query.JobId,
@@ -161,6 +179,7 @@ public sealed class FindingTargetService
                     Model = query.Model
                 }, ct);
                 record = ToRecord(finding, answer, nodes, rows, query.UseModel, _time.GetUtcNow().UtcDateTime);
+                record.InputHash = inputHash;
                 await _store.UpsertAsync(record, ct);
                 fromStore = false;
                 matched++;
@@ -168,7 +187,7 @@ public sealed class FindingTargetService
             }
 
             items.Add(new FindingTargetItem(finding.Key, finding.Kind, finding.Title, record.Status, fromStore, record.LibraryJobId,
-                record.Path, record.RelativePath, record.Certainty, record.ContentCheck, record.ContentStatus, record.Reason));
+                record.Path, record.RelativePath, record.Certainty, record.ContentCheck, record.ContentStatus, record.Reason, record.Parts));
             progress?.Report(new FindingTargetProgress(i + 1, todo.Count, finding.Key, record.Status, fromStore));
         }
 
@@ -176,6 +195,44 @@ public sealed class FindingTargetService
             .OrderBy(g => g.Key, StringComparer.Ordinal)
             .ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
         return new FindingTargetRun(report.Job, StorageStatus.Known, null, libraries, todo.Count, matched, reused, byStatus, items);
+    }
+
+    /// <summary>
+    /// When no file of the finding is described: describes up to <see cref="DescribeSampleSize"/> of its pictures and
+    /// documents, spread over their time, never a marked file, and stores the description facts next to the facts the
+    /// file has. True when a file got facts. Without a model, or when a file is described already, nothing is asked.
+    /// </summary>
+    private async Task<bool> DescribeSampleAsync(IReadOnlyList<FileNode> nodes, CancellationToken ct)
+    {
+        if (_facts is null || _preparer is null || _ollama is null) return false;
+        var known = new Dictionary<long, IReadOnlyList<FileFact>>();
+        foreach (var n in nodes)
+        {
+            var facts = await _facts.GetByFileNodeIdAsync(n.Id, ct);
+            if (facts.Any(f => f.Key.IsDescription() && !string.IsNullOrWhiteSpace(f.Value))) return false;
+            known[n.Id] = facts;
+        }
+        var candidates = nodes
+            .Where(n => n.SensitiveMarkers == SensitiveMarker.None && n.FileType is FileType.Image or FileType.Document)
+            .ToList();
+        var stored = false;
+        foreach (var file in SampleFolderDescriptionSource.Spread(candidates, DescribeSampleSize))
+        {
+            ct.ThrowIfCancellationRequested();
+            var input = await _preparer.PrepareAsync(file, ct);
+            var answer = await _ollama.ClassifyAsync(input, ct);
+            if (answer.Error is not null)
+            {
+                _logger.LogInformation("Target match: {Path} not described ({Error})", file.RelativePath, answer.Error);
+                continue;
+            }
+            var described = answer.DescribedFacts.Where(f => f.Key.IsDescription() && !string.IsNullOrWhiteSpace(f.Value)).ToList();
+            if (described.Count == 0) continue;
+            var keep = known.GetValueOrDefault(file.Id) ?? [];
+            await _facts.ReplaceAsync(file.Id, [.. keep.Where(f => !f.Key.IsDescription()), .. described], ct);
+            stored = true;
+        }
+        return stored;
     }
 
     /// <summary>
@@ -191,18 +248,56 @@ public sealed class FindingTargetService
         Finding finding, LibraryMatchAnswer answer, IReadOnlyList<FileNode> nodes, IReadOnlyDictionary<long, FileComparison> rows,
         bool useModel, DateTime now)
     {
+        var record = Place(answer, nodes, rows, useModel);
+        record.JobId = answer.Source.Id;
+        record.FindingKey = finding.Key;
+        record.InputHash = finding.TargetInput!;
+        record.WithModel = useModel;
+        record.MatchedAt = now;
+        if (answer.Parts is { Count: > 0 } parts)
+        {
+            // The files do not belong together: the mixture gets no target, each part its own (Issue 85).
+            record.Status = FindingTargetStatus.Split;
+            record.ContentCheck = TargetContentCheck.NotChecked;
+            record.ContentStatus = parts.Select(p => p.Answer?.Result?.Content?.Status).FirstOrDefault(s => s is not null) ?? ContentCheckStatus.NoCandidates;
+            record.Model = parts.Select(p => p.Answer?.Advice.Model).FirstOrDefault(m => m is not null);
+            record.Reason = answer.Result?.NoTarget ?? "The files do not belong together by content; each part is matched on its own.";
+            for (var i = 0; i < parts.Count; i++)
+            {
+                var p = parts[i];
+                var placed = p.Answer is { } a ? Place(a, p.Files, rows, useModel) : null;
+                record.Parts.Add(new FindingTargetPart
+                {
+                    Index = i,
+                    FileIds = p.Files.Select(f => f.Id).ToList(),
+                    Label = p.Label,
+                    Status = placed?.Status ?? FindingTargetStatus.NoTarget,
+                    LibraryJobId = placed?.LibraryJobId,
+                    Path = placed?.Path,
+                    RelativePath = placed?.RelativePath,
+                    Certainty = placed?.Certainty,
+                    ContentCheck = placed?.ContentCheck ?? TargetContentCheck.NotChecked,
+                    Reason = placed?.Reason ?? p.NotMatched ?? "Not matched."
+                });
+            }
+        }
+        return record;
+    }
+
+    /// <summary>Where the answer of one match puts the files: the best existing folder, else a complete new folder, else why none.</summary>
+    private static FindingTargetRecord Place(
+        LibraryMatchAnswer answer, IReadOnlyList<FileNode> nodes, IReadOnlyDictionary<long, FileComparison> rows, bool useModel)
+    {
         var content = answer.Result?.Content;
         var contentStatus = content?.Status ?? ContentCheckStatus.NoModel;
-        var record = new FindingTargetRecord
+        var record = new FindingTargetRecord { ContentStatus = contentStatus, Model = answer.Advice.Model };
+        if (answer.Excluded is { } excluded)
         {
-            JobId = answer.Source.Id,
-            FindingKey = finding.Key,
-            InputHash = finding.TargetInput!,
-            ContentStatus = contentStatus,
-            WithModel = useModel,
-            Model = answer.Advice.Model,
-            MatchedAt = now
-        };
+            record.Status = FindingTargetStatus.Excluded;
+            record.ContentCheck = TargetContentCheck.NotChecked;
+            record.Reason = "Not matched on purpose: " + excluded;
+            return record;
+        }
 
         if (answer.Result is { Candidates.Count: > 0 } result && answer.CandidateLibraries is { Count: > 0 } candidateLibraries)
         {

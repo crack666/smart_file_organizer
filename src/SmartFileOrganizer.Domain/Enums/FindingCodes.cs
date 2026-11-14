@@ -113,7 +113,19 @@ public enum FindingTargetStatus
     /// No target on purpose (https://github.com/crack666/smart_file_organizer/issues/85): no existing folder is confirmed by
     /// content, and no library holds this kind of content, so a new folder would be a guess as well.
     /// </summary>
-    [JsonStringEnumMemberName("no_target")] NoTarget
+    [JsonStringEnumMemberName("no_target")] NoTarget,
+
+    /// <summary>
+    /// The files do not belong together by content (https://github.com/crack666/smart_file_organizer/issues/85): the
+    /// mixture as a whole gets no target; each part has its own (<c>finding_target_parts</c>).
+    /// </summary>
+    [JsonStringEnumMemberName("split")] Split,
+
+    /// <summary>
+    /// Not matched on purpose (https://github.com/crack666/smart_file_organizer/issues/85): the files are system clutter
+    /// (a folder judged <c>system</c>) or their worth is unclear (a folder judged as a whole with retention <c>review</c>).
+    /// </summary>
+    [JsonStringEnumMemberName("excluded")] Excluded
 }
 
 /// <summary>Whether a kind of finding could be computed from the stored steps of a job.</summary>
