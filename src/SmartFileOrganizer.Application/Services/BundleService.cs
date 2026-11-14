@@ -37,8 +37,12 @@ public sealed record BundleOverview(
     IReadOnlyDictionary<string, long> TopLevelByKind,
     BundleComparisonInfo? Comparison);
 
-/// <summary>The comparison with a library whose states the bundle counts show.</summary>
-public sealed record BundleComparisonInfo(long ComparisonId, long AgainstJobId, DateTime ComparedAt);
+/// <summary>
+/// The comparison with the libraries whose states the bundle counts show: the newest <c>sfo compare</c> run, all of its
+/// libraries (https://github.com/crack666/smart_file_organizer/issues/83). <see cref="ComparisonId"/> and
+/// <see cref="AgainstJobId"/> name the first of them; <see cref="ComparedAt"/> is the oldest of the run.
+/// </summary>
+public sealed record BundleComparisonInfo(long ComparisonId, long AgainstJobId, DateTime ComparedAt, IReadOnlyList<long>? LibraryJobIds = null);
 
 public sealed record BundleListQuery
 {
@@ -68,6 +72,7 @@ public sealed class BundleService
     private readonly ICaptureInfoSource _captures;
     private readonly BundleOptions _options;
     private readonly ILogger<BundleService> _logger;
+    private readonly IContentComparisonRepository _comparisons;
 
     public BundleService(
         IScanJobRepository jobs,
@@ -75,8 +80,10 @@ public sealed class BundleService
         IBundleRepository bundles,
         ICaptureInfoSource captures,
         BundleOptions options,
-        ILogger<BundleService> logger)
+        ILogger<BundleService> logger,
+        IContentComparisonRepository comparisons)
     {
+        _comparisons = comparisons;
         _jobs = jobs;
         _read = read;
         _bundles = bundles;
@@ -151,7 +158,7 @@ public sealed class BundleService
             .OrderByDescending(g => g.Count()).ThenBy(g => g.Key, StringComparer.Ordinal)
             .ToDictionary(g => g.Key, g => (long)g.Count());
 
-        var comparison = await _bundles.GetComparisonCountsAsync(jobId, ct);
+        var (set, _) = await LibraryComparisonSet.LoadAsync(_comparisons, jobId, null, ct);
         using var settings = JsonDocument.Parse(build.SettingsJson);
         return new BundleOverview(
             jobId,
@@ -159,7 +166,7 @@ public sealed class BundleService
             settings.RootElement.Clone(),
             JsonSerializer.Deserialize<BundleSplitStats>(build.StatsJson, StatsJson) ?? new BundleSplitStats(),
             byKind,
-            comparison is null ? null : new BundleComparisonInfo(comparison.ComparisonId, comparison.AgainstJobId, comparison.ComparedAt));
+            set is null ? null : new BundleComparisonInfo(set.First.Id, set.First.AgainstJobId!.Value, set.ComparedAt, set.LibraryJobIds));
     }
 
     /// <summary>
@@ -222,9 +229,9 @@ public sealed class BundleService
 
         // Marked files: the same check the output guard makes (rule markers and model markers).
         var sensitive = new Dictionary<long, long>();
+        IReadOnlyDictionary<long, long> membership = all.Count > 0 ? await _bundles.GetMembershipAsync(jobId, ct) : new Dictionary<long, long>();
         if (all.Count > 0)
         {
-            var membership = await _bundles.GetMembershipAsync(jobId, ct);
             await foreach (var row in _read.StreamFilesAsync(new FileListFilter { JobId = jobId }, ct))
             {
                 if (!SensitiveOutputGuard.GetMatch(row.File).IsMatch) continue;
@@ -234,14 +241,18 @@ public sealed class BundleService
             }
         }
 
+        // Comparison states over every library of the newest compare run: a file is backed up as soon as one of them
+        // holds it (until Issue 83 only the newest single comparison counted, so files in another root showed as new).
         Dictionary<long, Dictionary<string, long>>? comparison = null;
-        if (all.Count > 0 && await _bundles.GetComparisonCountsAsync(jobId, ct) is { } counts)
+        if (all.Count > 0 && (await LibraryComparisonSet.LoadAsync(_comparisons, jobId, null, ct)).Set is { } set)
         {
             comparison = all.ToDictionary(b => b.Id, _ => new Dictionary<string, long>(StringComparer.Ordinal));
-            foreach (var (bundleId, state, files) in counts.Counts)
+            foreach (var row in set.Files)
             {
+                if (row.State is not { } state || !membership.TryGetValue(row.FileNodeId, out var bundleId)) continue;
+                var code = state.ToValue();
                 foreach (var id in SelfAndAncestors(byId, bundleId))
-                    comparison[id][state] = comparison[id].GetValueOrDefault(state) + files;
+                    comparison[id][code] = comparison[id].GetValueOrDefault(code) + 1;
             }
         }
 

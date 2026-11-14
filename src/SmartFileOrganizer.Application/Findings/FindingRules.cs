@@ -43,6 +43,15 @@ public static class FindingRules
         FindingKind.NotBackedUp, FindingKind.InNoise, FindingKind.Sensitive, FindingKind.Misplaced, FindingKind.Duplicate
     ];
 
+    /// <summary>
+    /// The kinds whose files should move and so need a place: the target match (<c>sfo findings targets</c>,
+    /// https://github.com/crack666/smart_file_organizer/issues/83) runs for these only. A sensitive finding never gets a target.
+    /// </summary>
+    public static IReadOnlyList<FindingKind> TargetKinds { get; } =
+    [
+        FindingKind.NotBackedUp, FindingKind.InNoise, FindingKind.Misplaced
+    ];
+
     private static readonly FileCategory[] KeptCategories =
     [
         FileCategory.Photo, FileCategory.Video, FileCategory.DocumentScan, FileCategory.Document,

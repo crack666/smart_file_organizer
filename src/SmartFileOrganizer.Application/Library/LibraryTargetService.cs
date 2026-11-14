@@ -73,6 +73,13 @@ public sealed record LibraryMatchQuery
     public string? Path { get; init; }
     public long? BundleId { get; init; }
 
+    /// <summary>
+    /// Exactly these files of the source as the unit (a finding, https://github.com/crack666/smart_file_organizer/issues/83)
+    /// instead of everything below <see cref="Path"/>. <see cref="Path"/>, when it names a folder, still gives the unit its
+    /// name and whether it is kept whole; otherwise the files are placed as loose files.
+    /// </summary>
+    public IReadOnlyList<FileNode>? Files { get; init; }
+
     /// <summary>The library job; null for the library of the latest comparison, else the newest library job.</summary>
     public long? Against { get; init; }
 
@@ -448,6 +455,20 @@ public sealed partial class LibraryTargetService
     private async Task<(IReadOnlyList<FileNode> Files, UnitBase Base)> LoadUnitAsync(ScanJob source, LibraryMatchQuery query, CancellationToken ct)
     {
         var files = new List<FileNode>();
+        if (query.Files is { } given)
+        {
+            if (given.Count == 0)
+                throw new LibraryServiceException(LibraryFailure.PathNotFound, $"No files of job {source.Id} were given.");
+            if (query.Path is { Length: > 0 } folder)
+            {
+                var folderPath = JobReadService.ResolvePath(source, folder);
+                var folderRow = (await _reads.GetDirectoriesAsync(source.Id, ct))
+                    .FirstOrDefault(d => string.Equals(d.FullPath, folderPath, PathComparison));
+                if (folderRow is not null)
+                    return (given, new UnitBase(MatchUnitKind.Folder, folderRow.FullPath, null, folderRow));
+            }
+            return (given, new UnitBase(MatchUnitKind.File, given[0].FullPath, null, null));
+        }
         if (query.BundleId is { } bundleId)
         {
             var all = await _bundles.GetAllAsync(source.Id, ct);
@@ -601,7 +622,7 @@ public sealed partial class LibraryTargetService
             default:
                 name = Path.GetFileName(b.FullPath!);
                 keepWhole = false;
-                keepReason = "A single file goes into a folder.";
+                keepReason = files.Count > 1 ? "Loose files go into a folder." : "A single file goes into a folder.";
                 break;
         }
 

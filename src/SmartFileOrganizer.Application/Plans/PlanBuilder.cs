@@ -200,7 +200,7 @@ public static class PlanBuilder
                 Reason = $"The folder is one whole ({d.Verdict}): it moves as it is, its name stays. {f.Action.Reason}",
                 UpdatedAt = now
             };
-            var (target, library, why) = TargetOf(inputs, f, ids, d.Name);
+            var (target, library, why) = TargetOf(inputs, f, ids, d.Name, folder: true);
             SetTarget(a, target, library, why);
             yield return a;
             foreach (var id in ids) used.Add(id);
@@ -236,10 +236,17 @@ public static class PlanBuilder
     /// The target of files that move together under <paramref name="name"/>: the place the finding proposes in a
     /// library, else the one target <c>sfo decide</c> gave all of them, bound to a library root.
     /// </summary>
-    private static (string? Target, long? Library, string? Why) TargetOf(PlanInputs inputs, Finding f, IReadOnlyList<long> ids, string name)
+    private static (string? Target, long? Library, string? Why) TargetOf(
+        PlanInputs inputs, Finding f, IReadOnlyList<long> ids, string name, bool folder = false)
     {
         if (f.Target is { LibraryJobId: { } lib } t)
+        {
+            // A folder kept whole whose target already carries its name (sfo findings targets: a folder of that name, or
+            // a new one named after it) goes there itself, not into a folder of its own name below it.
+            if (folder && string.Equals(Path.GetFileName(Path.TrimEndingDirectorySeparator(t.Path)), name, StringComparison.OrdinalIgnoreCase))
+                return (t.Path, lib, null);
             return (PlanChecks.Join(t.Path, name), lib, null);
+        }
 
         var paths = ids.Select(id => inputs.Decisions.TryGetValue(id, out var d) ? d.Target?.Path : null).Distinct(StringComparer.Ordinal).ToList();
         if (paths.Count != 1 || paths[0] is not { } rel)

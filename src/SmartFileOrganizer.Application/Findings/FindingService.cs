@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -69,7 +71,9 @@ public sealed record FindingBrief(
     string? RelativePath,
     long Files,
     long Bytes,
-    PlanActionKind Action);
+    PlanActionKind Action,
+    FindingTarget? Target = null,
+    FindingTargetStatus? TargetStatus = null);
 
 /// <summary>Everything about the findings of a job that fits one page.</summary>
 public sealed record FindingSummary(
@@ -117,6 +121,7 @@ public sealed class FindingService
     private readonly BundleOptions _bundleOptions;
     private readonly ILogger<FindingService> _logger;
     private readonly IFreeSpaceProbe? _freeSpace;
+    private readonly IFindingTargetRepository? _targets;
 
     public FindingService(
         IScanJobRepository jobs,
@@ -131,9 +136,11 @@ public sealed class FindingService
         FindingOptions options,
         BundleOptions bundleOptions,
         ILogger<FindingService> logger,
-        IFreeSpaceProbe? freeSpace = null)
+        IFreeSpaceProbe? freeSpace = null,
+        IFindingTargetRepository? targets = null)
     {
         _freeSpace = freeSpace;
+        _targets = targets;
         _jobs = jobs;
         _read = read;
         _bundles = bundles;
@@ -197,7 +204,8 @@ public sealed class FindingService
         var byCertainty = Enum.GetValues<ResultCertainty>().ToDictionary(c => c, c => (long)listed.Count(f => f.Certainty == c));
         var byState = Enum.GetValues<FindingState>().ToDictionary(s => s, s => (long)report.Findings.Count(f => f.State == s));
         var briefs = listed.Take(Math.Max(0, top)).Select(f => new FindingBrief(
-            f.Rank, f.Key, f.Kind, f.Certainty, f.State, f.Title, f.RelativePath, f.Files, f.Bytes, f.Action.Kind)).ToList();
+            f.Rank, f.Key, f.Kind, f.Certainty, f.State, f.Title, f.RelativePath, f.Files, f.Bytes, f.Action.Kind,
+            f.Target, f.TargetStatus)).ToList();
         return new FindingSummary(report.Job, report.Inputs, report.Coverage, report.MissingSteps,
             listed.Count, listed.Count(f => !f.Unsure), listed.Count(f => f.Unsure),
             byKind, byCertainty, byState, briefs, report.BelowThreshold, report.Overview, report.Storage);
@@ -216,6 +224,17 @@ public sealed class FindingService
     {
         var computed = await ComputeInternalAsync(jobId, ct, libraries);
         return (computed.Report, computed.Values);
+    }
+
+    /// <summary>
+    /// The findings with the scanned files of the job by id: the input of the target match
+    /// (https://github.com/crack666/smart_file_organizer/issues/83), which hands a finding's files to <c>sfo library match</c>.
+    /// </summary>
+    public async Task<(FindingReport Report, IReadOnlyDictionary<long, FileNode> Files)> ComputeWithFilesAsync(
+        long jobId, IReadOnlyList<long>? libraries, CancellationToken ct = default)
+    {
+        var computed = await ComputeInternalAsync(jobId, ct, libraries);
+        return (computed.Report, computed.Files);
     }
 
     /// <summary>One finding by key, in any state.</summary>
@@ -520,6 +539,9 @@ public sealed class FindingService
         // ---- misplaced
         findings.AddRange(await MisplacedAsync(job, facts, dirs, patterns, libHeader, libRows, libraryJobs, ct));
 
+        // ---- places of the target match (sfo findings targets), as long as the finding is what was matched
+        await ApplyStoredTargetsAsync(jobId, findings, facts, factsByFile, libraryJobs, ct);
+
         // ---- decisions, order
         var decisions = await _decisions.GetAllAsync(jobId, ct);
         foreach (var finding in findings)
@@ -545,6 +567,10 @@ public sealed class FindingService
             libHeader?.AgainstJobId,
             libSet?.LibraryJobIds ?? []);
         var (coverage, missing) = Coverage(job, inputs);
+        if (libraryJobs.Count > 0 && ranked.Any(f => f.State is FindingState.Open or FindingState.Accepted
+                                                    && f.Action.Kind == PlanActionKind.Move && f.Target is null
+                                                    && f.TargetStatus == FindingTargetStatus.NotMatched))
+            missing = [.. missing, $"sfo findings targets {jobId}"];
         var overview = Overview(facts, libSet, libraryJobs);
         var storage = Storage(ranked, libraryJobs);
         return new Computed(new FindingReport(job, inputs, coverage, missing, ranked, below, overview, storage), fileById, values);
@@ -599,11 +625,15 @@ public sealed class FindingService
         var listed = findings.Where(f => f.State is FindingState.Open or FindingState.Accepted && f.Action.Kind == PlanActionKind.Move).ToList();
         var unplaced = listed.Where(f => f.Target is null).ToList();
         var unplacedTally = new FileTally(unplaced.Sum(f => f.Files), unplaced.Sum(f => f.Bytes));
+        var reasons = unplaced
+            .GroupBy(f => (f.TargetStatus ?? FindingTargetStatus.NotMatched).ToCode(), StringComparer.Ordinal)
+            .OrderBy(g => g.Key, StringComparer.Ordinal)
+            .ToDictionary(g => g.Key, g => g.Count(), StringComparer.Ordinal);
         if (libraries.Count == 0)
         {
             return new FindingStorage(StorageStatus.NoLibrary,
                 "No permanent storage is known: no target is proposed. Scan it with 'sfo scan <path> --role library' and compare with 'sfo compare <job> --against <library>'.",
-                [], unplaced.Count, unplacedTally, []);
+                [], unplaced.Count, unplacedTally, [], reasons);
         }
 
         var roots = new List<RootStorage>();
@@ -625,7 +655,7 @@ public sealed class FindingService
             if (unplacedTally.Bytes > freeTotal)
                 warnings.Add($"{FindingRules.Count(unplaced.Count, "finding", "findings")} without a target need {FindingRules.Size(unplacedTally.Bytes)}, more than is left free in all library roots ({FindingRules.Size(freeTotal)}).");
         }
-        return new FindingStorage(StorageStatus.Known, null, roots, unplaced.Count, unplacedTally, warnings);
+        return new FindingStorage(StorageStatus.Known, null, roots, unplaced.Count, unplacedTally, warnings, reasons);
     }
 
     private static Unit UnitOf(ScanJob job, FileNode f, FilePlace place, DirectoryReadRow? dir, Bundle? part, Bundle? top, bool besidePrograms)
@@ -1098,7 +1128,7 @@ public sealed class FindingService
             }
             else if (lib is not null && index >= 0)
             {
-                finding.Notes.Add("No folder of the library fits these files.");
+                finding.Notes.Add(NoFolderFitsNote);
                 finding.Action = new FindingAction(PlanActionKind.Leave, "No folder of the library fits these files; decide where they belong.");
             }
 
@@ -1106,10 +1136,99 @@ public sealed class FindingService
             if (target is null || target.ContentCheck != TargetContentCheck.Fits)
                 finding.Notes.Add(lib is null
                     ? "No permanent storage (library) is known: no place is proposed, and the finding stays uncertain."
-                    : "The content of the proposed place was not compared with these files, so the finding stays uncertain at most.");
+                    : NotComparedNote);
         }
 
         return candidates.Select(c => c.Finding).ToList();
+    }
+
+    private const string NoFolderFitsNote = "No folder of the library fits these files.";
+    private const string NotComparedNote = "The content of the proposed place was not compared with these files, so the finding stays uncertain at most.";
+
+    /// <summary>
+    /// Sets the stored target match on every finding that needs a place (https://github.com/crack666/smart_file_organizer/issues/83),
+    /// as long as it rests on the same files, descriptions and libraries; otherwise the finding is <c>not_matched</c>. A
+    /// target is kept only inside a library root of this run, as the places of the rules are. A marked file never gets one.
+    /// </summary>
+    private async Task ApplyStoredTargetsAsync(
+        long jobId, List<Finding> findings, IReadOnlyList<FileFacts> facts,
+        IReadOnlyDictionary<long, IReadOnlyList<FileFact>> factsByFile, IReadOnlyList<ScanJob> libraries, CancellationToken ct)
+    {
+        var targetFindings = findings.Where(f => FindingRules.TargetKinds.Contains(f.Kind)).ToList();
+        if (targetFindings.Count == 0) return;
+        var byId = facts.ToDictionary(x => x.File.Id);
+        var libraryIds = libraries.Select(l => l.Id).ToList();
+        IReadOnlyDictionary<string, FindingTargetRecord> stored = _targets is null || libraries.Count == 0
+            ? new Dictionary<string, FindingTargetRecord>()
+            : await _targets.GetAllAsync(jobId, ct);
+
+        foreach (var finding in targetFindings)
+        {
+            var files = finding.FileIds.Where(byId.ContainsKey).Select(id => byId[id]).ToList();
+            finding.TargetInput = TargetInputHash(files.Select(x => x.File.Id), factsByFile, libraryIds);
+            finding.TargetStatus = FindingTargetStatus.NotMatched;
+            if (files.Any(x => x.Match.IsMatch)) continue;
+            if (!stored.TryGetValue(finding.Key, out var row) || row.InputHash != finding.TargetInput) continue;
+
+            var fileCertainty = FindingRules.Weakest(
+                files.Select(x => x.Value.Worth == FileWorth.None ? ResultCertainty.Uncertain : x.Value.Certainty), ResultCertainty.Uncertain);
+            if (row.Status is FindingTargetStatus.ExistingFolder or FindingTargetStatus.NewFolder)
+            {
+                var home = row.Path is { } path
+                    ? libraries.FirstOrDefault(l => l.Id == row.LibraryJobId && IsAtOrBelow(path, Path.TrimEndingDirectorySeparator(l.RootPath)))
+                    : null;
+                if (home is null)
+                {
+                    finding.TargetStatus = FindingTargetStatus.NoFittingFolder;
+                    finding.Notes.Add("A matched place outside every library root was dropped: targets lie only in the permanent storage.");
+                    continue;
+                }
+
+                var target = new FindingTarget(row.Path!, row.RelativePath ?? row.Path!, row.Certainty ?? ResultCertainty.Uncertain,
+                    row.Reason, row.SameContentFiles, row.ContentCheck, home.Id, home.RootPath);
+                finding.Target = target;
+                finding.TargetStatus = row.Status;
+                finding.Action = new FindingAction(PlanActionKind.Move,
+                    $"Move to {target.RelativePath}{(row.Status == FindingTargetStatus.NewFolder ? " (a new folder)" : string.Empty)} in library job {home.Id}: {target.Reason}");
+                finding.Notes.RemoveAll(n => n == NoFolderFitsNote || n.StartsWith("No place looked up", StringComparison.Ordinal));
+                if (finding.Kind == FindingKind.Misplaced)
+                {
+                    finding.Certainty = FindingRules.MisplacedCertainty(fileCertainty, target);
+                    if (target.ContentCheck == TargetContentCheck.Fits)
+                        finding.Notes.Remove(NotComparedNote);
+                }
+                continue;
+            }
+
+            finding.TargetStatus = row.Status;
+            finding.Notes.Add($"No target ({row.Status.ToCode()}): {row.Reason}");
+            // The match by content found no fitting folder: a place the rules alone proposed does not count either.
+            if (row.Status == FindingTargetStatus.NoFittingFolder && finding.Kind == FindingKind.Misplaced && finding.Target is not null)
+            {
+                finding.Target = null;
+                finding.Action = new FindingAction(PlanActionKind.Leave, "No folder of the library fits these files; decide where they belong.");
+                finding.Certainty = FindingRules.MisplacedCertainty(fileCertainty, null);
+            }
+        }
+    }
+
+    /// <summary>What a target match rests on: the files, the description facts of each, and the libraries, in order.</summary>
+    private static string TargetInputHash(
+        IEnumerable<long> fileIds, IReadOnlyDictionary<long, IReadOnlyList<FileFact>> factsByFile, IReadOnlyList<long> libraries)
+    {
+        var sb = new StringBuilder("finding-target-v1\n");
+        sb.Append(string.Join(",", libraries)).Append('\n');
+        foreach (var id in fileIds.Order())
+        {
+            sb.Append(id).Append(':');
+            if (factsByFile.TryGetValue(id, out var stored))
+            {
+                foreach (var fact in stored.Where(f => f.Key.IsDescription()).Select(f => f.Key.ToCode() + "=" + f.Value).Order(StringComparer.Ordinal))
+                    sb.Append(fact).Append(';');
+            }
+            sb.Append('\n');
+        }
+        return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(sb.ToString())));
     }
 
     private static (IReadOnlyDictionary<FindingKind, KindCoverage>, IReadOnlyList<string>) Coverage(ScanJob job, FindingInputsInfo inputs)
@@ -1153,7 +1272,7 @@ public sealed class FindingService
                 ? new KindCoverage(FindingCoverage.NotComputed, "neither folder verdicts nor bundles: no folder purpose is known (sfo analyze, sfo bundles build)")
                 : new KindCoverage(FindingCoverage.Partial, !library
                     ? "no library: no place is proposed; uncertain at most until targets are checked by content"
-                    : "targets are not checked by content yet: uncertain at most"),
+                    : "uncertain at most until a target is checked by content (sfo findings targets)"),
             [FindingKind.Sensitive] = !analysed || pending
                 ? new KindCoverage(FindingCoverage.Partial, "rule markers only; markers of the model come with sfo analyze")
                 : new KindCoverage(FindingCoverage.Complete, null),

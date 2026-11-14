@@ -8,8 +8,17 @@ public static class ModelCallKinds
     public const string SecondCheck = "second_check";
     public const string Summary = "summary";
 
+    /// <summary>The content check of target folders (<c>sfo library match</c>, <c>sfo findings targets</c>).</summary>
+    public const string ContentFit = "content_fit";
+
+    /// <summary>The name of a new folder in the style of the library.</summary>
+    public const string FolderName = "folder_name";
+
+    /// <summary>Other questions about a library: purposes, review, proposal.</summary>
+    public const string LibraryAdvice = "library_advice";
+
     /// <summary>All codes in the order of the pipeline.</summary>
-    public static readonly IReadOnlyList<string> All = [PreAssessment, Classification, SecondCheck, Summary];
+    public static readonly IReadOnlyList<string> All = [PreAssessment, Classification, SecondCheck, Summary, ContentFit, FolderName, LibraryAdvice];
 }
 
 /// <summary>

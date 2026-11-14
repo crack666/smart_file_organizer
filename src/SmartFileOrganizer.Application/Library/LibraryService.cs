@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Extensions.Logging;
+using SmartFileOrganizer.Application.Services;
 using SmartFileOrganizer.Domain.Enums;
 using SmartFileOrganizer.Domain.Interfaces;
 using SmartFileOrganizer.Domain.Models;
@@ -117,6 +118,7 @@ public sealed class LibraryService
     private readonly ILibraryAdvisor _advisor;
     private readonly IOllamaService _ollama;
     private readonly ILogger<LibraryService> _logger;
+    private readonly ModelUsageMeter? _meter;
 
     public LibraryService(
         IScanJobRepository jobs,
@@ -124,8 +126,10 @@ public sealed class LibraryService
         ILibraryRepository library,
         ILibraryAdvisor advisor,
         IOllamaService ollama,
-        ILogger<LibraryService> logger)
+        ILogger<LibraryService> logger,
+        ModelUsageMeter? meter = null)
     {
+        _meter = meter;
         _jobs = jobs;
         _reads = reads;
         _library = library;
@@ -219,7 +223,15 @@ public sealed class LibraryService
             return (AdviceStatus.Unavailable, null);
 
         _logger.LogInformation("Asking the local model for library {Task} of job {JobId} ({Chars} characters of facts)", task, jobId, facts.Length);
+        var started = System.Diagnostics.Stopwatch.GetTimestamp();
         var reply = await _advisor.AskAsync(new LibraryAdviceRequest(kind, facts, model, null), ct);
+        // Counted like the calls of the analysis; the advisor does not report tokens, so only calls and time.
+        _meter?.Record(kind switch
+        {
+            LibraryAdviceTask.Fit => ModelCallKinds.ContentFit,
+            LibraryAdviceTask.Name => ModelCallKinds.FolderName,
+            _ => ModelCallKinds.LibraryAdvice
+        }, 0, 0, 0, System.Diagnostics.Stopwatch.GetElapsedTime(started));
         var record = new LibraryAdviceRecord
         {
             JobId = jobId,

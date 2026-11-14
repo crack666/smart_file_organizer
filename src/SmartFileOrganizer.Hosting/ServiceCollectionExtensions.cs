@@ -234,6 +234,10 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<IConfiguration>().GetSection("Findings").Get<FindingOptions>() ?? new FindingOptions());
         services.AddSingleton<IFindingTargetAdvisor, LibraryFindingTargetAdvisor>();
         services.AddSingleton<FindingService>();
+        // Target match per finding (https://github.com/crack666/smart_file_organizer/issues/83): the match of
+        // sfo library match for every finding that should move, stored per finding.
+        services.AddSingleton<IFindingTargetRepository, FindingTargetRepository>();
+        services.AddSingleton<FindingTargetService>();
 
         // Stage 2, deciding (https://github.com/crack666/smart_file_organizer/issues/37): rules over stored facts and
         // results; no model service is injected.

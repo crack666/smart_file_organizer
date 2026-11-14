@@ -84,6 +84,32 @@ public enum TargetContentCheck
     [JsonStringEnumMemberName("unclear")] Unclear
 }
 
+/// <summary>
+/// What the target match of a finding (<c>sfo findings targets</c>, https://github.com/crack666/smart_file_organizer/issues/83)
+/// gave: a place, or why there is none. Stored per finding in <c>finding_targets.status</c>, except
+/// <see cref="NotMatched"/>, which means no stored match fits the finding as it is now.
+/// </summary>
+public enum FindingTargetStatus
+{
+    /// <summary>An existing folder of a library is the target.</summary>
+    [JsonStringEnumMemberName("existing_folder")] ExistingFolder,
+
+    /// <summary>No existing folder fits; a new folder in the style of the library is the target.</summary>
+    [JsonStringEnumMemberName("new_folder")] NewFolder,
+
+    /// <summary>The target match has not run for the finding as it is now (never, or its files or descriptions changed).</summary>
+    [JsonStringEnumMemberName("not_matched")] NotMatched,
+
+    /// <summary>No folder of any library fits, and no complete name for a new one could be found.</summary>
+    [JsonStringEnumMemberName("no_fitting_folder")] NoFittingFolder,
+
+    /// <summary>The content could not be told: the files are not described, so neither a folder nor a name could be chosen.</summary>
+    [JsonStringEnumMemberName("content_unclear")] ContentUnclear,
+
+    /// <summary>A model was needed (content check or the name of a new folder) and none was used or reachable.</summary>
+    [JsonStringEnumMemberName("no_model")] NoModel
+}
+
 /// <summary>Whether a kind of finding could be computed from the stored steps of a job.</summary>
 public enum FindingCoverage
 {
