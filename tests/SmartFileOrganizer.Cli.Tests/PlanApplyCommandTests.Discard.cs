@@ -212,7 +212,7 @@ public partial class PlanApplyCommandTests
         await OkAsync("plan", "apply", plan, "--remove-sources", "--execute", "--action", invoice);
 
         var text = File.ReadAllText(notice);
-        var line = Assert.Single(text.Split('\n').Where(l => l.Length > 0 && !l.StartsWith('#')));
+        var line = Assert.Single(text.Split('\n'), l => l.Length > 0 && !l.StartsWith('#'));
         var fields = line.Split('\t');
         Assert.Equal("removed", fields[0]);
         Assert.Equal("Rechnung_Strom.pdf", fields[4]);
