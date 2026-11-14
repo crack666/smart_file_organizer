@@ -42,12 +42,14 @@ public sealed record FindingCandidateItem(
     IReadOnlySet<long> Marked);
 
 /// <summary>The answer of <c>sfo findings candidates</c>.</summary>
+/// <param name="InboxName">The subfolder the source gets in an inbox (<see cref="InboxNames"/>); null without a library.</param>
 public sealed record FindingCandidateRun(
     ScanJob Job,
     StorageStatus Status,
     string? Message,
     IReadOnlyList<LibraryRootFacts> Libraries,
-    IReadOnlyList<FindingCandidateItem> Items);
+    IReadOnlyList<FindingCandidateItem> Items,
+    string? InboxName = null);
 
 /// <summary>
 /// Facts instead of a verdict (https://github.com/crack666/smart_file_organizer/issues/95): for every finding that should
@@ -60,11 +62,13 @@ public sealed class FindingCandidateService
 {
     private readonly FindingService _findings;
     private readonly LibraryTargetService _targets;
+    private readonly InboxNames _inboxNames;
 
-    public FindingCandidateService(FindingService findings, LibraryTargetService targets)
+    public FindingCandidateService(FindingService findings, LibraryTargetService targets, InboxNames inboxNames)
     {
         _findings = findings;
         _targets = targets;
+        _inboxNames = inboxNames;
     }
 
     public async Task<FindingCandidateRun> CandidatesAsync(FindingCandidateQuery query, CancellationToken ct = default)
@@ -106,7 +110,7 @@ public sealed class FindingCandidateService
                 marked.Where(m => m.Markers != SensitiveMarker.None).Select(m => new SensitiveFileRef(Rel(m.Node), m.Markers)).ToList(),
                 answer.Marked.Keys.ToHashSet()));
         }
-        return new FindingCandidateRun(report.Job, StorageStatus.Known, null, answer.Libraries, items);
+        return new FindingCandidateRun(report.Job, StorageStatus.Known, null, answer.Libraries, items, await _inboxNames.SubfolderAsync(report.Job, ct));
     }
 
     private static string Rel(FileNode f) => f.RelativePath.Replace('\\', '/');

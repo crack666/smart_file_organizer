@@ -175,7 +175,7 @@ public sealed partial class LibraryMap
         var root = Visit(tree.Root, null);
 
         var byRelative = entries.ToDictionary(e => e.RelativePath, StringComparer.Ordinal);
-        var byFull = entries.ToDictionary(e => e.FullPath, StringComparer.Ordinal);
+        var byFull = entries.ToDictionary(e => e.FullPath, PathKey.Comparer);
 
         foreach (var finding in rules.Findings)
         {

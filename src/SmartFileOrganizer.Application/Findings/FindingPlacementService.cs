@@ -63,6 +63,7 @@ public sealed class FindingPlacementService
     private readonly IProtectedPlaces _protected;
     private readonly PlanOptions _planOptions;
     private readonly LibraryMatchOptions _matchOptions;
+    private readonly InboxNames _inboxNames;
     private readonly TimeProvider _time;
 
     public FindingPlacementService(
@@ -74,6 +75,7 @@ public sealed class FindingPlacementService
         IProtectedPlaces protectedPlaces,
         PlanOptions planOptions,
         LibraryMatchOptions matchOptions,
+        InboxNames inboxNames,
         TimeProvider? time = null)
     {
         _findings = findings;
@@ -84,6 +86,7 @@ public sealed class FindingPlacementService
         _protected = protectedPlaces;
         _planOptions = planOptions;
         _matchOptions = matchOptions;
+        _inboxNames = inboxNames;
         _time = time ?? TimeProvider.System;
     }
 
@@ -99,6 +102,7 @@ public sealed class FindingPlacementService
         var stored = await _store.GetAllAsync(jobId, ct);
         var protectedPlaces = _protected.Get().Concat(_planOptions.ProtectedPlaces).Where(p => !string.IsNullOrWhiteSpace(p)).ToList();
         IReadOnlyDictionary<long, FileComparison>? rows = null;
+        string? inboxName = null;
 
         var now = _time.GetUtcNow().UtcDateTime;
         var pending = new Dictionary<string, FindingTargetRecord>(StringComparer.Ordinal);
@@ -142,7 +146,11 @@ public sealed class FindingPlacementService
                 if (libraries.Count == 0)
                     Refuse(PlacementProblem.LibraryNotFound, $"job {jobId} was compared with no library; there is no permanent storage");
                 else
-                    (library, relative) = Resolve(r, status, libraries, report.Job, Refuse);
+                {
+                    if (status == FindingTargetStatus.Inbox)
+                        inboxName ??= await _inboxNames.SubfolderAsync(report.Job, ct);
+                    (library, relative) = Resolve(r, status, libraries, inboxName, Refuse);
+                }
                 if (library is { } lib && relative is not null)
                 {
                     path = PlanChecks.Join(lib.Job.RootPath, relative);
@@ -235,7 +243,7 @@ public sealed class FindingPlacementService
         : libraries.Count == 1 ? libraries[0] : null;
 
     private ((ScanJob Job, LibraryMap Map)?, string?) Resolve(
-        PlacementRequest r, FindingTargetStatus status, IReadOnlyList<(ScanJob Job, LibraryMap Map)> libraries, ScanJob source,
+        PlacementRequest r, FindingTargetStatus status, IReadOnlyList<(ScanJob Job, LibraryMap Map)> libraries, string? inboxName,
         Action<PlacementProblem, string> refuse)
     {
         if (status == FindingTargetStatus.Inbox)
@@ -246,7 +254,7 @@ public sealed class FindingPlacementService
                 Unresolved(r, libraries, refuse);
                 return (null, null);
             }
-            return (lib, $"{_matchOptions.InboxFolderOf(lib.Value.Item1.RootPath)}/{SourceFolderName(source)}");
+            return (lib, $"{_matchOptions.InboxFolderOf(lib.Value.Item1.RootPath)}/{inboxName}");
         }
 
         if (string.IsNullOrWhiteSpace(r.Folder))
@@ -337,14 +345,6 @@ public sealed class FindingPlacementService
                 break;
             }
         }
-    }
-
-    /// <summary>The subfolder of a source in an inbox: the name of its root folder, or <c>source-&lt;job&gt;</c> for a drive root.</summary>
-    public static string SourceFolderName(ScanJob source)
-    {
-        var name = Path.GetFileName(Path.TrimEndingDirectorySeparator(source.RootPath));
-        var cleaned = new string((name ?? string.Empty).Select(c => Path.GetInvalidFileNameChars().Contains(c) || c is ':' or '*' or '?' ? '_' : c).ToArray()).Trim().TrimEnd('.');
-        return cleaned.Length == 0 ? $"source-{source.Id}" : cleaned;
     }
 
     private static FindingTargetRecord Clone(FindingTargetRecord r) => new()

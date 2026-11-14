@@ -107,6 +107,13 @@ public sealed class LibraryMatchOptions
     /// <summary>The inbox folder of single libraries, by the root path of the library; the others use <see cref="InboxFolder"/>.</summary>
     public List<LibraryInbox> Inboxes { get; set; } = [];
 
+    /// <summary>
+    /// Names the subfolder of a source in an inbox after its place (<c>sfo places</c>: the label of the drive), with the
+    /// folder name of the source root added when the source is not the whole drive (Issue 97). Off, or without a known
+    /// label, it is the folder name of the source root, as before.
+    /// </summary>
+    public bool InboxNameFromPlace { get; set; } = true;
+
     /// <summary>The inbox folder of the library at <paramref name="root"/>, relative to the root with <c>/</c>.</summary>
     public string InboxFolderOf(string root)
     {

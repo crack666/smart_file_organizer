@@ -119,6 +119,12 @@ public sealed class LibraryTree
     /// Builds the tree from the stored directories and a stream of the stored files. Files whose parent is not
     /// a stored directory are ignored. Directories outside the job root are dropped.
     /// </summary>
+    /// <remarks>
+    /// Parents are found by <see cref="PathKey"/>, not by the stored text: a root scanned as typed with a trailing
+    /// separator (<c>\\server\share\</c>, <c>D:\Photos\</c>) is stored that way, while its subfolders name it without one
+    /// as their parent. Compared as stored text the root had no subfolders at all
+    /// (https://github.com/crack666/smart_file_organizer/issues/97).
+    /// </remarks>
     public static async Task<LibraryTree> BuildAsync(
         string rootPath,
         IReadOnlyList<DirectoryReadRow> directories,
@@ -126,9 +132,11 @@ public sealed class LibraryTree
         LibraryWords words,
         CancellationToken ct)
     {
-        var byPath = new Dictionary<string, LibraryNode>(StringComparer.Ordinal);
+        var byPath = new Dictionary<string, LibraryNode>(PathKey.Comparer);
         foreach (var d in directories.OrderBy(d => d.Depth).ThenBy(d => d.FullPath, StringComparer.Ordinal))
         {
+            // The same folder twice (once with a trailing separator, or the root once more as a row of its own): the first counts.
+            if (byPath.ContainsKey(d.FullPath)) continue;
             var node = new LibraryNode
             {
                 FullPath = d.FullPath,
@@ -160,7 +168,7 @@ public sealed class LibraryTree
             n.Children.Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase));
 
         var tree = new LibraryTree { Root = root, All = all };
-        var inTree = all.ToDictionary(n => n.FullPath, StringComparer.Ordinal);
+        var inTree = all.ToDictionary(n => n.FullPath, PathKey.Comparer);
 
         long largest = -1;
         await foreach (var f in files.WithCancellation(ct))
@@ -267,5 +275,40 @@ public sealed class LibraryTree
                 return SensitiveMarker.Credentials;
         }
         return SensitiveMarker.None;
+    }
+}
+
+/// <summary>
+/// Compares stored folder paths as the file system does: without a trailing separator (a drive root keeps its own),
+/// either separator, and without regard to case where the file system ignores it (Windows, macOS). A scan stores the
+/// root as it was given, its subfolders name their parent as <see cref="Path.GetDirectoryName(string)"/> returns it.
+/// </summary>
+public static class PathKey
+{
+    private static readonly bool IgnoreCase = OperatingSystem.IsWindows() || OperatingSystem.IsMacOS();
+
+    /// <summary>The form two paths of the same folder share.</summary>
+    public static string Of(string path)
+    {
+        if (string.IsNullOrEmpty(path)) return string.Empty;
+        var p = OperatingSystem.IsWindows() ? path.Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar) : path;
+        var trimmed = Path.TrimEndingDirectorySeparator(p);
+        return trimmed.Length == 0 ? p : trimmed;
+    }
+
+    public static bool Same(string? a, string? b) =>
+        a is not null && b is not null && Comparer.Equals(a, b);
+
+    /// <summary>Equality and hash by <see cref="Of"/>.</summary>
+    public static readonly IEqualityComparer<string> Comparer = new KeyComparer();
+
+    private sealed class KeyComparer : IEqualityComparer<string>
+    {
+        private static readonly StringComparer Inner = IgnoreCase ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+
+        public bool Equals(string? x, string? y) =>
+            ReferenceEquals(x, y) || x is not null && y is not null && Inner.Equals(Of(x), Of(y));
+
+        public int GetHashCode(string obj) => Inner.GetHashCode(Of(obj));
     }
 }

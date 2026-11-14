@@ -1221,7 +1221,9 @@ the name of the rules, `advice.status` says `unavailable`.
 ### `sfo library folder <job> <path>`
 
 One folder of a library as the scan holds it, for a controller that wants to look closer before it decides
-(Issue 95). **No model call.** `path` is relative to the library root (with `/`) or a full path.
+(Issue 95). **No model call.** `path` is relative to the library root (with `/`) or a full path; `""`, `.` or `/` is
+the root. The top level is listed whether the root was scanned with a trailing separator or without (until Issue 97 a
+root scanned as `\\server\share\` or `D:\Photos\` listed no subfolders).
 
 ```json
 { "folder": { "library_job_id": 1, "relative_path": "Photos", "role": "...", "files": 6, "subdirs": 2,
@@ -1565,13 +1567,19 @@ folders of the rules (time, names, kinds of files, the same files already there)
 | `--limit <n>` | Candidate folders per finding, or per part of a mixed finding, 0 to 20, default 5. |
 | `--names <n>` | File names listed per finding, part and folder, 0 to 20, default 5. |
 | `--offset <n>` | Findings to skip (see `next_offset`). |
-| `--max-kb <kb>` | Cap of the listed findings in kB of JSON, 1 to 4096, default 256; the rest follows with `--offset`. At least one finding is listed. |
+| `--max-kb <kb>` | Cap of the listed findings (`items`) in kB of compact JSON, 1 to 4096, default 256; the rest follows with `--offset`. The head (`libraries` with `top_level`) is not counted. At least one finding is listed: one that alone is over the cap comes with fewer candidates and weak candidates per part (`candidates_kept`), down to none; only then, with nothing left to cut, can it still be over the cap. |
 
 ```json
 {
   "job_id": 2, "status": "known", "message": null,
   "libraries": [ { "library_job_id": 1, "root_path": "/nas/photos", "reachable": true,
-                   "free_bytes": 93616517120, "inbox_folder": "_Inbox" } ],
+                   "free_bytes": 93616517120, "inbox_folder": "_Inbox", "root_sensitive": false,
+                   "top_level": [
+                     { "name": "Photos", "relative_path": "Photos", "role": "collection", "files": 1250, "subdirs": 14,
+                       "bytes": 3221225472, "by_file_type": { "image": 1200, "video": 50 },
+                       "period": { "from": "2009-07-04T10:12:00", "to": "2024-12-26T18:40:00", "time_source": "mixed" },
+                       "sensitive": false } ] } ],
+  "inbox_name": "Holiday stick - DCIM",
   "total": 1, "offset": 0, "next_offset": null, "truncated": false,
   "items": [
     { "key": "not_backed_up-09b9879a63", "kind": "not_backed_up", "state": "open",
@@ -1596,10 +1604,15 @@ folders of the rules (time, names, kinds of files, the same files already there)
                           "sensitive": false, "markers": [], "file_names": [ "IMG_20150201_100000.jpg" ],
                           "subfolders": [], "described": false, "description": null, "described_at": null } }
           ],
+          "weak_candidates": [
+            { "library_job_id": 1, "placement": "into_existing", "destination_relative": "Photos", "score": 0.4,
+              "agrees": [ "period", "file_type" ], "files": 1250, "period": { "...": "" } }
+          ],
           "new_folder": { "library_job_id": 1, "parent_relative": "Photos", "name": "2015-02 {occasion}",
                           "name_complete": false, "pattern": "{yyyy}-{mm} {occasion}" },
           "not_matched": null }
-      ] }
+      ],
+      "candidates_kept": null }
   ]
 }
 ```
@@ -1607,15 +1620,32 @@ folders of the rules (time, names, kinds of files, the same files already there)
 - `libraries`: every library with `reachable` (the root exists now), `free_bytes` (`null` when it cannot be told) and
   its `inbox_folder` (below the root; [Inbox](#the-inbox-of-a-library)). A root that cannot be read is the error
   `library_unreachable`, as in `findings targets`.
+- `inbox_name` (since Issue 97): the subfolder this source gets in the inbox of a library, so `inbox` puts its files
+  into `<root>/<inbox_folder>/<inbox_name>`.
+- `libraries[].top_level` (since Issue 97): the folders directly below the root, once per library, with `role`, counts,
+  `by_file_type` and `period`, so the controller sees the order of the library without asking `library folder` for
+  each one. A sensitive folder is listed with `sensitive` true and its counts only. When the root itself is sensitive
+  (marked, or it holds a marked file) `root_sensitive` is true and `top_level` is empty, as in `library folder`.
 - `groups`: one for the finding as a whole, or one per part when its files do not belong together by content
   (`split` true, `part` = the index `sfo findings place --part` takes). `described` condenses the stored description
   facts of the files (`described` of `sampled` carried one); a part lists `examples` of its own files.
 - `candidates[].folder`: the folder as the scan holds it, a few `file_names` (direct files first) and `subfolders`, and
   its stored description (`described`, `description`, `described_at`) from `folder_descriptions`. Nothing is described
   here; [`sfo library describe`](#sfo-library-describe-job-path) describes one folder on demand.
+- `weak_candidates` (since Issue 97): candidates that agree by `period` and `file_type` only, and whose period is not a
+  specific one (the folder spans more than 366 days, or the times of the files are modification times). For loose
+  files they name the same broad folders of the right years again and again; they are kept out of `candidates` and
+  listed apart, best first, at most `--limit`, without what the folder holds (that is in `top_level` or
+  `library folder`). A folder of a short period (an occasion, a year) that holds the times of the files from their
+  names or capture dates stays in `candidates` even with period and kind alone. Before Issue 97 every such candidate
+  stood in `candidates`.
 - `new_folder`: where the rules would put a new folder and the name of its siblings' pattern; `name_complete` false
   means the rules cannot fill in the name (an occasion): the controller names it.
 - `stored`: a target stored earlier (`status`, `decided_by`, `library_job_id`, `relative_path`); `null` when none.
+- `candidates_kept` (since Issue 97): `null` for a finding listed in full. A number when the finding alone was over
+  `--max-kb`: each part lists at most that many candidates and weak candidates (0: none). Ask for it alone with
+  `--key <key> --max-kb <more>` or a lower `--limit` to see the rest. Until Issue 97 such a finding came in full,
+  far over the cap.
 - **Marked files and folders.** A marked file of a finding, or a file in a marked folder of the source, is listed in
   `sensitive_files` with path and markers only: never an example, never part of a description or label. A library
   folder that is marked, lies below a marked folder or holds a marked file has `sensitive` true with its `markers`, and
@@ -1671,7 +1701,7 @@ The stored decision has `decided_by` `controller`, certainty `likely`, `content_
 `content_status` `controller`. It stays until it is withdrawn or replaced by another `place`: `findings targets` keeps
 it (also with `--local-model --refresh`), and it stays when the files or their descriptions change (a note in
 `sfo findings` says so). `no_target` keeps the finding out of the plan (the action says why); `inbox` puts the files
-into `<root>/<inbox folder>/<name of the source root>`.
+into `<root>/<inbox folder>/<inbox name>` (`inbox_name` in `findings candidates`; [Inbox](#the-inbox-of-a-library)).
 
 Errors: `placement_refused` (1), `import_invalid` (1, the file cannot be read, is not JSON, has no `decisions` list,
 or an entry has no `key` or a wrong type; nothing is stored), `job_not_found` (1), `wrong_role` (1),
@@ -1680,13 +1710,17 @@ or an entry has no `key` or a wrong type; nothing is stored), `job_not_found` (1
 ### The inbox of a library
 
 For files without a fitting home a library has an inbox folder (target status `inbox`, Issue 95): by default `_Inbox`
-below the root, one subfolder per source named after the folder name of the source root (`source-<job>` for a drive
-root). Settings, section `LibraryMatch`:
+below the root, one subfolder per source. Since Issue 97 the subfolder is named after the place of the source, the
+drive label that [`sfo places`](#sfo-places) knows: `Holiday stick` for a whole drive, `Holiday stick - DCIM` for a
+folder on it, because the folder name of a source root alone is often a general one. Without a known label, or with
+`InboxNameFromPlace` false, it is the folder name of the source root (`source-<job>` for a drive root), as before.
+Settings, section `LibraryMatch`:
 
 ```json
 "LibraryMatch": {
   "InboxFolder": "_Inbox",
-  "Inboxes": [ { "Root": "/nas/photos", "Folder": "Unsorted/Incoming" } ]
+  "Inboxes": [ { "Root": "/nas/photos", "Folder": "Unsorted/Incoming" } ],
+  "InboxNameFromPlace": true
 }
 ```
 

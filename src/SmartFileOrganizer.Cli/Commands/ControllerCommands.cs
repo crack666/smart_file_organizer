@@ -72,6 +72,13 @@ public static class ControllerCommands
         int Rank, string Placement, string DestinationRelative, double Score, string Certainty, string Reason,
         IReadOnlyList<string> Agrees, IReadOnlyList<string> Contradicts, FolderView Folder);
 
+    /// <summary>
+    /// A candidate that fits by period and kind of files only (Issue 97): where it is, the score and the size of the
+    /// folder, without what the folder holds. The top level of each library is in <see cref="LibraryView.TopLevel"/>.
+    /// </summary>
+    public sealed record WeakCandidateView(
+        long LibraryJobId, string Placement, string DestinationRelative, double Score, IReadOnlyList<string> Agrees, long Files, PeriodView Period);
+
     public sealed record NewFolderHintView(long LibraryJobId, string ParentRelative, string Name, bool NameComplete, string? Pattern);
 
     /// <summary>The files of a finding, or one part of a mixed finding (<c>part</c> as <c>sfo findings place --part</c> takes it).</summary>
@@ -85,6 +92,7 @@ public static class ControllerCommands
         IReadOnlyList<string> Examples,
         DescribedView Described,
         IReadOnlyList<CandidateFolderView> Candidates,
+        IReadOnlyList<WeakCandidateView> WeakCandidates,
         NewFolderHintView? NewFolder,
         string? NotMatched);
 
@@ -108,15 +116,31 @@ public static class ControllerCommands
         StoredTargetView? Stored,
         string? Excluded,
         bool Split,
-        IReadOnlyList<GroupView> Groups);
+        IReadOnlyList<GroupView> Groups,
+        int? CandidatesKept = null);
 
-    public sealed record LibraryView(long LibraryJobId, string RootPath, bool Reachable, long? FreeBytes, string InboxFolder);
+    /// <summary>A folder directly below a library root: name, counts, kinds of files and period. A sensitive one shows no more.</summary>
+    public sealed record TopLevelView(
+        string Name, string RelativePath, string Role, long Files, int Subdirs, long Bytes, IReadOnlyDictionary<string, long> ByFileType,
+        PeriodView Period, bool Sensitive)
+    {
+        public static TopLevelView From(FolderFacts f) => new(
+            f.Entry.Name, f.Entry.RelativePath, f.Entry.Role.ToCode(), f.Entry.Files, f.Entry.Subdirs, f.Entry.Bytes, ByType(f.Entry.Types),
+            new PeriodView(BundlesCommand.Local(f.Entry.From), BundlesCommand.Local(f.Entry.To), f.Entry.TimeSource.ToCode()), f.Sensitive);
+    }
 
+    /// <param name="RootSensitive">The root is marked or holds a marked file: <c>top_level</c> stays empty, as in <c>sfo library folder</c>.</param>
+    /// <param name="TopLevel">The folders directly below the root (Issue 97).</param>
+    public sealed record LibraryView(
+        long LibraryJobId, string RootPath, bool Reachable, long? FreeBytes, string InboxFolder, bool RootSensitive, IReadOnlyList<TopLevelView> TopLevel);
+
+    /// <param name="InboxName">The subfolder this source gets in the inbox of a library (<c>inbox_folder/inbox_name</c>).</param>
     public sealed record CandidatesResult(
         long JobId,
         string Status,
         string? Message,
         IReadOnlyList<LibraryView> Libraries,
+        string? InboxName,
         int Total,
         int Offset,
         int? NextOffset,
@@ -188,7 +212,8 @@ public static class ControllerCommands
         });
         var maxKb = new Option<int>("--max-kb")
         {
-            Description = $"Cap of the listed findings in kB of JSON, 1 to {MaxMaxKb}; the rest follows with --offset. At least one finding is listed.",
+            Description = $"Cap of the listed findings in kB of JSON, 1 to {MaxMaxKb}; the rest follows with --offset. At least one finding is listed: "
+                          + "alone over the cap, it comes with fewer candidates per part (candidates_kept), down to none. The head (libraries) is not counted.",
             DefaultValueFactory = _ => DefaultMaxKb,
             HelpName = "kb"
         };
@@ -234,18 +259,49 @@ public static class ControllerCommands
             long size = 0;
             for (var i = start; i < all.Count; i++)
             {
-                var bytes = Encoding.UTF8.GetByteCount(CliJson.Serialize(all[i], indented: false));
+                var view = all[i];
+                var bytes = Bytes(view);
                 if (page.Count > 0 && size + bytes > cap) break;
-                page.Add(all[i]);
+                // The first finding of a page is always listed; when it alone is over the cap (a mixture of many parts),
+                // it is listed with fewer candidates per part, down to none, instead of the cap being ignored (Issue 97).
+                if (bytes > cap)
+                    (view, bytes) = Shrink(view, cap);
+                page.Add(view);
                 size += bytes;
             }
             int? next = start + page.Count < all.Count ? start + page.Count : null;
             var result = new CandidatesResult(run.Job.Id, run.Status.ToCode(), run.Message,
-                run.Libraries.Select(l => new LibraryView(l.Library.Id, l.Library.RootPath, Directory.Exists(l.Library.RootPath), l.FreeBytes, l.InboxFolder)).ToList(),
+                run.Libraries.Select(l => new LibraryView(l.Library.Id, l.Library.RootPath, Directory.Exists(l.Library.RootPath), l.FreeBytes, l.InboxFolder,
+                    l.Root?.Sensitive ?? false, (l.TopLevel ?? []).Select(TopLevelView.From).ToList())).ToList(),
+                run.InboxName,
                 all.Count, start, next, next is not null, page);
             return CommandOutcome.Success(result, () => RenderCandidates(result));
         });
         return command;
+    }
+
+    private static long Bytes(CandidateItemView view) => Encoding.UTF8.GetByteCount(CliJson.Serialize(view, indented: false));
+
+    /// <summary>
+    /// The finding with at most <c>k</c> candidates and weak candidates per part, for the largest <c>k</c> that fits
+    /// <paramref name="cap"/>; <c>k</c> = 0 when none does, then it may still be over the cap.
+    /// </summary>
+    private static (CandidateItemView View, long Bytes) Shrink(CandidateItemView view, long cap)
+    {
+        var most = view.Groups.Count == 0 ? 0 : view.Groups.Max(g => Math.Max(g.Candidates.Count, g.WeakCandidates.Count));
+        CandidateItemView shrunk = view;
+        long bytes = 0;
+        for (var k = most - 1; k >= 0; k--)
+        {
+            shrunk = view with
+            {
+                Groups = view.Groups.Select(g => g with { Candidates = g.Candidates.Take(k).ToList(), WeakCandidates = g.WeakCandidates.Take(k).ToList() }).ToList(),
+                CandidatesKept = k
+            };
+            bytes = Bytes(shrunk);
+            if (bytes <= cap) break;
+        }
+        return most == 0 ? (view, Bytes(view)) : (shrunk, bytes);
     }
 
     private static CandidateItemView ItemView(FindingCandidateItem item, int names)
@@ -265,6 +321,10 @@ public static class ControllerCommands
                     c.Candidate.Signals.Where(s => s.Agrees).Select(s => s.Signal.ToCode()).ToList(),
                     c.Candidate.Signals.Where(s => s.Contradicts).Select(s => s.Signal.ToCode()).ToList(),
                     FolderView.From(c.Folder))).ToList(),
+                (g.Weak ?? []).Select(w => new WeakCandidateView(w.Library.Id, w.Candidate.Placement.ToCode(), w.Candidate.Destination,
+                    Math.Round(w.Candidate.Score, 3), w.Candidate.Signals.Where(s => s.Agrees).Select(s => s.Signal.ToCode()).ToList(),
+                    w.Candidate.Target.Files, new PeriodView(BundlesCommand.Local(w.Candidate.Target.From), BundlesCommand.Local(w.Candidate.Target.To),
+                        w.Candidate.Target.TimeSource.ToCode()))).ToList(),
                 g.NewFolder is { } n ? new NewFolderHintView(n.Library.Id, n.Parent.RelativePath, n.Name, n.NameComplete, n.Pattern) : null,
                 g.NotMatched);
         }).ToList();
@@ -286,7 +346,14 @@ public static class ControllerCommands
         var sb = new StringBuilder();
         sb.AppendLine($"Job {r.JobId}: {r.Total} finding(s) to place" + (r.NextOffset is { } next ? $", more with --offset {next}" : string.Empty));
         foreach (var l in r.Libraries)
-            sb.AppendLine($"  library job {l.LibraryJobId}: {l.RootPath} ({(l.FreeBytes is { } free ? ReadFormat.Size(free) : "unknown")} free, inbox {l.InboxFolder})");
+        {
+            sb.AppendLine($"  library job {l.LibraryJobId}: {l.RootPath} ({(l.FreeBytes is { } free ? ReadFormat.Size(free) : "unknown")} free, inbox {l.InboxFolder}/{r.InboxName})");
+            if (l.RootSensitive) sb.AppendLine("    top level not listed: the root is sensitive");
+            foreach (var t in l.TopLevel)
+                sb.AppendLine($"    {t.Name}/  {t.Files} files, {t.Subdirs} subfolders"
+                              + (t.Period is { From.Length: >= 4, To.Length: >= 4 } p ? $", {p.From[..4]}-{p.To[..4]}" : string.Empty)
+                              + (t.Sensitive ? ", sensitive" : string.Empty));
+        }
         foreach (var i in r.Items)
         {
             sb.AppendLine($"{i.Key}  {i.Kind}  {i.Files} files {ReadFormat.Size(i.Bytes)}  {i.Title}");
@@ -305,6 +372,8 @@ public static class ControllerCommands
                 foreach (var c in g.Candidates)
                     sb.AppendLine($"     {c.Rank}. {c.DestinationRelative} (library job {c.Folder.LibraryJobId}, {c.Certainty}, {c.Folder.Files} files"
                                   + (c.Folder.Sensitive ? ", sensitive" : c.Folder.Described ? ", described" : string.Empty) + ")");
+                if (g.WeakCandidates.Count > 0)
+                    sb.AppendLine($"     weak (period and kind of files only): {string.Join(", ", g.WeakCandidates.Select(w => w.DestinationRelative))}");
                 if (g.NewFolder is { } n)
                     sb.AppendLine($"     new folder: {n.ParentRelative}/{n.Name} (library job {n.LibraryJobId})");
             }

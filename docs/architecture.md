@@ -308,7 +308,9 @@ model outside sfo, which sfo never calls ([controller-guide.md](controller-guide
 - A row with `decided_by` `controller` wins over everything after it: `FindingTargetService` reuses it even with
   `--refresh`, `FindingService` applies it even when `input_hash` changed (with a note), and a `no_target` decision
   keeps the finding out of the plan (`PlanBuilder.TargetOf`). `inbox` is a target like a folder: the inbox folder of the
-  library (`LibraryMatchOptions.InboxFolderOf`) with a subfolder named after the source root.
+  library (`LibraryMatchOptions.InboxFolderOf`) with a subfolder named after the place of the source (`InboxNames`: the drive
+  label that `sfo places` knows, plus the folder name of the source root below the drive root; the folder name alone
+  without a label or with `InboxNameFromPlace` off; Issue 97).
 
 **Overview and room.** Besides the findings, `FindingService` counts the files of the job once
 (`FindingOverview`: worth keeping and not backed up, backed up per library, disposable, sensitive) and weighs the

@@ -19,10 +19,15 @@ All commands with `--json`. `<job>` is the source job, `<lib>` a library job.
 1. **Prepare.** `sfo scan`, `sfo analyze` (descriptions of the files), `sfo compare <job> --against <lib>`,
    `sfo bundles build <job>`. Optional: `sfo findings targets <job>`; by default the rules only, which stores the
    certain cases (the same files already in a folder) and leaves the rest without a target (`no_model` and the like).
-2. **Get the facts.** `sfo findings candidates <job>`. For each finding: kind, size, period, kinds of files, what its
+2. **Get the facts.** `sfo findings candidates <job>`. In the head, per library: free space, inbox and the top level
+   (`top_level`: each folder below the root with counts, kinds of files and period), so you see how the library is
+   ordered before looking at a single finding. For each finding: kind, size, period, kinds of files, what its
    files show (`described`), the parts of a mixture, and per part the candidate folders of the rules with their score,
-   reasons, counts, period, a few file names and the stored description (`described` false when none). Large jobs:
-   page with `--offset` (`next_offset`), or narrow with `--key`, `--limit`, `--names`, `--max-kb`.
+   reasons, counts, period, a few file names and the stored description (`described` false when none). Candidates
+   that fit by period and kind of files only, in a broad folder, are listed apart as `weak_candidates`: they are
+   rarely the place for loose files. Large jobs: page with `--offset` (`next_offset`), or narrow with `--key`,
+   `--limit`, `--names`, `--max-kb`. A finding that alone is over `--max-kb` comes cut (`candidates_kept` per part);
+   ask for it with `--key` and a larger cap before deciding it.
 3. **Look closer where needed.** `sfo library folder <lib> "<relative path>"` lists a folder's subfolders and files.
    `sfo library describe <lib> "<relative path>"` lets the local model describe that one folder from a few of its
    files and stores the description; it is the only step that calls a model. Describe only folders you are about to
@@ -46,13 +51,15 @@ The local model failed at these; the controller should not.
   after what the files show (occasion, place, topic) in the style of its siblings (`new_folder.pattern`, the names in
   `subfolders`); when nothing names it, use the inbox.
 - **The period alone is weak.** A folder that covers the same days but shows something else is not the place; check
-  `described` against the folder's description, or describe the folder.
+  `described` against the folder's description, or describe the folder. A `weak_candidates` entry (a broad folder
+  of the right years) is no reason by itself; take it only when `top_level` and what the files show agree.
 - **Kept whole stays whole.** A finding with `keep_whole` true is a named folder or device copy: it goes as a whole
   under its own name, so the target is the folder it goes into.
 - **Parts are decided apart.** A `split` finding mixes things; decide each part, and leave a part you cannot place
   without a target rather than forcing it next to the others.
 - **When in doubt: inbox or no target.** A wrong target buries files in a folder nobody looks into for them. The
-  inbox (`_Inbox/<source>` below the library root by default) keeps them findable; `no_target` leaves them where they
+  inbox (`_Inbox/<inbox_name>` below the library root by default; `inbox_name`, named after the drive label of the
+  source, is in the head of `findings candidates`) keeps them findable; `no_target` leaves them where they
   are. Both are decisions with a reason, not failures.
 - **Marked things stay closed.** Marked files show path and markers only, marked folders no names or description.
   They are decided by a person; do not try to recover their content from paths.
