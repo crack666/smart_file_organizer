@@ -284,8 +284,9 @@ them.
 should move (`not_backed_up`, `in_noise`, `misplaced`), so the findings and the plan know where each goes. Nothing of
 the match is built a second time: the unit is exactly the files of the finding (`LibraryMatchQuery.Files`); a named
 folder or a device copy also gives its path, so it is kept whole under its name as with `--bundle`; all other findings
-are placed as loose files. The libraries are those of the comparison; the content check, the new folder and its name
-by the model work as above, and `--no-model` works the same way (no existing folder without the same files there).
+are placed as loose files. The libraries are those of the comparison. Since Issue 95 the run uses the rules alone
+unless `--local-model` is given: then the content check, the new folder and its name by the model work as above;
+without it, as `match --no-model` (no existing folder without the same files there).
 
 Per finding one answer is stored in `finding_targets` (step 26):
 
@@ -319,6 +320,23 @@ the model and the stored one could not. Answers are stored as they come, so a ru
 Sensitive findings are never matched and never get a target. Model calls are counted in `model_calls`
 (`content_fit`, `folder_name`, and `classification` for describing a sampled library file). Codes:
 [glossary.md](glossary.md#target-match-of-a-finding-findingtargetstatus); command: [cli.md](cli.md#sfo-findings-targets-job).
+
+## The controller decides: candidates and placed targets
+
+The local model proved unfit for the judgement (Issue 95): it took general features (indoor, a person, a season) for a
+fit and named new folders after a file name. The judgement therefore lies with a controlling model outside sfo:
+
+- `sfo findings candidates <job>` lists, per finding and per part of a mixed one, the candidates of the rules
+  (`LibraryMatcher.Preselect`, the same ranking as above, over all libraries) with what each folder holds and its
+  stored description, plus where the rules would put a new folder. No model call, nothing described ahead.
+- `sfo library folder` shows one folder; `sfo library describe` lets the local model describe one folder on demand
+  (stored in `folder_descriptions` like the samples of the content check, so `--local-model` runs reuse it).
+- `sfo findings place` records the decision: `existing_folder`, `new_folder`, `inbox` or `no_target`, with a reason,
+  `decided_by` `controller`. It is checked like a plan target, all or nothing per call, and no later run replaces it.
+
+The inbox is a folder of the library for files without a fitting home (`InboxFolder`, default `_Inbox`, per library
+`Inboxes`), one subfolder per source. Only the controller puts files there. Workflow and the rules the controller
+follows: [controller-guide.md](controller-guide.md); commands: [cli.md](cli.md#sfo-findings-candidates-job).
 
 ## Targets only in the permanent storage
 
@@ -376,6 +394,8 @@ system clutter, a folder of a person that shares only general features); with th
 | `UnitGapHours` | 3 | Photos within three hours of each other belong together unless both are described as different occasions; a ski morning and a birthday evening are further apart (Issue 85). |
 | `MaxUnitParts` | 12 | A split unit is matched part by part; more parts than that are rather a heap of single things, the rest is listed unmatched. |
 | `MatchUnclearWorth` | `false` | System clutter and folders of unclear worth get no target (Issue 85). On: they are matched like anything else. |
+| `InboxFolder` | `_Inbox` | Below each library root, for files the controller has no home for (Issue 95); the underscore sorts it first and marks it as not part of the order. |
+| `Inboxes` | empty | `[ { "Root", "Folder" } ]`: another inbox folder for single libraries, by root path as scanned. |
 | `PatternsDirectory` | `library-patterns` next to the database | One file per library job, beside the data it was made from. |
 
 An invalid value ends `show` and `match` with `settings_invalid`, naming every problem.

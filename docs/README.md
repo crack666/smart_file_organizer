@@ -232,6 +232,7 @@ https://github.com/crack666/smart_file_organizer/milestones
 | [scan-rules.md](scan-rules.md) | Rule files (profiles): which folders a scan enters, records shallow or skips, and why |
 | [library-review.md](library-review.md) | Judging a library by its structure: dumps, finding kinds and thresholds, word file, model questions, target file |
 | [library-match.md](library-match.md) | Placing into a library: target map, match signals and certainty, weak places, new folder names, patterns file, settings |
+| [controller-guide.md](controller-guide.md) | Deciding targets as a controlling model: candidates, looking at folders, recording decisions, the rules where the local model failed |
 | [evaluation.md](evaluation.md) | Measuring verdicts, categories and markers: test corpus, truth file, test cases from corrections, comparing runs |
 | [glossary.md](glossary.md) | Every fixed code in database, JSON, CLI and prompts, with its meaning |
 | [move-notice.md](move-notice.md) | The move notice `sfo plan apply` leaves in emptied source folders: name, text format, how it is written and read |

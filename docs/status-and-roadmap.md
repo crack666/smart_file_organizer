@@ -351,6 +351,19 @@ trees against a temp database, output checked with a JSON parser. No run with a 
   named source folder keeps its name and stays whole; see [library-match.md](library-match.md).
 - Thresholds are starting values: the evaluation corpus has no library with known truth yet.
 
+_Checked 14.11.2026 on the branch for https://github.com/crack666/smart_file_organizer/issues/95: `dotnet test` 982
+passed, 2 skipped; `sfo eval generate` plus `sfo eval --stub` as in CI: target 14 of 14 hit. `sfo findings candidates`
+run by hand on a generated tree against a temp database. No run with a real model._
+
+- `sfo findings targets` runs the rules alone unless `--local-model` is given; the target decision belongs to a
+  controlling model outside sfo ([controller-guide.md](controller-guide.md)).
+- `sfo findings candidates` gives it the facts without a model call, `sfo library folder` and `sfo library describe`
+  (the local model, one folder on demand) let it look closer, `sfo findings place` records its decision
+  (`existing_folder`, `new_folder`, `inbox`, `no_target`; `decided_by` `controller`), checked like a plan target, all
+  or nothing per file, kept by later target runs and taken by `sfo plan create`.
+- Not measured yet: how well a controlling model decides on a real library; the evaluation corpus scores the rules and
+  the local model, not the controller.
+
 ### Known limits
 
 - PDFs: embedded text of the first pages up to 6,000 characters, page 1 as
