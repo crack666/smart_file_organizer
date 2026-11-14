@@ -59,7 +59,13 @@ before that) and in CI on Windows and Linux._
   of small non-media files); the local model adds markers in the regular
   classification call. Stored in `file_nodes.sensitive_markers` /
   `sensitive_rule` and `ai_results.sensitive_markers` (schema step 2).
-  Outputs withhold their content by default; see
+  Since [#99](https://github.com/crack666/smart_file_organizer/issues/99)
+  (14.11.2026) the setting `Sensitive:Disclosure` decides what outputs show:
+  `open` (default) treats a marker as a hint and withholds only the text of
+  access data (`credentials`, `keys`); `restricted` is the earlier default,
+  which withheld the content of every marked file and the structure of
+  folders holding one (until 14.11.2026 this line said "Outputs withhold
+  their content by default"); see
   [engineering-decisions.md](engineering-decisions.md#8-sensitive-files-local-and-external-readers).
   Until 12.11.2026 a stored `private_nachricht` marker made every read of
   its folder fail (Dapper parsed the token as an enum name); fixed with

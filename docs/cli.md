@@ -335,7 +335,7 @@ State per source file:
 
 | `state` | Meaning |
 |---|---|
-| `backed_up` | A file with exactly the same content is in the library: the full SHA-256 of both files is equal (the sample checksum alone never counts). `match_path` is one of them (first by path), `match_count` how many, `match_hash` the shared full SHA-256 and `match_verified_at` the older of the two times that checksum was computed from the files (possibly in an earlier run, see the cache below). A step that deletes the source file must read both files again and compare with `match_hash` first. For a marked file, or a file whose match is marked, `match_hash` is `null`: for a short secret the checksum would confirm a guess of its content. |
+| `backed_up` | A file with exactly the same content is in the library: the full SHA-256 of both files is equal (the sample checksum alone never counts). `match_path` is one of them (first by path), `match_count` how many, `match_hash` the shared full SHA-256 and `match_verified_at` the older of the two times that checksum was computed from the files (possibly in an earlier run, see the cache below). A step that deletes the source file must read both files again and compare with `match_hash` first. For a file whose content the disclosure withholds, or whose match is such a file, `match_hash` is `null`: for a short secret the checksum would confirm a guess of its content. That is a file with an access data marker, and with `Sensitive:Disclosure` `restricted` every marked file; until 14.11.2026 every marked file (see [Sensitive files](#sensitive-files)). |
 | `new` | No library file has this content, and none has the same name in a folder of the same name. |
 | `differs` | Not in the library by content, but a file with the same name lies in a folder of the same name there (`match_path`): probably another version. |
 | `error` | The content could not be determined: the source file is unreadable, gone or changed since its scan, or a library file of the same size that could hold this content cannot be read. `error` says which. Never counted as `new` or `backed_up`. |
@@ -462,7 +462,8 @@ folders is counted there; a copy elsewhere keeps its own group.
 
 Per group: `scope`, `certainty` (`likely`, `certain`), `advice`, `size` (one copy; for folders the identical files of
 one folder), `copies`, `wasted_bytes` (what keeping one copy would free), `hash` (the full SHA-256 of a `certain` file
-group; `null` when a file of the group is marked, see [Sensitive files](#sensitive-files)), `jobs`, `across_jobs`,
+group; `null` when the disclosure withholds the content of a file of the group: access data always, every marked file
+with `restricted`, see [Sensitive files](#sensitive-files); until 14.11.2026 every marked file), `jobs`, `across_jobs`,
 `in_library`, `files_total`, `files` (path, job, role, `managed`, `sensitive`, `sensitive_rule`; empty for folder
 groups) and `folders` (path, job, role, `managed`, `files`, `matched_files`). `managed` marks a path in a managed area
 (`Plan:ManagedAreas`). Codes: [glossary.md, Duplicates](glossary.md#duplicates). Sorted by `wasted_bytes`, largest
@@ -785,25 +786,46 @@ Filters shared by `dirs` and `files` (for `files` they apply to the directory ho
 | `--verdict <code>` | Directory verdict, `error` or `none`. Repeatable; any value matches. |
 | `--retention <code>` | Retention code or `none`. Repeatable. |
 | `--sensitive yes\|no` | `yes`: only marked files, or directories with marked files in their subtree. `no`: the others. |
-| `--include-sensitive` | Lift the protection described below. For a person at this machine only. |
+| `--include-sensitive` | With `Sensitive:Disclosure` `restricted`: lift the protection described below. Never shows the text of access data. For a person at this machine only. |
 
 ### Sensitive files
 
 Every file passes `SensitiveOutputGuard` (see
 [engineering-decisions.md](engineering-decisions.md#8-sensitive-files-local-and-external-readers)).
-A marked file shows path, type, markers (`sensitive`), `protected: true`, a neutral summary,
-category `review_needed`, and `null` for confidence, importance, target and model output.
-Filters see the same values: `--category trash_candidate` never returns a marked file, and
+What a marked file shows is decided in one place, `SensitiveOutputOptions`, by the setting
+`Sensitive:Disclosure` in `settings.json` (https://github.com/crack666/smart_file_organizer/issues/99,
+since 14.11.2026):
+
+```json
+{ "Sensitive": { "Disclosure": "open" } }
+```
+
+| Value | Meaning |
+|---|---|
+| `open` (default) | A marker is a hint on something important, not a reason to hide it. A marked file shows what any other file shows, with its markers in `sensitive`: category, confidence, importance, summary, excerpt, raw answer. Folders, subfolders and file names appear everywhere, also in and next to marked folders, and so do the stored description facts. One exception, below. |
+| `restricted` | The behaviour before 14.11.2026. A marked file shows path, type, markers (`sensitive`), `protected: true`, a neutral summary, category `review_needed`, and `null` for confidence, importance, target and model output. A folder that is marked, lies below a marked folder or holds a marked file lists no file names, no subfolders and no description (`sfo library folder`, `sfo findings candidates`). |
+
+Another value is refused (`internal_error` naming the setting). **Access data** are the markers `credentials`
+(passwords, logins, recovery codes, API keys, tokens, `.env` files) and `keys` (private keys, certificates with a
+private key, wallets, seed phrases). The literal text of a file with one of them appears in no output and no log,
+whatever the setting and also with `--include-sensitive`: `protected: true`, the neutral summary, and `null` for the
+model summary, excerpt, raw answer, `error` and `previous_error`. Its name, path, markers and short classification
+(category, importance, confidence; in descriptions the codes, issuer and year, not the free texts `scene` and
+`activity`) are shown. Until 14.11.2026 `--include-sensitive` showed the text of access data as well.
+
+`--category trash_candidate` never returns a marked file: the model's `trash_candidate` becomes `review_needed`
+with `category_source` `rule` in either setting. With `restricted` filters see the protected values, so
 `--max-confidence` leaves marked files out.
 
 Model texts about a directory (purpose, reason, summary, error texts, raw verdict answer,
-anomaly reasons) are replaced by a neutral hint when they name a marked file of the subtree
+anomaly reasons) are replaced by a neutral hint, with `restricted`, when they name a marked file of the subtree
 (full name, or the name without extension if it has at least 4 characters). The item then has
-`text_withheld: true`. This name check is a second net; the protection is at the source: the
-verdict model sees names and the folder profile only, and the summary model sees a marked file
+`text_withheld: true`. With `open` names are no secret and this check is off. The protection of content is at the
+source: the verdict model sees names and the folder profile only, and the summary model sees a marked file
 as its neutral line. A summary written before a file of its directory was marked is shown as
 a stale hint (summary, theme, anomaly reasons and error withheld, `text_withheld: true`) until
-the next `sfo analyze` writes it again
+the next `sfo analyze` writes it again, when the disclosure withholds the content of that file (access data always,
+every marked file with `restricted`); a model reason about an access data file is withheld the same way
 (https://github.com/crack666/smart_file_organizer/issues/33).
 
 Folders the scan skipped without entering are marked by their name (`.ssh`, `.gnupg`,
@@ -812,8 +834,8 @@ Folders the scan skipped without entering are marked by their name (`.ssh`, `.gn
 counts marked folders in the subtree, this one included, and `--sensitive yes` lists them.
 `summary` has `sensitive_directories`.
 
-`--include-sensitive` turns both protections off for one run and writes a note to stderr. No
-setting or environment variable turns it on.
+With `restricted`, `--include-sensitive` turns both protections off for one run, except for access data, and writes
+a note to stderr. No setting or environment variable turns it on; `Sensitive:Disclosure` `open` is the default instead.
 
 ### `sfo summary <job>`
 
@@ -855,7 +877,8 @@ sfo summary 7 --json
 
 - `files.pending`: files of any type still waiting for classification (as in
   `sfo status`). `files.errors`: files whose classification failed.
-- `by_category` counts the category `files` reports, so marked files count as `review_needed`;
+- `by_category` counts the category `files` reports, with the configured disclosure (with `restricted` marked files
+  count as `review_needed`, with `open` as their category, a `trash_candidate` as `review_needed`);
   `unclassified` are files without a category.
 - Distributions are sorted by count, largest first. `largest_directories` leaves out the job
   root; sizes and file counts cover the whole subtree.
@@ -1228,15 +1251,17 @@ root scanned as `\\server\share\` or `D:\Photos\` listed no subfolders).
 ```json
 { "folder": { "library_job_id": 1, "relative_path": "Photos", "role": "...", "files": 6, "subdirs": 2,
               "sensitive": false, "markers": [], "file_names": [ "..." ], "subfolders": [ "Barbecue 2016", "Ski trip 2015" ],
-              "described": false, "description": null, "...": "" },
+              "described": false, "description": null, "withheld": false, "marked_files": [], "...": "" },
   "subfolders": [ "Barbecue 2016", "Ski trip 2015" ],
   "total": 0, "limit": 50, "offset": 0, "next_offset": null,
   "files": [ { "name", "relative_path", "size_bytes", "file_type", "modified", "markers" } ] }
 ```
 
 `folder` has the fields of a candidate folder in `findings candidates`; `files` is one page (`--limit` 1 to 1000,
-default 50, `--offset`) of the folder's own files. A sensitive folder lists no subfolders and only its marked files
-(path and markers); `total` then counts those. Errors: `job_not_found` (1), `wrong_role` (1),
+default 50, `--offset`) of the folder's own files, a marked one with its `markers`. With `Sensitive:Disclosure`
+`restricted` a sensitive folder (`withheld` true) lists no subfolders and only its marked files (path and markers);
+`total` then counts those. Until 14.11.2026 that held for every sensitive folder, so a marked file in the root hid the
+whole top level (see [Sensitive files](#sensitive-files)). Errors: `job_not_found` (1), `wrong_role` (1),
 `path_not_found` (1, no folder of the scan), `usage` (2).
 
 ### `sfo library describe <job> <path>`
@@ -1247,8 +1272,9 @@ then on. No other folder is described; candidate folders are never described ahe
 without a model call unless `--refresh` is given.
 
 `{ "folder": {...}, "described", "stored", "sample": [ "<relative path>", ... ], "model", "refused" }`: `described`
-false with `refused` saying why when the folder is sensitive (exit 0, the model is not asked) or nothing in it could be
-described. Errors: `ollama_unavailable` (3, the model server is not reachable; nothing is described),
+false with `refused` saying why when the folder is sensitive (exit 0, the model is not asked; this decides what goes to
+the model and does not follow `Sensitive:Disclosure`) or nothing in it could be described. A stored description of a
+sensitive folder is in `folder` as in `library folder`. Errors: `ollama_unavailable` (3, the model server is not reachable; nothing is described),
 `library_unreachable` (1), `job_not_found` (1), `wrong_role` (1), `path_not_found` (1), `usage` (2).
 
 ## Bundles
@@ -1411,7 +1437,8 @@ it the facts, [`sfo findings place`](#sfo-findings-place-job-key) records its de
   `sfo plan create` moves each file with its part.
 - `inputs.library_job_ids` lists every library the findings rest on; `library_job_id` and `library_compared_at` are
   those of the first one.
-- `sensitive` findings name path, marker and rule ids, never content.
+- `sensitive` findings name path, marker and rule ids; what their files show is decided by `Sensitive:Disclosure`
+  ([Sensitive files](#sensitive-files)). Marked files stay in `sensitive` findings, decided one by one, in either setting.
 - `--summary` gives `{ "job_id", "root_path", "inputs", "coverage", "missing_steps", "listed", "sure", "unsure",
   "by_kind": { "<kind>": { "findings", "sure", "unsure", "files", "bytes" } }, "by_certainty", "by_state",
   "below_threshold", "top": [ { "rank", "key", "kind", "certainty", "state", "title", "relative_path", "files",
@@ -1479,8 +1506,8 @@ the job was not compared with), `settings_invalid` (1, a `Findings` value), `usa
 ### `sfo findings show <job> <key>`
 
 `{ "job_id", "finding": {...}, "total", "limit", "offset", "next_offset", "files": [ ... ] }`: the finding and
-its files, one page at a time, as `sfo files` writes them (marked files protected; `--include-sensitive` as
-there). Errors: `job_not_found` (1), `finding_not_found` (1).
+its files, one page at a time, as `sfo files` writes them (marked files as `Sensitive:Disclosure` says;
+`--include-sensitive` as there). Errors: `job_not_found` (1), `finding_not_found` (1).
 
 ### `sfo findings targets <job>`
 
@@ -1574,6 +1601,7 @@ folders of the rules (time, names, kinds of files, the same files already there)
   "job_id": 2, "status": "known", "message": null,
   "libraries": [ { "library_job_id": 1, "root_path": "/nas/photos", "reachable": true,
                    "free_bytes": 93616517120, "inbox_folder": "_Inbox", "root_sensitive": false,
+                   "top_level_withheld": false, "root_marked_files": [],
                    "top_level": [
                      { "name": "Photos", "relative_path": "Photos", "role": "collection", "files": 1250, "subdirs": 14,
                        "bytes": 3221225472, "by_file_type": { "image": 1200, "video": 50 },
@@ -1602,7 +1630,8 @@ folders of the rules (time, names, kinds of files, the same files already there)
                           "role": "occasion", "purpose": "...", "files": 3, "direct_files": 3, "subdirs": 0, "bytes": 9,
                           "by_file_type": { "image": 3 }, "period": { "...": "" }, "pattern": null,
                           "sensitive": false, "markers": [], "file_names": [ "IMG_20150201_100000.jpg" ],
-                          "subfolders": [], "described": false, "description": null, "described_at": null } }
+                          "subfolders": [], "described": false, "description": null, "described_at": null,
+                          "withheld": false, "marked_files": [] } }
           ],
           "weak_candidates": [
             { "library_job_id": 1, "placement": "into_existing", "destination_relative": "Photos", "score": 0.4,
@@ -1624,8 +1653,11 @@ folders of the rules (time, names, kinds of files, the same files already there)
   into `<root>/<inbox_folder>/<inbox_name>`.
 - `libraries[].top_level` (since Issue 97): the folders directly below the root, once per library, with `role`, counts,
   `by_file_type` and `period`, so the controller sees the order of the library without asking `library folder` for
-  each one. A sensitive folder is listed with `sensitive` true and its counts only. When the root itself is sensitive
-  (marked, or it holds a marked file) `root_sensitive` is true and `top_level` is empty, as in `library folder`.
+  each one. A sensitive folder is listed with `sensitive` true (a hint). When the root itself is sensitive (marked, or
+  it holds a marked file) `root_sensitive` is true and its own marked files are in `root_marked_files` (relative path
+  and markers). With `Sensitive:Disclosure` `restricted` `top_level` is then empty and `top_level_withheld` true, as in
+  `library folder`; until 14.11.2026 that held for every sensitive root (the fields `top_level_withheld` and
+  `root_marked_files` were added on that date).
 - `groups`: one for the finding as a whole, or one per part when its files do not belong together by content
   (`split` true, `part` = the index `sfo findings place --part` takes). `described` condenses the stored description
   facts of the files (`described` of `sampled` carried one); a part lists `examples` of its own files.
@@ -1646,10 +1678,15 @@ folders of the rules (time, names, kinds of files, the same files already there)
   `--max-kb`: each part lists at most that many candidates and weak candidates (0: none). Ask for it alone with
   `--key <key> --max-kb <more>` or a lower `--limit` to see the rest. Until Issue 97 such a finding came in full,
   far over the cap.
-- **Marked files and folders.** A marked file of a finding, or a file in a marked folder of the source, is listed in
-  `sensitive_files` with path and markers only: never an example, never part of a description or label. A library
-  folder that is marked, lies below a marked folder or holds a marked file has `sensitive` true with its `markers`, and
-  no `file_names`, `subfolders`, `purpose` or description.
+- **Marked files and folders** (changed 14.11.2026, https://github.com/crack666/smart_file_organizer/issues/99). A
+  marked file of a finding, or a file in a marked folder of the source, is listed in `sensitive_files` with path and
+  markers, the hint. With `Sensitive:Disclosure` `open` (default) it is also an example and part of the description
+  and label like any other file; for access data (`credentials`, `keys`) only its short facts count (codes, issuer,
+  year; not the free texts `scene` and `activity`). A library folder that is marked, lies below a marked folder or
+  holds a marked file has `sensitive` true with its `markers` and its own marked files in `marked_files`, and shows
+  `file_names`, `subfolders`, `purpose` and its stored description as any other folder. With `restricted`, the
+  behaviour before that date, a marked file is never an example, never part of a description or label, and such a
+  folder has `withheld` true and no `file_names`, `subfolders`, `purpose`, `marked_files` or description.
 - `status` `no_library` with a `message` and no items: without a library there are no candidates.
 
 Errors: `job_not_found` (1), `wrong_role` (1), `comparison_not_found` (1), `finding_not_found` (1, `--key`),

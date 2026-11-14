@@ -61,8 +61,14 @@ The local model failed at these; the controller should not.
   inbox (`_Inbox/<inbox_name>` below the library root by default; `inbox_name`, named after the drive label of the
   source, is in the head of `findings candidates`) keeps them findable; `no_target` leaves them where they
   are. Both are decisions with a reason, not failures.
-- **Marked things stay closed.** Marked files show path and markers only, marked folders no names or description.
-  They are decided by a person; do not try to recover their content from paths.
+- **A marker points at something important.** Since 14.11.2026 (Issue 99, setting `Sensitive:Disclosure`, default
+  `open`) a marked file or folder shows its names, subfolders and description like any other, with `sensitive` and
+  `markers` as the hint: here lies something that matters (a tax return, a doctor's letter, logins). Use it to keep
+  such things together and findable, never to put them in a folder nobody looks into. A file with access data
+  (`credentials`, `keys`) shows name, markers and its short classification, never its text; do not try to recover
+  it. Marked files of the source stay in their own `sensitive` findings, decided by a person one by one. Before that
+  date (now `restricted`) marked files showed path and markers only, and a folder holding one showed no names,
+  subfolders or description: a marked file in a library root hid its whole `top_level` (`top_level_withheld`).
 
 ## What sfo checks when a decision is recorded
 

@@ -72,10 +72,26 @@ Rule ids (`sensitive_rule`) name the rule that set a marker, never the content: 
 means the rule fired on the name of an entry inside an archive, read from its listing without unpacking
 (https://github.com/crack666/smart_file_organizer/issues/67); the archive carries the marker with origin rule.
 
+**Access data** are the markers `credentials` and `keys`. The literal text of such a file (model summary, excerpt,
+raw response, error texts, free-text description facts, full checksum) never appears in any output or log, whatever
+the setting below; name, path, markers and the short classification (category, document kind, issuer or service,
+year) do.
+
+#### What a marker withholds (`Sensitive:Disclosure`)
+
+The setting `Sensitive:Disclosure` in `settings.json` decides what the CLI shows of a marked file
+(https://github.com/crack666/smart_file_organizer/issues/99, since 14.11.2026). What goes to the local model does not
+depend on it.
+
+| Value | Meaning |
+|---|---|
+| `open` | Default. A marker is a hint, not a reason to hide: a marked file and a folder holding one show names, subfolders, classification and descriptions like any other, with the markers. Only the text of access data stays out. |
+| `restricted` | The behaviour before 14.11.2026: a marked file shows path, file type, markers and a neutral summary only, and a folder holding one shows no names, subfolders or description. `--include-sensitive` lifts this for a person at the machine, except for the text of access data (until 14.11.2026 it lifted that too). |
+
 #### Where `finance` and `private_message` end
 
-A marker withholds the content of a file from everything that leaves the machine and sends the file to
-review. Both mistakes cost something: a false alarm costs rework and makes a folder of ordinary papers
+A marker sends the file to review and, with `Sensitive:Disclosure` `restricted` (until 14.11.2026 always), withholds
+its content from everything that leaves the machine. Both mistakes cost something: a false alarm costs rework and makes a folder of ordinary papers
 look sensitive, a missed marker can let private content out. The line below was drawn on 12.11.2026
 after three runs with real models marked the same ordinary invoices and a rental contract as `finance`
 and the same formal letters as `private_message`
@@ -467,7 +483,7 @@ Finer than the category: the category says invoice, letter or personal document,
 | `dominant_file` | A single file holds more than half of the bytes of the library. |
 | `very_full` | A folder with very many files directly in it. |
 | `very_deep` | A branch far deeper than the rest of the library. |
-| `sensitive_location` | Credential, key or identity files, reported with path and marker only. |
+| `sensitive_location` | Credential, key or identity files, reported with path and marker; their text, for access data, never (until 14.11.2026 path and marker only for all). |
 | `case_inconsistent` | A name starts in another letter case than most of its siblings. |
 
 ### Impact of a finding (`FindingImpact`)
@@ -708,7 +724,7 @@ The short list of hints a job ends in (see [findings.md](findings.md)).
 | `not_backed_up` | Files worth keeping whose content is not in the library. Needs a comparison with a library. |
 | `in_noise` | Files worth keeping in a place without value: app data of a device copy, a program folder, a folder judged mixed or disposable. |
 | `misplaced` | Files whose kind does not fit the purpose of their folder; uncertain at most until targets are checked by content. |
-| `sensitive` | Files or skipped folders marked sensitive. Path and marker only, never content; always decided one by one. |
+| `sensitive` | Files or skipped folders marked sensitive; always decided one by one. What their files show is decided by `Sensitive:Disclosure` (until 14.11.2026 path and marker only, never content). |
 | `duplicate` | Files with identical content (same full SHA-256) at several places of the source. |
 
 ### Kind of files of a finding (`group`)
