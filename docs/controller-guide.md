@@ -26,7 +26,8 @@ All commands with `--json`. `<job>` is the source job, `<lib>` a library job.
    reasons, counts, period, a few file names and the stored description (`described` false when none). Candidates
    that fit by period and kind of files only, in a broad folder, are listed apart as `weak_candidates`: they are
    rarely the place for loose files. Large jobs: page with `--offset` (`next_offset`), or narrow with `--key`,
-   `--limit`, `--names`, `--max-kb`.
+   `--limit`, `--names`, `--max-kb`. A finding that alone is over `--max-kb` comes cut (`candidates_kept` per part);
+   ask for it with `--key` and a larger cap before deciding it.
 3. **Look closer where needed.** `sfo library folder <lib> "<relative path>"` lists a folder's subfolders and files.
    `sfo library describe <lib> "<relative path>"` lets the local model describe that one folder from a few of its
    files and stores the description; it is the only step that calls a model. Describe only folders you are about to

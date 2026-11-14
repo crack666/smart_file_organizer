@@ -1567,7 +1567,7 @@ folders of the rules (time, names, kinds of files, the same files already there)
 | `--limit <n>` | Candidate folders per finding, or per part of a mixed finding, 0 to 20, default 5. |
 | `--names <n>` | File names listed per finding, part and folder, 0 to 20, default 5. |
 | `--offset <n>` | Findings to skip (see `next_offset`). |
-| `--max-kb <kb>` | Cap of the listed findings in kB of JSON, 1 to 4096, default 256; the rest follows with `--offset`. At least one finding is listed. |
+| `--max-kb <kb>` | Cap of the listed findings (`items`) in kB of compact JSON, 1 to 4096, default 256; the rest follows with `--offset`. The head (`libraries` with `top_level`) is not counted. At least one finding is listed: one that alone is over the cap comes with fewer candidates and weak candidates per part (`candidates_kept`), down to none; only then, with nothing left to cut, can it still be over the cap. |
 
 ```json
 {
@@ -1611,7 +1611,8 @@ folders of the rules (time, names, kinds of files, the same files already there)
           "new_folder": { "library_job_id": 1, "parent_relative": "Photos", "name": "2015-02 {occasion}",
                           "name_complete": false, "pattern": "{yyyy}-{mm} {occasion}" },
           "not_matched": null }
-      ] }
+      ],
+      "candidates_kept": null }
   ]
 }
 ```
@@ -1641,6 +1642,10 @@ folders of the rules (time, names, kinds of files, the same files already there)
 - `new_folder`: where the rules would put a new folder and the name of its siblings' pattern; `name_complete` false
   means the rules cannot fill in the name (an occasion): the controller names it.
 - `stored`: a target stored earlier (`status`, `decided_by`, `library_job_id`, `relative_path`); `null` when none.
+- `candidates_kept` (since Issue 97): `null` for a finding listed in full. A number when the finding alone was over
+  `--max-kb`: each part lists at most that many candidates and weak candidates (0: none). Ask for it alone with
+  `--key <key> --max-kb <more>` or a lower `--limit` to see the rest. Until Issue 97 such a finding came in full,
+  far over the cap.
 - **Marked files and folders.** A marked file of a finding, or a file in a marked folder of the source, is listed in
   `sensitive_files` with path and markers only: never an example, never part of a description or label. A library
   folder that is marked, lies below a marked folder or holds a marked file has `sensitive` true with its `markers`, and

@@ -116,7 +116,8 @@ public static class ControllerCommands
         StoredTargetView? Stored,
         string? Excluded,
         bool Split,
-        IReadOnlyList<GroupView> Groups);
+        IReadOnlyList<GroupView> Groups,
+        int? CandidatesKept = null);
 
     /// <summary>A folder directly below a library root: name, counts, kinds of files and period. A sensitive one shows no more.</summary>
     public sealed record TopLevelView(
@@ -211,7 +212,8 @@ public static class ControllerCommands
         });
         var maxKb = new Option<int>("--max-kb")
         {
-            Description = $"Cap of the listed findings in kB of JSON, 1 to {MaxMaxKb}; the rest follows with --offset. At least one finding is listed.",
+            Description = $"Cap of the listed findings in kB of JSON, 1 to {MaxMaxKb}; the rest follows with --offset. At least one finding is listed: "
+                          + "alone over the cap, it comes with fewer candidates per part (candidates_kept), down to none. The head (libraries) is not counted.",
             DefaultValueFactory = _ => DefaultMaxKb,
             HelpName = "kb"
         };
@@ -257,9 +259,14 @@ public static class ControllerCommands
             long size = 0;
             for (var i = start; i < all.Count; i++)
             {
-                var bytes = Encoding.UTF8.GetByteCount(CliJson.Serialize(all[i], indented: false));
+                var view = all[i];
+                var bytes = Bytes(view);
                 if (page.Count > 0 && size + bytes > cap) break;
-                page.Add(all[i]);
+                // The first finding of a page is always listed; when it alone is over the cap (a mixture of many parts),
+                // it is listed with fewer candidates per part, down to none, instead of the cap being ignored (Issue 97).
+                if (bytes > cap)
+                    (view, bytes) = Shrink(view, cap);
+                page.Add(view);
                 size += bytes;
             }
             int? next = start + page.Count < all.Count ? start + page.Count : null;
@@ -271,6 +278,30 @@ public static class ControllerCommands
             return CommandOutcome.Success(result, () => RenderCandidates(result));
         });
         return command;
+    }
+
+    private static long Bytes(CandidateItemView view) => Encoding.UTF8.GetByteCount(CliJson.Serialize(view, indented: false));
+
+    /// <summary>
+    /// The finding with at most <c>k</c> candidates and weak candidates per part, for the largest <c>k</c> that fits
+    /// <paramref name="cap"/>; <c>k</c> = 0 when none does, then it may still be over the cap.
+    /// </summary>
+    private static (CandidateItemView View, long Bytes) Shrink(CandidateItemView view, long cap)
+    {
+        var most = view.Groups.Count == 0 ? 0 : view.Groups.Max(g => Math.Max(g.Candidates.Count, g.WeakCandidates.Count));
+        CandidateItemView shrunk = view;
+        long bytes = 0;
+        for (var k = most - 1; k >= 0; k--)
+        {
+            shrunk = view with
+            {
+                Groups = view.Groups.Select(g => g with { Candidates = g.Candidates.Take(k).ToList(), WeakCandidates = g.WeakCandidates.Take(k).ToList() }).ToList(),
+                CandidatesKept = k
+            };
+            bytes = Bytes(shrunk);
+            if (bytes <= cap) break;
+        }
+        return most == 0 ? (view, Bytes(view)) : (shrunk, bytes);
     }
 
     private static CandidateItemView ItemView(FindingCandidateItem item, int names)

@@ -157,4 +157,71 @@ public partial class FindingTargetsCommandTests
         File.WriteAllText(Path.Combine(Path.GetDirectoryName(_dbPath)!, "settings.json"), """{ "LibraryMatch": { "InboxNameFromPlace": false } }""");
         Assert.Equal("fund", Str(await OkAsync("findings", "candidates", job), "inbox_name"));
     }
+
+    /// <summary>
+    /// Done when: <c>--max-kb</c> caps the page and <c>--offset</c> walks through every finding once, in the order of the
+    /// whole list; a finding that alone is over the cap comes with fewer candidates per part (<c>candidates_kept</c>)
+    /// instead of in full. Before, with <c>--max-kb 256</c> one finding of twelve parts came at about 590 kB.
+    /// </summary>
+    [Fact]
+    public async Task MaxKbCapsThePage_OffsetWalksOn_AndAFindingOverTheCapIsCut()
+    {
+        Photos(_source, "Sonstiges", new DateTime(2018, 5, 1, 10, 0, 0), 3, "src");
+        Photos(_source, "Kram", new DateTime(2019, 8, 1, 10, 0, 0), 3, "src");
+        Photos(_source, "Zeug", new DateTime(2020, 10, 1, 10, 0, 0), 3, "src");
+        for (var year = 2010; year <= 2020; year++)
+            Write(_library, $"Bilder/IMG_{year}0601_120000.jpg", $"lib {year}", new DateTime(year, 6, 1, 12, 0, 0));
+        var (_, source) = await PrepareAsync();
+        var job = source.ToString();
+
+        var whole = await OkAsync("findings", "candidates", job, "--limit", "20", "--max-kb", "4096");
+        var keys = whole.GetProperty("items").EnumerateArray().Select(i => Str(i, "key")).ToList();
+        Assert.True(keys.Count >= 4, whole.ToString());
+        Assert.Equal(keys.Count, whole.GetProperty("total").GetInt32());
+        Assert.False(whole.GetProperty("truncated").GetBoolean());
+        Assert.Equal(JsonValueKind.Null, whole.GetProperty("next_offset").ValueKind);
+        Assert.All(whole.GetProperty("items").EnumerateArray(), i => Assert.Equal(JsonValueKind.Null, i.GetProperty("candidates_kept").ValueKind));
+        static int Listed(JsonElement item) => item.GetProperty("groups").EnumerateArray()
+            .Sum(g => g.GetProperty("candidates").GetArrayLength() + g.GetProperty("weak_candidates").GetArrayLength());
+        var full = whole.GetProperty("items").EnumerateArray().ToDictionary(i => Str(i, "key"), Listed);
+        Assert.Contains(full.Values, n => n > 0);
+
+        // One kB: every finding is over the cap alone, so each page holds one, cut.
+        var walked = new List<string>();
+        var cut = 0;
+        int? offset = 0;
+        while (offset is { } at)
+        {
+            var page = await OkAsync("findings", "candidates", job, "--limit", "20", "--max-kb", "1", "--offset", at.ToString());
+            Assert.Equal(at, page.GetProperty("offset").GetInt32());
+            Assert.Equal(keys.Count, page.GetProperty("total").GetInt32());
+            var item = page.GetProperty("items").EnumerateArray().Single();
+            var key = Str(item, "key");
+            walked.Add(key);
+            var size = JsonSerializer.Serialize(item).Length;
+            if (item.GetProperty("candidates_kept").ValueKind == JsonValueKind.Null)
+            {
+                Assert.True(size <= 1024 + 64 || full[key] == 0, item.ToString());   // fits whole, or has nothing to cut
+            }
+            else
+            {
+                var kept = item.GetProperty("candidates_kept").GetInt32();
+                cut++;
+                Assert.True(Listed(item) < full[key], item.ToString());
+                Assert.All(item.GetProperty("groups").EnumerateArray(), g => Assert.True(g.GetProperty("candidates").GetArrayLength() <= kept));
+                Assert.True(kept == 0 || size <= 1024 + 64, item.ToString());
+            }
+            offset = page.GetProperty("next_offset").ValueKind == JsonValueKind.Null ? null : page.GetProperty("next_offset").GetInt32();
+            Assert.Equal(offset is not null, page.GetProperty("truncated").GetBoolean());
+        }
+        Assert.Equal(keys, walked);
+        Assert.True(cut > 0);
+
+        // A cap that holds more than one: as many whole findings as fit, the rest with --offset.
+        var two = await OkAsync("findings", "candidates", job, "--max-kb", "4096", "--offset", "2");
+        Assert.Equal(keys.Skip(2).ToList(), two.GetProperty("items").EnumerateArray().Select(i => Str(i, "key")).ToList());
+        var past = await OkAsync("findings", "candidates", job, "--offset", "100");
+        Assert.Empty(past.GetProperty("items").EnumerateArray());
+        Assert.Equal(JsonValueKind.Null, past.GetProperty("next_offset").ValueKind);
+    }
 }
