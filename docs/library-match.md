@@ -10,6 +10,8 @@ Both commands only read. No file in the source or the library is moved, renamed 
 the proposals are data for the plan (https://github.com/crack666/smart_file_organizer/issues/11).
 The only file written is the patterns file next to the database (below); the database gets the
 folder descriptions of the content check (`folder_descriptions`) and the model's answers.
+`sfo findings targets` runs the same match for every finding and stores its answer per finding
+([below](#for-every-finding-sfo-findings-targets)).
 
 The rule part is complete without a model (`--no-model`). The model, when used, is asked for
 three things: a purpose for the upper folders (`show`), a name for a new folder when the rules
@@ -199,9 +201,36 @@ proposal is most certain (first named on a tie), named by the model in that libr
 the rules cannot complete the name. The `Margin` rule is applied within each library, not across
 them.
 
+## For every finding: `sfo findings targets`
+
+`match` answers for one folder, file or bundle at a time. `sfo findings targets <job>`
+(https://github.com/crack666/smart_file_organizer/issues/83) runs the same match for every open or accepted finding that
+should move (`not_backed_up`, `in_noise`, `misplaced`), so the findings and the plan know where each goes. Nothing of
+the match is built a second time: the unit is exactly the files of the finding (`LibraryMatchQuery.Files`); a named
+folder or a device copy also gives its path, so it is kept whole under its name as with `--bundle`; all other findings
+are placed as loose files. The libraries are those of the comparison; the content check, the new folder and its name
+by the model work as above, and `--no-model` caps a target at `uncertain` in the same way.
+
+Per finding one answer is stored in `finding_targets` (step 26):
+
+1. the best existing folder of all libraries (`existing_folder`), with its certainty, reason and content check;
+2. else a new folder whose name is complete (`new_folder`), in the library whose proposal is most certain;
+3. else no target, with the reason: `no_model` (a new folder needs a name the rules cannot complete and no model was
+   used or reachable), `content_unclear` (no candidate, and the files are not described), `no_fitting_folder`
+   (anything else).
+
+The answer belongs to an input hash of the finding's file ids, their description facts and the library ids. The findings
+read it back only while that hash is still the finding's own; otherwise the finding is `not_matched` again. A second
+run keeps every stored answer with an unchanged hash and asks the model nothing (measured by
+`FindingTargetsCommandTests`, 14.11.2026: no further `fit` question, no further folder sample), unless this run may ask
+the model and the stored one could not. Answers are stored as they come, so a run cut off goes on where it stopped.
+Sensitive findings are never matched and never get a target. Model calls are counted in `model_calls`
+(`content_fit`, `folder_name`, and `classification` for describing a sampled library file). Codes:
+[glossary.md](glossary.md#target-match-of-a-finding-findingtargetstatus); command: [cli.md](cli.md#sfo-findings-targets-job).
+
 ## Targets only in the permanent storage
 
-Every target (`match`, and the `misplaced` findings, which use the same rules) is a folder of a
+Every target (`match`, `sfo findings targets`, and the `misplaced` findings, which use the same rules) is a folder of a
 library map or a new folder below one, so it lies in a root scanned with the role `library`. The
 findings check it once more and drop any place outside every library root, with a note. Without a
 library, no target path exists at all.

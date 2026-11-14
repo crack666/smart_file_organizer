@@ -163,8 +163,10 @@ with and without dumps). A new build replaces the bundles of the job; a rescan o
 the job drops them, because file ids change.
 
 Counts of marked files (`sensitive_files`, rule and model markers, as the output guard sees them) and of
-comparison states (`comparison`, from the latest `sfo compare` of the job against a library) are computed
-when read, so they follow later analysis and comparisons without a rebuild.
+comparison states (`comparison`, from the newest `sfo compare` run of the job, over all of its libraries: a file is
+`backed_up` as soon as one of them holds it) are computed when read, so they follow later analysis and comparisons
+without a rebuild. Until https://github.com/crack666/smart_file_organizer/issues/83 (14.11.2026) only the newest single
+comparison counted, so the files of a bundle that lay in another library root showed as `new`.
 
 ## Not decided here
 
