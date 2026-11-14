@@ -45,11 +45,19 @@ public sealed record PlanChange(long ActionId, PlanActionKind? Kind = null, stri
 
 /// <summary>Which actions a confirmation or rejection is about.</summary>
 /// <param name="Dir">Actions whose source lies at or below this folder (full, or relative to the job root).</param>
-public sealed record PlanSelection(IReadOnlyList<long> ActionIds, string? Dir = null, bool All = false)
+/// <param name="AsBatch">The ids are a selection of many (a group or several rows in the GUI), not actions named one by
+/// one: a sensitive action among them is passed over as by <paramref name="Dir"/> or <paramref name="All"/>.</param>
+public sealed record PlanSelection(IReadOnlyList<long> ActionIds, string? Dir = null, bool All = false, bool AsBatch = false)
 {
     /// <summary>More than the actions named one by one: sensitive actions are never part of it.</summary>
-    public bool IsBatch => Dir is not null || All;
+    public bool IsBatch => Dir is not null || All || AsBatch;
+
+    /// <summary>Whether the action is named one by one, the only way to confirm a sensitive action.</summary>
+    public bool Names(long actionId) => !AsBatch && ActionIds.Contains(actionId);
 }
+
+/// <summary>What a change of many actions did: the changes the checks allow are stored, the others are refused.</summary>
+public sealed record PlanBatchChangeResult(PlanState State, IReadOnlyList<long> Changed, IReadOnlyList<RefusedChange> Refused);
 
 /// <summary>An action as it stands now: the problems the checks find today, and whether it leads into a managed area.</summary>
 public sealed record PlanActionStatus(PlanAction Action, IReadOnlyList<PlanProblem> Problems, bool IntoManagedArea);
@@ -186,6 +194,13 @@ public sealed class PlanService
         return Status(plan, job, libraries, actions, ctx);
     }
 
+    /// <summary>The plans of a job, newest first.</summary>
+    public async Task<IReadOnlyList<Plan>> ListAsync(long jobId, CancellationToken ct = default)
+    {
+        _ = await _jobs.GetByIdAsync(jobId, ct) ?? throw new JobReadException(ReadFailure.JobNotFound, $"Job {jobId} not found.");
+        return await _plans.GetByJobAsync(jobId, ct);
+    }
+
     // ------------------------------------------------------------------ change
 
     /// <summary>
@@ -303,7 +318,7 @@ public sealed class PlanService
             if (approve)
             {
                 // Named one by one is the only way to confirm a sensitive action.
-                if (a.SingleDecision && !selection.ActionIds.Contains(a.Id))
+                if (a.SingleDecision && !selection.Names(a.Id))
                 {
                     skipped.Add(new SkippedAction(a.Id, ["single_decision"]));
                     continue;
@@ -324,6 +339,156 @@ public sealed class PlanService
 
         await _plans.UpdateActionsAsync(changed, ct);
         return new PlanDecisionResult(Status(plan, job, libraries, actions, ctx), changed.Select(a => a.Id).ToList(), skipped);
+    }
+
+    /// <summary>
+    /// Sets confirmed and rejected actions of the selection back to <c>proposed</c>: only those decided by
+    /// <paramref name="decidedBy"/> (for example everything a steering agent confirmed), or every decision when null.
+    /// Verified, executed, failed and undone actions are not touched.
+    /// </summary>
+    public async Task<PlanDecisionResult> ResetDecisionsAsync(
+        long planId, PlanSelection selection, PlanActionOrigin? decidedBy, CancellationToken ct = default)
+    {
+        var (plan, job, libraries, actions, ctx) = await LoadAsync(planId, ct);
+        var dir = selection.Dir is { Length: > 0 } d ? (Path.IsPathRooted(d) ? d : Path.Combine(job.RootPath, d)) : null;
+        var now = _time.GetUtcNow().UtcDateTime;
+        var changed = new List<PlanAction>();
+        var skipped = new List<SkippedAction>();
+        foreach (var a in actions.Where(a => selection.All
+                                             || selection.ActionIds.Contains(a.Id)
+                                             || dir is not null && PlanChecks.IsAtOrBelow(a.SourcePath, dir)))
+        {
+            if (a.State is not (PlanActionState.Approved or PlanActionState.Rejected))
+            {
+                if (a.State != PlanActionState.Proposed) skipped.Add(new SkippedAction(a.Id, [a.State.ToCode()]));
+                continue;
+            }
+            if (decidedBy is { } by && a.DecidedBy != by) continue;
+            a.State = PlanActionState.Proposed;
+            a.DecidedBy = null;
+            a.DecidedAt = null;
+            a.UpdatedAt = now;
+            changed.Add(a);
+        }
+
+        await _plans.UpdateActionsAsync(changed, ct);
+        return new PlanDecisionResult(Status(plan, job, libraries, actions, ctx), changed.Select(a => a.Id).ToList(), skipped);
+    }
+
+    // ------------------------------------------------------------------ kind, from the review
+
+    /// <summary>
+    /// Sets the kind of the selected actions and brings the target with it, so a person switches kinds without typing a
+    /// path: <c>quarantine</c> goes to the quarantine folder (<see cref="PlanOptions.QuarantineFolder"/>) of the
+    /// action's library, keeping the rest of its target; <c>move</c> and <c>copy</c> take an action back out of that
+    /// folder; <c>delete_source</c> points at the place in a library that holds the same content; <c>leave</c> keeps
+    /// the target. Every change goes through <see cref="ChangeAsync"/> and its checks; an action the checks refuse is
+    /// left as it was and listed, the others are stored. A sensitive action is changed only on its own, never as part of
+    /// a selection of several.
+    /// </summary>
+    public Task<PlanBatchChangeResult> SetKindAsync(
+        long planId, IReadOnlyList<long> actionIds, PlanActionKind kind, PlanActionOrigin origin, CancellationToken ct = default) =>
+        RetypeAsync(planId, actionIds, kind, origin, ct);
+
+    /// <summary>
+    /// Marks the selected actions as clutter to remove instead of moving it: <c>delete_source</c> where a library already
+    /// holds the content of the file, else <c>quarantine</c>. As <see cref="SetKindAsync"/>, with the same checks.
+    /// </summary>
+    public Task<PlanBatchChangeResult> MarkForRemovalAsync(
+        long planId, IReadOnlyList<long> actionIds, PlanActionOrigin origin, CancellationToken ct = default) =>
+        RetypeAsync(planId, actionIds, null, origin, ct);
+
+    private async Task<PlanBatchChangeResult> RetypeAsync(
+        long planId, IReadOnlyList<long> actionIds, PlanActionKind? kind, PlanActionOrigin origin, CancellationToken ct)
+    {
+        var (_, job, libraries, actions, ctx) = await LoadAsync(planId, ct);
+        var set = libraries.Count > 0
+            ? (await LibraryComparisonSet.LoadAsync(_comparisons, job.Id, libraries.Select(l => l.Id).ToList(), ct)).Set
+            : null;
+        var byId = actions.ToDictionary(a => a.Id);
+        var ids = actionIds.Distinct().ToList();
+        var refused = new List<RefusedChange>();
+        var changes = new List<PlanChange>();
+        foreach (var id in ids)
+        {
+            if (!byId.TryGetValue(id, out var a))
+            {
+                refused.Add(new RefusedChange(id, [], $"Plan {planId} has no action {id}."));
+                continue;
+            }
+            var wanted = kind ?? (MatchInLibrary(a, ctx, set) is not null ? PlanActionKind.DeleteSource : PlanActionKind.Quarantine);
+            if (wanted == a.Kind) continue;
+            if (a.SingleDecision && ids.Count > 1)
+            {
+                refused.Add(new RefusedChange(id, [], $"Action {id}: single_decision (a sensitive action is changed on its own)"));
+                continue;
+            }
+            var (target, why) = TargetFor(a, wanted, libraries, ctx, set);
+            if (why is not null)
+            {
+                refused.Add(new RefusedChange(id, [PlanProblem.NoTarget], $"Action {id}: no_target ({why})"));
+                continue;
+            }
+            changes.Add(new PlanChange(id, wanted, target));
+        }
+
+        // All or none per call of ChangeAsync: drop what it refuses and store the rest. Each round drops at least one.
+        var changed = new List<long>();
+        PlanState? state = null;
+        while (changes.Count > 0)
+        {
+            try
+            {
+                state = await ChangeAsync(planId, changes, origin, ct);
+                changed.AddRange(changes.Select(c => c.ActionId));
+                break;
+            }
+            catch (PlanException ex) when (ex.Failure == PlanFailure.ChangeRefused && ex.Refused.Count > 0)
+            {
+                var bad = ex.Refused.Select(r => r.ActionId).ToHashSet();
+                refused.AddRange(ex.Refused);
+                changes = changes.Where(c => !bad.Contains(c.ActionId)).ToList();
+            }
+        }
+        return new PlanBatchChangeResult(state ?? await GetAsync(planId, ct), changed, refused);
+    }
+
+    /// <summary>The place in a library that holds the content of a file action, when the comparison found one.</summary>
+    private static string? MatchInLibrary(PlanAction a, PlanCheckContext ctx, LibraryComparisonSet? set) =>
+        a.SourceKind == PlanSourceKind.File && a.FileNodeId is { } id && set is not null
+        && set.Rows.TryGetValue(id, out var row) && row.State == ContentState.BackedUp && ctx.BackedUp.Contains(a.SourcePath)
+            ? row.MatchPath
+            : null;
+
+    /// <summary>The target an action gets with a new kind: null to keep its target, or why there is none.</summary>
+    private (string? Target, string? Why) TargetFor(
+        PlanAction a, PlanActionKind kind, IReadOnlyList<ScanJob> libraries, PlanCheckContext ctx, LibraryComparisonSet? set)
+    {
+        var folder = string.IsNullOrWhiteSpace(_options.QuarantineFolder) ? PlanOptions.DefaultQuarantineFolder : _options.QuarantineFolder;
+        var inQuarantine = libraries.FirstOrDefault(l => a.TargetPath is { } t && PlanChecks.IsAtOrBelow(t, PlanChecks.Join(l.RootPath, folder)));
+        switch (kind)
+        {
+            case PlanActionKind.Quarantine:
+            {
+                if (inQuarantine is not null) return (null, null);
+                var library = libraries.FirstOrDefault(l => l.Id == a.LibraryJobId) ?? (libraries.Count == 1 ? libraries[0] : null);
+                if (library is null)
+                    return (null, libraries.Count == 0 ? "the plan has no library for a quarantine folder" : "the action names none of the libraries of the plan");
+                var rest = a.TargetPath is { } t && PlanChecks.IsAtOrBelow(t, library.RootPath)
+                    ? Path.GetRelativePath(library.RootPath, t)
+                    : a.RelativePath;
+                return (PlanChecks.Normalize(PlanChecks.Join(library.RootPath, folder, rest)), null);
+            }
+            case PlanActionKind.DeleteSource:
+                return MatchInLibrary(a, ctx, set) is { } match ? (match, null) : (null, "no library holds its content");
+            case PlanActionKind.Move or PlanActionKind.Copy when inQuarantine is not null:
+            {
+                var rest = Path.GetRelativePath(PlanChecks.Join(inQuarantine.RootPath, folder), a.TargetPath!);
+                return (PlanChecks.Normalize(PlanChecks.Join(inQuarantine.RootPath, rest)), null);
+            }
+            default:
+                return (null, null);
+        }
     }
 
     // ------------------------------------------------------------------ helpers

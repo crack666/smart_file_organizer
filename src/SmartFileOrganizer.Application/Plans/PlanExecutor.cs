@@ -30,7 +30,12 @@ public sealed class PlanExecutionHooks
 /// <param name="Execute">False: a dry run that reads, checks and reports, and writes nothing.</param>
 /// <param name="Notices">Step 2 leaves a move notice in every folder whose originals went (default); false: none is written
 /// in this run. Undo corrects existing notices either way.</param>
-public sealed record PlanRunOptions(IReadOnlyList<long> ActionIds, bool Execute, bool Notices = true);
+public sealed record PlanRunOptions(IReadOnlyList<long> ActionIds, bool Execute, bool Notices = true)
+{
+    /// <summary>Gets each item as soon as its action is done, for a progress display; the report lists them all again.
+    /// A run stopped through its cancellation token is cut off like Ctrl+C: the next run settles the open step.</summary>
+    public IProgress<PlanRunItem>? Progress { get; init; }
+}
 
 /// <summary>What a run did with the move notice of one source folder.</summary>
 /// <param name="Outcome"><c>written</c> (created or changed), <c>removed</c> (no entry left), <c>would_write</c> or
@@ -145,10 +150,10 @@ public sealed class PlanExecutor
             if (!run.Selected(a)) continue;
             if (a.State != PlanActionState.Approved)
             {
-                if (run.Named(a)) items.Add(Item(a, "skipped", [PlanRunReason.NotApproved.ToCode(), a.State.ToCode()], 0, 0));
+                if (run.Named(a)) Add(run, items,Item(a, "skipped", [PlanRunReason.NotApproved.ToCode(), a.State.ToCode()], 0, 0));
                 continue;
             }
-            items.Add(await CopyActionAsync(run, a, ct));
+            Add(run, items,await CopyActionAsync(run, a, ct));
         }
         return Report(run, "apply", items, []);
     }
@@ -369,10 +374,10 @@ public sealed class PlanExecutor
             if (!run.Selected(a)) continue;
             if (a.State != PlanActionState.Verified)
             {
-                if (run.Named(a)) items.Add(Item(a, "skipped", [a.State.ToCode()], 0, 0));
+                if (run.Named(a)) Add(run, items,Item(a, "skipped", [a.State.ToCode()], 0, 0));
                 continue;
             }
-            items.Add(await RemoveActionAsync(run, a, emptied, ct));
+            Add(run, items,await RemoveActionAsync(run, a, emptied, ct));
         }
         var notices = await UpdateNoticesAsync(run, create: options.Notices, ct);
         return Report(run, "remove_sources", items, emptied.ToList(), notices);
@@ -458,7 +463,7 @@ public sealed class PlanExecutor
         {
             if (!run.Selected(a) || a.State is PlanActionState.Undone) continue;
             if (!run.Steps.Any(s => s.ActionId == a.Id && s.State == PlanStepState.Done)) continue;
-            items.Add(await UndoActionAsync(run, a, ct));
+            Add(run, items,await UndoActionAsync(run, a, ct));
         }
         var notices = await UpdateNoticesAsync(run, create: false, ct);
         if (run.Execute)
@@ -653,7 +658,7 @@ public sealed class PlanExecutor
             var bytes = held.Sum(h => h.Bytes);
             if (!run.Execute)
             {
-                items.Add(Item(a, "would_run", [], held.Count, bytes));
+                Add(run, items, Item(a, "would_run", [], held.Count, bytes));
                 continue;
             }
 
@@ -688,7 +693,7 @@ public sealed class PlanExecutor
                     details.Add(ex.Message);
                 }
             }
-            items.Add(Item(a, reasons.Count == 0 ? "done" : "partial", reasons, purged, purgedBytes, Join(details)));
+            Add(run, items,Item(a, reasons.Count == 0 ? "done" : "partial", reasons, purged, purgedBytes, Join(details)));
         }
         if (run.Execute)
             CleanHoldFolder(run);
@@ -1065,6 +1070,13 @@ public sealed class PlanExecutor
         new(a.Id, a.Kind.ToCode(), outcome, a.State.ToCode(), reasons, files, bytes, detail);
 
     private static string? Join(IReadOnlyCollection<string> parts) => parts.Count == 0 ? null : string.Join("; ", parts);
+
+    /// <summary>Adds the item of an action to the run and passes it to the progress display.</summary>
+    private static void Add(RunState run, List<PlanRunItem> items, PlanRunItem item)
+    {
+        items.Add(item);
+        run.Options.Progress?.Report(item);
+    }
 
     private static PlanRunReport Report(RunState run, string mode, IReadOnlyList<PlanRunItem> items, IReadOnlyList<string> emptied,
         IReadOnlyList<PlanNoticeItem>? notices = null)

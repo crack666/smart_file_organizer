@@ -24,8 +24,8 @@ _Status checked against the code on 12.11.2026; details and limits in
 | 🔎 Reveal in Explorer (right-click folder) | ✅ Done (Windows only) |
 | ✏️ Manual review & category override | ✅ Done |
 | ⚙️ Configurable Ollama model, timeout, language | ✅ Done |
-| 📦 Move/copy confirmed files to target folders | 🔜 Planned |
-| 🧹 Trash candidate bulk actions | 🔜 Planned |
+| 📦 Move/copy confirmed files to target folders | ✅ Done (CLI `sfo plan apply`, GUI plan view since 14.11.2026) |
+| 🧹 Trash candidate bulk actions | ✅ Done (GUI plan view: mark clutter for a selection, 14.11.2026) |
 
 ---
 

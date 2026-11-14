@@ -38,6 +38,25 @@ public partial class MainViewModel : ViewModelBase
     public FileDetailViewModel FileDetail => _fileDetail;
     public ScanProgressViewModel ScanProgress => _scanProgress;
     public AiProgressViewModel AiProgress => _aiProgress;
+    public PlanViewModel Plan { get; }
+
+    /// <summary>Which database the window works on; always visible in the status bar.</summary>
+    public string DatabaseText => Plan.DatabaseText;
+
+    /// <summary>The plan view instead of the welcome screen or the browser.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsWelcomeVisible))]
+    [NotifyPropertyChangedFor(nameof(IsBrowserVisible))]
+    private bool _isShowingPlan;
+
+    public bool IsWelcomeVisible => IsShowingWelcome && !IsShowingPlan;
+    public bool IsBrowserVisible => !IsShowingWelcome && !IsShowingPlan;
+
+    partial void OnIsShowingWelcomeChanged(bool value)
+    {
+        OnPropertyChanged(nameof(IsWelcomeVisible));
+        OnPropertyChanged(nameof(IsBrowserVisible));
+    }
 
     [ObservableProperty] private string _rootPath = string.Empty;
     [ObservableProperty] private bool _isScanRunning;
@@ -88,8 +107,10 @@ public partial class MainViewModel : ViewModelBase
         ScanProgressViewModel scanProgress,
         AiProgressViewModel aiProgress,
         IDirectoryClassificationRepository dirClassRepo,
-        FocusedRescanService focusedRescanService)
+        FocusedRescanService focusedRescanService,
+        PlanViewModel plan)
     {
+        Plan = plan;
         _scanJobService = scanJobService;
         _fileQueryService = fileQueryService;
         _aiCoordinator = aiCoordinator;
@@ -175,6 +196,7 @@ public partial class MainViewModel : ViewModelBase
         _activeJobId = job.Id;
         RootPath = job.RootPath;
         IsShowingWelcome = false;
+        IsShowingPlan = false;
         _scanProgress.Apply(job);
         await _folderTree.LoadJobAsync(job.Id);
         UpdateCanStartScan();
@@ -222,9 +244,21 @@ public partial class MainViewModel : ViewModelBase
         _scanProgress.StatusText = "Resuming scan…";
     }
 
+    /// <summary>Shows the plans of the open job (or of the newest job with a plan).</summary>
+    [RelayCommand]
+    public async Task OpenPlanAsync(ScanJob? job = null)
+    {
+        IsShowingPlan = true;
+        await Plan.LoadAsync(job?.Id ?? (_activeJobId > 0 ? _activeJobId : null));
+    }
+
+    [RelayCommand]
+    private void ClosePlan() => IsShowingPlan = false;
+
     [RelayCommand]
     private async Task BackToHomeAsync()
     {
+        IsShowingPlan = false;
         // Pause active work when returning to home screen
         if (IsScanRunning)
         {

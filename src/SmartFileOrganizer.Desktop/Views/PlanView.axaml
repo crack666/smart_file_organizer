@@ -1,0 +1,334 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:SmartFileOrganizer.Desktop.ViewModels"
+             x:Class="SmartFileOrganizer.Desktop.Views.PlanView"
+             x:DataType="vm:PlanViewModel"
+             Background="#1E1E1E">
+
+    <UserControl.Styles>
+        <Style Selector="TextBlock.small">
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="Foreground" Value="#A0A7B0" />
+        </Style>
+        <Style Selector="TextBlock.label">
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="Foreground" Value="#8B949E" />
+            <Setter Property="Margin" Value="0,6,0,1" />
+        </Style>
+        <Style Selector="Border.tile">
+            <Setter Property="CornerRadius" Value="4" />
+            <Setter Property="Padding" Value="8,3" />
+            <Setter Property="Margin" Value="0,0,6,0" />
+        </Style>
+        <Style Selector="Button.compact">
+            <Setter Property="Padding" Value="8,3" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Margin" Value="0,0,4,0" />
+        </Style>
+    </UserControl.Styles>
+
+    <Grid RowDefinitions="Auto,Auto,Auto,*,Auto">
+
+        <!-- ===== Header: job, plan, grouping, database ===== -->
+        <Border Grid.Row="0" Background="#252526" Padding="8,6" BorderBrush="#3E3E42" BorderThickness="0,0,0,1">
+            <DockPanel>
+                <TextBlock DockPanel.Dock="Right"
+                           Text="{Binding DatabaseText}"
+                           ToolTip.Tip="{Binding DatabasePath}"
+                           Classes="small"
+                           MaxWidth="420"
+                           TextTrimming="CharacterEllipsis"
+                           VerticalAlignment="Center" />
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                    <TextBlock Text="Plan" FontSize="16" FontWeight="SemiBold" Foreground="White" VerticalAlignment="Center" Margin="0,0,6,0" />
+                    <ComboBox ItemsSource="{Binding Jobs}" SelectedItem="{Binding SelectedJob, Mode=TwoWay}" Width="300"
+                              ToolTip.Tip="Quell-Job der Datenbank">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate x:DataType="vm:PlanJobItem">
+                                <TextBlock Text="{Binding Label}" TextTrimming="CharacterEllipsis" />
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
+                    <ComboBox ItemsSource="{Binding Plans}" SelectedItem="{Binding SelectedPlan, Mode=TwoWay}" Width="230"
+                              ToolTip.Tip="Pläne dieses Jobs, neuester zuerst">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate x:DataType="vm:PlanListItem">
+                                <TextBlock Text="{Binding Label}" />
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
+                    <ComboBox ItemsSource="{Binding Groupings}" SelectedItem="{Binding SelectedGrouping, Mode=TwoWay}" Width="130">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate x:DataType="vm:PlanGrouping">
+                                <TextBlock Text="{Binding Label}" />
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
+                    <Button Classes="compact" Content="Neu laden" Command="{Binding ReloadCommand}"
+                            ToolTip.Tip="Plan neu lesen und neu prüfen (auch was ein Agent inzwischen geändert hat)" />
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+        <!-- ===== Summary ===== -->
+        <WrapPanel Grid.Row="1" Margin="8,6,8,2">
+            <Border Classes="tile" Background="#1C3A6B">
+                <TextBlock Text="{Binding MoveText}" Foreground="White" FontSize="12" />
+            </Border>
+            <Border Classes="tile" Background="#6B2A22">
+                <TextBlock Text="{Binding RemoveText}" Foreground="White" FontSize="12" />
+            </Border>
+            <Border Classes="tile" Background="#3A3F45">
+                <TextBlock Text="{Binding StayText}" Foreground="White" FontSize="12" />
+            </Border>
+            <TextBlock Text="{Binding StatesText}" Classes="small" VerticalAlignment="Center" Margin="6,0,10,0" />
+            <Border Classes="tile" Background="#8957E5" IsVisible="{Binding HasAgentDecisions}">
+                <TextBlock Text="{Binding AgentText}" Foreground="White" FontSize="12" />
+            </Border>
+            <TextBlock Text="{Binding ProblemsText}" Foreground="#FF7B72" FontSize="12" VerticalAlignment="Center" Margin="0,0,10,0" />
+            <CheckBox Content="Quelle nicht anfassen" IsChecked="{Binding KeepSource, Mode=TwoWay}" FontSize="12"
+                      ToolTip.Tip="Für den ganzen Job: Umziehen kopiert nur, kein Original wird entfernt (sfo plan keep-source)" />
+        </WrapPanel>
+
+        <!-- ===== Actions on the ticked rows and on the whole plan ===== -->
+        <WrapPanel Grid.Row="2" Margin="8,4,8,6">
+            <TextBlock Text="{Binding CheckedText}" Foreground="White" FontSize="12" VerticalAlignment="Center" Width="90" />
+            <Button Classes="compact" Content="Bestätigen" Command="{Binding ApproveCheckedCommand}" />
+            <Button Classes="compact" Content="Ablehnen" Command="{Binding RejectCheckedCommand}" />
+            <Button Classes="compact" Content="Als Ballast entfernen" Command="{Binding MarkCheckedForRemovalCommand}"
+                    ToolTip.Tip="Löschen, wo die Bibliothek den Inhalt schon hat, sonst Quarantäne; neu zu bestätigen" />
+            <Button Classes="compact" Content="Belassen" Command="{Binding LeaveCheckedCommand}" />
+            <Button Classes="compact" Content="Umziehen" Command="{Binding MoveCheckedCommand}" />
+            <Button Classes="compact" Content="Zurücksetzen" Command="{Binding ResetCheckedCommand}"
+                    ToolTip.Tip="Bestätigt oder abgelehnt wieder auf „Vorgeschlagen“" />
+            <Button Classes="compact" Content="Auswahl leeren" Command="{Binding ClearChecksCommand}" Margin="0,0,16,0" />
+            <Button Classes="compact" Content="Alle bestätigen" Command="{Binding ApproveAllCommand}"
+                    ToolTip.Tip="Nur Aktionen ohne Problem; sensible Aktionen nur einzeln" />
+            <Button Classes="compact" Content="Alle ablehnen" Command="{Binding RejectAllCommand}" />
+            <Button Classes="compact" Content="Agent-Entscheidungen zurücksetzen" Command="{Binding ResetAgentDecisionsCommand}"
+                    IsEnabled="{Binding HasAgentDecisions}" />
+        </WrapPanel>
+
+        <!-- ===== List and detail ===== -->
+        <Grid Grid.Row="3" ColumnDefinitions="*,4,430">
+
+            <ListBox Grid.Column="0"
+                     ItemsSource="{Binding Rows}"
+                     SelectedItem="{Binding SelectedRow, Mode=TwoWay}"
+                     Background="#1E1E1E"
+                     BorderThickness="0,1,0,0"
+                     BorderBrush="#3E3E42">
+                <ListBox.Styles>
+                    <Style Selector="ListBoxItem">
+                        <Setter Property="Padding" Value="0" />
+                        <Setter Property="Margin" Value="0" />
+                    </Style>
+                </ListBox.Styles>
+                <ListBox.DataTemplates>
+                    <!-- Group header: a bundle or a source folder -->
+                    <DataTemplate x:DataType="vm:PlanGroupViewModel">
+                        <Grid ColumnDefinitions="26,*,Auto" Background="#2D2D30" Margin="0,4,0,0">
+                            <Button Grid.Column="0" Content="{Binding ExpandGlyph}" Background="Transparent" BorderThickness="0"
+                                    Padding="6,2" Foreground="White"
+                                    Command="{Binding $parent[ListBox].((vm:PlanViewModel)DataContext).ToggleGroupCommand}"
+                                    CommandParameter="{Binding}" />
+                            <StackPanel Grid.Column="1" Margin="2,4" Spacing="1">
+                                <TextBlock Text="{Binding Title}" FontWeight="SemiBold" Foreground="White" TextTrimming="CharacterEllipsis"
+                                           ToolTip.Tip="{Binding Subtitle}" />
+                                <TextBlock Text="{Binding Summary}" Classes="small" TextTrimming="CharacterEllipsis" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center" Margin="4,0,8,0">
+                                <Button Classes="compact" Content="Auswählen"
+                                        Command="{Binding $parent[ListBox].((vm:PlanViewModel)DataContext).CheckGroupCommand}"
+                                        CommandParameter="{Binding}" />
+                                <Button Classes="compact" Content="Bestätigen"
+                                        Command="{Binding $parent[ListBox].((vm:PlanViewModel)DataContext).ApproveGroupCommand}"
+                                        CommandParameter="{Binding}" />
+                                <Button Classes="compact" Content="Ablehnen"
+                                        Command="{Binding $parent[ListBox].((vm:PlanViewModel)DataContext).RejectGroupCommand}"
+                                        CommandParameter="{Binding}" />
+                            </StackPanel>
+                        </Grid>
+                    </DataTemplate>
+
+                    <!-- One action -->
+                    <DataTemplate x:DataType="vm:PlanActionRowViewModel">
+                        <Grid ColumnDefinitions="30,92,*,110,150" Margin="0,1" Background="Transparent">
+                            <CheckBox Grid.Column="0" IsChecked="{Binding IsChecked, Mode=TwoWay}" Margin="8,0,0,0" MinWidth="0" />
+                            <Border Grid.Column="1" Background="{Binding KindColor}" CornerRadius="3" Padding="6,2"
+                                    VerticalAlignment="Center" HorizontalAlignment="Left" ToolTip.Tip="{Binding KindTip}">
+                                <TextBlock Text="{Binding KindLabel}" Foreground="White" FontSize="11" FontWeight="SemiBold" />
+                            </Border>
+                            <StackPanel Grid.Column="2" Margin="6,3" Spacing="1">
+                                <TextBlock Text="{Binding Name}" Foreground="White" TextTrimming="CharacterEllipsis" />
+                                <TextBlock Classes="small" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding TargetText}">
+                                    <Run Text="{Binding RelativeFolder}" />
+                                    <Run Text="  " />
+                                    <Run Text="{Binding TargetText}" />
+                                </TextBlock>
+                            </StackPanel>
+                            <TextBlock Grid.Column="3" Text="{Binding SizeText}" Classes="small" VerticalAlignment="Center" />
+                            <StackPanel Grid.Column="4" Orientation="Horizontal" Spacing="4" VerticalAlignment="Center">
+                                <TextBlock Text="{Binding StateLabel}" Foreground="{Binding StateColor}" FontSize="12" FontWeight="SemiBold" />
+                                <Border Background="#8957E5" CornerRadius="3" Padding="4,0" IsVisible="{Binding DecidedByAgent}"
+                                        ToolTip.Tip="Von einem Agenten entschieden">
+                                    <TextBlock Text="Agent" Foreground="White" FontSize="10" />
+                                </Border>
+                                <Border Background="#9E6A03" CornerRadius="3" Padding="4,0" IsVisible="{Binding IsSensitive}"
+                                        ToolTip.Tip="Sensibel: nur einzeln zu entscheiden">
+                                    <TextBlock Text="sensibel" Foreground="White" FontSize="10" />
+                                </Border>
+                                <TextBlock Text="Problem" Foreground="#FF7B72" FontSize="11" IsVisible="{Binding HasProblems}"
+                                           ToolTip.Tip="{Binding ProblemsText}" />
+                            </StackPanel>
+                        </Grid>
+                    </DataTemplate>
+                </ListBox.DataTemplates>
+            </ListBox>
+
+            <GridSplitter Grid.Column="1" ResizeDirection="Columns" Background="#2D2D30" />
+
+            <!-- ===== Detail of the selected action ===== -->
+            <Border Grid.Column="2" Background="#252526" BorderBrush="#3E3E42" BorderThickness="1,1,0,0">
+                <Panel>
+                    <TextBlock Text="Eine Aktion wählen, um sie anzusehen." Classes="small" Margin="12"
+                               IsVisible="{Binding !HasDetail}" />
+                    <ScrollViewer IsVisible="{Binding HasDetail}">
+                        <StackPanel Margin="12,8" Spacing="2">
+                            <TextBlock Text="{Binding DetailTitle}" FontSize="15" FontWeight="SemiBold" Foreground="White" TextWrapping="Wrap" />
+                            <TextBlock Text="{Binding DetailSource}" Classes="small" TextWrapping="Wrap" />
+                            <WrapPanel Margin="0,6,0,0">
+                                <Button Classes="compact" Content="Öffnen" Command="{Binding OpenSelectedCommand}"
+                                        ToolTip.Tip="Mit dem Standardprogramm öffnen" />
+                                <Button Classes="compact" Content="Im Ordner zeigen" Command="{Binding RevealSelectedCommand}" />
+                                <Button Classes="compact" Content="Ziel zeigen" Command="{Binding RevealTargetCommand}" />
+                            </WrapPanel>
+
+                            <TextBlock Text="Art" Classes="label" />
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <ComboBox ItemsSource="{Binding KindOptions}" SelectedItem="{Binding SelectedKind, Mode=TwoWay}" Width="150">
+                                    <ComboBox.ItemTemplate>
+                                        <DataTemplate x:DataType="vm:PlanKindOption">
+                                            <StackPanel Orientation="Horizontal" Spacing="6" ToolTip.Tip="{Binding Code}">
+                                                <Border Background="{Binding Color}" Width="10" Height="10" CornerRadius="2" VerticalAlignment="Center" />
+                                                <TextBlock Text="{Binding Label}" />
+                                            </StackPanel>
+                                        </DataTemplate>
+                                    </ComboBox.ItemTemplate>
+                                </ComboBox>
+                                <TextBlock Text="{Binding DetailRecommended}" Classes="small" VerticalAlignment="Center" />
+                            </StackPanel>
+                            <WrapPanel Margin="0,6,0,0">
+                                <Button Classes="compact" Content="Bestätigen" Command="{Binding ApproveSelectedCommand}" />
+                                <Button Classes="compact" Content="Ablehnen" Command="{Binding RejectSelectedCommand}" />
+                                <Button Classes="compact" Content="Als Ballast" Command="{Binding MarkSelectedForRemovalCommand}" />
+                                <Button Classes="compact" Content="Belassen" Command="{Binding LeaveSelectedCommand}" />
+                            </WrapPanel>
+
+                            <TextBlock Text="Ziel" Classes="label" />
+                            <TextBlock Text="{Binding DetailTarget}" Foreground="White" FontSize="12" TextWrapping="Wrap" />
+                            <TextBlock Text="Begründung" Classes="label" />
+                            <TextBlock Text="{Binding DetailReason}" Foreground="White" FontSize="12" TextWrapping="Wrap" />
+                            <TextBlock Text="{Binding DetailNote}" Classes="small" TextWrapping="Wrap"
+                                       IsVisible="{Binding DetailNote, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                            <TextBlock Text="{Binding DetailProblems}" Foreground="#FF7B72" FontSize="12" TextWrapping="Wrap"
+                                       IsVisible="{Binding DetailProblems, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                            <TextBlock Text="{Binding DetailDecision}" Classes="small" TextWrapping="Wrap" Margin="0,4,0,0" />
+
+                            <TextBlock Text="Datei" Classes="label" />
+                            <TextBlock Text="{Binding DetailMarker}" Foreground="#E3B341" FontSize="12" TextWrapping="Wrap"
+                                       IsVisible="{Binding DetailMarker, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                            <TextBlock Text="{Binding DetailDescription}" Foreground="White" FontSize="12" TextWrapping="Wrap"
+                                       IsVisible="{Binding DetailDescription, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                            <TextBlock Text="{Binding DetailFacts}" Classes="small" TextWrapping="Wrap" />
+
+                            <Border Margin="0,8,0,0" Background="White" CornerRadius="3" Padding="2" HorizontalAlignment="Left"
+                                    IsVisible="{Binding HasImagePreview}">
+                                <Image Source="{Binding ImagePreview}" MaxHeight="280" MaxWidth="400" Stretch="Uniform" />
+                            </Border>
+                            <Border Margin="0,8,0,0" Background="#1E1E1E" BorderBrush="#3E3E42" BorderThickness="1" CornerRadius="3"
+                                    Padding="6" MaxHeight="220" IsVisible="{Binding HasTextPreview}">
+                                <ScrollViewer>
+                                    <TextBlock Text="{Binding TextPreview}" FontFamily="Consolas,Menlo,monospace" FontSize="11"
+                                               Foreground="#D0D0D0" TextWrapping="Wrap" />
+                                </ScrollViewer>
+                            </Border>
+                            <TextBlock Text="{Binding PreviewMessage}" Classes="small" TextWrapping="Wrap" Margin="0,8,0,0"
+                                       IsVisible="{Binding HasPreviewMessage}" />
+                        </StackPanel>
+                    </ScrollViewer>
+                </Panel>
+            </Border>
+        </Grid>
+
+        <!-- ===== Execution: dry run, two steps, undo, progress, results ===== -->
+        <Border Grid.Row="4" Background="#252526" BorderBrush="#3E3E42" BorderThickness="0,1,0,0" Padding="8,6">
+            <StackPanel Spacing="4">
+                <DockPanel>
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="6" IsVisible="{Binding IsRunning}">
+                        <ProgressBar Value="{Binding RunProgress}" Minimum="0" Maximum="100" Width="200" Height="6" VerticalAlignment="Center" />
+                        <TextBlock Text="{Binding RunProgressText}" Classes="small" VerticalAlignment="Center" MaxWidth="260" TextTrimming="CharacterEllipsis" />
+                        <Button Classes="compact" Content="Abbrechen" Command="{Binding CancelRunCommand}" />
+                    </StackPanel>
+                    <WrapPanel>
+                        <Button Classes="compact" Content="Trockenlauf" Command="{Binding DryRunCommand}"
+                                ToolTip.Tip="Schritt 1 ohne Änderung: was kopiert würde, was übersprungen würde, Kollisionen" />
+                        <Button Classes="compact" Content="1 · Kopieren und prüfen" Command="{Binding ApplyCommand}" />
+                        <Button Classes="compact" Content="2 · Originale entfernen" Command="{Binding RemoveSourcesCommand}" />
+                        <Button Classes="compact" Content="Zurücknehmen" Command="{Binding UndoCommand}" Margin="0,0,12,0" />
+                        <TextBlock Text="{Binding StatusText}" Foreground="White" FontSize="12" VerticalAlignment="Center"
+                                   TextTrimming="CharacterEllipsis" MaxWidth="640" ToolTip.Tip="{Binding StatusText}" />
+                    </WrapPanel>
+                </DockPanel>
+                <TextBlock IsVisible="{Binding RunTitle, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" FontSize="12">
+                    <Run Text="{Binding RunTitle}" FontWeight="SemiBold" Foreground="White" />
+                    <Run Text="  " />
+                    <Run Text="{Binding RunSummary}" Foreground="#A0A7B0" />
+                </TextBlock>
+                <ListBox ItemsSource="{Binding RunLines}" MaxHeight="110" Background="#1E1E1E"
+                         IsVisible="{Binding RunTitle, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                    <ListBox.Styles>
+                        <Style Selector="ListBoxItem">
+                            <Setter Property="Padding" Value="6,1" />
+                        </Style>
+                    </ListBox.Styles>
+                    <ListBox.ItemTemplate>
+                        <DataTemplate x:DataType="vm:PlanRunLine">
+                            <Grid ColumnDefinitions="220,90,*">
+                                <TextBlock Grid.Column="0" Text="{Binding Name}" Foreground="White" FontSize="11" TextTrimming="CharacterEllipsis" />
+                                <TextBlock Grid.Column="1" Text="{Binding Outcome}" Foreground="{Binding OutcomeColor}" FontSize="11" />
+                                <TextBlock Grid.Column="2" FontSize="11" Foreground="#A0A7B0" TextTrimming="CharacterEllipsis">
+                                    <Run Text="{Binding Reasons}" />
+                                    <Run Text=" " />
+                                    <Run Text="{Binding Detail}" />
+                                </TextBlock>
+                            </Grid>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </StackPanel>
+        </Border>
+
+        <!-- ===== Confirmation before a step that changes files ===== -->
+        <Grid Grid.Row="0" Grid.RowSpan="5" Background="#B0000000" IsVisible="{Binding HasConfirmation}">
+            <Border Background="#2D2D30" BorderBrush="#5A626B" BorderThickness="1" CornerRadius="6" Padding="20,16"
+                    MaxWidth="640" HorizontalAlignment="Center" VerticalAlignment="Center">
+                <StackPanel Spacing="8">
+                    <TextBlock Text="{Binding Confirmation.Title}" FontSize="16" FontWeight="SemiBold" Foreground="White" />
+                    <ItemsControl ItemsSource="{Binding Confirmation.Lines}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="x:String">
+                                <TextBlock Text="{Binding}" Foreground="#D0D0D0" FontSize="13" TextWrapping="Wrap" Margin="0,2" />
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8" Margin="0,8,0,0">
+                        <Button Content="Abbrechen" Command="{Binding Confirmation.CancelCommand}" />
+                        <Button Content="{Binding Confirmation.ConfirmText}" Command="{Binding Confirmation.AcceptCommand}"
+                                Background="{Binding Confirmation.ConfirmColor}" Foreground="White" />
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </Grid>
+    </Grid>
+</UserControl>

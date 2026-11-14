@@ -32,6 +32,26 @@ To run the desktop app (needs a running Ollama for the AI part):
 dotnet run --project src/SmartFileOrganizer.Desktop
 ```
 
+The GUI resolves its database like the CLI: `SFO_DB` (and `SFO_SETTINGS`) win over
+the default under the application data folder, and the window shows which
+database is open. To look at a plan in another database:
+
+```bash
+SFO_DB=<folder>/data.db SFO_SETTINGS=<folder>/settings.json dotnet run --project src/SmartFileOrganizer.Desktop
+```
+
+```powershell
+$env:SFO_DB = "<folder>\data.db"; $env:SFO_SETTINGS = "<folder>\settings.json"; dotnet run --project src/SmartFileOrganizer.Desktop
+```
+
+"Plan" in the toolbar (or on a recent scan) opens the plan view, since
+14.11.2026 ([#15](https://github.com/crack666/smart_file_organizer/issues/15)):
+the plans of a job grouped by bundle or folder, preview and description per
+action, kind and decision for one action, a selection, a group or all, clutter
+marked with one click, and the two execution steps of the CLI, each after a
+confirmation, with dry run, progress, stop and undo. Screenshots from a
+generated test folder: [docs/images](docs/images/01-plan-agent.png).
+
 The same work runs from the command line, with `--json` output for scripts
 and models ([docs/cli.md](docs/cli.md)):
 
