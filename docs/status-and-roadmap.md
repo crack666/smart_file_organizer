@@ -316,6 +316,18 @@ _Checked 14.11.2026 on the branch for https://github.com/crack666/smart_file_org
 - Not built: updating the library job in place after `plan apply` (the copy counts as backed up only after the library
   is scanned again); carrying directory verdicts and summaries over in a refresh.
 
+### Duplicates over a whole holding
+
+_Checked 14.11.2026 on the branch for https://github.com/crack666/smart_file_organizer/issues/87 (schema step 29):
+`dotnet test` 949 passed, 2 skipped; `sfo duplicates` runs in-process on generated trees in a temp folder
+(`DuplicateServiceTests`, `DuplicatesCommandTests`). No run on a real medium or network drive._
+
+- `sfo duplicates <job> [<job> ...]` reports files and folders with the same content over jobs of any role, reading in
+  stages (size, sample checksum, full SHA-256 with `--verify`) and keeping every checksum in `content_fingerprints`.
+  See [cli.md](cli.md#sfo-duplicates-job-job-).
+- Not built: similar instead of equal files; hashing on the storage device itself; a finding or plan action from the
+  report (removal goes through `sfo compare`, `sfo findings`, `sfo plan`).
+
 ### Placing into the library
 
 _Checked 12.11.2026 on the branch for
