@@ -91,6 +91,29 @@
     "#recycle", ".trash", "$recycle.bin", ".trashes"
   ],
 
+  // General features of what pictures show (Issue 85). A content check that names only these as what a unit and a
+  // folder have in common is unclear, never fitting: "both indoors, everyday life" fits half of every archive.
+  "general_features": [
+    "indoor", "indoors", "outdoor", "outdoors", "inside", "outside", "drinnen", "draussen", "innen", "aussen",
+    "everyday", "everyday life", "life", "alltag", "daily", "routine", "home", "zuhause", "house", "haus",
+    "people", "person", "persons", "man", "woman", "men", "women", "child", "children", "menschen", "leute", "mensch",
+    "room", "zimmer", "raum", "interior", "building", "gebaeude", "street", "strasse", "scene", "szene",
+    "day", "tag", "night", "nacht", "daylight", "evening", "abend", "morning", "morgen",
+    "spring", "summer", "autumn", "fall", "winter", "fruehling", "sommer", "herbst",
+    "photo", "photos", "picture", "pictures", "image", "images", "video", "videos", "foto", "fotos", "bild", "bilder",
+    "none", "unknown", "general", "various", "different", "mixed", "several", "some", "both", "same",
+    "casual", "normal", "ordinary", "group", "gruppe", "selfie", "portrait", "close-up", "closeup", "view", "shot"
+  ],
+
+  // Names of folders that hold material from elsewhere: films, series, downloads of others (Issue 85). Such a folder,
+  // and everything below it, is never the parent of a new folder for own pictures or papers.
+  "foreign_names": [
+    "filme", "film", "movies", "movie", "kino", "serien", "serie", "series", "tv", "tv shows", "tvshows", "shows",
+    "dokus", "dokumentationen", "documentaries", "anime", "musik", "music", "hoerbuecher", "audiobooks", "podcasts",
+    "downloads", "download", "torrents", "spiele", "games", "programme", "programs", "software", "apps",
+    "wallpaper", "wallpapers", "hintergrundbilder", "memes", "stock", "clipart", "vorlagen", "templates"
+  ],
+
   // Extra words in file names that mark access data, beyond the scan's sensitive-file rules.
   "sensitive_name_words": ["recovery", "wiederherstellung", "2fa", "backup codes", "backup-codes", "backupcodes", "mnemonic", "tan-liste", "tanliste", "puk"],
 

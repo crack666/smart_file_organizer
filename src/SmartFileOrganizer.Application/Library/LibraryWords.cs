@@ -59,6 +59,12 @@ public sealed class LibraryWords
 
     /// <summary>Folder names of technical parts (cache, thumbnails, css): closed for loose files (Issue 85).</summary>
     public IReadOnlySet<string> TechnicalNames { get; private init; } = new HashSet<string>();
+
+    /// <summary>Words of general features (indoors, everyday life, people, a season): a content check never fits on them alone (Issue 85).</summary>
+    public IReadOnlySet<string> GeneralFeatures { get; private init; } = new HashSet<string>();
+
+    /// <summary>Folder names of material from elsewhere (films, series, downloads of others): never the parent of a new folder (Issue 85).</summary>
+    public IReadOnlySet<string> ForeignNames { get; private init; } = new HashSet<string>();
     public IReadOnlyList<string> SensitiveNameWords { get; private init; } = [];
     public IReadOnlySet<string> DeviceMarkers { get; private init; } = new HashSet<string>();
     public IReadOnlySet<string> ComputerMarkers { get; private init; } = new HashSet<string>();
@@ -165,6 +171,8 @@ public sealed class LibraryWords
         StopWords = [.. a.StopWords ?? [], .. b.StopWords ?? []],
         CommonWords = [.. a.CommonWords ?? [], .. b.CommonWords ?? []],
         TechnicalNames = [.. a.TechnicalNames ?? [], .. b.TechnicalNames ?? []],
+        GeneralFeatures = [.. a.GeneralFeatures ?? [], .. b.GeneralFeatures ?? []],
+        ForeignNames = [.. a.ForeignNames ?? [], .. b.ForeignNames ?? []],
         SensitiveNameWords = [.. a.SensitiveNameWords ?? [], .. b.SensitiveNameWords ?? []],
         DeviceMarkers = [.. a.DeviceMarkers ?? [], .. b.DeviceMarkers ?? []],
         ComputerMarkers = [.. a.ComputerMarkers ?? [], .. b.ComputerMarkers ?? []],
@@ -204,6 +212,8 @@ public sealed class LibraryWords
             StopWords = Set(dto.StopWords),
             CommonWords = Set(dto.CommonWords),
             TechnicalNames = Set(dto.TechnicalNames),
+            GeneralFeatures = Set(dto.GeneralFeatures),
+            ForeignNames = Set(dto.ForeignNames),
             SensitiveNameWords = (dto.SensitiveNameWords ?? []).Select(Normalize).Distinct().ToList(),
             DeviceMarkers = Set(dto.DeviceMarkers),
             ComputerMarkers = Set(dto.ComputerMarkers),
@@ -248,6 +258,8 @@ public sealed class LibraryWords
         public List<string>? StopWords { get; set; }
         public List<string>? CommonWords { get; set; }
         public List<string>? TechnicalNames { get; set; }
+        public List<string>? GeneralFeatures { get; set; }
+        public List<string>? ForeignNames { get; set; }
         public List<string>? SensitiveNameWords { get; set; }
         public List<string>? DeviceMarkers { get; set; }
         public List<string>? ComputerMarkers { get; set; }

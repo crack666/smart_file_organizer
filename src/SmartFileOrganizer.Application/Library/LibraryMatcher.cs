@@ -80,7 +80,8 @@ public sealed record MatchCandidate(
     CandidateContent? Content = null);
 
 /// <summary>What the content check said about one candidate, and what the folder shows.</summary>
-public sealed record CandidateContent(ContentFit Fit, string Reason, ContentDescription? Folder);
+/// <param name="Shared">The concrete feature both share, as the judge named it (Issue 85); null when none.</param>
+public sealed record CandidateContent(ContentFit Fit, string Reason, ContentDescription? Folder, string? Shared = null, SharedFeatureKind? SharedKind = null);
 
 /// <summary>
 /// The content check of a match (https://github.com/crack666/smart_file_organizer/issues/56): per candidate whether

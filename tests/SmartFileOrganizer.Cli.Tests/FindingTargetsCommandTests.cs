@@ -143,7 +143,11 @@ public partial class FindingTargetsCommandTests : IDisposable
             var verdicts = lines.Where(l => CandidateRegex().IsMatch(l)).Select(l =>
             {
                 var fit = Occasion(l) == unit ? "fits" : "contradicts";
-                return new { id = l[..l.IndexOf(' ')], fit, reason = fit == "fits" ? $"both show {unit}" : "another occasion" };
+                return new
+                {
+                    id = l[..l.IndexOf(' ')], fit, shared = fit == "fits" ? $"the {unit} on the snowy slope" : "",
+                    shared_kind = fit == "fits" ? "occasion" : "none", reason = fit == "fits" ? $"both show {unit}" : "another occasion"
+                };
             });
             var content = JsonSerializer.Serialize(new { verdicts });
             return Task.FromResult(new LibraryAdviceReply(content, "scripted-judge", content, null));

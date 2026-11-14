@@ -193,6 +193,32 @@ public enum ContentFit
     [JsonStringEnumMemberName("unclear")] Unclear
 }
 
+/// <summary>
+/// What kind of concrete feature a unit and a candidate folder share (https://github.com/crack666/smart_file_organizer/issues/85).
+/// <c>fits</c> needs one of the first five; general features (indoors, everyday life, people seen, a season) are
+/// <see cref="None"/> and make the answer at most <c>unclear</c>.
+/// </summary>
+public enum SharedFeatureKind
+{
+    /// <summary>The same occasion: the same trip, the same party, the same event.</summary>
+    [JsonStringEnumMemberName("occasion")] Occasion,
+
+    /// <summary>The same person or the same group of people.</summary>
+    [JsonStringEnumMemberName("person")] Person,
+
+    /// <summary>The same place: a town, a building, a landscape that is named or clearly the same.</summary>
+    [JsonStringEnumMemberName("place")] Place,
+
+    /// <summary>The same topic or activity: skiing, a renovation, a course of study.</summary>
+    [JsonStringEnumMemberName("topic")] Topic,
+
+    /// <summary>The same issuer of documents: a company, an authority, a school.</summary>
+    [JsonStringEnumMemberName("issuer")] Issuer,
+
+    /// <summary>Nothing concrete in common; general features at most.</summary>
+    [JsonStringEnumMemberName("none")] None
+}
+
 /// <summary>Whether the content of a match was checked, and why not.</summary>
 public enum ContentCheckStatus
 {

@@ -184,7 +184,7 @@ public sealed class OllamaLibraryAdvisor : ILibraryAdvisor
     }
 
     /// <summary>Answer tokens for a content check: a code and one short sentence per candidate.</summary>
-    public const int FitMaxAnswerTokens = 400;
+    public const int FitMaxAnswerTokens = 500;
 
     /// <summary>
     /// <c>sfo library match</c>, task <c>fit</c> (https://github.com/crack666/smart_file_organizer/issues/56): whether what
@@ -199,13 +199,17 @@ public sealed class OllamaLibraryAdvisor : ILibraryAdvisor
         sb.AppendLine("its period and the same kind of description made from a few of its files. You never see the files themselves.");
         sb.AppendLine();
         sb.AppendLine("For each candidate answer one code:");
-        sb.AppendLine("- fits: the same occasion or activity (the same trip, the same party), or the same kind of document from the same issuer.");
+        sb.AppendLine("- fits: both sides share one concrete feature: the same occasion (the same trip, the same party), the same person or");
+        sb.AppendLine("  group, the same place, the same topic or activity, or the same issuer of documents. Name it in shared and its kind");
+        sb.AppendLine("  in shared_kind (occasion, person, place, topic, issuer).");
         sb.AppendLine("- contradicts: clearly something else: another occasion or activity, another kind of document or another issuer.");
         sb.AppendLine("  A matching period or year never makes a fit: a birthday in the week of a ski trip contradicts the ski trip folder.");
-        sb.AppendLine("- unclear: the descriptions are too thin or too mixed to tell.");
+        sb.AppendLine("- unclear: the descriptions are too thin or too mixed to tell, or they share only general features.");
+        sb.AppendLine("General features are never a fit: indoors or outdoors, everyday life, people seen or not, a season, the time of day.");
+        sb.AppendLine("\"Both indoors, everyday life\" is unclear, not fits. Without a concrete shared feature, shared_kind is none.");
         sb.AppendLine("Judge by what most files show; one odd picture does not change it. Do not invent what the descriptions do not say.");
         sb.AppendLine($"Give a reason of one short sentence in {language} that names what was seen on both sides.");
-        sb.AppendLine("Answer with JSON only: verdicts, each with id (as listed), fit, reason.");
+        sb.AppendLine("Answer with JSON only: verdicts, each with id (as listed), fit, shared, shared_kind, reason.");
         return sb.ToString();
     }
 
@@ -239,9 +243,11 @@ public sealed class OllamaLibraryAdvisor : ILibraryAdvisor
                     {
                         id = Str(),
                         fit = new { type = "string", @enum = VerdictCodes.All<ContentFit>() },
+                        shared = Str(),
+                        shared_kind = new { type = "string", @enum = VerdictCodes.All<SharedFeatureKind>() },
                         reason = Str()
                     },
-                    required = new[] { "id", "fit", "reason" }
+                    required = new[] { "id", "fit", "shared", "shared_kind", "reason" }
                 }
             }
         },

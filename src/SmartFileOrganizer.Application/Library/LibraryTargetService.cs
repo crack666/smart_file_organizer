@@ -838,7 +838,9 @@ public sealed partial class LibraryTargetService
         foreach (var (fit, _) in asked)
         {
             var verdict = answer.Verdicts.GetValueOrDefault(fit.Id) ?? new FitVerdict(ContentFit.Unclear, "the model said nothing about this folder");
-            byKey[fit.Key] = new CandidateContent(verdict.Fit, verdict.Reason, fit.Description);
+            // fits only with a concrete shared feature, whatever the judge said (Issue 85).
+            verdict = FitRules.Enforce(verdict, query.Words);
+            byKey[fit.Key] = new CandidateContent(verdict.Fit, verdict.Reason, fit.Description, verdict.Shared, verdict.SharedKind);
         }
         return new ContentCheck(ContentCheckStatus.Checked, unitDescription, byKey, answer.Model);
     }

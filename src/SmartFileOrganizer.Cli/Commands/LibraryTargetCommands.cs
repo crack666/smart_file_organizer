@@ -125,7 +125,9 @@ public static class LibraryTargetCommands
     }
 
     /// <summary>The content check of one candidate: fits, contradicts or unclear, why, and what the folder shows.</summary>
-    public sealed record ContentView(string Fit, string Reason, DescriptionView? Folder);
+    /// <param name="Shared">The concrete feature both share (Issue 85: <c>fits</c> needs one); null when none was named.</param>
+    /// <param name="SharedKind">A <c>SharedFeatureKind</c> code: occasion, person, place, topic, issuer or none.</param>
+    public sealed record ContentView(string Fit, string Reason, DescriptionView? Folder, string? Shared = null, string? SharedKind = null);
 
     /// <summary>Whether the content was checked; <c>status</c> is a <see cref="ContentCheckStatus"/> code.</summary>
     public sealed record ContentCheckView(string Status, string? Model, string? Note);
@@ -412,7 +414,7 @@ public static class LibraryTargetCommands
             Full(library?.RootPath, c.Destination), c.Destination, u.KeepWhole, c.Score, c.Certainty.ToCode(), c.Reason,
             c.Signals.Select(s => new SignalView(s.Signal.ToCode(), Math.Round(s.Value, 3), s.Weight, s.Agrees, s.Contradicts, s.Detail)).ToList(),
             Weak(c.Weak), library?.Id,
-            c.Content is { } cc ? new ContentView(cc.Fit.ToCode(), cc.Reason, DescriptionView.From(cc.Folder)) : null);
+            c.Content is { } cc ? new ContentView(cc.Fit.ToCode(), cc.Reason, DescriptionView.From(cc.Folder), cc.Shared, cc.SharedKind.ToCode()) : null);
 
         var candidates = (a.Result?.Candidates ?? []).Select((c, i) => View(c, i, LibraryOf(i))).ToList();
         var unconfirmed = (a.Result?.Unconfirmed ?? []).Select((c, i) =>
