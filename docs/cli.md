@@ -1972,6 +1972,10 @@ The change is checked at once; a refused change changes nothing and ends with `p
 `{ "plan_id", "refused": [ { "action_id", "problems", "message" } ] }` as result. A changed action is `proposed`
 again. Verified, executed, failed and undone actions are not changed. Result: `{ "plan_id", "items": [ action ] }`.
 
+The GUI plan view (since 14.11.2026) changes the same plan through the same `PlanService`, with the same checks. When
+it switches an action to `quarantine` without a target of its own, the target is
+`<library>/<Plan:QuarantineFolder>/<rest of the path>`; `Plan:QuarantineFolder` defaults to `_sfo-quarantine`.
+
 ### `sfo plan import <plan> <file>`
 
 Many changes at once, as a steering model writes them; all or none, checked as `set`:

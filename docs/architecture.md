@@ -21,13 +21,16 @@ The repository is intentionally split into focused layers.
   - composition root for everything except the GUI; no Avalonia reference
   - resolves database and settings paths, ships the default `appsettings.json`
 - `src/SmartFileOrganizer.Desktop`
-  - Avalonia UI, MVVM view models, GUI-only services (preview bitmap adapter)
+  - Avalonia UI, MVVM view models, GUI-only services (preview bitmap adapter, `IShellLauncher` for open and reveal)
+  - `ServiceConfigurator.Build(configure, overrides)` takes host options and service overrides, so tests compose the GUI on a temp database
+  - the plan view (`PlanViewModel`) has no file logic of its own: it reads and changes plans through `PlanService` and runs them through `PlanExecutor`, the same calls as `sfo plan`
 - `src/SmartFileOrganizer.Cli`
   - command line `sfo` on top of the Hosting project; commands and the JSON contract are described in [cli.md](cli.md)
 - `tests/*`
   - unit and integration-style validation for the core logic
   - `SmartFileOrganizer.Hosting.Tests` references only the Hosting project and proves the core runs without the GUI
   - `SmartFileOrganizer.Cli.Tests` runs `sfo` in-process against a temp folder and database
+  - `SmartFileOrganizer.Desktop.Tests` makes a plan through `sfo` in-process and drives the plan view model and, Avalonia headless, the main window; `SFO_SCREENSHOT_DIR` saves the rendered frames
 
 ## Design intent
 

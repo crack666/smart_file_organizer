@@ -165,6 +165,27 @@ yet against a real Ollama restart.
 - Recent scans on the welcome screen.
 - Right-click on a folder opens it in the file manager. This calls
   `explorer.exe` and therefore only works on Windows.
+- Plan view (since 14.11.2026,
+  [#15](https://github.com/crack666/smart_file_organizer/issues/15)): plan
+  picker per job of the open database, which is named in the window; actions
+  grouped by bundle or source folder with kind (fixed colour), target, reason,
+  origin, state and an "Agent" mark for decisions an agent made, which can be
+  reset to proposed in one go. Detail with preview (image, first page or text
+  start, otherwise stored facts), description and marker, "Öffnen" / "Im
+  Ordner zeigen" through the system shell (Windows, macOS, `xdg-open`). Kind
+  and decision for one action, the ticked rows, a group or all; "Als Ballast"
+  sets quarantine or `delete_source` (`PlanService.MarkForRemovalAsync`), with
+  the same checks as the CLI. Summary of what moves, is removed and stays.
+  Dry run, step 1 (copy and verify) and step 2 (originals to the hold folder,
+  with space freed) each ask first, show progress and can be stopped; undo
+  takes the last run back. All through `PlanService` and `PlanExecutor`.
+  _Checked 14.11.2026: `SmartFileOrganizer.Desktop.Tests` 12 passed on Windows
+  and on Linux (Avalonia headless), one pass rendered in the main window
+  ([screenshots](images/01-plan-agent.png)); the real window was not driven by
+  hand._ Limits: sensitive actions are decided one by one and run only with
+  `sfo plan apply --action`; `sfo plan purge` is CLI only; "Als Ballast" picks
+  `delete_source` only when the library comparison shows the content is held
+  there, otherwise quarantine.
 
 ### Command line
 
@@ -392,11 +413,14 @@ run by hand on a generated tree against a temp database. No run with a real mode
   and summaries already written are not redone by it.
 - gemma4 ignores schema field names; the parser accepts aliases such as
   `classification` for `category`. Other models may differ.
-- No bulk review, no review filters, no file operations (move, copy,
-  archive) yet. See milestones C and D.
+- No review filters in the file browser yet. Bulk decisions and file
+  operations exist for plans (CLI, and the GUI plan view since 14.11.2026);
+  until then this line read "No bulk review, no review filters, no file
+  operations (move, copy, archive) yet".
 - Sensitive-file protection covers what goes through `SensitiveOutputGuard`
   (today: the CSV export). The GUI shows everything, as it is used at the
-  machine itself. The header probe runs only during a scan or rescan;
+  machine itself, except that the plan view withholds the text of files
+  marked as access data (`Sensitive:Disclosure`, since 14.11.2026). The header probe runs only during a scan or rescan;
   databases scanned before schema step 2 are protected by the name rules
   (re-evaluated on output) and by model markers, not by the header rule.
 
