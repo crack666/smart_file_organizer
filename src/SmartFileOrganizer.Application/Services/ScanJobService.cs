@@ -15,6 +15,8 @@ public class ScanJobService
     private readonly IScanJobRepository _jobRepo;
     private readonly IScanEngine _scanEngine;
     private readonly ILogger<ScanJobService> _logger;
+    private readonly IPlaceRepository? _places;
+    private readonly IVolumeProbe? _volumes;
 
     // Active scan state — one scan job at a time (MVP constraint).
     private CancellationTokenSource? _cts;
@@ -28,8 +30,12 @@ public class ScanJobService
     public ScanJobService(
         IScanJobRepository jobRepo,
         IScanEngine scanEngine,
-        ILogger<ScanJobService> logger)
+        ILogger<ScanJobService> logger,
+        IPlaceRepository? places = null,
+        IVolumeProbe? volumes = null)
     {
+        _places = places;
+        _volumes = volumes;
         _jobRepo = jobRepo;
         _scanEngine = scanEngine;
         _logger = logger;
@@ -126,6 +132,7 @@ public class ScanJobService
             {
                 await _scanEngine.RunAsync(job, progress, _cts.Token);
                 var updated = await _jobRepo.GetByIdAsync(jobId) ?? job;
+                await RecordPlaceAsync(updated, CancellationToken.None);
                 JobStateChanged?.Invoke(this, updated);
             }
             catch (OperationCanceledException)
@@ -188,7 +195,9 @@ public class ScanJobService
         try
         {
             await _scanEngine.RunAsync(job, progress ?? new Progress<ScanProgress>(), ct);
-            return await _jobRepo.GetByIdAsync(jobId, CancellationToken.None) ?? job;
+            var done = await _jobRepo.GetByIdAsync(jobId, CancellationToken.None) ?? job;
+            await RecordPlaceAsync(done, CancellationToken.None);
+            return done;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -205,6 +214,17 @@ public class ScanJobService
             await _jobRepo.UpdateAsync(job, CancellationToken.None);
             return job;
         }
+    }
+
+    /// <summary>
+    /// A completed scan makes its root a known place, or moves the place on to this job
+    /// (https://github.com/crack666/smart_file_organizer/issues/86).
+    /// </summary>
+    private async Task RecordPlaceAsync(ScanJob job, CancellationToken ct)
+    {
+        if (_places is null || job.Status != JobStatus.Completed)
+            return;
+        await _places.RecordScanAsync(job, _volumes?.Probe(job.RootPath), ct);
     }
 
     public void Pause()

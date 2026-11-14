@@ -38,13 +38,39 @@ public class PlanJournalRepository : IPlanJournal
     {
         await using var conn = _db.CreateConnection();
         await conn.OpenAsync(ct);
+        await using var tx = await conn.BeginTransactionAsync(ct);
         await conn.ExecuteAsync(new CommandDefinition(
             """
             UPDATE plan_steps SET state = @State, target_path = @TargetPath, hold_path = @HoldPath, bytes = @Bytes,
                 hash = @Hash, detail = @Detail, finished_at = @FinishedAt
             WHERE id = @Id
             """,
-            Params(step), cancellationToken: ct));
+            Params(step), tx, cancellationToken: ct));
+
+        // The move history (https://github.com/crack666/smart_file_organizer/issues/86) is written with the step that
+        // moves an original, in the same transaction, and outlives the plan and the job.
+        if (step.State == PlanStepState.Done)
+        {
+            var sql = step.Kind switch
+            {
+                PlanStepKind.Hold => """
+                    INSERT INTO moves (plan_id, action_id, source_path, target_path, hash, bytes, moved_at)
+                    VALUES (@PlanId, @ActionId, @SourcePath, @TargetPath, @Hash, @Bytes, @FinishedAt)
+                    """,
+                PlanStepKind.Restore => """
+                    UPDATE moves SET returned_at = @FinishedAt
+                    WHERE plan_id = @PlanId AND action_id = @ActionId AND source_path = @SourcePath AND returned_at IS NULL
+                    """,
+                PlanStepKind.Purge => """
+                    UPDATE moves SET purged_at = @FinishedAt
+                    WHERE plan_id = @PlanId AND action_id = @ActionId AND source_path = @SourcePath AND returned_at IS NULL AND purged_at IS NULL
+                    """,
+                _ => null
+            };
+            if (sql is not null)
+                await conn.ExecuteAsync(new CommandDefinition(sql, Params(step), tx, cancellationToken: ct));
+        }
+        await tx.CommitAsync(ct);
     }
 
     public async Task<IReadOnlyList<PlanStep>> GetStepsAsync(long planId, CancellationToken ct = default)

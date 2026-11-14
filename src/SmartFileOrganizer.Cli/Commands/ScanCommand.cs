@@ -1,5 +1,6 @@
 using System.CommandLine;
 using Microsoft.Extensions.DependencyInjection;
+using SmartFileOrganizer.Application.Places;
 using SmartFileOrganizer.Application.Services;
 using SmartFileOrganizer.Cli.Contract;
 using SmartFileOrganizer.Domain.Enums;
@@ -12,7 +13,22 @@ public static class ScanCommand
 {
     /// <param name="RulesChanged">The job was resumed with <c>--rules</c> that differ from its stored rules;
     /// folders stored as skipped or shallow were re-evaluated.</param>
-    public sealed record ScanResult(JobView Job, bool Resumed, bool RulesChanged = false);
+    /// <param name="Refresh">With <c>--refresh</c>: what changed against the previous job of the place; null otherwise.</param>
+    public sealed record ScanResult(JobView Job, bool Resumed, bool RulesChanged = false, RefreshView? Refresh = null);
+
+    /// <summary>A refresh against the previous job of the same place (https://github.com/crack666/smart_file_organizer/issues/86).</summary>
+    /// <param name="Carried">What was taken over for unchanged files instead of being worked out again.</param>
+    /// <param name="Changes">The files that are new, changed, missing or moved, by path; at most <see cref="MaxChanges"/>.</param>
+    public sealed record RefreshView(long PreviousJobId, long Unchanged, long New, long Changed, long Missing, long Moved,
+        CarriedView Carried, IReadOnlyList<ChangeView> Changes, bool ChangesTruncated);
+
+    /// <param name="Checksums">Unchanged files whose stored checksum still holds; no file is read again.</param>
+    /// <param name="Results">Unchanged files whose analysis result was taken over; no model is asked for them.</param>
+    public sealed record CarriedView(long Checksums, long Results, long Facts, long Corrections);
+
+    public sealed record ChangeView(string Path, string Change, long Size, string? Target, long? PlanId, DateTime? MovedAt);
+
+    public const int MaxChanges = 200;
 
     public static Command Create(CliHost host, GlobalOptions globals)
     {
@@ -43,13 +59,21 @@ public static class ScanCommand
                           "sensitive-file header probe. Stored at the job, so --resume keeps it."
         };
 
+        var refresh = new Option<bool>("--refresh")
+        {
+            Description = "Scan a known place again and compare with its previous job: unchanged files keep checksum, " +
+                          "analysis result and facts; new, changed, missing and moved files are listed. Keeps the rules and " +
+                          "the structure-only setting of the previous job unless --rules is given."
+        };
+
         var command = new Command("scan", "Create a scan job for a folder and scan it, or resume a job.")
         {
             path,
             resume,
             rulesFile,
             role,
-            structureOnly
+            structureOnly,
+            refresh
         };
         command.Validators.Add(result =>
         {
@@ -61,6 +85,8 @@ public static class ScanCommand
                 result.AddError("--role is set when a job is created; it cannot be given with --resume.");
             if (hasResume && result.GetValue(structureOnly))
                 result.AddError("--structure-only is fixed when a job is created; a resumed job keeps its setting.");
+            if (hasResume && result.GetValue(refresh))
+                result.AddError("--refresh creates a new job for a path; it cannot be given with --resume.");
         });
 
         CommandRunner.SetHandler(command, host, globals, async (ctx, ct) =>
@@ -72,6 +98,7 @@ public static class ScanCommand
             var (_, profile) = RulesCommand.Load(rulesPath);
 
             long jobId;
+            long? previousJobId = null;
             var rulesChanged = false;
             var resumeId = ctx.ParseResult.GetValue(resume);
             if (resumeId is { } id)
@@ -89,6 +116,26 @@ public static class ScanCommand
                     throw new CliFailureException(ExitCodes.Failure, ErrorCodes.PathNotFound, $"Folder not found: {root}");
                 var scanRole = ctx.ParseResult.GetValue(role) is { } r ? ScanRoleValues.Parse(r) : ScanRole.Source;
                 var shape = ctx.ParseResult.GetValue(structureOnly);
+                if (ctx.ParseResult.GetValue(refresh))
+                {
+                    var places = services.GetRequiredService<IPlaceRepository>();
+                    previousJobId = await places.GetPreviousJobIdAsync(root, scanRole, 0, ct);
+                    if (previousJobId is null && ctx.ParseResult.GetValue(role) is null)
+                    {
+                        previousJobId = await places.GetPreviousJobIdAsync(root, ScanRole.Library, 0, ct);
+                        if (previousJobId is not null) scanRole = ScanRole.Library;
+                    }
+                    if (previousJobId is { } prev && await jobs.GetJobAsync(prev, ct) is { } previous)
+                    {
+                        if (rulesPath == null && previous.Rules is { } kept) profile = kept;
+                        shape |= previous.StructureOnly;
+                        ctx.Note($"Refreshing job {prev} of {root}");
+                    }
+                    else
+                    {
+                        ctx.Note($"No completed scan of {root} is known; scanning it in full");
+                    }
+                }
                 jobId = (await jobs.CreateJobAsync(root, profile, scanRole, shape, ct)).Id;
                 ctx.Note($"Created {scanRole.ToValue()} job {jobId} for {root} with rules '{profile.Name}'"
                          + (shape ? ", structure only" : string.Empty));
@@ -101,10 +148,13 @@ public static class ScanCommand
             {
                 // Only an explicit --rules switches a resumed job; otherwise it keeps its stored rules.
                 var job = await jobs.RunAsync(jobId, rulesPath != null ? profile : null, progress, ct);
-                var result = new ScanResult(JobView.From(job), resumeId != null, rulesChanged);
+                RefreshView? refreshed = null;
+                if (previousJobId is { } before && job.Status == JobStatus.Completed)
+                    refreshed = View(await services.GetRequiredService<PlaceService>().RefreshAsync(before, job.Id, ct));
+                var result = new ScanResult(JobView.From(job), resumeId != null, rulesChanged, refreshed);
                 return job.Status switch
                 {
-                    JobStatus.Completed => CommandOutcome.Success(result, () => result.Job.ToLine()),
+                    JobStatus.Completed => CommandOutcome.Success(result, () => Render(result)),
                     JobStatus.Failed => CommandOutcome.Fail(ExitCodes.Failure, ErrorCodes.ScanFailed,
                         $"Scan of job {jobId} failed: {job.LastError}", result, () => result.Job.ToLine()),
                     _ => CommandOutcome.Fail(ExitCodes.Failure, ErrorCodes.ScanFailed,
@@ -123,6 +173,28 @@ public static class ScanCommand
         });
 
         return command;
+    }
+
+    private static RefreshView View(RefreshReport r) => new(
+        r.Counts.PreviousJobId, r.Counts.Unchanged, r.Counts.New, r.Counts.Changed, r.Counts.Missing, r.Counts.Moved,
+        new CarriedView(r.Counts.Checksums, r.Counts.Results, r.Counts.Facts, r.Counts.Corrections),
+        r.Changes.Take(MaxChanges).Select(c => new ChangeView(c.FullPath, c.Change.ToCode(), c.Size, c.TargetPath, c.PlanId, c.MovedAt)).ToList(),
+        r.Changes.Count > MaxChanges);
+
+    private static string Render(ScanResult result)
+    {
+        if (result.Refresh is not { } r)
+            return result.Job.ToLine();
+        var lines = new List<string>
+        {
+            result.Job.ToLine(),
+            $"  against job {r.PreviousJobId}: {r.Unchanged} unchanged, {r.New} new, {r.Changed} changed, {r.Missing} missing, {r.Moved} moved",
+            $"  taken over: {r.Carried.Checksums} checksums, {r.Carried.Results} results, {r.Carried.Facts} facts, {r.Carried.Corrections} corrections"
+        };
+        lines.AddRange(r.Changes.Select(c => $"  {c.Change,-8} {c.Path}" + (c.Target is { } t ? $" -> {t}" : string.Empty)));
+        if (r.ChangesTruncated)
+            lines.Add($"  (first {MaxChanges} changes listed)");
+        return string.Join(Environment.NewLine, lines);
     }
 }
 

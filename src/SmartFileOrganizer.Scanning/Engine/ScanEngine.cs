@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using SmartFileOrganizer.Application.Plans;
 using SmartFileOrganizer.Application.Sensitivity;
 using SmartFileOrganizer.Domain.Enums;
 using SmartFileOrganizer.Domain.Interfaces;
@@ -28,6 +29,7 @@ public class ScanEngine : IScanEngine
     private readonly IDirectoryRepository _dirRepo;
     private readonly IScanJobRepository _jobRepo;
     private readonly ILogger<ScanEngine> _logger;
+    private readonly IPlaceRepository? _places;
 
     private const int BatchSize = 200;
     private const int JobUpdateIntervalMs = 2000;
@@ -37,8 +39,10 @@ public class ScanEngine : IScanEngine
         IFileRepository fileRepo,
         IDirectoryRepository dirRepo,
         IScanJobRepository jobRepo,
-        ILogger<ScanEngine> logger)
+        ILogger<ScanEngine> logger,
+        IPlaceRepository? places = null)
     {
+        _places = places;
         _fs = fs;
         _fileRepo = fileRepo;
         _dirRepo = dirRepo;
@@ -70,6 +74,7 @@ public class ScanEngine : IScanEngine
         var fileBatch = new List<FileNode>(BatchSize);
         var dirBatch = new List<DirectoryNode>(BatchSize);
         var linkBatch = new List<FileLinkNode>(BatchSize);
+        var noticeBatch = new List<NoticeEntryRecord>();
         var followedTargets = new HashSet<string>(PathComparer);
         var lastJobSave = DateTime.UtcNow;
 
@@ -136,6 +141,9 @@ public class ScanEngine : IScanEngine
                     () => new DirectoryContent(Files().Select(f => FileTypeDetector.Detect(_fs.GetExtension(f)))));
             if (followedLink != null)
                 evaluation = evaluation with { Reason = $"{evaluation.Reason} (followed link: {followedLink})" };
+            // The hold folder of sfo plan apply holds originals that already left the source; they are not content of it.
+            if (depth == 1 && string.Equals(_fs.GetFileName(dirPath), PlanExecutor.HoldFolderName, StringComparison.OrdinalIgnoreCase))
+                evaluation = new DirectoryEvaluation(ScanDecision.Skip, "Skip: hold folder of sfo plan apply (originals that were moved)");
             var decision = evaluation.Decision;
             var status = DecisionToStatus(decision);
 
@@ -258,6 +266,14 @@ public class ScanEngine : IScanEngine
                     continue;
                 }
 
+                // A move notice is the tool's own note about files that left the folder: read as origin, never content.
+                if (MoveNotice.HasNoticeName(filePath) && ReadNotice(job, filePath) is { } notice)
+                {
+                    noticeBatch.AddRange(notice.Entries.Select(e => new NoticeEntryRecord(job.Id, filePath,
+                        Path.Combine(dirPath, e.Name), e.Target, e.PlanId, e.MovedAt)));
+                    continue;
+                }
+
                 var ext = _fs.GetExtension(filePath);
                 long size = 0;
                 Exception? sizeError = null;
@@ -375,6 +391,9 @@ public class ScanEngine : IScanEngine
             linkBatch.Clear();
         }
 
+        if (noticeBatch.Count > 0 && _places != null)
+            await _places.AddNoticeEntriesAsync(noticeBatch, ct);
+
         // The running counters can drift: a resumed run counts again what an interrupted run had counted but not
         // stored, and re-reads folders that failed before. At the end the stored rows are the truth.
         var totals = await _dirRepo.GetScanTotalsAsync(job.Id, ct);
@@ -389,6 +408,27 @@ public class ScanEngine : IScanEngine
         _logger.LogInformation(
             "Scan job {JobId} finished with status {Status}. Files: {Files}, Dirs: {Dirs}",
             job.Id, job.Status, job.ProcessedFiles, job.ProcessedDirectories);
+    }
+
+    /// <summary>
+    /// The notice at <paramref name="path"/>, or null when the file is not one. A structure-only job opens no file, so
+    /// there the name alone counts and the entries stay unknown.
+    /// </summary>
+    private MoveNoticeDocument? ReadNotice(ScanJob job, string path)
+    {
+        if (job.StructureOnly)
+            return new MoveNoticeDocument(MoveNotice.Version, []);
+        try
+        {
+            if (_fs.GetFileSize(path) > MoveNotice.MaxBytes)
+                return null;
+            var bytes = _fs.ReadPrefix(path, MoveNotice.MaxBytes);
+            return MoveNotice.Parse(System.Text.Encoding.UTF8.GetString(bytes));
+        }
+        catch (Exception ex) when (ScanErrorCauses.IsReadError(ex))
+        {
+            return null;
+        }
     }
 
     private async Task FlushDirBatchIfNeeded(List<DirectoryNode> batch, CancellationToken ct)

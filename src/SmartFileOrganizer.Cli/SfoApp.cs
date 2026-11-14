@@ -33,6 +33,8 @@ public static class SfoApp
         root.Subcommands.Add(DecideCommand.Create(host, globals));
         root.Subcommands.Add(CacheCommand.Create(host, globals));
         root.Subcommands.Add(PlanCommand.Create(host, globals));
+        root.Subcommands.Add(PlacesCommand.Create(host, globals));
+        root.Subcommands.Add(WhereCommand.Create(host, globals));
         return root;
     }
 

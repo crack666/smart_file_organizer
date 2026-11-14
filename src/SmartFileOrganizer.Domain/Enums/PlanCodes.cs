@@ -127,7 +127,13 @@ public enum PlanStepKind
     [JsonStringEnumMemberName("uncopy")] Uncopy,
 
     /// <summary>A folder this tool created was removed again because it was empty.</summary>
-    [JsonStringEnumMemberName("remove_folder")] RemoveFolder
+    [JsonStringEnumMemberName("remove_folder")] RemoveFolder,
+
+    /// <summary>
+    /// The move notice of a source folder was written, changed or removed so that it lists the originals of this plan
+    /// that are away (https://github.com/crack666/smart_file_organizer/issues/86); <c>source_path</c> is the notice.
+    /// </summary>
+    [JsonStringEnumMemberName("notice")] Notice
 }
 
 /// <summary>Where a journal step stands.</summary>

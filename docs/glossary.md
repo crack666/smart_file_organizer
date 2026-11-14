@@ -870,6 +870,7 @@ afterwards; `hash` is the full checksum it was checked with.
 | `restore` | An original was put back: from the hold folder, or copied back from the checked file at the target. |
 | `uncopy` | A copy this tool wrote was removed again, after its original was back with its checksum. |
 | `remove_folder` | A folder this tool created was removed again because it was empty. |
+| `notice` | The move notice of a source folder was written, changed or removed so that it lists the originals of this plan that are away; `source_path` is the notice. |
 
 ### State of a journal step (`PlanStepState`)
 
@@ -904,6 +905,46 @@ the plan run again before every action) and state codes (an action named by `--a
 | `held_changed` | Undo: the held original no longer has its checksum. |
 | `not_undoable` | Undo: the original was removed for good and no checked copy is left to copy back, or it is not back, so its copy stays. |
 | `io_error` | The file system refused (access, full disk, a path too long); `detail` has the message. |
+
+## Places
+
+https://github.com/crack666/smart_file_organizer/issues/86: the memory of the tool. Every completed scan makes its root a
+known place (`places`, `sfo places`); `sfo scan <path> --refresh` compares a place with its previous job
+(`scan_changes`); every original that leaves its place through a plan is written to the move history (`moves`), which
+outlives jobs and plans; `sfo where` answers from it. The move notice in a folder is described in
+[move-notice.md](move-notice.md).
+
+### Change found by a refresh (`FileChange`)
+
+`change` of a row of `scan_changes` and of `refresh.changes[]` in the result of `sfo scan --refresh`. A file with the
+same path, size and modification time is unchanged; unchanged files are counted, not listed.
+
+| Code | Meaning |
+|---|---|
+| `new` | The file is there now and was not in the previous job. |
+| `changed` | The file was there before with another size or modification time; its checksum, result and facts are not taken over. |
+| `missing` | The file was there before and is gone, and no plan moved it. |
+| `moved` | The file is gone because a plan moved it; `target` names its new place. |
+
+### State of a move (`MoveState`)
+
+`state` of a step of the history in the result of `sfo where`.
+
+| Code | Meaning |
+|---|---|
+| `moved` | The original left its place; the file at the target holds its content. |
+| `returned` | The original was put back by `sfo plan undo`. |
+
+### What an answer of `sfo where` rests on (`WhereSource`)
+
+`source` of a place or a step in the result of `sfo where`.
+
+| Code | Meaning |
+|---|---|
+| `journal` | The move history of the plans executed with this database. |
+| `scan` | A stored scan that saw the file at that place. |
+| `notice` | A move notice a scan found in the folder, possibly written with another database. |
+| `checksum` | A full checksum stored for that path (`content_fingerprints`). |
 
 ## Model server
 

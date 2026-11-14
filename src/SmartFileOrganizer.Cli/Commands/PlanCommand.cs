@@ -139,15 +139,23 @@ public static class PlanCommand
         {
             Description = "Step 2: move the originals of verified actions into the hold folder, after reading both files again."
         };
+        var noNotice = new Option<bool>("--no-notice")
+        {
+            Description = $"With --remove-sources: leave no move notice ({SmartFileOrganizer.Domain.Models.MoveNotice.FileName}) in the folders whose originals go."
+        };
         var command = new Command(name, description) { plan, action, execute };
         if (withRemove)
+        {
             command.Options.Add(remove);
+            command.Options.Add(noNotice);
+        }
 
         CommandRunner.SetHandler(command, host, globals, async (ctx, ct) =>
         {
             var services = await ctx.GetServicesAsync(ct);
             var p = ctx.ParseResult;
-            var options = new PlanRunOptions((p.GetValue(action) ?? []).Distinct().ToList(), p.GetValue(execute));
+            var options = new PlanRunOptions((p.GetValue(action) ?? []).Distinct().ToList(), p.GetValue(execute),
+                Notices: !(withRemove && p.GetValue(noNotice)));
             var executor = services.GetRequiredService<PlanExecutor>();
             var id = p.GetValue(plan);
             var report = await Run(() => name switch
@@ -213,6 +221,8 @@ public static class PlanCommand
                           + $"(sfo plan apply {r.PlanId} --remove-sources)");
         foreach (var folder in r.EmptyFolders)
             sb.AppendLine($"  left empty (stays): {folder}");
+        foreach (var n in r.Notices ?? [])
+            sb.AppendLine($"  move notice {n.Outcome}: {n.Path} ({n.Entries} entries)" + (n.Detail is { } d ? $"; {d}" : string.Empty));
         return sb.ToString().TrimEnd();
     }
 

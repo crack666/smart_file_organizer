@@ -7,6 +7,7 @@ using SmartFileOrganizer.Application.Bundles;
 using SmartFileOrganizer.Application.Evaluation;
 using SmartFileOrganizer.Application.Decisions;
 using SmartFileOrganizer.Application.Findings;
+using SmartFileOrganizer.Application.Places;
 using SmartFileOrganizer.Application.Plans;
 using SmartFileOrganizer.Application.Services;
 using SmartFileOrganizer.Domain.Interfaces;
@@ -257,6 +258,12 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IPlanJournal, PlanJournalRepository>();
         services.TryAddSingleton<PlanExecutionHooks>();
         services.AddSingleton<PlanExecutor>();
+
+        // Memory (https://github.com/crack666/smart_file_organizer/issues/86): known places, refresh against the previous
+        // job of a place, the move history and the notices a scan finds.
+        services.AddSingleton<IPlaceRepository, PlaceRepository>();
+        services.TryAddSingleton<IVolumeProbe, VolumeProbe>();
+        services.AddSingleton<PlaceService>();
 
         return services;
     }
