@@ -20,6 +20,9 @@ public sealed class FileContent
     /// <summary>Encoded image bytes (PNG/JPEG/... as stored on disk, or PNG for rendered PDF pages).</summary>
     public byte[]? ImageBytes { get; init; }
 
+    /// <summary>Which reader ran (<see cref="PreviewFormats.Decide"/>); <see cref="PreviewKind.None"/> when none.</summary>
+    public PreviewKind Kind { get; init; }
+
     /// <summary>True when <see cref="ImageBytes"/> is a PNG rendered from a document page.</summary>
     public bool IsRenderedPage { get; init; }
 
@@ -65,39 +68,56 @@ public class FileContentExtractor
     private static readonly object PdfRenderLock = new();
     private static readonly Lazy<IDocLib> PdfLib = new(() => DocLib.Instance);
 
-    private static readonly HashSet<string> TextExtensions =
-    [
-        ".txt", ".md", ".json", ".xml", ".csv", ".log", ".ini", ".cfg",
-        ".yml", ".yaml", ".sql", ".cs", ".js", ".ts", ".tsx", ".jsx",
-        ".py", ".html", ".htm", ".css", ".ps1", ".sh", ".bat"
-    ];
+    /// <summary>Archive names shown in a preview; the listing itself stops at <see cref="ArchiveListingReader.MaxEntries"/>.</summary>
+    public const int MaxListedArchiveEntries = 200;
 
+    /// <summary>
+    /// Reads what the preview of <paramref name="file"/> shows. Which reader runs is decided by
+    /// <see cref="PreviewFormats.Decide"/> from the first bytes and the extension (until 16.11.2026 from the scan type and
+    /// a short extension list, so <c>.jfif</c>, <c>.doc</c>, <c>.rtf</c>, <c>.odp</c> and archives had no preview).
+    /// </summary>
     public async Task<FileContent> ExtractAsync(FileNode file, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(file.FullPath) || !File.Exists(file.FullPath))
         {
-            return new FileContent { Message = "Preview unavailable: file does not exist." };
+            return new FileContent { Message = "Keine Vorschau: die Datei ist nicht mehr da." };
         }
 
+        var ext = file.Extension?.ToLowerInvariant() ?? string.Empty;
+        var format = PreviewFormats.Sniff(file.FullPath);
+        var kind = PreviewFormats.Decide(ext, format);
         try
         {
-            var ext = file.Extension?.ToLowerInvariant() ?? string.Empty;
-
-            if (file.FileType == FileType.Image)
-                return new FileContent { ImageBytes = await File.ReadAllBytesAsync(file.FullPath, ct) };
-
-            if (ext == ".pdf")
-                return RenderPdfFirstPage(file.FullPath);
-
-            if (ext is ".docx" or ".xlsx" or ".pptx" or ".odt" or ".ods")
-                return await ExtractOfficeTextAsync(file.FullPath, ext, ct);
-
-            if (IsTextLike(file))
-                return await ReadTextAsync(file.FullPath, ct);
-
-            return new FileContent
+            return kind switch
             {
-                Message = "No built-in preview for this file type yet. Images and text-like files are previewed directly."
+                PreviewKind.Image => new FileContent { Kind = kind, ImageBytes = await File.ReadAllBytesAsync(file.FullPath, ct) },
+                PreviewKind.ImageNotDecoded => new FileContent
+                {
+                    Kind = kind,
+                    Message = $"Kein Bild: {FormatName(ext, format)} kann die Vorschau nicht zeichnen. „Öffnen“ zeigt es im Standardprogramm."
+                },
+                PreviewKind.Pdf => RenderPdfFirstPage(file.FullPath),
+                PreviewKind.OfficeText => await ExtractOfficeTextAsync(file.FullPath, ext, ct),
+                PreviewKind.LegacyWord => await Task.Run(() => ReadLegacyWord(file.FullPath), ct),
+                PreviewKind.LegacyOffice => new FileContent
+                {
+                    Kind = kind,
+                    Message = $"Kein Textauszug: altes Office-Format ({FormatName(ext, format)}) wird nicht gelesen. „Öffnen“ zeigt die Datei."
+                },
+                PreviewKind.Rtf => await ReadRtfAsync(file.FullPath, ct),
+                PreviewKind.Text => await ReadTextAsync(file.FullPath, ct),
+                PreviewKind.Archive => await Task.Run(() => ListArchive(file.FullPath, format, ct), ct),
+                PreviewKind.CompressedStream => new FileContent
+                {
+                    Kind = kind,
+                    Message = "Gepackter Datenstrom: was darin liegt, zeigt erst das Entpacken, und das tut die Vorschau nie."
+                },
+                PreviewKind.Video or PreviewKind.Audio => new FileContent { Kind = kind },
+                _ => new FileContent
+                {
+                    Kind = kind,
+                    Message = $"Keine Vorschau für {FormatName(ext, format)}. „Öffnen“ zeigt die Datei im Standardprogramm."
+                }
             };
         }
         catch (ContentLimitException ex)
@@ -118,10 +138,11 @@ public class FileContentExtractor
 
             var text = ext switch
             {
-                ".docx" => ExtractDocxText(path, ct),
-                ".xlsx" => ExtractXlsxText(path, ct),
-                ".pptx" => ExtractPptxText(path, ct),
-                ".odt" => ExtractOdtText(path, ct),
+                ".docx" or ".docm" => ExtractDocxText(path, ct),
+                ".xlsx" or ".xlsm" => ExtractXlsxText(path, ct),
+                ".pptx" or ".pptm" => ExtractPptxText(path, ct),
+                // Text of a presentation lies in text:p of its pages, as in a text document.
+                ".odt" or ".odp" => ExtractOdtText(path, ct),
                 ".ods" => ExtractOdsText(path, ct),
                 _ => string.Empty
             };
@@ -130,14 +151,15 @@ public class FileContentExtractor
             {
                 return new FileContent
                 {
-                    Message = "No readable text content extracted from office document."
+                    Kind = PreviewKind.OfficeText,
+                    Message = "Das Office-Dokument enthält keinen lesbaren Text."
                 };
             }
 
             if (text.Length > MaxTextChars)
                 text = text[..MaxTextChars] + "\n\n… preview truncated …";
 
-            return new FileContent { TextPreview = text };
+            return new FileContent { Kind = PreviewKind.OfficeText, TextPreview = text };
         }, ct);
     }
 
@@ -318,6 +340,7 @@ public class FileContentExtractor
             using var docReader = PdfLib.Value.GetDocReader(path, new PageDimensions(PdfTargetWidth, PdfTargetHeight));
             return new FileContent
             {
+                Kind = PreviewKind.Pdf,
                 ImageBytes = RenderPage(docReader, 0),
                 IsRenderedPage = true
             };
@@ -382,6 +405,76 @@ public class FileContentExtractor
         }
     }
 
+    private static string FormatName(string ext, string? format) =>
+        ext.Length > 1 ? ext.TrimStart('.').ToUpperInvariant() : format?.ToUpperInvariant() ?? "diese Datei";
+
+    private static FileContent ReadLegacyWord(string path)
+    {
+        var doc = LegacyWordReader.Read(path, MaxTextChars);
+        if (doc.Problem is { } problem)
+            return new FileContent { Kind = PreviewKind.LegacyWord, Message = $"Kein Textauszug aus dem Word-Dokument: {problem}. „Öffnen“ zeigt es." };
+        if (doc.Text.Length == 0)
+            return new FileContent { Kind = PreviewKind.LegacyWord, Message = "Das Word-Dokument enthält keinen Text." };
+        return new FileContent
+        {
+            Kind = PreviewKind.LegacyWord,
+            TextPreview = doc.Text + (doc.Truncated ? "\n\n… preview truncated …" : string.Empty),
+            Message = "Altes Word-Format: nur der Text, ohne Bilder und Layout."
+        };
+    }
+
+    private static async Task<FileContent> ReadRtfAsync(string path, CancellationToken ct)
+    {
+        // RTF is 7-bit by its specification; characters beyond come as \'hh and \uN escapes.
+        using var reader = new StreamReader(path, Encoding.Latin1);
+        var buffer = new char[MaxTextChars * 8];
+        var read = await reader.ReadBlockAsync(buffer.AsMemory(), ct);
+        var text = RtfText.Extract(new string(buffer, 0, read), MaxTextChars).Trim();
+        if (text.Length == 0)
+            return new FileContent { Kind = PreviewKind.Rtf, Message = "Das RTF-Dokument enthält keinen lesbaren Text am Anfang." };
+        return new FileContent
+        {
+            Kind = PreviewKind.Rtf,
+            TextPreview = text + (reader.Peek() >= 0 ? "\n\n… preview truncated …" : string.Empty)
+        };
+    }
+
+    private static FileContent ListArchive(string path, string? format, CancellationToken ct)
+    {
+        if (!ArchiveListingReader.CanList(format))
+            return new FileContent { Kind = PreviewKind.Archive, Message = $"Das Archiv ({format ?? "unbekanntes Format"}) lässt sich nicht auflisten." };
+        ArchiveListing listing;
+        try
+        {
+            listing = ArchiveListingReader.Read(path, format!, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return new FileContent { Kind = PreviewKind.Archive, Message = "Das Archiv lässt sich nicht auflisten: verschlüsselt oder beschädigt." };
+        }
+        var sb = new StringBuilder();
+        foreach (var e in listing.Entries.Take(MaxListedArchiveEntries))
+            sb.Append(e.Name).Append("  (").Append(SizeText(e.Size)).AppendLine(")");
+        var more = listing.Entries.Count - MaxListedArchiveEntries;
+        if (more > 0 || listing.Truncated)
+            sb.AppendLine($"… und {(listing.Truncated ? "mehr als " : string.Empty)}{Math.Max(more, 0):N0} weitere");
+        return new FileContent
+        {
+            Kind = PreviewKind.Archive,
+            TextPreview = sb.ToString(),
+            Message = $"Archiv: {listing.Entries.Count:N0}{(listing.Truncated ? "+" : string.Empty)} Dateien, entpackt {SizeText(listing.UnpackedBytes)}"
+                      + (listing.Encrypted ? ", verschlüsselt" : string.Empty) + "; nichts wurde entpackt."
+        };
+    }
+
+    private static string SizeText(long bytes) => bytes switch
+    {
+        < 1024 => $"{bytes} B",
+        < 1024 * 1024 => $"{bytes / 1024.0:0.#} KB",
+        < 1024L * 1024 * 1024 => $"{bytes / (1024.0 * 1024):0.#} MB",
+        _ => $"{bytes / (1024.0 * 1024 * 1024):0.##} GB"
+    };
+
     private static async Task<FileContent> ReadTextAsync(string path, CancellationToken ct)
     {
         using var stream = File.OpenRead(path);
@@ -395,13 +488,6 @@ public class FileContentExtractor
         if (truncated)
             text += "\n\n… preview truncated …";
 
-        return new FileContent { TextPreview = text };
-    }
-
-    private static bool IsTextLike(FileNode file)
-    {
-        return TextExtensions.Contains(file.Extension)
-            || file.FileType is FileType.Code
-            || (file.FileType is FileType.Document && TextExtensions.Contains(file.Extension));
+        return new FileContent { Kind = PreviewKind.Text, TextPreview = text };
     }
 }

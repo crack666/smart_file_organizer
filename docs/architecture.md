@@ -98,12 +98,37 @@ Other options: `AppSettingsDirectory` (where the shipped `appsettings.json` defa
 
 ## Preview flow
 
-`FileContentExtractor` (Infrastructure) reads the content once, without UI types; `FilePreviewService` (Desktop) only decodes the returned image bytes into an Avalonia bitmap. Preview and model input therefore come from the same code.
+`FileContentExtractor` (Infrastructure) reads the content once, without UI types; `FilePreviewService` (Desktop) only decodes the returned image bytes into Avalonia bitmaps and makes the filmstrip of a video. Preview and model input therefore come from the same code.
 
-- images: original file bytes
-- PDFs: page 1 rendered via Docnet/PDFium with a white background, encoded as PNG by a small built-in encoder
-- `.docx`, `.xlsx`, `.pptx`, `.odt`, `.ods`: text extracted from the package XML
-- text-like files: truncated text excerpt (12,000 characters)
+Which reader runs is decided by `PreviewFormats.Decide` (since 16.11.2026,
+[#109](https://github.com/crack666/smart_file_organizer/issues/109)): the format the first bytes show
+(`FileSignature`, the code behind the fact `detected_format`) where it decides, else a complete extension list. A
+decodable image format wins over the extension; a ZIP or OLE container goes by its extension (a `.docx` is a ZIP).
+Until then the scan type of the extension and a short list decided, so `.jfif` (no image type), `.doc` (no reader),
+`.rtf`, `.odp`, `.docm`/`.xlsm`/`.pptm` and archives got the line "No built-in preview for this file type yet".
+
+| Format | Preview | Needs |
+|---|---|---|
+| JPEG (`.jpg` `.jpeg` `.jpe` `.jfif`), PNG, GIF (first frame), BMP, WebP, ICO | the image | nothing |
+| TIFF, HEIC/HEIF, AVIF, camera raw (`.cr2` `.nef` `.arw` `.dng` …), PSD | hint "Kein Bild: … kann die Vorschau nicht zeichnen" and "Öffnen" | the default program |
+| PDF | page 1 rendered | PDFium (Docnet.Core, shipped) |
+| `.docx` `.docm` `.xlsx` `.xlsm` `.pptx` `.pptm` `.odt` `.ods` `.odp` | text from the package XML | nothing |
+| `.doc` `.dot` (Word 97-2003) | text from the piece table (`LegacyWordReader`), no pictures or layout; encrypted or damaged: hint | nothing; files up to 64 MB |
+| `.xls` `.ppt` `.pps` `.msg` (other legacy Office) | hint "altes Office-Format … wird nicht gelesen" and "Öffnen" | the default program |
+| `.rtf` (and RTF saved as `.doc`) | text without control words (`RtfText`) | nothing |
+| text: `.txt` `.text` `.md` `.nfo` `.log` `.csv` `.tsv` `.json` `.xml` `.ini` `.toml` `.srt` `.vtt` `.svg` source code … and any file whose first bytes are text | the first 12,000 characters | nothing |
+| ZIP, RAR, 7z, TAR (`.zip` `.cbz` `.rar` `.7z` `.tar`) | the names and sizes of the first 200 entries, nothing unpacked | nothing (SharpCompress, shipped) |
+| `.gz` `.tgz` `.bz2` `.xz` | hint: the contents exist only after unpacking | – |
+| video | filmstrip of up to 9 pictures with time marks, kind and origin from the facts, "Abspielen" | `ffmpeg` on the PATH for the pictures; without it a hint and "Abspielen" |
+| audio | duration and tags from the facts, "Abspielen" | the default program |
+| anything else | hint "Keine Vorschau für …" and "Öffnen" | the default program |
+
+A file with an access-data marker shows no preview and no excerpt at all (the rule of `Sensitive:Disclosure`).
+
+The filmstrip (`FilePreviewService.FilmstripPositions`): the running time is split into equal parts, at most nine and
+one per second for a short video, and one picture 320 px wide is taken in the middle of each by `ffmpeg`, in the
+background; choosing another row cancels it. The pictures are kept per file (path, size, time of change) under
+`<temp>/SmartFileOrganizer/preview-cache/filmstrip/`, at most 300 strips, never beside the file or in a library.
 
 ## Comparison flow (source against library)
 

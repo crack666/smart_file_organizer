@@ -49,7 +49,7 @@ public class FileContentExtractorTests : IDisposable
 
         Assert.False(content.HasImage);
         Assert.False(content.HasText);
-        Assert.Contains("does not exist", content.Message);
+        Assert.Contains("nicht mehr da", content.Message);
     }
 
     [Fact]

@@ -177,7 +177,8 @@ public partial class FileDetailViewModel : ViewModelBase
         PreviewMessage = string.Empty;
 
         var preview = await _previewService.BuildAsync(file, ct);
-        ImagePreview = preview.ImagePreview;
+        // One picture here: for a video the first of its filmstrip (the plan view shows all of them).
+        ImagePreview = preview.TakeStill();
         TextPreview = preview.TextPreview;
         PreviewMessage = preview.Message;
 

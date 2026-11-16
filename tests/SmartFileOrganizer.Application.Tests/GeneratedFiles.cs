@@ -324,6 +324,128 @@ internal static class GeneratedFiles
             """);
     }
 
+    // ─── Word 97-2003 ────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// A Word 97-2003 document (<c>.doc</c>): a compound file (MS-CFB version 3) with the streams <c>WordDocument</c>
+    /// (above the mini stream cutoff) and <c>1Table</c> (in the mini stream), and a piece table with one piece stored
+    /// as Windows-1252 and one as UTF-16, as Word writes them. The text may hold a field: <c>\u0013</c> code
+    /// <c>\u0014</c> result <c>\u0015</c>. Paragraphs end with <c>\r</c>.
+    /// </summary>
+    public static byte[] LegacyDoc(string compressedPiece, string unicodePiece)
+    {
+        const int sector = 512;
+        const uint end = 0xFFFFFFFE, free = 0xFFFFFFFF, fatSect = 0xFFFFFFFD;
+        var cp1252 = new Dictionary<char, byte> { ['€'] = 0x80, ['–'] = 0x96, ['„'] = 0x84, ['“'] = 0x93 };
+
+        // WordDocument: the FIB, then the text of both pieces from offset 1024.
+        var word = new byte[4608];
+        BinaryPrimitives.WriteUInt16LittleEndian(word, 0xA5EC);
+        BinaryPrimitives.WriteUInt16LittleEndian(word.AsSpan(2), 0x00C1);
+        BinaryPrimitives.WriteUInt16LittleEndian(word.AsSpan(0x0A), 0x0200); // fWhichTblStm: 1Table
+        BinaryPrimitives.WriteUInt16LittleEndian(word.AsSpan(32), 14);
+        BinaryPrimitives.WriteUInt16LittleEndian(word.AsSpan(62), 22);
+        BinaryPrimitives.WriteUInt16LittleEndian(word.AsSpan(152), 0x5D);
+        const int textAt = 1024;
+        for (var i = 0; i < compressedPiece.Length; i++)
+        {
+            var c = compressedPiece[i];
+            word[textAt + i] = cp1252.TryGetValue(c, out var b) ? b : (byte)c;
+        }
+        var unicodeAt = textAt + compressedPiece.Length + (compressedPiece.Length % 2);
+        Encoding.Unicode.GetBytes(unicodePiece).CopyTo(word, unicodeAt);
+        var ccpText = compressedPiece.Length + unicodePiece.Length;
+        BinaryPrimitives.WriteInt32LittleEndian(word.AsSpan(76), ccpText);
+
+        // 1Table: some bytes, then the Clx with one Pcdt of two pieces.
+        const int fcClx = 16;
+        var table = new byte[fcClx + 1 + 4 + 3 * 4 + 2 * 8];
+        var t = table.AsSpan(fcClx);
+        t[0] = 0x02;
+        BinaryPrimitives.WriteInt32LittleEndian(t[1..], 3 * 4 + 2 * 8);
+        BinaryPrimitives.WriteInt32LittleEndian(t[5..], 0);
+        BinaryPrimitives.WriteInt32LittleEndian(t[9..], compressedPiece.Length);
+        BinaryPrimitives.WriteInt32LittleEndian(t[13..], ccpText);
+        BinaryPrimitives.WriteUInt32LittleEndian(t[(17 + 2)..], (uint)(textAt * 2) | 0x40000000);
+        BinaryPrimitives.WriteUInt32LittleEndian(t[(25 + 2)..], (uint)unicodeAt);
+        BinaryPrimitives.WriteUInt32LittleEndian(word.AsSpan(418), fcClx);
+        BinaryPrimitives.WriteUInt32LittleEndian(word.AsSpan(422), (uint)(table.Length - fcClx));
+
+        // Sectors: 0 FAT, 1 directory, 2 mini FAT, 3.. WordDocument, then the mini stream holding 1Table.
+        var wordSectors = word.Length / sector;
+        var miniSectors = (table.Length + 63) / 64;
+        var miniStream = new byte[miniSectors * 64];
+        table.CopyTo(miniStream, 0);
+        var miniStreamSectors = (miniStream.Length + sector - 1) / sector;
+        var total = 3 + wordSectors + miniStreamSectors;
+        var file = new byte[(total + 1) * sector];
+
+        var h = file.AsSpan();
+        new byte[] { 0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1 }.CopyTo(h);
+        BinaryPrimitives.WriteUInt16LittleEndian(h[0x18..], 0x003E);
+        BinaryPrimitives.WriteUInt16LittleEndian(h[0x1A..], 3);
+        BinaryPrimitives.WriteUInt16LittleEndian(h[0x1C..], 0xFFFE);
+        BinaryPrimitives.WriteUInt16LittleEndian(h[0x1E..], 9);
+        BinaryPrimitives.WriteUInt16LittleEndian(h[0x20..], 6);
+        BinaryPrimitives.WriteUInt32LittleEndian(h[0x2C..], 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(h[0x30..], 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(h[0x38..], 4096);
+        BinaryPrimitives.WriteUInt32LittleEndian(h[0x3C..], 2);
+        BinaryPrimitives.WriteUInt32LittleEndian(h[0x40..], 1);
+        BinaryPrimitives.WriteUInt32LittleEndian(h[0x44..], end);
+        for (var i = 0; i < 109; i++)
+            BinaryPrimitives.WriteUInt32LittleEndian(h[(0x4C + i * 4)..], i == 0 ? 0 : free);
+
+        Span<byte> Sector(int n) => file.AsSpan((n + 1) * sector, sector);
+
+        var fat = Sector(0);
+        for (var i = 0; i < sector / 4; i++) BinaryPrimitives.WriteUInt32LittleEndian(fat[(i * 4)..], free);
+        BinaryPrimitives.WriteUInt32LittleEndian(fat, fatSect);
+        BinaryPrimitives.WriteUInt32LittleEndian(fat[4..], end);
+        BinaryPrimitives.WriteUInt32LittleEndian(fat[8..], end);
+        void Chain(int first, int count)
+        {
+            for (var i = 0; i < count; i++)
+                BinaryPrimitives.WriteUInt32LittleEndian(Sector(0)[((first + i) * 4)..], i == count - 1 ? end : (uint)(first + i + 1));
+        }
+        Chain(3, wordSectors);
+        var miniStart = 3 + wordSectors;
+        Chain(miniStart, miniStreamSectors);
+
+        var miniFat = Sector(2);
+        for (var i = 0; i < sector / 4; i++)
+            BinaryPrimitives.WriteUInt32LittleEndian(miniFat[(i * 4)..], i < miniSectors ? (i == miniSectors - 1 ? end : (uint)(i + 1)) : free);
+
+        void Entry(int index, string name, byte type, uint start, uint size, uint child, uint right)
+        {
+            var e = Sector(1).Slice(index * 128, 128);
+            Encoding.Unicode.GetBytes(name).CopyTo(e);
+            BinaryPrimitives.WriteUInt16LittleEndian(e[0x40..], (ushort)((name.Length + 1) * 2));
+            e[0x42] = type;
+            e[0x43] = 1;
+            BinaryPrimitives.WriteUInt32LittleEndian(e[0x44..], free);
+            BinaryPrimitives.WriteUInt32LittleEndian(e[0x48..], right);
+            BinaryPrimitives.WriteUInt32LittleEndian(e[0x4C..], child);
+            BinaryPrimitives.WriteUInt32LittleEndian(e[0x74..], start);
+            BinaryPrimitives.WriteUInt32LittleEndian(e[0x78..], size);
+        }
+        Entry(0, "Root Entry", 5, (uint)miniStart, (uint)miniStream.Length, 1, free);
+        Entry(1, "WordDocument", 2, 3, (uint)word.Length, free, 2);
+        Entry(2, "1Table", 2, 0, (uint)table.Length, free, free);
+        for (var i = 3; i < 4; i++)
+        {
+            var e = Sector(1).Slice(i * 128, 128);
+            BinaryPrimitives.WriteUInt32LittleEndian(e[0x44..], free);
+            BinaryPrimitives.WriteUInt32LittleEndian(e[0x48..], free);
+            BinaryPrimitives.WriteUInt32LittleEndian(e[0x4C..], free);
+        }
+
+        for (var s = 0; s < wordSectors; s++)
+            word.AsSpan(s * sector, sector).CopyTo(Sector(3 + s));
+        miniStream.CopyTo(file, (miniStart + 1) * sector);
+        return file;
+    }
+
     private static void Write(ZipArchive zip, string name, string content)
     {
         var entry = zip.CreateEntry(name);

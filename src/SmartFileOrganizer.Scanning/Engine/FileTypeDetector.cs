@@ -16,6 +16,8 @@ public static class FileTypeDetector
         [".heif"] = FileType.Image, [".raw"] = FileType.Image, [".cr2"] = FileType.Image,
         [".nef"] = FileType.Image, [".arw"] = FileType.Image, [".svg"] = FileType.Image,
         [".ico"] = FileType.Image,
+        // Other names of JPEG (until 16.11.2026 these were "Other", so the GUI showed no picture; issue 109).
+        [".jfif"] = FileType.Image, [".jpe"] = FileType.Image,
         // Video
         [".mp4"] = FileType.Video, [".mkv"] = FileType.Video, [".avi"] = FileType.Video,
         [".mov"] = FileType.Video, [".wmv"] = FileType.Video, [".flv"] = FileType.Video,

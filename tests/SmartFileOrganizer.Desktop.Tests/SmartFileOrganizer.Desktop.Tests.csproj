@@ -31,6 +31,8 @@
     <Compile Include="..\SmartFileOrganizer.Hosting.Tests\FakeOllamaService.cs" Link="FakeOllamaService.cs" />
     <!-- Temp folders removed without following links; shared with the application tests. -->
     <Compile Include="..\SmartFileOrganizer.Application.Tests\FileSystemLinks.cs" Link="FileSystemLinks.cs" />
+    <!-- Synthetic test files byte by byte (a Word 97-2003 document, an MP4 header); shared with the application tests. -->
+    <Compile Include="..\SmartFileOrganizer.Application.Tests\GeneratedFiles.cs" Link="GeneratedFiles.cs" />
     <!-- No test reaches a real model server through the shipped default address. -->
     <Compile Include="..\SmartFileOrganizer.Cli.Tests\NoRealModelServer.cs" Link="NoRealModelServer.cs" />
   </ItemGroup>
