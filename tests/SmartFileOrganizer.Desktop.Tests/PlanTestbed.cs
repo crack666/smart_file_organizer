@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using SkiaSharp;
@@ -10,6 +11,8 @@ using SmartFileOrganizer.Desktop.Services;
 using SmartFileOrganizer.Desktop.ViewModels;
 using SmartFileOrganizer.Domain.Interfaces;
 using SmartFileOrganizer.Hosting.Tests;
+using SmartFileOrganizer.Infrastructure.Content;
+using SmartFileOrganizer.Application.Tests;
 using SmartFileOrganizer.Tests.Support;
 
 namespace SmartFileOrganizer.Desktop.Tests;
@@ -26,7 +29,11 @@ public sealed class PlanTestbed : IDisposable
     private readonly List<TruthDirectoryEntry> _dirs = [new(".", "mixed")];
     private readonly List<TruthFileEntry> _files = [];
 
-    public PlanTestbed(string? root = null)
+    /// <param name="root">A fixed folder (screenshots), else a new one in the temp folder.</param>
+    /// <param name="withMedia">Also a video, a Word 97-2003 document, a .jfif photo and a file of an unknown format in
+    /// Downloads (https://github.com/crack666/smart_file_organizer/issues/109). The video is made by <c>ffmpeg</c> when it
+    /// is on the PATH, else it is a bare MP4 header that no tool can decode.</param>
+    public PlanTestbed(string? root = null, bool withMedia = false)
     {
         _keep = root is not null;
         Root = root ?? Path.Combine(Path.GetTempPath(), $"sfo_gui_{Guid.NewGuid():N}");
@@ -50,6 +57,19 @@ public sealed class PlanTestbed : IDisposable
         Write("Downloads/Rechnung_Strom.pdf", "invoice", "%PDF-1.4 power");
         Write("Downloads/Einkaufsliste.txt", "document",
             "Einkaufsliste\n- Milch\n- Brot\n- Kaffee\n- Batterien AA\n\nfür Samstag, invented test content\n");
+
+        if (withMedia)
+        {
+            WriteBytes("Downloads/Mietvertrag_alt.doc", "document", GeneratedFiles.LegacyDoc(
+                "Mietvertrag\rzwischen Vermieterin Muster und Mieter Beispiel\rKaution: 900 € – fällig zum Einzug\r",
+                "Übergabe der Schlüssel am 1. März\rinvented test content\r"));
+            WriteBytes("Downloads/Postkarte.jfif", "photo", PhotoBytes(2));
+            // A legacy Excel file: a compound file without a Word stream, which the preview does not read.
+            var xls = GeneratedFiles.LegacyDoc("Tabelle\r", "Zahlen\r");
+            "X"u8.CopyTo(xls.AsSpan(xls.AsSpan().IndexOf("W\0o\0r\0d\0D\0o\0c\0"u8)));
+            WriteBytes("Downloads/Tabelle_alt.xls", "document", xls);
+            Video("Downloads/Ausflug_2023.mp4");
+        }
 
         // Sensitive: decided one by one.
         Folder("Privat", "mixed");
@@ -75,6 +95,15 @@ public sealed class PlanTestbed : IDisposable
     public long PlanId { get; private set; }
 
     public RecordingShell Shell { get; } = new();
+
+    /// <summary>The cache of the preview in this test folder, never the cache of the user.</summary>
+    public string PreviewCache => Path.Combine(Root, "preview-cache");
+
+    /// <summary>The GUI acts as if <c>ffmpeg</c> were not installed.</summary>
+    public bool WithoutFfmpeg { get; set; }
+
+    /// <summary>True when the video of <c>withMedia</c> was made by <c>ffmpeg</c> (a real, decodable video).</summary>
+    public bool HasRealVideo { get; private set; }
 
     /// <summary>Called at the named points of a run (<see cref="PlanExecutionHooks"/>), for example to stop it midway.</summary>
     public Action<string, string>? Hook { get; set; }
@@ -124,6 +153,8 @@ public sealed class PlanTestbed : IDisposable
             s.AddSingleton<IOllamaService>(new FakeOllamaService());
             s.AddSingleton<IShellLauncher>(Shell);
             s.AddSingleton(new PlanExecutionHooks { At = (point, path) => Hook?.Invoke(point, path) });
+            var frames = WithoutFfmpeg ? new VideoFrameExtractor(() => null) : new VideoFrameExtractor();
+            s.AddSingleton(sp => new FilePreviewService(sp.GetRequiredService<FileContentExtractor>(), frames, PreviewCache));
         });
 
     public async Task<PlanViewModel> OpenPlanAsync()
@@ -159,11 +190,46 @@ public sealed class PlanTestbed : IDisposable
         _files.Add(new TruthFileEntry(relative, category, sensitive ?? []));
     }
 
+    private void WriteBytes(string relative, string? category, byte[] content)
+    {
+        var path = Path.Combine(Tree, relative.Replace('/', Path.DirectorySeparatorChar));
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllBytes(path, content);
+        _files.Add(new TruthFileEntry(relative, category, []));
+    }
+
+    /// <summary>A 12-second test video with moving colour bars and a counter, made by ffmpeg; without it an MP4 header only.</summary>
+    private void Video(string relative)
+    {
+        var path = Path.Combine(Tree, relative.Replace('/', Path.DirectorySeparatorChar));
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        if (new VideoFrameExtractor().IsAvailable)
+        {
+            var psi = new ProcessStartInfo(VideoFrameExtractor.ToolName) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardError = true };
+            foreach (var arg in new[] { "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=480x270:rate=10:duration=12",
+                         "-pix_fmt", "yuv420p", path })
+                psi.ArgumentList.Add(arg);
+            using var make = Process.Start(psi)!;
+            make.StandardError.ReadToEnd();
+            make.WaitForExit();
+            HasRealVideo = make.ExitCode == 0 && File.Exists(path);
+        }
+        if (!HasRealVideo)
+            File.WriteAllBytes(path, GeneratedFiles.Mp4Header(new DateTime(2023, 8, 12, 14, 0, 0, DateTimeKind.Utc), 12, 480, 270));
+        _files.Add(new TruthFileEntry(relative, "video", []));
+    }
+
     /// <summary>A real, small JPEG, so the preview has a picture to show.</summary>
     private void Photo(string relative, int seed)
     {
         var path = Path.Combine(Tree, relative.Replace('/', Path.DirectorySeparatorChar));
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllBytes(path, PhotoBytes(seed));
+        _files.Add(new TruthFileEntry(relative, "photo", []));
+    }
+
+    private static byte[] PhotoBytes(int seed)
+    {
         SKColor[] sky = [new(0x4A, 0x90, 0xD9), new(0xF2, 0x99, 0x4A), new(0x6F, 0xCF, 0x97), new(0x9B, 0x51, 0xE0), new(0xEB, 0x57, 0x57)];
         using var bitmap = new SKBitmap(320, 220);
         using (var canvas = new SKCanvas(bitmap))
@@ -179,8 +245,7 @@ public sealed class PlanTestbed : IDisposable
         }
         using var image = SKImage.FromBitmap(bitmap);
         using var data = image.Encode(SKEncodedImageFormat.Jpeg, 85);
-        File.WriteAllBytes(path, data.ToArray());
-        _files.Add(new TruthFileEntry(relative, "photo", []));
+        return data.ToArray();
     }
 
     private sealed class FixedPlaces(params string[] places) : IProtectedPlaces

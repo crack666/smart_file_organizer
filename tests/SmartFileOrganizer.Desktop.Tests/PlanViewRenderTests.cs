@@ -80,7 +80,12 @@ public class PlanViewRenderTests
 
         // 4: the person sets back what the agent decided and releases everything at once.
         await plan.ResetAgentDecisionsCommand.ExecuteAsync(null);
-        await plan.ReleaseAllCommand.ExecuteAsync(null);
+        var releasing = plan.ReleaseAllCommand.ExecuteAsync(null);
+        await Until(() => plan.Confirmation is not null);
+        await Until(() => Visible(window).Any(t => t.StartsWith("Kein Ausgang wird geändert", StringComparison.Ordinal)));
+        Frame(window, shots, "13-confirm-release-all.png");
+        plan.Confirmation!.AcceptCommand.Execute(null);
+        await releasing;
         Assert.DoesNotContain(plan.AllActions, r => r.DecidedByAgent);
         Assert.Contains(Visible(window), t => t.StartsWith("Freigegeben: ", StringComparison.Ordinal));
         Frame(window, shots, "04-released.png");
@@ -122,6 +127,55 @@ public class PlanViewRenderTests
         await undo;
         Assert.Contains(plan.AllActions, r => r.Action.State == PlanActionState.Undone);
         Frame(window, shots, "08-undone.png");
+        window.Close();
+    }
+
+    /// <summary>
+    /// The preview of #109 in the main window at 1300 px: the filmstrip of a video beside its facts and "Abspielen", the
+    /// text of a Word 97-2003 document, a .jfif photo, and Enter in the list handing the file to the (stand-in) shell.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task Preview_InTheMainWindow_FilmstripDocAndJfif()
+    {
+        var shots = Environment.GetEnvironmentVariable(ScreenshotVariable) is { Length: > 0 } d ? Directory.CreateDirectory(d).FullName : null;
+        using var bed = new PlanTestbed(shots is null ? null : Path.Combine(Path.GetTempPath(), "sfo-demo-media"), withMedia: true);
+        await bed.CreatePlanAsync();
+
+        var main = bed.GuiServices().GetRequiredService<MainViewModel>();
+        main.OllamaBaseUrl = "http://localhost:11434";
+        var window = new MainWindow { DataContext = main, Width = 1300, Height = 900 };
+        window.Show();
+        await main.OpenPlanAsync();
+        var plan = main.Plan;
+
+        var video = plan.AllActions.Single(r => r.Action.RelativePath == "Downloads/Ausflug_2023.mp4");
+        plan.SelectedRow = video;
+        await Until(() => plan.CanPlay);
+        await Until(() => Visible(window).Any(t => t.Contains("Abspielen", StringComparison.Ordinal)));
+        if (bed.HasRealVideo)
+        {
+            await Until(() => plan.HasFrames);
+            await Until(() => Visible(window).Count(t => t is "0:00" or "0:06" or "0:11") == 3);
+        }
+        Frame(window, shots, "10-video-filmstrip.png");
+
+        // Enter in the list: the file goes to the default program (here the recording stand-in).
+        var list = window.GetVisualDescendants().OfType<ListBox>().First(l => l.Name == "ActionList");
+        var item = list.ContainerFromItem(video) ?? throw new InvalidOperationException("row not realised");
+        Assert.True(item.Focus(), "the row takes the focus");
+        Dispatcher.UIThread.RunJobs();
+        window.KeyPressQwerty(Avalonia.Input.PhysicalKey.Enter, Avalonia.Input.RawInputModifiers.None);
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal([video.Action.SourcePath], bed.Shell.Opened);
+
+        plan.SelectedRow = plan.AllActions.Single(r => r.Action.RelativePath == "Downloads/Mietvertrag_alt.doc");
+        await Until(() => plan.HasTextPreview);
+        await Until(() => Visible(window).Any(t => t.Contains("Kaution: 900 €", StringComparison.Ordinal)));
+        Frame(window, shots, "11-doc-text.png");
+
+        plan.SelectedRow = plan.AllActions.Single(r => r.Action.RelativePath == "Downloads/Postkarte.jfif");
+        await Until(() => plan.HasImagePreview);
+        Frame(window, shots, "12-jfif.png");
         window.Close();
     }
 

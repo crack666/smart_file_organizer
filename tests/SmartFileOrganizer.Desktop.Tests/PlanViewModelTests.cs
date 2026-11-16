@@ -183,7 +183,7 @@ public class PlanViewModelTests : IDisposable
         Assert.All(photos, p => Assert.Equal(PlanActionOrigin.Human, vm.AllActions.Single(r => r.Id == p.Id).Action.DecidedBy));
 
         // Everything: a sensitive action is passed over and released only on its own.
-        await vm.ReleaseAllCommand.ExecuteAsync(null);
+        await ReleaseAllAsync(vm);
         Assert.Contains("single_decision", vm.StatusText);
         Assert.Equal(PlanActionState.Proposed, vm.AllActions.Single(r => r.Action.Sensitive).Action.State);
         Assert.All(vm.AllActions.Where(r => !r.Action.Sensitive), r => Assert.True(r.IsReleased));
@@ -221,7 +221,7 @@ public class PlanViewModelTests : IDisposable
         Assert.Contains("Hier lassen: 2 ", vm.StayText);
 
         // A release never makes a rejected action move: not with everything, not on its own.
-        await vm.ReleaseAllCommand.ExecuteAsync(null);
+        await ReleaseAllAsync(vm);
         Assert.Equal(PlanActionState.Rejected, Row(vm, "Rechnung_Strom.pdf").Action.State);
         Assert.Contains("abgelehnt: 1", vm.StatusText);
         vm.SelectedRow = Row(vm, "Rechnung_Strom.pdf");
@@ -366,22 +366,28 @@ public class PlanViewModelTests : IDisposable
         Assert.Equal(string.Empty, PlanViewModel.MediaLine(new FileNode { Name = "a.txt", FileType = FileType.Document }, [], true));
     }
 
-    /// <summary>A bitmap needs the Avalonia platform: headless, as the render test.</summary>
+    /// <summary>
+    /// A bitmap needs the Avalonia platform: headless, as the render test. Without ffmpeg the preview says so and offers
+    /// "Abspielen"; with it (on this machine, possibly not on a CI runner) a short video gets one picture per second.
+    /// Since #109 a filmstrip; until 16.11.2026 one still frame.
+    /// </summary>
     [AvaloniaFact]
-    public async Task VideoPreview_IsAStillFrame_WhenFfmpegIsThere_ElseSaysWhyNot()
+    public async Task VideoPreview_IsAFilmstrip_WhenFfmpegIsThere_ElseSaysWhyNot()
     {
         var file = Path.Combine(_bed.Root, "clip.mp4");
         Directory.CreateDirectory(_bed.Root);
         var node = new FileNode { Name = "clip.mp4", FullPath = file, FileType = FileType.Video, Extension = ".mp4" };
+        var cache = Path.Combine(_bed.Root, "cache");
 
-        var none = new FilePreviewService(new FileContentExtractor(), new VideoFrameExtractor(() => null));
+        var none = new FilePreviewService(new FileContentExtractor(), new VideoFrameExtractor(() => null), cache);
         File.WriteAllBytes(file, [0, 0, 0, 24]);
         var without = await none.BuildAsync(node);
-        Assert.Null(without.ImagePreview);
-        Assert.Contains("Kein Standbild", without.Message);
+        Assert.Empty(without.Frames);
+        Assert.True(without.CanPlay);
+        Assert.StartsWith("Kein Bildstreifen: ffmpeg ist auf diesem Rechner nicht gefunden", without.Message);
 
         var frames = new VideoFrameExtractor();
-        if (!frames.IsAvailable) return; // the still itself needs ffmpeg on this machine
+        if (!frames.IsAvailable) return; // the pictures themselves need ffmpeg on this machine
         var psi = new ProcessStartInfo(VideoFrameExtractor.ToolName) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardError = true };
         foreach (var arg in new[] { "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "testsrc=size=320x240:rate=10:duration=2", "-pix_fmt", "yuv420p", file })
             psi.ArgumentList.Add(arg);
@@ -390,10 +396,19 @@ public class PlanViewModelTests : IDisposable
             await make!.WaitForExitAsync();
             Assert.Equal(0, make.ExitCode);
         }
-        var with = await new FilePreviewService(new FileContentExtractor(), frames).BuildAsync(node);
-        Assert.True(with.ImagePreview is not null, with.Message);
-        Assert.StartsWith("Standbild bei", with.Message);
-        with.ImagePreview!.Dispose();
+        var with = await new FilePreviewService(new FileContentExtractor(), frames, cache).BuildAsync(node);
+        Assert.True(with.Frames.Count == 2, with.Message);
+        Assert.Equal(["0:00", "0:01"], with.Frames.Select(f => f.Label));
+        with.Dispose();
+    }
+
+    [Fact]
+    public void FilmstripPositions_AreTheMiddlesOfEqualParts_AtMostNine_OnePerSecondWhenShort()
+    {
+        Assert.Equal([10, 30, 50, 70, 90, 110, 130, 150, 170], FilePreviewService.FilmstripPositions(180));
+        Assert.Equal([0.5, 1.5, 2.5], FilePreviewService.FilmstripPositions(3));
+        Assert.Equal([0.2], FilePreviewService.FilmstripPositions(0.4));
+        Assert.Equal([0], FilePreviewService.FilmstripPositions(0));
     }
 
     [Fact]
@@ -640,6 +655,14 @@ public class PlanViewModelTests : IDisposable
         await WaitUntil(() => vm.Confirmation is not null || running.IsCompleted);
         if (running.IsCompleted) await running;
         return vm.Confirmation ?? throw new InvalidOperationException("No confirmation was asked for: " + vm.StatusText);
+    }
+
+    /// <summary>"Alles freigeben" and yes to its confirmation (since #109 it asks first).</summary>
+    private static async Task ReleaseAllAsync(PlanViewModel vm)
+    {
+        var running = vm.ReleaseAllCommand.ExecuteAsync(null);
+        (await ConfirmationAsync(vm, running)).AcceptCommand.Execute(null);
+        await running;
     }
 
     private static async Task WaitUntil(Func<bool> condition)

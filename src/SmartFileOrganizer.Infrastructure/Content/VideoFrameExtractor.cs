@@ -29,21 +29,31 @@ public class VideoFrameExtractor
     /// One PNG per position (seconds from the start), scaled to 768 px width. Positions the tool
     /// cannot decode are left out. Empty when no tool is available.
     /// </summary>
-    public async Task<IReadOnlyList<byte[]>> ExtractAsync(string videoPath, IReadOnlyList<double> positions, CancellationToken ct)
-    {
-        var tool = _toolPath.Value;
-        if (tool is null) return [];
+    public Task<IReadOnlyList<byte[]>> ExtractAsync(string videoPath, IReadOnlyList<double> positions, CancellationToken ct) =>
+        ExtractAsync(videoPath, positions, FrameWidth, ct);
 
+    /// <summary>As <see cref="ExtractAsync(string, IReadOnlyList{double}, CancellationToken)"/>, scaled to <paramref name="width"/> px.</summary>
+    public async Task<IReadOnlyList<byte[]>> ExtractAsync(string videoPath, IReadOnlyList<double> positions, int width, CancellationToken ct)
+    {
         var frames = new List<byte[]>();
         foreach (var position in positions)
         {
-            var frame = await ExtractOneAsync(tool, videoPath, position, ct);
-            if (frame is { Length: > 0 }) frames.Add(frame);
+            if (await ExtractOneAsync(videoPath, position, width, ct) is { } frame) frames.Add(frame);
         }
         return frames;
     }
 
-    private static async Task<byte[]?> ExtractOneAsync(string tool, string videoPath, double position, CancellationToken ct)
+    /// <summary>One PNG at <paramref name="position"/> seconds, <paramref name="width"/> px wide; null when the tool is
+    /// missing or cannot decode that position.</summary>
+    public async Task<byte[]?> ExtractOneAsync(string videoPath, double position, int width, CancellationToken ct)
+    {
+        var tool = _toolPath.Value;
+        if (tool is null) return null;
+        var frame = await ExtractOneAsync(tool, videoPath, position, width, ct);
+        return frame is { Length: > 0 } ? frame : null;
+    }
+
+    private static async Task<byte[]?> ExtractOneAsync(string tool, string videoPath, double position, int width, CancellationToken ct)
     {
         var psi = new ProcessStartInfo(tool)
         {
@@ -59,7 +69,7 @@ public class VideoFrameExtractor
                      "-ss", position.ToString("0.###", CultureInfo.InvariantCulture),
                      "-i", videoPath,
                      "-frames:v", "1",
-                     "-vf", $"scale={FrameWidth}:-2",
+                     "-vf", $"scale={width}:-2",
                      "-f", "image2pipe", "-vcodec", "png", "-"
                  })
             psi.ArgumentList.Add(arg);

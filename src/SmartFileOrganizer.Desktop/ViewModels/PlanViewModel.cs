@@ -153,13 +153,25 @@ public partial class PlanViewModel : ViewModelBase
     [ObservableProperty] private string _textPreview = string.Empty;
     [ObservableProperty] private string _previewMessage = string.Empty;
 
+    /// <summary>The filmstrip of a video (https://github.com/crack666/smart_file_organizer/issues/109); empty otherwise.</summary>
+    [ObservableProperty] private IReadOnlyList<PreviewFrame> _previewFrames = [];
+
+    /// <summary>Kind and origin of a video from its facts, one line under the key facts.</summary>
+    [ObservableProperty] private string _detailMediaOrigin = string.Empty;
+
+    /// <summary>The selected file is a video or a sound file: "Abspielen" hands it to the default program.</summary>
+    [ObservableProperty] private bool _canPlay;
+
     public bool HasDetail => SelectedAction is not null;
     public bool HasImagePreview => ImagePreview is not null;
     public bool HasTextPreview => !string.IsNullOrWhiteSpace(TextPreview);
     public bool HasPreviewMessage => !string.IsNullOrWhiteSpace(PreviewMessage);
+    public bool HasFrames => PreviewFrames.Count > 0;
     public bool HasMedia => !string.IsNullOrWhiteSpace(DetailMedia);
+    public bool HasMediaOrigin => !string.IsNullOrWhiteSpace(DetailMediaOrigin);
 
     partial void OnDetailMediaChanged(string value) => OnPropertyChanged(nameof(HasMedia));
+    partial void OnDetailMediaOriginChanged(string value) => OnPropertyChanged(nameof(HasMediaOrigin));
 
     // ------------------------------------------------------------------ target picker
 
@@ -450,7 +462,42 @@ public partial class PlanViewModel : ViewModelBase
     [RelayCommand] private Task ReleaseSelectedAsync() => ReleaseAsync(SelectedRows(), asBatch: false);
     [RelayCommand] private Task ReleaseCheckedAsync() => ReleaseAsync(CheckedRows(), asBatch: CheckedCount > 1);
     [RelayCommand] private Task ReleaseGroupAsync(PlanGroupViewModel group) => ReleaseAsync(group.Actions, asBatch: true);
-    [RelayCommand] private Task ReleaseAllAsync() => ReleaseAsync(AllActions.ToList(), asBatch: true);
+    /// <summary>The hint at "Alles freigeben": it releases what is set and changes no outcome (Issue 109).</summary>
+    public const string ReleaseAllHint =
+        "Gibt frei, was eingestellt ist: Umziehen bleibt Umziehen, Papierkorb bleibt Papierkorb, Hier lassen bleibt hier. "
+        + "Kein Ausgang wird geändert. Sensible und abgelehnte Aktionen nur einzeln; vorher eine Rückfrage mit den Zahlen.";
+
+    /// <summary>
+    /// "Alles freigeben", after a confirmation that names what is set: how many move, go into the bin and stay, and that no
+    /// outcome is changed (until 16.11.2026 it released at once, and it was unclear whether it overwrote the outcomes).
+    /// </summary>
+    [RelayCommand]
+    private async Task ReleaseAllAsync()
+    {
+        var rows = AllActions.ToList();
+        if (SelectedPlan is null || rows.Count == 0) return;
+        if (!await ConfirmAsync("Alles freigeben?", ReleaseAllLines(rows), "Alles freigeben", isDanger: false)) return;
+        await ReleaseAsync(rows, asBatch: true);
+    }
+
+    /// <summary>The lines of the confirmation of "Alles freigeben", counted from the outcomes as they are set.</summary>
+    public static IReadOnlyList<string> ReleaseAllLines(IReadOnlyList<PlanActionRowViewModel> rows)
+    {
+        var released = rows.Where(r => r.Action.State != PlanActionState.Rejected && !r.Action.SingleDecision).ToList();
+        int Count(PlanOutcome o) => released.Count(r => r.Outcome == o);
+        var lines = new List<string>
+        {
+            $"Freigegeben wird, was eingestellt ist: {Count(PlanOutcome.Move)} ziehen um, {Count(PlanOutcome.Bin)} kommen in den Papierkorb, "
+            + $"{Count(PlanOutcome.Stay)} bleiben hier.",
+            "Kein Ausgang wird geändert: was „Umziehen“ zeigt, zieht um; was „Hier lassen“ zeigt, bleibt. Ändern geht vorher in der Liste oder rechts.",
+            "Ausgeführt wird erst mit „1 · Kopieren und prüfen“, wieder mit einer Rückfrage."
+        };
+        var single = rows.Count(r => r.Action.SingleDecision && r.Action.State != PlanActionState.Rejected);
+        var rejected = rows.Count(r => r.Action.State == PlanActionState.Rejected);
+        if (single + rejected > 0)
+            lines.Add($"Nicht dabei: {single} sensible (nur einzeln), {rejected} abgelehnte (erst einen Ausgang wählen).");
+        return lines;
+    }
 
     private async Task ReleaseAsync(IReadOnlyList<PlanActionRowViewModel> rows, bool asBatch)
     {
@@ -695,10 +742,22 @@ public partial class PlanViewModel : ViewModelBase
 
     // ================================================================== detail
 
+    /// <summary>"Öffnen", a double click on a row and Enter in the list: the file (or folder) in its default program.</summary>
     [RelayCommand]
     private void OpenSelected()
     {
         if (SelectedAction is { } r) _shell.Open(r.Action.SourcePath);
+    }
+
+    /// <summary>
+    /// "Abspielen" beside the preview of a video or sound file: the default program plays it. There is no player in the
+    /// application itself (https://github.com/crack666/smart_file_organizer/issues/109: a media framework would be a
+    /// second, native code base to ship and keep up).
+    /// </summary>
+    [RelayCommand]
+    private void PlaySelected()
+    {
+        if (CanPlay && SelectedAction is { } r) _shell.Open(r.Action.SourcePath);
     }
 
     [RelayCommand]
@@ -724,6 +783,8 @@ public partial class PlanViewModel : ViewModelBase
         SelectedKind = row is null ? null : KindOptions.First(o => o.Kind == row.Action.Kind);
         _suppress = false;
         SetPreview(null, string.Empty, string.Empty);
+        CanPlay = false;
+        DetailMediaOrigin = string.Empty;
         if (row is null)
         {
             DetailTitle = DetailSource = DetailTarget = DetailRecommended = DetailReason = DetailNote = string.Empty;
@@ -788,15 +849,21 @@ public partial class PlanViewModel : ViewModelBase
             }
             .Concat(facts.Where(f => shows || !f.Key.IsFreeText()).Select(f => $"{f.Key.ToCode()}: {f.Value}")));
         DetailMedia = MediaLine(file, facts, shows);
+        DetailMediaOrigin = OriginLine(file, facts, shows);
+        // The button is there at once; the filmstrip follows in the background and is dropped when another row is chosen.
+        CanPlay = file.FileType is FileType.Video or FileType.Audio;
 
         if (!shows)
         {
             SetPreview(null, string.Empty, "Inhalt wird nicht angezeigt: Zugangsdaten. „Öffnen“ zeigt die Datei im Standardprogramm.");
             return;
         }
+        if (file.FileType == FileType.Video && _preview.CanMakeFilmstrips)
+            PreviewMessage = "Bildstreifen wird erstellt …";
         var preview = await _preview.BuildAsync(file, ct);
-        if (ct.IsCancellationRequested) { preview.ImagePreview?.Dispose(); return; }
-        SetPreview(preview.ImagePreview, preview.TextPreview, preview.Message);
+        if (ct.IsCancellationRequested) { preview.Dispose(); return; }
+        CanPlay = preview.CanPlay;
+        SetPreview(preview.ImagePreview, preview.TextPreview, preview.Message, preview.Frames);
     }
 
     private async Task LoadFolderDetailAsync(PlanAction a, CancellationToken ct)
@@ -818,8 +885,8 @@ public partial class PlanViewModel : ViewModelBase
         }
         DetailDescription = $"Vorschau: {first.Name}" + (first.Classification?.Summary is { Length: > 0 } sum ? " · " + sum : string.Empty);
         var preview = await _preview.BuildAsync(first, ct);
-        if (ct.IsCancellationRequested) { preview.ImagePreview?.Dispose(); return; }
-        SetPreview(preview.ImagePreview, preview.TextPreview, preview.Message);
+        if (ct.IsCancellationRequested) { preview.Dispose(); return; }
+        SetPreview(preview.ImagePreview, preview.TextPreview, preview.Message, preview.Frames);
     }
 
     /// <summary>
@@ -843,15 +910,42 @@ public partial class PlanViewModel : ViewModelBase
         return string.Join(" · ", parts);
     }
 
-    private void SetPreview(Bitmap? image, string text, string message)
+    /// <summary>
+    /// Kind and origin of a video from its stored facts (Issue 103), in words: "Eigene Aufnahme · Handy · aus den
+    /// Metadaten, sicher". The title of a film or episode only where free text is shown. Empty for other files and for a
+    /// video without a kind fact.
+    /// </summary>
+    public static string OriginLine(FileNode file, IReadOnlyList<FileFact> facts, bool showsFreeText)
+    {
+        if (file.FileType != FileType.Video) return string.Empty;
+        var kind = facts.FirstOrDefault(f => f.Key == FileFactKey.VideoKind);
+        if (kind is null) return string.Empty;
+        string? Fact(FileFactKey key) => facts.FirstOrDefault(f => f.Key == key && (showsFreeText || !f.Key.IsFreeText()))?.Value;
+        var parts = new List<string> { "Art: " + PlanDisplay.VideoKindLabel(kind.Value) };
+        if (Fact(FileFactKey.RecordingDevice) is { } device) parts.Add(PlanDisplay.RecordingDeviceLabel(device));
+        if (Fact(FileFactKey.SeasonNumber) is { } s && Fact(FileFactKey.EpisodeNumber) is { } e) parts.Add($"Staffel {s}, Folge {e}");
+        if (Fact(FileFactKey.VideoTitle) is { Length: > 0 } title) parts.Add($"„{title}“");
+        if (Fact(FileFactKey.ReleaseYear) is { } year) parts.Add(year);
+        var line = string.Join(" · ", parts) + " · " + PlanDisplay.FactSourceLabel(kind.Source)
+                   + (kind.Certainty is { } c ? ", " + PlanDisplay.CertaintyLabel(c) : string.Empty);
+        if (Fact(FileFactKey.VideoKindDisputed) is { } disputed)
+            line += $" (das Modell sagte {PlanDisplay.VideoKindLabel(disputed)})";
+        return line;
+    }
+
+    private void SetPreview(Bitmap? image, string text, string message, IReadOnlyList<PreviewFrame>? frames = null)
     {
         if (!ReferenceEquals(ImagePreview, image)) ImagePreview?.Dispose();
+        var old = PreviewFrames;
         ImagePreview = image;
         TextPreview = text;
         PreviewMessage = message;
+        PreviewFrames = frames ?? [];
+        foreach (var f in old.Where(o => !PreviewFrames.Contains(o))) f.Image.Dispose();
         OnPropertyChanged(nameof(HasImagePreview));
         OnPropertyChanged(nameof(HasTextPreview));
         OnPropertyChanged(nameof(HasPreviewMessage));
+        OnPropertyChanged(nameof(HasFrames));
     }
 
     // ================================================================== run

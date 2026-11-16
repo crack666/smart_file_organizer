@@ -1,6 +1,7 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:vm="using:SmartFileOrganizer.Desktop.ViewModels"
+             xmlns:services="using:SmartFileOrganizer.Desktop.Services"
              x:Class="SmartFileOrganizer.Desktop.Views.PlanView"
              x:DataType="vm:PlanViewModel"
              Background="#1E1E1E">
@@ -113,8 +114,8 @@
                     ToolTip.Tip="Die Auswahl darf ausgeführt werden. Sensible und abgelehnte Aktionen nur einzeln." />
             <Button Classes="compact" Content="Freigabe zurücknehmen" Command="{Binding RevokeReleaseCommand}" />
             <Button Classes="compact" Content="Auswahl leeren" Command="{Binding ClearChecksCommand}" Margin="0,0,16,0" />
-            <Button Classes="compact release" Content="Alles freigeben" Command="{Binding ReleaseAllCommand}"
-                    ToolTip.Tip="Alle Aktionen ohne Problem; sensible und abgelehnte nur einzeln" />
+            <Button Classes="compact release" Content="Alles freigeben…" Command="{Binding ReleaseAllCommand}"
+                    ToolTip.Tip="{x:Static vm:PlanViewModel.ReleaseAllHint}" />
             <Button Classes="compact" Content="Agent zurücksetzen" Command="{Binding ResetAgentDecisionsCommand}"
                     IsEnabled="{Binding HasAgentDecisions}"
                     ToolTip.Tip="Was ein Agent freigegeben oder abgelehnt hat, wieder auf „Offen“" />
@@ -123,9 +124,12 @@
         <!-- ===== List and detail ===== -->
         <Grid Grid.Row="3" ColumnDefinitions="*,4,430">
 
+            <!-- Double click or Enter on a row: the file in its default program (a video or sound file plays). -->
             <ListBox Grid.Column="0"
+                     x:Name="ActionList"
                      ItemsSource="{Binding Rows}"
                      SelectedItem="{Binding SelectedRow, Mode=TwoWay}"
+                     DoubleTapped="OnRowDoubleTapped"
                      Background="#1E1E1E"
                      BorderThickness="0,1,0,0"
                      BorderBrush="#3E3E42">
@@ -208,10 +212,51 @@
                             <TextBlock Text="{Binding DetailSource}" Classes="small" TextWrapping="Wrap" />
                             <WrapPanel Margin="0,6,0,0">
                                 <Button Classes="compact" Content="Öffnen" Command="{Binding OpenSelectedCommand}"
-                                        ToolTip.Tip="Mit dem Standardprogramm öffnen" />
+                                        ToolTip.Tip="Mit dem Standardprogramm öffnen (auch Doppelklick oder Eingabetaste in der Liste)" />
                                 <Button Classes="compact" Content="Im Ordner zeigen" Command="{Binding RevealSelectedCommand}" />
                                 <Button Classes="compact" Content="Ziel zeigen" Command="{Binding RevealTargetCommand}" />
                             </WrapPanel>
+
+                            <!-- ===== Preview first: what the file is decides what happens to it ===== -->
+                            <TextBlock Text="{Binding DetailMedia}" Foreground="White" FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap"
+                                       IsVisible="{Binding HasMedia}" Margin="0,8,0,0" />
+                            <TextBlock Text="{Binding DetailMediaOrigin}" Foreground="#D0D0D0" FontSize="12" TextWrapping="Wrap"
+                                       IsVisible="{Binding HasMediaOrigin}" />
+                            <Button Content="▶  Abspielen" Command="{Binding PlaySelectedCommand}" IsVisible="{Binding CanPlay}"
+                                    Background="#2F6FD6" Foreground="White" FontSize="13" FontWeight="SemiBold" Padding="14,5" Margin="0,6,0,0"
+                                    HotKey="Ctrl+P"
+                                    ToolTip.Tip="Im Standardprogramm abspielen (Strg+P; Doppelklick oder Eingabetaste in der Liste)" />
+                            <ItemsControl ItemsSource="{Binding PreviewFrames}" IsVisible="{Binding HasFrames}" Margin="0,6,0,0">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <UniformGrid Columns="3" />
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="services:PreviewFrame">
+                                        <Panel Margin="0,0,3,3">
+                                            <Image Source="{Binding Image}" Stretch="Uniform" />
+                                            <Border Background="#C0000000" CornerRadius="2" Padding="4,0" Margin="2"
+                                                    HorizontalAlignment="Right" VerticalAlignment="Bottom">
+                                                <TextBlock Text="{Binding Label}" Foreground="White" FontSize="11" FontWeight="SemiBold" />
+                                            </Border>
+                                        </Panel>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <Border Margin="0,8,0,0" Background="White" CornerRadius="3" Padding="2" HorizontalAlignment="Left"
+                                    IsVisible="{Binding HasImagePreview}">
+                                <Image Source="{Binding ImagePreview}" MaxHeight="280" MaxWidth="400" Stretch="Uniform" />
+                            </Border>
+                            <Border Margin="0,8,0,0" Background="#1E1E1E" BorderBrush="#3E3E42" BorderThickness="1" CornerRadius="3"
+                                    Padding="6" MaxHeight="220" IsVisible="{Binding HasTextPreview}">
+                                <ScrollViewer>
+                                    <TextBlock Text="{Binding TextPreview}" FontFamily="Consolas,Menlo,monospace" FontSize="11"
+                                               Foreground="#D0D0D0" TextWrapping="Wrap" />
+                                </ScrollViewer>
+                            </Border>
+                            <TextBlock Text="{Binding PreviewMessage}" Classes="small" TextWrapping="Wrap" Margin="0,6,0,0"
+                                       IsVisible="{Binding HasPreviewMessage}" />
 
                             <TextBlock Text="Was soll damit geschehen?" Classes="label" />
                             <ItemsControl ItemsSource="{Binding OutcomeChoices}">
@@ -274,27 +319,11 @@
                             </StackPanel>
 
                             <TextBlock Text="Datei" Classes="label" />
-                            <TextBlock Text="{Binding DetailMedia}" Foreground="White" FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap"
-                                       IsVisible="{Binding HasMedia}" Margin="0,0,0,4" />
                             <TextBlock Text="{Binding DetailMarker}" Foreground="#E3B341" FontSize="12" TextWrapping="Wrap"
                                        IsVisible="{Binding DetailMarker, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
                             <TextBlock Text="{Binding DetailDescription}" Foreground="White" FontSize="12" TextWrapping="Wrap"
                                        IsVisible="{Binding DetailDescription, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
                             <TextBlock Text="{Binding DetailFacts}" Classes="small" TextWrapping="Wrap" />
-
-                            <Border Margin="0,8,0,0" Background="White" CornerRadius="3" Padding="2" HorizontalAlignment="Left"
-                                    IsVisible="{Binding HasImagePreview}">
-                                <Image Source="{Binding ImagePreview}" MaxHeight="280" MaxWidth="400" Stretch="Uniform" />
-                            </Border>
-                            <Border Margin="0,8,0,0" Background="#1E1E1E" BorderBrush="#3E3E42" BorderThickness="1" CornerRadius="3"
-                                    Padding="6" MaxHeight="220" IsVisible="{Binding HasTextPreview}">
-                                <ScrollViewer>
-                                    <TextBlock Text="{Binding TextPreview}" FontFamily="Consolas,Menlo,monospace" FontSize="11"
-                                               Foreground="#D0D0D0" TextWrapping="Wrap" />
-                                </ScrollViewer>
-                            </Border>
-                            <TextBlock Text="{Binding PreviewMessage}" Classes="small" TextWrapping="Wrap" Margin="0,8,0,0"
-                                       IsVisible="{Binding HasPreviewMessage}" />
                         </StackPanel>
                     </ScrollViewer>
                 </Panel>

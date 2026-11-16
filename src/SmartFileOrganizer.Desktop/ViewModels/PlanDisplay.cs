@@ -251,4 +251,50 @@ public static class PlanDisplay
     public static IReadOnlyList<PlanActionKind> Kinds { get; } = Enum.GetValues<PlanActionKind>();
 
     public static IReadOnlyList<PlanOutcome> Outcomes { get; } = Enum.GetValues<PlanOutcome>();
+
+    /// <summary>A video kind code (fact <c>video_kind</c>) in words; an unknown code as it is.</summary>
+    public static string VideoKindLabel(string code) => code switch
+    {
+        "movie" => "Film",
+        "series_episode" => "Serienfolge",
+        "own_recording" => "Eigene Aufnahme",
+        "screen_recording" => "Bildschirmaufnahme",
+        "web_clip" => "Clip aus dem Netz",
+        "music_video" => "Musikvideo",
+        "received" => "Per Messenger erhalten",
+        "unknown" => "unbekannt",
+        _ => code
+    };
+
+    /// <summary>A recording device code (fact <c>recording_device</c>) in words.</summary>
+    public static string RecordingDeviceLabel(string code) => code switch
+    {
+        "phone" => "Handy",
+        "action_cam" => "Actioncam",
+        "camera_360" => "360-Grad-Kamera",
+        "drone" => "Drohne",
+        "camera" => "Kamera",
+        "dashcam" => "Dashcam",
+        _ => code
+    };
+
+    /// <summary>Where a fact was read, as the detail says it.</summary>
+    public static string FactSourceLabel(FactSource source) => source switch
+    {
+        FactSource.Metadata => "aus den Metadaten",
+        FactSource.Rule => "per Regel",
+        FactSource.Model => "vom Modell",
+        FactSource.Name => "aus dem Namen",
+        FactSource.Companion => "aus einer Begleitdatei",
+        _ => source.ToString()
+    };
+
+    public static string CertaintyLabel(ResultCertainty certainty) => certainty switch
+    {
+        ResultCertainty.Certain => "sicher",
+        ResultCertainty.Likely => "wahrscheinlich",
+        ResultCertainty.Uncertain => "unsicher",
+        ResultCertainty.Review => "zu prüfen",
+        _ => certainty.ToString()
+    };
 }
