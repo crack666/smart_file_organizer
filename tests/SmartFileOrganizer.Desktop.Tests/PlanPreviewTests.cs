@@ -1,5 +1,6 @@
 using Avalonia.Headless.XUnit;
 using SmartFileOrganizer.Application.Plans;
+using SmartFileOrganizer.Application.Tests;
 using SmartFileOrganizer.Desktop.ViewModels;
 using SmartFileOrganizer.Infrastructure.Content;
 
@@ -24,9 +25,27 @@ public class PlanPreviewTests
 
         vm.SelectedRow = video;
         await WaitUntil(() => vm.CanPlay);
-        if (bed.HasRealVideo)
+        // Wait until the preview has settled (strip or final message), whatever the machine has, then name the case.
+        // Nine real ffmpeg runs may take a while on a slow runner; the bound only catches a preview that never settles.
+        string State() => $"ffmpeg found: {new VideoFrameExtractor().IsAvailable}, test video made: {bed.HasRealVideo}, frames: {vm.PreviewFrames.Count}, message: {vm.PreviewMessage}";
+        await WaitUntil(() => vm.HasFrames || (vm.HasPreviewMessage && !vm.PreviewMessage.StartsWith("Bildstreifen wird erstellt", StringComparison.Ordinal)),
+            seconds: 60, state: State);
+        var state = State();
+        if (!new VideoFrameExtractor().IsAvailable)
         {
-            await WaitUntil(() => vm.HasFrames);
+            // A machine without ffmpeg (the GitHub runners): the hint names the tool, "Abspielen" is the way.
+            Assert.True(vm.PreviewMessage.StartsWith("Kein Bildstreifen: ffmpeg ist auf diesem Rechner nicht gefunden", StringComparison.Ordinal), state);
+            Assert.False(vm.HasFrames, state);
+        }
+        else if (!bed.HasRealVideo)
+        {
+            // ffmpeg there, but it could not make the test video: the file is a bare header it cannot read.
+            Assert.True(vm.PreviewMessage.StartsWith("Kein Bildstreifen: ffmpeg konnte das Video nicht lesen", StringComparison.Ordinal), state);
+            Assert.False(vm.HasFrames, state);
+        }
+        else
+        {
+            Assert.True(vm.HasFrames, state);
             Assert.Equal(FilePreviewServiceFrames, vm.PreviewFrames.Count);
             Assert.Equal(["0:00", "0:02", "0:03", "0:04", "0:06", "0:07", "0:08", "0:10", "0:11"], vm.PreviewFrames.Select(f => f.Label));
             Assert.All(vm.PreviewFrames, f => Assert.Equal(Services.FilePreviewService.FilmstripWidth, f.Image.PixelSize.Width));
@@ -43,13 +62,50 @@ public class PlanPreviewTests
             Assert.Equal(9, again.Frames.Count);
             again.Dispose();
         }
-        else
-        {
-            await WaitUntil(() => vm.PreviewMessage.Contains("konnte das Video nicht lesen", StringComparison.Ordinal));
-        }
 
         vm.PlaySelectedCommand.Execute(null);
         Assert.Equal([video.Action.SourcePath], bed.Shell.Opened);
+    }
+
+    /// <summary>
+    /// ffmpeg is "there" but gives no picture (here: the path it was found at cannot be started), on every machine alike:
+    /// the preview ends with an honest message and "Abspielen" instead of waiting, and nothing is cached.
+    /// </summary>
+    [AvaloniaFact]
+    public async Task Video_WhenTheToolGivesNoPicture_EndsWithAHint_NotAnEndlessWait()
+    {
+        using var bed = new PlanTestbed(withMedia: true);
+        var file = Path.Combine(bed.Root, "clip.mp4");
+        File.WriteAllBytes(file, GeneratedFiles.Mp4Header(new DateTime(2023, 8, 12, 14, 0, 0, DateTimeKind.Utc), 12, 480, 270));
+        var tool = new VideoFrameExtractor(() => Path.Combine(bed.Root, "no-such-ffmpeg.exe"));
+        Assert.True(tool.IsAvailable);
+        var service = new Services.FilePreviewService(new FileContentExtractor(), tool, bed.PreviewCache);
+
+        var started = DateTime.UtcNow;
+        var preview = await service.BuildAsync(new Domain.Models.FileNode
+        {
+            Name = "clip.mp4", FullPath = file, Extension = ".mp4", FileType = Domain.Enums.FileType.Video
+        });
+
+        Assert.Empty(preview.Frames);
+        Assert.True(preview.CanPlay);
+        Assert.StartsWith("Kein Bildstreifen: ffmpeg konnte das Video nicht lesen", preview.Message);
+        Assert.Contains("„Abspielen“", preview.Message);
+        Assert.True(DateTime.UtcNow - started < TimeSpan.FromSeconds(10), "no waiting for a tool that does not answer");
+        Assert.False(Directory.Exists(bed.PreviewCache));
+
+        // The same with the real ffmpeg, where there is one: it runs, but the bare header holds no picture.
+        var real = new VideoFrameExtractor();
+        if (!real.IsAvailable) return;
+        started = DateTime.UtcNow;
+        var unreadable = await new Services.FilePreviewService(new FileContentExtractor(), real, bed.PreviewCache).BuildAsync(new Domain.Models.FileNode
+        {
+            Name = "clip.mp4", FullPath = file, Extension = ".mp4", FileType = Domain.Enums.FileType.Video
+        });
+        Assert.Empty(unreadable.Frames);
+        Assert.StartsWith("Kein Bildstreifen: ffmpeg konnte das Video nicht lesen", unreadable.Message);
+        Assert.True(DateTime.UtcNow - started < TimeSpan.FromSeconds(10), "one failed picture is enough to give up");
+        Assert.False(Directory.Exists(bed.PreviewCache));
     }
 
     [AvaloniaFact]
@@ -186,13 +242,14 @@ public class PlanPreviewTests
     private static SortedSet<string> Files(string root) =>
         new(Directory.GetFiles(root, "*", SearchOption.AllDirectories).Select(f => Path.GetRelativePath(root, f)), StringComparer.Ordinal);
 
-    private static async Task WaitUntil(Func<bool> condition)
+    private static async Task WaitUntil(Func<bool> condition, int seconds = 10, Func<string>? state = null)
     {
-        for (var i = 0; i < 1000 && !condition(); i++)
+        var until = DateTime.UtcNow.AddSeconds(seconds);
+        while (!condition() && DateTime.UtcNow < until)
         {
             Avalonia.Threading.Dispatcher.UIThread.RunJobs();
             await Task.Delay(10);
         }
-        Assert.True(condition(), "condition not met in time");
+        Assert.True(condition(), $"condition not met in {seconds} s" + (state is null ? "" : ": " + state()));
     }
 }

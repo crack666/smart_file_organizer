@@ -158,6 +158,9 @@ public class FilePreviewService
                 ct.ThrowIfCancellationRequested();
                 if (await _frames.ExtractOneAsync(file.FullPath, position, FilmstripWidth, ct) is { } png)
                     made.Add((position, png));
+                // No picture at the first position: the tool cannot read this file, and asking eight more times
+                // (each with its own timeout) would only delay the honest hint.
+                else if (made.Count == 0) break;
             }
             if (made.Count == 0)
                 return new FilePreviewData

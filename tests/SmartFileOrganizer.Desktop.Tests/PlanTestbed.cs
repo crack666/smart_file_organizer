@@ -207,7 +207,8 @@ public sealed class PlanTestbed : IDisposable
         {
             var psi = new ProcessStartInfo(VideoFrameExtractor.ToolName) { UseShellExecute = false, CreateNoWindow = true, RedirectStandardError = true };
             foreach (var arg in new[] { "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "testsrc2=size=480x270:rate=10:duration=12",
-                         "-pix_fmt", "yuv420p", path })
+                         "-c:v", "mpeg4", "-pix_fmt", "yuv420p", path }) // mpeg4 is built into every ffmpeg; libx264 is not
+
                 psi.ArgumentList.Add(arg);
             using var make = Process.Start(psi)!;
             make.StandardError.ReadToEnd();
