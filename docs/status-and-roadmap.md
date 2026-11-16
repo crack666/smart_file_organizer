@@ -208,7 +208,8 @@ yet against a real Ollama restart.
   folder`), with the inbox folder and "Neuer Ordner hier"; `PlanService` and
   its checks decide, a refused target keeps the picker open with the reason.
   Videos get one still frame when `ffmpeg` is on the PATH (the extractor of
-  the analysis), video and audio their key facts in large type.
+  the analysis), video and audio their key facts in large type (since #109
+  a filmstrip, below).
   _Checked 14.11.2026: `SmartFileOrganizer.Desktop.Tests` 17 passed on Windows
   and on Linux (Avalonia headless), one pass rendered
   ([screenshots](images/01-plan-agent.png)); the real window was not driven by
@@ -231,6 +232,29 @@ yet against a real Ollama restart.
   of "Papierkorb leeren" ([screenshot](images/09-confirm-empty-bin.png)); the
   real window was not driven by hand._ Limits: a discarded file that was purged cannot be put
   back; an older build that rewrites a move notice drops its `removed` lines.
+- Plan view preview: filmstrip, "Abspielen", more formats, "Alles freigeben"
+  explained (since 16.11.2026,
+  [#109](https://github.com/crack666/smart_file_organizer/issues/109)). Until
+  then a video showed one still, `.jfif` and `.doc` (and `.rtf`, `.odp`,
+  archives) showed "No built-in preview", and "Alles freigeben" released at
+  once. Now the preview stands right under "Öffnen": a video gets up to nine
+  pictures with time marks (three by three, made by `ffmpeg` in the
+  background, cached under the temp folder of the application), its kind and
+  origin from the facts, and "Abspielen" (default program; also Enter or a
+  double click in the list, Ctrl+P). Without `ffmpeg` a hint names it. Audio
+  gets "Abspielen" beside duration and tags. The reader is chosen from the
+  first bytes, then a full extension list
+  ([format table](architecture.md#preview-flow)). "Alles freigeben…" asks
+  with the counts as set (move, bin, stay) and says no outcome is changed.
+  No player is built in ([why](engineering-decisions.md#no-video-player-in-the-gui)).
+  _Checked 16.11.2026: `dotnet test` 1,188 passed and 2 skipped on Windows,
+  1,190 passed on Linux, `SmartFileOrganizer.Desktop.Tests` 33 of them
+  (Avalonia headless), both with `ffmpeg` on the PATH; the case without it is
+  forced in the tests. Preview rendered headless
+  ([screenshot](images/10-video-filmstrip.png)); the real window was not
+  driven by hand._ Limits: `.xls`/`.ppt` show a hint only;
+  TIFF, HEIC and raw images are not drawn; the analysis does not read `.doc`
+  text yet (only the preview does).
 
 ### Command line
 

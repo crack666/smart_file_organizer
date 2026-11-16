@@ -86,7 +86,19 @@ for the 12,000 characters the model sees; a spreadsheet whose single sheet unpac
 
 Video still frames come from `ffmpeg` if it is found on the `PATH` (`VideoFrameExtractor`). It is not a dependency
 and not shipped: without it videos get their container metadata only, and the evidence tells the model that frames
-are missing. Each call has a 30 s timeout and reads one frame, scaled to 768 px width.
+are missing. Each call has a 30 s timeout and reads one frame, scaled to 768 px width (the GUI filmstrip: 320 px).
+
+### No video player in the GUI
+
+Decided 16.11.2026 ([#109](https://github.com/crack666/smart_file_organizer/issues/109)). To judge whether a video is
+clutter, the plan view shows a filmstrip of up to nine pictures through the same optional `ffmpeg`, and "Abspielen"
+hands the file to the default program of the system. A player inside the window was weighed and left out: the usual
+option for Avalonia is LibVLCSharp, whose managed part is small (`LibVLCSharp` 3.10.2: 2.8 MB, `LibVLCSharp.Avalonia`:
+41 KB as NuGet packages), but it needs the native VLC engine: `VideoLAN.LibVLC.Windows` 3.0.24 is a 145 MB NuGet package
+(x86 and x64 plugins), measured 16.11.2026 from the Content-Length of nuget.org; on Linux and macOS it comes from the
+system or a separate package. That is a second, native code base with its own codecs and security updates to ship and
+keep up with on three platforms, for a view in which a person mostly needs a glance. The default program plays every
+format the person already uses.
 
 ## System.CommandLine for the CLI
 
