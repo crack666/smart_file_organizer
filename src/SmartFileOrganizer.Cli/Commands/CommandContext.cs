@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using SmartFileOrganizer.Cli.Contract;
 using SmartFileOrganizer.Hosting;
+using SmartFileOrganizer.Infrastructure.Ollama;
 
 namespace SmartFileOrganizer.Cli.Commands;
 
@@ -108,6 +109,18 @@ public sealed class CommandContext : IAsyncDisposable
         _commandServices?.Invoke(services);
 
         _services = services.BuildServiceProvider();
+        try
+        {
+            _services.GetRequiredService<OllamaOptions>().ApplySelection(
+                ParseResult.GetValue(_globals.Profile),
+                ParseResult.GetValue(_globals.Provider));
+        }
+        catch
+        {
+            _services.Dispose();
+            _services = null;
+            throw;
+        }
         return _services;
     }
 

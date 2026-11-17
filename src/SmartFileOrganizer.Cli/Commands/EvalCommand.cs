@@ -10,6 +10,7 @@ using SmartFileOrganizer.Domain.Enums;
 using SmartFileOrganizer.Domain.Interfaces;
 using SmartFileOrganizer.Domain.Models;
 using SmartFileOrganizer.Infrastructure.Evaluation;
+using SmartFileOrganizer.Infrastructure.ModelServer;
 using SmartFileOrganizer.Infrastructure.Ollama;
 
 namespace SmartFileOrganizer.Cli.Commands;
@@ -345,6 +346,8 @@ public static class EvalCommand
         var inv = CultureInfo.InvariantCulture;
         var settings = new Dictionary<string, string>
         {
+            ["model.provider"] = o.Provider,
+            ["model.base_url"] = ModelWire.AddressWithoutSecrets(o.BaseUrl),
             ["ollama.max_parallel_requests"] = Math.Clamp(o.MaxParallelRequests, 1, 8).ToString(inv),
             ["ollama.max_samples_per_directory"] = o.MaxSamplesPerDirectory.ToString(inv),
             ["ollama.max_image_upload_bytes"] = o.MaxImageUploadBytes.ToString(inv),
@@ -352,6 +355,10 @@ public static class EvalCommand
             ["ollama.timeout_seconds"] = o.TimeoutSeconds.ToString(inv),
             ["ollama.summary_language"] = o.SummaryLanguage
         };
+        if (o.NumCtx is int ctx)
+            settings["model.num_ctx"] = ctx.ToString(inv);
+        if (o.Temperature is double temperature)
+            settings["model.temperature"] = temperature.ToString(inv);
         if (sampling != null)
         {
             // The thresholds the sample check decided with (issue 50 changed how they are applied).

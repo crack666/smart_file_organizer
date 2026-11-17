@@ -6,6 +6,7 @@ using SmartFileOrganizer.Cli.Contract;
 using SmartFileOrganizer.Domain.Enums;
 using SmartFileOrganizer.Domain.Interfaces;
 using SmartFileOrganizer.Hosting;
+using SmartFileOrganizer.Infrastructure.ModelServer;
 using SmartFileOrganizer.Infrastructure.Ollama;
 
 namespace SmartFileOrganizer.Cli.Commands;
@@ -26,7 +27,8 @@ public static class DoctorCommand
     public sealed record LibraryCheck(long JobId, string RootPath, bool Readable, string? Problem);
 
     public sealed record DoctorResult(bool Ok, DatabaseCheck Database, string SettingsPath, OllamaCheck Ollama, ModelCheck Model,
-        IReadOnlyList<LibraryCheck>? Libraries = null);
+        IReadOnlyList<LibraryCheck>? Libraries = null, string Provider = "ollama", bool ApiKeyConfigured = false,
+        bool Busy = false, int ParallelRequested = 1, int? ParallelMeasured = null, string? ParallelWarning = null);
 
     public static Command Create(CliHost host, GlobalOptions globals)
     {
@@ -53,25 +55,25 @@ public static class DoctorCommand
             var options = services.GetRequiredService<OllamaOptions>();
             var ollama = services.GetRequiredService<IOllamaService>();
 
-            bool reachable;
+            ModelEndpointProbe probe;
             using (var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct))
             {
                 timeout.CancelAfter(OllamaTimeout);
                 try
                 {
-                    reachable = await ollama.IsAvailableAsync(timeout.Token);
+                    probe = await ollama.ProbeEndpointAsync(timeout.Token);
                 }
                 catch (OperationCanceledException) when (!ct.IsCancellationRequested)
                 {
-                    // Our own limit: IsAvailableAsync passes a cancelled token through instead of answering false.
-                    reachable = false;
+                    // Our own limit: a cancelled token is not a refusal, the server did not answer in time.
+                    probe = new ModelEndpointProbe(false, false);
                 }
             }
             ct.ThrowIfCancellationRequested();
 
             var installed = new List<string>();
             bool? modelAvailable = null;
-            if (reachable)
+            if (probe.Reachable && !probe.Busy)
             {
                 try
                 {
@@ -91,28 +93,56 @@ public static class DoctorCommand
             var libraries = new List<LibraryCheck>();
             if (database.Ok)
             {
-                var probe = services.GetRequiredService<ILibraryRootProbe>();
+                var roots = services.GetRequiredService<ILibraryRootProbe>();
                 foreach (var job in (await services.GetRequiredService<IScanJobRepository>().GetAllAsync(ct))
                              .Where(j => j.Role == ScanRole.Library && j.Status == JobStatus.Completed).OrderBy(j => j.Id))
                 {
-                    var problem = probe.Problem(job.RootPath);
+                    var problem = roots.Problem(job.RootPath);
                     libraries.Add(new LibraryCheck(job.Id, job.RootPath, problem is null, problem));
                 }
             }
             var librariesOk = libraries.All(l => l.Readable);
+            var requested = Math.Clamp(options.MaxParallelRequests, 1, 8);
+            int? measured = null;
+            if (probe.Reachable && !probe.Busy && modelAvailable == true)
+            {
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                timeout.CancelAfter(TimeSpan.FromSeconds(20));
+                try
+                {
+                    measured = await ollama.MeasureParallelismAsync(requested, timeout.Token);
+                }
+                catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+                {
+                    measured = null;
+                }
+            }
+            var warning = ModelWire.ParallelWarning(requested, measured);
+            if (warning is not null)
+                ctx.Note(warning);
 
             var result = new DoctorResult(
-                database.Ok && reachable && modelAvailable == true && librariesOk,
+                database.Ok && probe.Reachable && !probe.Busy && modelAvailable == true && librariesOk,
                 database,
                 paths.SettingsPath,
-                new OllamaCheck(options.BaseUrl, reachable),
+                new OllamaCheck(options.BaseUrl, probe.Reachable),
                 new ModelCheck(options.Model, modelAvailable, installed),
-                libraries);
+                libraries,
+                options.Provider,
+                options.ResolveApiKey() is not null,
+                probe.Busy,
+                requested,
+                measured,
+                warning);
 
             if (!database.Ok)
                 return CommandOutcome.Fail(ExitCodes.Failure, ErrorCodes.DatabaseError, $"Database check failed: {database.Error}", result, () => Render(result));
-            if (!reachable)
+            if (!probe.Reachable)
                 return CommandOutcome.Fail(ExitCodes.OllamaUnavailable, ErrorCodes.OllamaUnavailable, $"Ollama is not reachable at {options.BaseUrl}.", result, () => Render(result));
+            if (probe.Busy)
+                return CommandOutcome.Fail(ExitCodes.OllamaUnavailable, ErrorCodes.OllamaUnavailable,
+                    $"The model server at {options.BaseUrl} is refusing requests (HTTP 429 or 503). It is reachable; try again when it is free.",
+                    result, () => Render(result));
             if (modelAvailable != true)
                 return CommandOutcome.Fail(ExitCodes.Failure, ErrorCodes.ModelMissing, $"Model {options.Model} is not installed in Ollama (ollama pull {options.Model}).", result, () => Render(result));
             if (!librariesOk)
@@ -132,8 +162,12 @@ public static class DoctorCommand
         var sb = new StringBuilder();
         sb.AppendLine($"{Mark(r.Database.Ok)} database  {r.Database.Path} (schema {r.Database.SchemaVersion?.ToString() ?? "-"}){(r.Database.Error is { } e ? $": {e}" : string.Empty)}");
         sb.AppendLine($"     settings  {r.SettingsPath}");
-        sb.AppendLine($"{Mark(r.Ollama.Reachable)} ollama    {r.Ollama.BaseUrl}");
+        sb.AppendLine($"{Mark(r.Ollama.Reachable)} {r.Provider,-10} {r.Ollama.BaseUrl}{(r.Busy ? " (refusing requests)" : string.Empty)}{(r.ApiKeyConfigured ? " (key set)" : string.Empty)}");
         sb.Append($"{Mark(r.Model.Available)} model     {r.Model.Name}");
+        if (r.ParallelMeasured is int measured)
+            sb.AppendLine().Append($"     parallel  requested {r.ParallelRequested}, server answered about {measured} at once");
+        if (r.ParallelWarning is { } warning)
+            sb.AppendLine().Append($"     warning   {warning}");
         foreach (var l in r.Libraries ?? [])
             sb.AppendLine().Append($"{Mark(l.Readable)} library   {l.JobId} {l.RootPath}{(l.Problem is { } p ? $": {p}" : string.Empty)}");
         return sb.ToString();
