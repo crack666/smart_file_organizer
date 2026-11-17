@@ -22,7 +22,10 @@ public static class FileTypeDetector
         [".mp4"] = FileType.Video, [".mkv"] = FileType.Video, [".avi"] = FileType.Video,
         [".mov"] = FileType.Video, [".wmv"] = FileType.Video, [".flv"] = FileType.Video,
         [".webm"] = FileType.Video, [".m4v"] = FileType.Video, [".mpg"] = FileType.Video,
-        [".mpeg"] = FileType.Video, [".ts"] = FileType.Video,
+        // .ts is not listed here: the extension alone cannot tell an MPEG transport stream from TypeScript, and
+        // it counts as code below. Until 17.11.2026 it stood in both lists and the later entry won silently.
+        // The preview still shows a binary .ts as video (PreviewFormats).
+        [".mpeg"] = FileType.Video,
         // Audio
         [".mp3"] = FileType.Audio, [".wav"] = FileType.Audio, [".flac"] = FileType.Audio,
         [".aac"] = FileType.Audio, [".ogg"] = FileType.Audio, [".m4a"] = FileType.Audio,
