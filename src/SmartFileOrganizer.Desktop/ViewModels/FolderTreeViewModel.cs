@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using SmartFileOrganizer.Application.Services;
+using SmartFileOrganizer.Desktop.Services;
 using SmartFileOrganizer.Domain.Models;
 
 namespace SmartFileOrganizer.Desktop.ViewModels;
@@ -43,12 +44,7 @@ public partial class FolderTreeItemViewModel : ViewModelBase
     {
         var path = Node?.FullPath;
         if (string.IsNullOrEmpty(path) || !Directory.Exists(path)) return;
-        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-        {
-            FileName = "explorer.exe",
-            Arguments = $"\"{path}\"",
-            UseShellExecute = false
-        });
+        new ShellLauncher().Reveal(path);
     }
 
     [RelayCommand]
