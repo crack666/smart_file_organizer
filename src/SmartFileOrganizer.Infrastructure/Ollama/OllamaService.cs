@@ -1,3 +1,4 @@
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
@@ -53,6 +54,9 @@ public class OllamaService : IOllamaService
         _server = server ?? new ModelServerOptions();
         _time = time ?? TimeProvider.System;
         _sender = new ModelHttpSender(http, _time, logger);
+        var key = options.ResolveApiKey();
+        if (!string.IsNullOrEmpty(key) && http.DefaultRequestHeaders.Authorization is null)
+            http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", key);
     }
 
     public async Task<bool> IsAvailableAsync(CancellationToken ct = default)
@@ -61,7 +65,7 @@ public class OllamaService : IOllamaService
         {
             using var limit = new CancellationTokenSource(_server.ProbeTimeout, _time);
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, limit.Token);
-            using var response = await _http.GetAsync(BuildUri("api/tags"), linked.Token);
+            using var response = await _http.GetAsync(BuildUri(ModelWire.ProbePath(_options)), linked.Token);
             return response.IsSuccessStatusCode;
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -97,27 +101,13 @@ public class OllamaService : IOllamaService
     {
         using var limit = new CancellationTokenSource(_server.ProbeTimeout, _time);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, limit.Token);
-        using var response = await _http.GetAsync(BuildUri("api/tags"), linked.Token);
+        using var response = await _http.GetAsync(BuildUri(ModelWire.ProbePath(_options)), linked.Token);
         response.EnsureSuccessStatusCode();
 
         await using var stream = await response.Content.ReadAsStreamAsync(linked.Token);
         using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: linked.Token);
 
-        var models = new List<OllamaLocalModel>();
-        if (!doc.RootElement.TryGetProperty("models", out var modelsProp) || modelsProp.ValueKind != JsonValueKind.Array)
-            return models;
-
-        foreach (var modelProp in modelsProp.EnumerateArray())
-        {
-            var details = modelProp.TryGetProperty("details", out var d) ? d : default;
-            models.Add(new OllamaLocalModel
-            {
-                Name = modelProp.TryGetProperty("name", out var name) ? name.GetString() ?? string.Empty : string.Empty,
-                Family = details.ValueKind == JsonValueKind.Object && details.TryGetProperty("family", out var family) ? family.GetString() ?? string.Empty : string.Empty,
-                ParameterSize = details.ValueKind == JsonValueKind.Object && details.TryGetProperty("parameter_size", out var parameterSize) ? parameterSize.GetString() ?? string.Empty : string.Empty,
-                QuantizationLevel = details.ValueKind == JsonValueKind.Object && details.TryGetProperty("quantization_level", out var q) ? q.GetString() ?? string.Empty : string.Empty
-            });
-        }
+        var models = ModelWire.ReadModels(_options.Provider, doc.RootElement);
 
         return models.OrderByDescending(m => string.Equals(m.Name, _options.Model, StringComparison.OrdinalIgnoreCase))
             .ThenBy(m => m.Name)
@@ -126,18 +116,18 @@ public class OllamaService : IOllamaService
 
     public async Task WarmModelAsync(string? model = null, CancellationToken ct = default)
     {
-        var requestBody = new
+        var requestBody = new ModelChatRequest
         {
-            model = string.IsNullOrWhiteSpace(model) ? _options.Model : model,
-            messages = Array.Empty<object>(),
-            stream = false,
-            keep_alive = _options.KeepAlive
+            Model = string.IsNullOrWhiteSpace(model) ? _options.Model : model,
+            MaxTokens = 8,
+            Warmup = true
         };
 
         // Loading a large model takes minutes; its own limit, far above the one of a call.
         using var limit = new CancellationTokenSource(_server.WarmupTimeout, _time);
         using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, limit.Token);
-        using var response = await _http.PostAsJsonAsync(BuildUri("api/chat"), requestBody, linked.Token);
+        using var message = ModelWire.Create(_options, requestBody, BuildUri(ModelWire.ChatPath(_options)));
+        using var response = await _http.SendAsync(message, linked.Token);
         response.EnsureSuccessStatusCode();
     }
 
@@ -150,10 +140,13 @@ public class OllamaService : IOllamaService
     /// throws <see cref="ModelServerUnavailableException"/> when the server is away and
     /// <see cref="ModelCallTimedOutException"/> when only this request runs out of time.
     /// </summary>
-    private Task<HttpResponseMessage> PostChatAsync(object requestBody, string what, CancellationToken ct) =>
-        _sender.SendAsync(
-            () => new HttpRequestMessage(HttpMethod.Post, BuildUri("api/chat")) { Content = JsonContent.Create(requestBody) },
+    private Task<HttpResponseMessage> PostChatAsync(ModelChatRequest requestBody, string what, CancellationToken ct)
+    {
+        var fitted = ModelWire.Fit(_options, requestBody);
+        return _sender.SendAsync(
+            () => ModelWire.Create(_options, fitted, BuildUri(ModelWire.ChatPath(_options))),
             CallTimeout, RetryPolicy, IsAvailableAsync, what, ct);
+    }
 
     /// <summary>An answer of <see cref="ChatAsync"/>: the body, and the status when the server refused.</summary>
     private sealed record ChatReply(bool Success, int Status, string? Reason, string Body);
@@ -163,12 +156,13 @@ public class OllamaService : IOllamaService
     /// An answer that stopped at <paramref name="maxTokens"/> (<c>done_reason</c> <c>length</c>) is a passing error,
     /// not a partial result: it is asked once more, and a second cut-off throws <see cref="ModelAnswerCutOffException"/>.
     /// </summary>
-    private async Task<ChatReply> ChatAsync(object requestBody, string kind, int maxTokens, string what, CancellationToken ct)
+    private async Task<ChatReply> ChatAsync(ModelChatRequest requestBody, string kind, int maxTokens, string what, CancellationToken ct)
     {
         for (var attempt = 1; ; attempt++)
         {
             using var response = await PostChatAsync(requestBody, what, ct);
-            var body = await response.Content.ReadAsStringAsync(ct);
+            var raw = await response.Content.ReadAsStringAsync(ct);
+            var body = ModelWire.NormalizeAnswer(_options.Provider, raw);
             if (!response.IsSuccessStatusCode)
                 return new ChatReply(false, (int)response.StatusCode, response.ReasonPhrase, body);
 
@@ -226,20 +220,9 @@ public class OllamaService : IOllamaService
                 file.Name, input.Depth, input.Base64Images.Count, input.ExtractedText?.Length ?? 0,
                 marked ? ModelTraffic.Withheld : Trunc(prompt.User, 8000));
 
-            var requestBody = new
-            {
-                model = _options.Model,
-                stream = false,
-                think = false,
-                keep_alive = _options.KeepAlive,
-                format = BuildClassificationSchema(input.AskKeepHint, DescriptionOf(input), VideoKindsOf(input)),
-                options = new { num_predict = _options.ClassificationMaxAnswerTokens },
-                messages = new object[]
-                {
-                    new { role = "system", content = prompt.System },
-                    new { role = "user", content = prompt.User, images = input.Base64Images.Count > 0 ? input.Base64Images : null }
-                }
-            };
+            var requestBody = MakeChat(BuildClassificationSchema(input.AskKeepHint, DescriptionOf(input), VideoKindsOf(input)),
+                _options.ClassificationMaxAnswerTokens, prompt.System, prompt.User,
+                input.Base64Images.Count > 0 ? input.Base64Images : null);
 
             var sw = System.Diagnostics.Stopwatch.StartNew();
             var reply = await ChatAsync(requestBody,
@@ -440,9 +423,7 @@ public class OllamaService : IOllamaService
         {
             var maxText = input.Depth == EvidenceDepth.Extended ? 24_000 : 8_000;
             sb.AppendLine("Extracted text / preview content:");
-            sb.AppendLine(input.ExtractedText.Length > maxText
-                ? input.ExtractedText[..maxText]
-                : input.ExtractedText);
+            sb.AppendLine(Excerpt(input.ExtractedText, maxText));
             sb.AppendLine();
         }
 
@@ -907,20 +888,7 @@ public class OllamaService : IOllamaService
                 input.Directory.RelativePath, input.DirectFiles.Count, input.SubdirectoryNames.Count,
                 prompt.User.Length, Trunc(prompt.User, 8000));
 
-            var requestBody = new
-            {
-                model = _options.Model,
-                stream = false,
-                think = false,
-                keep_alive = _options.KeepAlive,
-                format = BuildPreAssessmentSchema(),
-                options = new { num_predict = _options.PreAssessmentMaxAnswerTokens },
-                messages = new object[]
-                {
-                    new { role = "system", content = prompt.System },
-                    new { role = "user", content = prompt.User }
-                }
-            };
+            var requestBody = MakeChat(BuildPreAssessmentSchema(), _options.PreAssessmentMaxAnswerTokens, prompt.System, prompt.User);
 
             var sw = System.Diagnostics.Stopwatch.StartNew();
             var reply = await ChatAsync(requestBody, ModelCallKinds.PreAssessment, _options.PreAssessmentMaxAnswerTokens, "Phase 1 call", ct);
@@ -1135,20 +1103,7 @@ public class OllamaService : IOllamaService
             // local log may hold it.
             _traffic.LogDebug("[Phase3] PROMPT for '{Dir}' ({Len} chars):\n{Prompt}",
                 input.Directory.RelativePath, prompt.User.Length, Trunc(prompt.User, 8000));
-            var requestBody = new
-            {
-                model = _options.Model,
-                stream = false,
-                think = false,
-                keep_alive = _options.KeepAlive,
-                format = BuildSummarySchema(),
-                options = new { num_predict = _options.SummaryMaxAnswerTokens },
-                messages = new object[]
-                {
-                    new { role = "system", content = prompt.System },
-                    new { role = "user", content = prompt.User }
-                }
-            };
+            var requestBody = MakeChat(BuildSummarySchema(), _options.SummaryMaxAnswerTokens, prompt.System, prompt.User);
 
             var sw = System.Diagnostics.Stopwatch.StartNew();
             var reply = await ChatAsync(requestBody, ModelCallKinds.Summary, _options.SummaryMaxAnswerTokens, "Phase 3 call", ct);
@@ -1296,6 +1251,104 @@ public class OllamaService : IOllamaService
         {
             // Malformed response — leave defaults
         }
+    }
+
+    private ModelChatRequest MakeChat(object schema, int maxTokens, string system, string user, IReadOnlyList<string>? images = null) =>
+        new()
+        {
+            Model = _options.Model,
+            Schema = schema,
+            MaxTokens = maxTokens,
+            Messages =
+            [
+                new ModelChatMessage("system", system),
+                new ModelChatMessage("user", user, images is { Count: > 0 } ? images : null)
+            ]
+        };
+
+    /// <summary>
+    /// Beginning, middle and end of a text that is longer than <paramref name="maxChars"/>, with a note for the omitted parts.
+    /// A shorter text is returned as it is.
+    /// </summary>
+    public static string Excerpt(string text, int maxChars)
+    {
+        if (text.Length <= maxChars)
+            return text;
+        var third = Math.Max(1, maxChars / 3);
+        var mid = Math.Max(0, (text.Length - third) / 2);
+        return text[..third]
+               + "\n… omitted: the rest of the beginning …\n"
+               + text.Substring(mid, Math.Min(third, text.Length - mid))
+               + "\n… omitted: the rest before the end …\n"
+               + text[^third..];
+    }
+
+    /// <inheritdoc />
+    public async Task<ModelEndpointProbe> ProbeEndpointAsync(CancellationToken ct = default)
+    {
+        try
+        {
+            using var limit = new CancellationTokenSource(_server.ProbeTimeout, _time);
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, limit.Token);
+            using var response = await _http.GetAsync(BuildUri(ModelWire.ProbePath(_options)), linked.Token);
+            if (response.IsSuccessStatusCode)
+                return new ModelEndpointProbe(true, false);
+            var busy = response.StatusCode is System.Net.HttpStatusCode.TooManyRequests
+                or System.Net.HttpStatusCode.ServiceUnavailable;
+            return new ModelEndpointProbe(busy, busy);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            return new ModelEndpointProbe(false, false);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<int?> MeasureParallelismAsync(int requested, CancellationToken ct = default)
+    {
+        var sent = Math.Clamp(requested, 1, 8);
+        if (sent <= 1)
+            return 1;
+        var one = await TimeProbesAsync(1, ct);
+        if (one is null)
+            return null;
+        var wall = await TimeProbesAsync(sent, ct);
+        if (wall is null)
+            return null;
+        return ModelWire.EstimateSlots(sent, one.Value, wall.Value);
+    }
+
+    private async Task<TimeSpan?> TimeProbesAsync(int count, CancellationToken ct)
+    {
+        var request = new ModelChatRequest
+        {
+            Model = _options.Model,
+            MaxTokens = 16,
+            Messages = [new ModelChatMessage("user", ModelWire.ParallelProbePrompt)]
+        };
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        var calls = Enumerable.Range(0, count).Select(_ => PostChatAsync(request, "parallel probe", ct)).ToArray();
+        HttpResponseMessage[] responses;
+        try
+        {
+            responses = await Task.WhenAll(calls);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
+        {
+            return null;
+        }
+        clock.Stop();
+        var ok = true;
+        foreach (var response in responses)
+        {
+            ok &= response.IsSuccessStatusCode;
+            response.Dispose();
+        }
+        return ok ? clock.Elapsed : null;
     }
 
     private Uri BuildUri(string relativePath)

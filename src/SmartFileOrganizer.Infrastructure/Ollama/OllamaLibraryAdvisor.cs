@@ -1,10 +1,10 @@
-using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
 using SmartFileOrganizer.Domain.Enums;
 using SmartFileOrganizer.Domain.Interfaces;
 using SmartFileOrganizer.Domain.Models;
+using SmartFileOrganizer.Infrastructure.ModelServer;
 
 namespace SmartFileOrganizer.Infrastructure.Ollama;
 
@@ -30,44 +30,60 @@ public sealed class OllamaLibraryAdvisor : ILibraryAdvisor
     {
         var model = string.IsNullOrWhiteSpace(request.Model) ? _options.Model : request.Model;
         var language = request.Language ?? _options.SummaryLanguage;
+        ModelChatRequest call;
         if (request.Task == LibraryAdviceTask.Fit)
-            return await SendAsync(request.Task, FitBody(model, request.Facts, language), model, ct);
-        var prompt = request.Task switch
         {
-            LibraryAdviceTask.Review => BuildReviewPrompt(request.Facts, language),
-            LibraryAdviceTask.Map => BuildMapPrompt(request.Facts, language),
-            LibraryAdviceTask.Name => BuildNamePrompt(request.Facts, language),
-            _ => BuildProposePrompt(request.Facts, language)
-        };
-        var body = new
-        {
-            model,
-            stream = false,
-            think = false,
-            keep_alive = _options.KeepAlive,
-            format = request.Task switch
+            call = new ModelChatRequest
             {
-                LibraryAdviceTask.Review => ReviewSchema(),
-                LibraryAdviceTask.Map => MapSchema(),
-                LibraryAdviceTask.Name => NameSchema(),
-                _ => ProposeSchema()
-            },
-            messages = new object[] { new { role = "user", content = prompt } }
-        };
-        return await SendAsync(request.Task, body, model, ct);
+                Model = model,
+                Schema = FitSchema(),
+                MaxTokens = FitMaxAnswerTokens,
+                Messages =
+                [
+                    new ModelChatMessage("system", BuildFitSystemPrompt(language)),
+                    new ModelChatMessage("user", request.Facts)
+                ]
+            };
+        }
+        else
+        {
+            var prompt = request.Task switch
+            {
+                LibraryAdviceTask.Review => BuildReviewPrompt(request.Facts, language),
+                LibraryAdviceTask.Map => BuildMapPrompt(request.Facts, language),
+                LibraryAdviceTask.Name => BuildNamePrompt(request.Facts, language),
+                _ => BuildProposePrompt(request.Facts, language)
+            };
+            call = new ModelChatRequest
+            {
+                Model = model,
+                Schema = request.Task switch
+                {
+                    LibraryAdviceTask.Review => ReviewSchema(),
+                    LibraryAdviceTask.Map => MapSchema(),
+                    LibraryAdviceTask.Name => NameSchema(),
+                    _ => ProposeSchema()
+                },
+                MaxTokens = AdviceMaxAnswerTokens,
+                Messages = [new ModelChatMessage("user", prompt)]
+            };
+        }
+        return await SendAsync(request.Task, call, model, ct);
     }
 
-    private async Task<LibraryAdviceReply> SendAsync(LibraryAdviceTask task, object body, string model, CancellationToken ct)
+    private async Task<LibraryAdviceReply> SendAsync(LibraryAdviceTask task, ModelChatRequest call, string model, CancellationToken ct)
     {
         try
         {
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             // One call over a whole tree: allow three times the per-file timeout.
             cts.CancelAfter(TimeSpan.FromSeconds(_options.TimeoutSeconds * 3));
-            var response = await _http.PostAsJsonAsync(new Uri(new Uri(_options.BaseUrl.TrimEnd('/') + "/"), "api/chat"), body, cts.Token);
-            var raw = await response.Content.ReadAsStringAsync(cts.Token);
+            var uri = new Uri(new Uri(_options.BaseUrl.TrimEnd('/') + "/"), ModelWire.ChatPath(_options));
+            using var httpMessage = ModelWire.Create(_options, ModelWire.Fit(_options, call), uri);
+            using var response = await _http.SendAsync(httpMessage, cts.Token);
+            var raw = ModelWire.NormalizeAnswer(_options.Provider, await response.Content.ReadAsStringAsync(cts.Token));
             if (!response.IsSuccessStatusCode)
-                return new LibraryAdviceReply(null, model, raw, $"HTTP {(int)response.StatusCode} from Ollama.");
+                return new LibraryAdviceReply(null, model, raw, $"HTTP {(int)response.StatusCode} from the model server.");
 
             using var doc = JsonDocument.Parse(raw);
             var content = doc.RootElement.TryGetProperty("message", out var message) && message.TryGetProperty("content", out var c)
@@ -186,6 +202,9 @@ public sealed class OllamaLibraryAdvisor : ILibraryAdvisor
     /// <summary>Answer tokens for a content check: a code and one short sentence per candidate.</summary>
     public const int FitMaxAnswerTokens = 500;
 
+    /// <summary>Answer tokens for a review, a proposal or a folder name. Longer than a content check, still capped.</summary>
+    public const int AdviceMaxAnswerTokens = 4096;
+
     /// <summary>
     /// <c>sfo library match</c>, task <c>fit</c> (https://github.com/crack666/smart_file_organizer/issues/56): whether what
     /// a group of files shows fits each candidate folder. The fixed task is the system message, the same text for every
@@ -212,21 +231,6 @@ public sealed class OllamaLibraryAdvisor : ILibraryAdvisor
         sb.AppendLine("Answer with JSON only: verdicts, each with id (as listed), fit, shared, shared_kind, reason.");
         return sb.ToString();
     }
-
-    private object FitBody(string model, string facts, string language) => new
-    {
-        model,
-        stream = false,
-        think = false,
-        keep_alive = _options.KeepAlive,
-        format = FitSchema(),
-        options = new { num_predict = FitMaxAnswerTokens },
-        messages = new object[]
-        {
-            new { role = "system", content = BuildFitSystemPrompt(language) },
-            new { role = "user", content = facts }
-        }
-    };
 
     private static object FitSchema() => new
     {

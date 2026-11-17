@@ -29,6 +29,9 @@ libraries are enough (glibc, ICU, OpenSSL; the desktop app also needs X11 and
 fontconfig). The AI part needs [Ollama](https://ollama.com) on the same machine
 and a multimodal model (default `gemma4:26b`, set in `settings.json`, see
 [docs/README.md](docs/README.md)); `sfo doctor` shows whether it is reachable.
+An OpenAI-compatible broker in front of the model (for example LiteLLM) is a setting,
+`Model.Provider` = `openai_compatible`, not a different program
+([docs/cli.md](docs/cli.md#model-connection)).
 Scanning, status and the read commands work without it. A first run:
 
 ```bash

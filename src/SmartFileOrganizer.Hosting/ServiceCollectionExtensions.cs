@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Text.Json.Nodes;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -16,6 +18,7 @@ using SmartFileOrganizer.Application.Services;
 using SmartFileOrganizer.Domain.Interfaces;
 using SmartFileOrganizer.Infrastructure;
 using SmartFileOrganizer.Infrastructure.Content;
+using SmartFileOrganizer.Infrastructure.ModelServer;
 using SmartFileOrganizer.Infrastructure.Ollama;
 using SmartFileOrganizer.Infrastructure.Persistence;
 using SmartFileOrganizer.Scanning.Engine;
@@ -102,11 +105,13 @@ public static class ServiceCollectionExtensions
         // Ollama
         services.AddSingleton(sp =>
         {
-            var configured = sp.GetRequiredService<IConfiguration>()
-                .GetSection("Ollama")
-                .Get<OllamaOptions>();
-
-            return configured ?? new OllamaOptions();
+            var configuration = sp.GetRequiredService<IConfiguration>();
+            var configured = configuration.GetSection("Ollama").Get<OllamaOptions>() ?? new OllamaOptions();
+            var model = configuration.GetSection("Model");
+            model.Get<ModelSection>()?.ApplyTo(configured);
+            configured.ExtraBody = ReadExtra(model.GetSection("ExtraBody"));
+            configured.Provider = ModelProviders.Canonical(configured.Provider);
+            return configured;
         });
         // Section "ModelServer": retries and waiting for a model server that went away
         // (https://github.com/crack666/smart_file_organizer/issues/63); provider-independent.
@@ -298,5 +303,49 @@ public static class ServiceCollectionExtensions
         this IServiceProvider services, CancellationToken ct = default)
     {
         return services.GetRequiredService<DatabaseContext>().InitializeAsync(ct);
+    }
+
+    /// <summary>The <c>Model.ExtraBody</c> object as JSON. The configuration provider stores every leaf as text.</summary>
+    private static JsonObject? ReadExtra(IConfigurationSection section)
+    {
+        if (!section.Exists())
+            return null;
+        var node = ReadNode(section);
+        return node is JsonObject obj && obj.Count > 0 ? obj : null;
+    }
+
+    private static JsonNode? ReadNode(IConfigurationSection section)
+    {
+        var children = section.GetChildren().ToList();
+        if (children.Count == 0)
+        {
+            var text = section.Value;
+            if (text is null)
+                return null;
+            if (text is "true" or "True")
+                return true;
+            if (text is "false" or "False")
+                return false;
+            if (long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var integer)
+                && integer.ToString(CultureInfo.InvariantCulture) == text)
+                return integer;
+            if (text.Contains('.', StringComparison.Ordinal)
+                && double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var number))
+                return number;
+            return text;
+        }
+
+        if (children.All(child => int.TryParse(child.Key, NumberStyles.None, CultureInfo.InvariantCulture, out _)))
+        {
+            var array = new JsonArray();
+            foreach (var child in children)
+                array.Add(ReadNode(child));
+            return array;
+        }
+
+        var obj = new JsonObject();
+        foreach (var child in children)
+            obj[child.Key] = ReadNode(child);
+        return obj;
     }
 }

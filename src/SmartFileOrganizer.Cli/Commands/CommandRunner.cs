@@ -1,6 +1,7 @@
 using System.CommandLine;
 using Microsoft.Extensions.Logging;
 using SmartFileOrganizer.Cli.Contract;
+using SmartFileOrganizer.Infrastructure.ModelServer;
 
 namespace SmartFileOrganizer.Cli.Commands;
 
@@ -30,6 +31,10 @@ public static class CommandRunner
             catch (CliFailureException failure)
             {
                 outcome = failure.ToOutcome();
+            }
+            catch (ModelSettingsException settings)
+            {
+                outcome = CommandOutcome.Fail(ExitCodes.Usage, ErrorCodes.SettingsInvalid, settings.Message);
             }
             catch (Exception ex)
             {

@@ -30,7 +30,21 @@ public sealed class GlobalOptions
         Recursive = true
     };
 
-    public IEnumerable<Option> All => [Json, Progress, Database, Verbose];
+    public Option<string?> Provider { get; } = new("--provider")
+    {
+        Description = "Model connection for this run: ollama (default) or openai_compatible. Not saved.",
+        HelpName = "name",
+        Recursive = true
+    };
+
+    public Option<string?> Profile { get; } = new("--profile")
+    {
+        Description = "Named model profile from settings (Model.Profiles): provider, model, context size and parallelism. Not saved.",
+        HelpName = "name",
+        Recursive = true
+    };
+
+    public IEnumerable<Option> All => [Json, Progress, Database, Verbose, Provider, Profile];
 
     public ProgressMode GetProgressMode(ParseResult parseResult) => parseResult.GetValue(Progress) switch
     {

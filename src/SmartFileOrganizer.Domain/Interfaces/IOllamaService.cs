@@ -55,4 +55,26 @@ public interface IOllamaService
 
     /// <summary>Phase 3: summarize a directory bottom-up from analyzed file results.</summary>
     Task<DirectoryClassificationResult> SummarizeDirectoryAsync(DirectorySummaryInput input, CancellationToken ct = default);
+
+    /// <summary>
+    /// Whether the endpoint answered, and whether that answer was a refusal (HTTP 429 or 503).
+    /// A stand-in that only implements <see cref="IsAvailableAsync"/> reports not busy.
+    /// </summary>
+    async Task<ModelEndpointProbe> ProbeEndpointAsync(CancellationToken ct = default)
+    {
+        var ok = await IsAvailableAsync(ct);
+        return new ModelEndpointProbe(ok, false);
+    }
+
+    /// <summary>
+    /// How many short calls the server answered at once, or null when it could not be measured.
+    /// A stand-in that does not speak HTTP returns null.
+    /// </summary>
+    Task<int?> MeasureParallelismAsync(int requested, CancellationToken ct = default) =>
+        Task.FromResult<int?>(null);
 }
+
+/// <summary>Result of one cheap reachability check of the model server.</summary>
+/// <param name="Reachable">The server answered, including a refusal.</param>
+/// <param name="Busy">The answer was HTTP 429 or 503.</param>
+public readonly record struct ModelEndpointProbe(bool Reachable, bool Busy);

@@ -21,6 +21,8 @@ Accepted by every command.
 | `--json` | Write exactly one JSON document to stdout. |
 | `--progress none\|text\|jsonl` | Progress on stderr. Default `text`, or `none` with `--json`. |
 | `--db <path>` | SQLite database. Overrides `SFO_DB`. |
+| `--provider <name>` | Model connection for this run: `ollama` (default) or `openai_compatible`. Not saved. |
+| `--profile <name>` | Named set from `Model.Profiles` in settings: provider, model, context size, temperature and parallelism. Not saved. |
 | `-v`, `--verbose` | Log at information level on stderr (default: warnings and errors). Prompts and model answers never go to stderr; with `--verbose` they are written at debug level to `sfo-debug.log` next to the database (appended, rotated to `sfo-debug.log.1` above 50 MB). For a marked file even that file holds a placeholder instead of prompt and answer. |
 | `-h`, `--help` | Help for the command. |
 
@@ -526,6 +528,37 @@ A file that cannot be read now, or changed since its scan, is in no group and li
 are kept). Not part of this command: similar instead of equal files (another format, resolution or version) and
 hashing on the storage device itself.
 
+### Model connection
+
+`Ollama` in settings is the direct connection: base address, model name, timeouts, `num_predict` limits
+and how many calls `sfo` sends at once (`MaxParallelRequests`). `Model` overrides it when a value is set.
+
+| Field | Meaning |
+|---|---|
+| `Provider` | `ollama` (default) or `openai_compatible`. No silent fallback from one to the other. |
+| `BaseUrl`, `Model`, `Parallel`, `NumCtx`, `Temperature` | Override the `Ollama` values. `NumCtx` is `num_ctx` (Ollama option, or a field of the same name on the OpenAI path). |
+| `ApiKey` | Sent as `Authorization: Bearer`. Prefer `ApiKeyEnv`, the name of an environment variable. The value is never printed and never stored in an eval run. |
+| `ExtraBody` | Object merged into every request. Use it for what a broker does not pass through (thinking off, keep-alive). |
+| `Metadata` | Object sent as `metadata`, so a broker can tell callers apart. |
+| `Profiles` | Named sets of the fields above. `sfo --profile tight` applies one for that run only. |
+
+```json
+{
+  "Model": {
+    "Provider": "openai_compatible",
+    "BaseUrl": "http://127.0.0.1:4000",
+    "ApiKeyEnv": "SFO_MODEL_API_KEY",
+    "NumCtx": 16384,
+    "Temperature": 0,
+    "Metadata": { "caller": "sfo" },
+    "Profiles": { "tight": { "NumCtx": 8192, "Parallel": 2, "Temperature": 0 } }
+  }
+}
+```
+
+On Ollama, how many calls actually run at once is `OLLAMA_NUM_PARALLEL` on the server, not `sfo`.
+`sfo doctor` measures it with a few short calls and warns when `--parallel` is higher.
+
 ### `sfo doctor`
 
 Checks the database (creates and migrates it if missing), whether Ollama answers within
@@ -548,15 +581,26 @@ sfo doctor --json
     "settings_path": "/home/me/.config/SmartFileOrganizer/settings.json",
     "ollama": { "base_url": "http://localhost:11434", "reachable": false },
     "model": { "name": "gemma4:26b", "available": null, "installed": [] },
+    "provider": "ollama",
+    "api_key_configured": false,
+    "busy": false,
+    "parallel_requested": 4,
+    "parallel_measured": null,
+    "parallel_warning": null,
     "libraries": [ { "job_id": 4, "root_path": "/media/archive", "readable": true, "problem": null } ]
   },
   "error": { "code": "ollama_unavailable", "message": "Ollama is not reachable at http://localhost:11434." }
 }
 ```
 
-`model.available` is `null` when Ollama could not be asked. `libraries` checks the root of every completed library
+`model.available` is `null` when the server could not be asked. `provider` is `ollama` or
+`openai_compatible`. `busy` is true when the server answered HTTP 429 or 503. `parallel_measured` is
+how many short calls the server answered at once (null when it was not measured); `parallel_warning`
+is set when that number is below `parallel_requested`. On Ollama the server's own limit is the
+environment variable `OLLAMA_NUM_PARALLEL`: `sfo` cannot raise it, and extra `--parallel` only waits
+in a queue. `libraries` checks the root of every completed library
 job: it exists and one entry of it can be listed; `problem` says why not (a share that is not connected, a drive that is
-not plugged in, no access). Exit code: 1 for a database error (`database_error`), 3 if Ollama is unreachable, 1 if the
+not plugged in, no access). Exit code: 1 for a database error (`database_error`), 3 if the model server is unreachable or is refusing requests, 1 if the
 model is missing (`model_missing`), 1 if a library root cannot be read (`library_unreachable`), else 0.
 
 ### `sfo rules check <path>...`
@@ -624,6 +668,8 @@ truth. The run is stored for `--compare`. Corpus, truth format and what counts:
 [evaluation.md](evaluation.md). Phase 3 (directory summaries) is left out on purpose: nothing it
 writes is measured, and it would cost a model call per mixed folder. `sfo status <job>` therefore
 shows the summary phase as pending; `sfo analyze <job>` writes the summaries if you want them.
+The stored run records `model.provider` and `model.base_url` (no key, no user info in the address) so two
+measurements stay comparable.
 
 | Option | Meaning |
 |---|---|

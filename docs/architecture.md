@@ -869,6 +869,16 @@ updated or runs out of memory must not leave a run with hundreds of stored error
 "the server is gone" apart from "this item fails"; neither knows Ollama, so a second provider
 (https://github.com/crack666/smart_file_organizer/issues/53) uses them unchanged.
 
+The second provider is selected with `Model.Provider` or `--provider`: `ollama` (the default,
+`/api/chat` and `/api/tags`) or `openai_compatible` (`/v1/chat/completions` and `/v1/models`).
+Images go out as data URLs on the OpenAI path and as base64 on the Ollama path. A key comes from
+`Model.ApiKey` or the environment variable named by `Model.ApiKeyEnv` and is never written to a
+command's output. `Model.ExtraBody` and `Model.Metadata` are merged into each request.
+`Model.Profiles` plus `--profile` sets provider, model, `num_ctx`, temperature and parallelism for
+one run. `sfo doctor` reports the provider, whether the server is refusing (429/503), and how many
+short calls it actually answered at once; a higher `--parallel` only queues inside Ollama when
+`OLLAMA_NUM_PARALLEL` is lower. `sfo eval` stores the provider and the address without a key.
+
 **One call: `ModelHttpSender` (Infrastructure/ModelServer).** Retries a request on connection errors,
 timeouts, 429, 502, 503 and 504, up to `Ollama.MaxRetries` further attempts, with pauses of
 `RetryDelaySeconds`, doubled each time, or the server's `Retry-After` up to `MaxRetryAfterSeconds`.
