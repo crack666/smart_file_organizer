@@ -72,6 +72,15 @@ public class FileSystemAccessorLinkTests : IDisposable
         Assert.Equal(13, _fs.GetFileSize(P("profile", "Documents", "letter.txt")));
     }
 
+    [Fact]
+    public void GetLastWriteTime_OfAMissingFile_Throws_InsteadOfReadingAsMinValue()
+    {
+        Assert.Throws<FileNotFoundException>(() => _fs.GetLastWriteTime(P("profile", "gone.txt")));
+        var time = _fs.GetLastWriteTime(P("profile", "Documents", "letter.txt"));
+        Assert.Equal(File.GetLastWriteTimeUtc(P("profile", "Documents", "letter.txt")), time);
+        Assert.True(time.Year > 2000);
+    }
+
     [LinkFact(LinkNeed.HardLink)]
     public void SameFile_HardLink_IsTheSameFile()
     {

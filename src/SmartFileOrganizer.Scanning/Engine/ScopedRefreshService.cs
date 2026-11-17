@@ -74,7 +74,6 @@ public class ScopedRefreshService : IScopedRefreshService
         file.RelativePath = _fs.GetRelativePath(job.RootPath, file.FullPath);
         file.RelativeDir = _fs.GetRelativePath(job.RootPath, file.ParentPath);
         ReadSize(file);
-        file.LastWriteTime = _fs.GetLastWriteTime(file.FullPath);
         file.Extension = _fs.GetExtension(file.FullPath);
         file.FileType = FileTypeDetector.Detect(file.Extension);
         file.Status = FileNodeStatus.Discovered;
@@ -85,12 +84,13 @@ public class ScopedRefreshService : IScopedRefreshService
         return file;
     }
 
-    /// <summary>Size of the file, or the cause why it could not be read (never a silent 0).</summary>
+    /// <summary>Size and modification time of the file, or the cause why they could not be read (never a silent 0).</summary>
     private void ReadSize(FileNode file)
     {
         try
         {
             file.Size = _fs.GetFileSize(file.FullPath);
+            file.LastWriteTime = _fs.GetLastWriteTime(file.FullPath);
             file.ScanErrorCause = null;
             file.ScanError = null;
         }
@@ -120,7 +120,6 @@ public class ScopedRefreshService : IScopedRefreshService
                 RelativePath = _fs.GetRelativePath(job.RootPath, filePath),
                 RelativeDir = _fs.GetRelativePath(job.RootPath, directoryPath),
                 Depth = dir.Depth + 1,
-                LastWriteTime = _fs.GetLastWriteTime(filePath),
                 Extension = ext,
                 FileType = FileTypeDetector.Detect(ext),
                 Status = FileNodeStatus.Discovered,
