@@ -1,0 +1,110 @@
+name: Release
+
+# Self-contained packages of sfo and the desktop app for Windows x64 and Linux x64: they run without an
+# installed .NET. A version tag (v1.2.3) attaches the four packages to a GitHub release; a pull request
+# that changes this file builds and probes the packages without releasing anything (README, Installation).
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+    paths: ['.github/workflows/release.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Package (${{ matrix.rid }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            rid: win-x64
+          - os: ubuntu-latest
+            rid: linux-x64
+    runs-on: ${{ matrix.os }}
+    env:
+      DOTNET_NOLOGO: true
+      DOTNET_CLI_TELEMETRY_OPTOUT: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Publish
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          [[ "$GITHUB_REF_TYPE" == tag ]] || version="0.0.0-ci.${GITHUB_RUN_NUMBER}"
+          for project in Cli Desktop; do
+            name=$([[ $project == Cli ]] && echo sfo || echo sfo-desktop)
+            dotnet publish "src/SmartFileOrganizer.$project" -c Release -r ${{ matrix.rid }} --self-contained \
+              -p:Version="$version" -o "dist/$name-${{ matrix.rid }}"
+          done
+
+      # The package itself, in a container that has the native libraries of a Linux desktop but no .NET.
+      - name: Probe the Linux package without .NET
+        if: matrix.rid == 'linux-x64'
+        run: |
+          mkdir -p probe/source/Fotos probe/source/Briefe
+          printf 'x' > probe/source/Fotos/IMG_0001.jpg
+          printf 'Hallo' > probe/source/Briefe/brief.txt
+          docker run --rm -u "$(id -u):$(id -g)" -v "$PWD/dist/sfo-linux-x64:/sfo:ro" -v "$PWD/probe:/probe" \
+            mcr.microsoft.com/dotnet/runtime-deps:10.0 sh -euc '
+              if command -v dotnet; then echo "the probe container has .NET"; exit 1; fi
+              /sfo/sfo scan /probe/source --db /probe/data.db --progress none --json > /probe/scan.json
+              /sfo/sfo status 1 --db /probe/data.db --json > /probe/status.json'
+          grep -q '"status": "completed"' probe/scan.json
+          grep -q '"files_total": 2' probe/status.json
+
+      - name: Probe the Windows package
+        if: matrix.rid == 'win-x64'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force probe/source/Fotos, probe/source/Briefe | Out-Null
+          Set-Content probe/source/Fotos/IMG_0001.jpg 'x'
+          Set-Content probe/source/Briefe/brief.txt 'Hallo'
+          $scan = ./dist/sfo-win-x64/sfo.exe scan probe/source --db probe/data.db --progress none --json | ConvertFrom-Json
+          $status = ./dist/sfo-win-x64/sfo.exe status $scan.result.job.id --db probe/data.db --json | ConvertFrom-Json
+          if ($scan.result.job.status -ne 'completed' -or $status.result.job.files_total -ne 2) { throw 'probe failed' }
+
+      - name: Pack
+        shell: bash
+        run: |
+          cd dist
+          for dir in sfo-${{ matrix.rid }} sfo-desktop-${{ matrix.rid }}; do
+            if [[ "${{ matrix.rid }}" == win-* ]]; then 7z a -bso0 "$dir.zip" "./$dir/*"; else tar -czf "$dir.tar.gz" -C "$dir" .; fi
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages-${{ matrix.rid }}
+          path: |
+            dist/*.zip
+            dist/*.tar.gz
+          if-no-files-found: error
+
+  release:
+    name: Release
+    needs: package
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: packages-*
+          merge-multiple: true
+          path: dist
+
+      - name: Create the release with four packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          test "$(ls dist | wc -l)" -eq 4
+          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes

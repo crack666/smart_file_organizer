@@ -13,6 +13,35 @@ Product description, file type support and configuration:
 [docs/README.md](docs/README.md). What exists today and the known traps:
 [docs/status-and-roadmap.md](docs/status-and-roadmap.md).
 
+## Installation
+
+Each release on the [releases page](https://github.com/crack666/smart_file_organizer/releases)
+carries four packages that run without an installed .NET:
+
+| Package | Contents |
+|---|---|
+| `sfo-win-x64.zip`, `sfo-linux-x64.tar.gz` | the command line tool `sfo` |
+| `sfo-desktop-win-x64.zip`, `sfo-desktop-linux-x64.tar.gz` | the desktop app |
+
+Unpack a package into a folder of its own and start `sfo` (`sfo.exe`) or
+`SmartFileOrganizer.Desktop` (`.exe`) from there. On Linux the usual desktop
+libraries are enough (glibc, ICU, OpenSSL; the desktop app also needs X11 and
+fontconfig). The AI part needs [Ollama](https://ollama.com) on the same machine
+and a multimodal model (default `gemma4:26b`, set in `settings.json`, see
+[docs/README.md](docs/README.md)); `sfo doctor` shows whether it is reachable.
+Scanning, status and the read commands work without it. A first run:
+
+```bash
+sfo scan <folder>
+sfo status <job>
+sfo doctor
+```
+
+The packages come from [.github/workflows/release.yml](.github/workflows/release.yml):
+a version tag (`v1.2.3`) builds them on Windows and Linux, runs `sfo scan` and
+`sfo status` from each package on a generated folder (on Linux in a container
+without .NET) and attaches them to the release.
+
 ## Build and test
 
 Requires the [.NET 10 SDK](https://dotnet.microsoft.com/download).
