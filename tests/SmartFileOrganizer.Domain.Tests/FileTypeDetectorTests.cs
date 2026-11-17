@@ -13,6 +13,7 @@ public class FileTypeDetectorTests
     [InlineData(".zip",  FileType.Archive)]
     [InlineData(".exe",  FileType.Executable)]
     [InlineData(".cs",   FileType.Code)]
+    [InlineData(".ts",   FileType.Code)]
     [InlineData(".mp3",  FileType.Audio)]
     [InlineData(".xyz",  FileType.Other)]
     [InlineData("",      FileType.Unknown)]

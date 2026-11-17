@@ -276,8 +276,13 @@ public class ScanEngine : IScanEngine
 
                 var ext = _fs.GetExtension(filePath);
                 long size = 0;
+                DateTime lastWrite = default;
                 Exception? sizeError = null;
-                try { size = _fs.GetFileSize(filePath); }
+                try
+                {
+                    size = _fs.GetFileSize(filePath);
+                    lastWrite = _fs.GetLastWriteTime(filePath);
+                }
                 catch (Exception ex) when (ScanErrorCauses.IsReadError(ex)) { sizeError = ex; }
                 dirSize += size;
                 fileCount++;
@@ -293,7 +298,7 @@ public class ScanEngine : IScanEngine
                     RelativeDir = _fs.GetRelativePath(job.RootPath, dirPath),
                     Depth = depth + 1,
                     Size = size,
-                    LastWriteTime = _fs.GetLastWriteTime(filePath),
+                    LastWriteTime = lastWrite,
                     Extension = ext,
                     FileType = FileTypeDetector.Detect(ext),
                     Status = FileNodeStatus.Discovered,

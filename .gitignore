@@ -429,3 +429,9 @@ FodyWeavers.xsd
 
 # Agent worktrees
 .claude/worktrees/
+
+# Backups and local secrets (.env alone misses names like .env.bak-2026-08-24)
+*.bak*
+.env
+.env.*
+!.env.example

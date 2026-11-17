@@ -50,6 +50,11 @@ public interface IFileSystemAccessor
     /// </summary>
     SameFileResult SameFile(string first, string second) =>
         new(SameFileAnswer.Unknown, "This file system accessor cannot tell file identities apart.");
+
+    /// <summary>
+    /// Last write time of a file in UTC. A file that cannot be read throws like <see cref="GetFileSize"/>;
+    /// it never reads as <see cref="DateTime.MinValue"/>.
+    /// </summary>
     DateTime GetLastWriteTime(string path);
     string GetFileName(string path);
     string GetDirectoryName(string path);

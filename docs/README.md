@@ -184,7 +184,11 @@ Uploading video bytes would be impractical. Classification is based entirely on 
 
 | Extensions | Treatment |
 |---|---|
-| `.mp4` `.mkv` `.avi` `.mov` `.wmv` `.flv` `.webm` `.ts` `.m4v` + others | Filename + directory path heuristics |
+| `.mp4` `.mkv` `.avi` `.mov` `.wmv` `.flv` `.webm` `.m4v` + others | Filename + directory path heuristics |
+
+`.ts` counts as source code (the file type comes from the extension alone, and it cannot tell
+TypeScript from an MPEG transport stream); the preview of the GUI shows a `.ts` that is not text
+as a video.
 
 ### Audio — metadata only
 

@@ -134,8 +134,11 @@ public class FileSystemAccessor : IFileSystemAccessor
 
     public DateTime GetLastWriteTime(string path)
     {
-        try { return File.GetLastWriteTimeUtc(path); }
-        catch { return DateTime.MinValue; }
+        // .NET answers a missing file with 1601-01-01 instead of an exception.
+        var time = File.GetLastWriteTimeUtc(path);
+        if (time == DateTime.FromFileTimeUtc(0))
+            throw new FileNotFoundException($"Could not find file '{path}'.", path);
+        return time;
     }
 
     public string GetFileName(string path) => Path.GetFileName(path) ?? string.Empty;

@@ -12,7 +12,7 @@ namespace SmartFileOrganizer.Application.Services;
 /// Why this exists: the scan result currently only lives in the SQLite file and in the
 /// desktop UI. Everything a human wants to do with it afterwards — sort 16k rows, filter
 /// trash candidates, hand the list to somebody else, diff two runs — is spreadsheet work.
-/// See docs/next-session-handover.md, "Immediate next priorities" #3.
+/// The open exchange format with a schema is issue 34.
 ///
 /// The export is deliberately read-only: it never touches a file on disk other than the
 /// output stream, and it never writes back into the database.

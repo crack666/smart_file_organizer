@@ -14,13 +14,11 @@ its date, or delete it.
 
 ## What exists
 
-_Checked 12.11.2026 by reading the code on `master`; build and tests run
-locally (`dotnet build` 0 errors and 0 warnings, `dotnet test` 582 passed with
-https://github.com/crack666/smart_file_organizer/issues/39 on top of the second check
-(https://github.com/crack666/smart_file_organizer/issues/23); the line said 551 with the second check on top of
-the library review and the evaluation, 454 with #22 on top of #8 and was not updated by those two, 411 with #8 on top of the
-scan rules, read commands and library comparison, 312 before that, 293 before that, 271 before that, and 47
-before that) and in CI on Windows and Linux._
+_Checked 12.11.2026 by reading the code on `master`. Whether build and tests
+pass today is what the CI badge in the [README](../README.md) shows (Windows
+and Linux, every push to `master` and every pull request). Until 17.11.2026
+this line carried a test count (last 582) that every package had to update and
+most did not; dated counts in the sections below are measurements of their day._
 
 ### Scan and persistence
 
@@ -163,8 +161,9 @@ yet against a real Ollama restart.
 - Ollama settings (base URL, model, keep-alive) editable and persisted;
   installed models listed from `/api/tags`; manual model warm-up.
 - Recent scans on the welcome screen.
-- Right-click on a folder opens it in the file manager. This calls
-  `explorer.exe` and therefore only works on Windows.
+- Right-click on a folder opens it in the file manager through the system
+  shell (Explorer, `open` on macOS, `xdg-open` on Linux). Until 17.11.2026
+  this called `explorer.exe` and only worked on Windows.
 - Plan view (since 14.11.2026,
   [#15](https://github.com/crack666/smart_file_organizer/issues/15)): plan
   picker per job of the open database, which is named in the window; actions
@@ -497,9 +496,11 @@ run by hand on a generated tree against a temp database. No run with a real mode
 
 _Checked 12.11.2026 against the code: `think = false` in all three request
 builders of `OllamaService`, `TimeoutSeconds` default 180 in
-`OllamaOptions` and `appsettings.json`, configuration order in
-`ServiceConfigurator`. The timing figures come from the development
-sessions of April 2026 and were not re-measured._
+`OllamaOptions` and `appsettings.json`. The configuration order was
+checked 17.11.2026 in `AddSmartFileOrganizerCore` of the Hosting project
+(`ServiceCollectionExtensions`); until then this line named the Desktop
+`ServiceConfigurator`, where it lived before #4. The timing figures come from
+the development sessions of April 2026 and were not re-measured._
 
 - **`think: false` stays.** Every Ollama request sends it. Without it gemma4
   emits reasoning tokens and trivial prompts took 90 to 150 s (April 2026).
