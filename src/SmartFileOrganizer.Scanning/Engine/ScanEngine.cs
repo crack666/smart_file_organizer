@@ -75,7 +75,17 @@ public class ScanEngine : IScanEngine
         var dirBatch = new List<DirectoryNode>(BatchSize);
         var linkBatch = new List<FileLinkNode>(BatchSize);
         var noticeBatch = new List<NoticeEntryRecord>();
+        // Targets entered through a followed link. A resumed scan starts from what the earlier runs stored, or a
+        // second link to the same target would be entered and its content counted twice.
         var followedTargets = new HashSet<string>(PathComparer);
+        var followedBefore = new HashSet<string>(PathComparer);
+        foreach (var followedPath in await _dirRepo.GetFollowedLinkPathsAsync(job.Id, ct))
+        {
+            if (_fs.ResolveLinkTarget(followedPath) is not { } resolvedTarget)
+                continue;
+            followedTargets.Add(Path.TrimEndingDirectorySeparator(Path.GetFullPath(resolvedTarget)));
+            followedBefore.Add(followedPath);
+        }
         var lastJobSave = DateTime.UtcNow;
 
         while (pendingDirs.Count > 0)
@@ -107,7 +117,8 @@ public class ScanEngine : IScanEngine
             if (link != null)
             {
                 var linkEvaluation = heuristics.ExplainLink(job.RootPath, dirPath, depth, link);
-                var refusal = linkEvaluation.Decision == ScanDecision.Descend
+                // A link an earlier run entered (stored shallow, looked at again on resume) is the one its target is remembered for.
+                var refusal = linkEvaluation.Decision == ScanDecision.Descend && !followedBefore.Contains(dirPath)
                     ? CheckLinkTarget(job.RootPath, dirPath, followedTargets)
                     : null;
                 if (linkEvaluation.Decision == ScanDecision.Link || refusal != null)

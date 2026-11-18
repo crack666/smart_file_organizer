@@ -399,4 +399,28 @@ public class FileEvidenceTests : IDisposable
     {
         Assert.Equal(expected, FileSignature.Detect(prefix));
     }
+
+    /// <summary>
+    /// HEIC, AVIF, MOV, M4A and MP4 all start with an <c>ftyp</c> box; the brands in it tell them apart
+    /// (https://github.com/crack666/smart_file_organizer/issues/111, from #23).
+    /// </summary>
+    [Theory]
+    [InlineData("heic", "mif1heic", "heif")]
+    [InlineData("heix", "mif1heix", "heif")]
+    [InlineData("mif1", "mif1heic", "heif")]
+    [InlineData("mif1", "mif1avifmiaf", "avif")]
+    [InlineData("avif", "avifmif1miaf", "avif")]
+    [InlineData("qt  ", "qt  ", "quicktime")]
+    [InlineData("M4A ", "M4A mp42isom", "m4a")]
+    [InlineData("isom", "isomiso2avc1mp41", "mp4")]
+    [InlineData("mp42", "mp42isom", "mp4")]
+    [InlineData("3gp4", "3gp4isom", "mp4")]
+    public void FileSignature_TellsIsoMediaFilesApartByBrand(string major, string compatible, string expected)
+    {
+        var body = System.Text.Encoding.ASCII.GetBytes("ftyp" + major + "    " + compatible);
+        var size = body.Length + 4;
+        byte[] box = [(byte)(size >> 24), (byte)(size >> 16), (byte)(size >> 8), (byte)size, .. body, 0, 0, 0, 8, (byte)'f', (byte)'r', (byte)'e', (byte)'e'];
+
+        Assert.Equal(expected, FileSignature.Detect(box));
+    }
 }

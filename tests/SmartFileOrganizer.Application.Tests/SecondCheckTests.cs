@@ -577,7 +577,12 @@ public class SecondCheckTests : IDisposable
 
     [Theory]
     [InlineData(FileType.Image, "jpeg", FileCategory.Photo, false)]
-    [InlineData(FileType.Image, "mp4", FileCategory.Photo, false)]   // HEIC: ftyp box, extension decides
+    [InlineData(FileType.Image, "mp4", FileCategory.Photo, false)]   // a fact stored before brands were read: extension decides
+    [InlineData(FileType.Image, "heif", FileCategory.Photo, false)]
+    [InlineData(FileType.Video, "heif", FileCategory.Video, true)]   // a HEIC named .mp4 is no video
+    [InlineData(FileType.Image, "quicktime", FileCategory.Photo, true)]
+    [InlineData(FileType.Video, "quicktime", FileCategory.Video, false)]
+    [InlineData(FileType.Video, "m4a", FileCategory.Audio, false)]
     [InlineData(FileType.Image, "jpeg", FileCategory.Video, true)]
     [InlineData(FileType.Document, "pdf", FileCategory.Photo, true)]
     [InlineData(FileType.Document, "pdf", FileCategory.DocumentScan, false)]

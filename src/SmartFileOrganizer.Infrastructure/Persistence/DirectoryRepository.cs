@@ -121,6 +121,20 @@ public class DirectoryRepository : IDirectoryRepository
         return result.AsList();
     }
 
+    public async Task<IReadOnlyList<string>> GetFollowedLinkPathsAsync(long jobId, CancellationToken ct = default)
+    {
+        await using var conn = _db.CreateConnection();
+        await conn.OpenAsync(ct);
+        var rows = await conn.QueryAsync<string>(new CommandDefinition(
+            """
+            SELECT full_path FROM directory_nodes
+            WHERE job_id = @jobId AND link_kind IS NOT NULL AND dir_status NOT IN (@link, @error)
+            ORDER BY id
+            """,
+            new { jobId, link = (int)DirectoryStatus.Link, error = (int)DirectoryStatus.Error }, cancellationToken: ct));
+        return rows.AsList();
+    }
+
     public async Task<ScanTotals> GetScanTotalsAsync(long jobId, CancellationToken ct = default)
     {
         await using var conn = _db.CreateConnection();

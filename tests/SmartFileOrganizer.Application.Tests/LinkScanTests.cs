@@ -169,6 +169,39 @@ public class LinkScanTests : IDisposable
         Assert.True(dirs.Max(d => d.Depth) < 6);
     }
 
+    /// <summary>
+    /// The targets entered through followed links are remembered across runs: a resumed scan does not enter a
+    /// second link to a target an earlier run entered (https://github.com/crack666/smart_file_organizer/issues/111).
+    /// </summary>
+    [LinkFact(LinkNeed.DirectoryLink)]
+    public async Task ResumedScan_RemembersFollowedTargets_AndDoesNotEnterASecondLinkToThem()
+    {
+        FileSystemLinks.DirectoryLink(Path.Combine(_root, "All Users"), _outside);
+        FileSystemLinks.DirectoryLink(Path.Combine(_root, "Alle Benutzer"), _outside);
+        ScanRuleSet Rules(params string[] followed) => ScanRulesFile.Default with
+        {
+            Name = "follow-" + followed.Length,
+            Rules = [.. ScanRulesFile.Default.Rules, .. followed.Select(name => new ScanRule(name, ScanRuleAction.FollowLink))]
+        };
+        // The first run follows one of the links; the other is stored as a link.
+        var (job, first) = await ScanAsync(Rules("All Users"));
+        Assert.Equal(DirectoryStatus.Scanned, first.Single(d => d.Name == "All Users").DirStatus);
+        Assert.Equal(DirectoryStatus.Link, first.Single(d => d.Name == "Alle Benutzer").DirStatus);
+
+        // The second run may follow both; the stored link is looked at again.
+        job.Rules = ScanRulesFile.ToProfile(Rules("All Users", "Alle Benutzer"), "test");
+        var dirs = new DirectoryRepository(_db);
+        var engine = new ScanEngine(new FileSystemAccessor(), new FileRepository(_db), dirs, new ScanJobRepository(_db), NullLogger<ScanEngine>.Instance);
+        await engine.RunAsync(job, new Progress<ScanProgress>(), CancellationToken.None);
+
+        var second = await dirs.GetAllForJobOrderedByDepthAsync(job.Id);
+        Assert.Equal(DirectoryStatus.Scanned, second.Single(d => d.Name == "All Users").DirStatus);
+        Assert.Equal(DirectoryStatus.Link, second.Single(d => d.Name == "Alle Benutzer").DirStatus);
+        var files = await FilePathsAsync(job.Id);
+        Assert.Equal(7, files.Count);
+        Assert.DoesNotContain(files, f => f.Contains("Alle Benutzer"));
+    }
+
     [LinkFact(LinkNeed.FileSymlink)]
     public async Task FileThatIsALink_IsRecordedAsLink_NotCountedAsContent()
     {

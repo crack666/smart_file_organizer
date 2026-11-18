@@ -61,7 +61,7 @@ public static class FileSignature
             if (kind.SequenceEqual("WEBP"u8)) return "webp";
             return "riff";
         }
-        if (b.Length >= 12 && b.Slice(4, 4).SequenceEqual("ftyp"u8)) return "mp4";
+        if (b.Length >= 12 && b.Slice(4, 4).SequenceEqual("ftyp"u8)) return IsoMediaFormat(b);
         if (b[0] == 0x1A && b[1] == 0x45 && b[2] == 0xDF && b[3] == 0xA3) return "matroska";
         if ((b[0] == 0x49 && b[1] == 0x49 && b[2] == 0x2A && b[3] == 0x00) ||
             (b[0] == 0x4D && b[1] == 0x4D && b[2] == 0x00 && b[3] == 0x2A)) return "tiff";
@@ -74,6 +74,39 @@ public static class FileSignature
         if (LooksLikeText(b)) return "text";
         return null;
     }
+
+    /// <summary>
+    /// The format of an ISO media file (first box <c>ftyp</c>) by its brands: <c>heif</c> and <c>avif</c> are still
+    /// images, <c>quicktime</c> a MOV, <c>m4a</c> audio; every other brand is <c>mp4</c>. Until 18.11.2026 all of
+    /// them were <c>mp4</c> (https://github.com/crack666/smart_file_organizer/issues/111), and facts stored before
+    /// still say so for a HEIC, so readers keep treating <c>mp4</c> as "the extension decides".
+    /// </summary>
+    private static string IsoMediaFormat(ReadOnlySpan<byte> b)
+    {
+        var major = b.Slice(8, 4);
+        if (IsHeifBrand(major)) return "heif";
+        if (major.SequenceEqual("avif"u8) || major.SequenceEqual("avis"u8)) return "avif";
+        if (major.SequenceEqual("qt  "u8)) return "quicktime";
+        if (major.SequenceEqual("M4A "u8) || major.SequenceEqual("M4B "u8) || major.SequenceEqual("M4P "u8)) return "m4a";
+
+        // The generic image brands mif1 and msf1 name the codec only among the compatible brands (after the minor version).
+        if (major.SequenceEqual("mif1"u8) || major.SequenceEqual("msf1"u8))
+        {
+            var boxSize = (int)Math.Min(b.Length, (uint)((b[0] << 24) | (b[1] << 16) | (b[2] << 8) | b[3]));
+            for (var i = 16; i + 4 <= boxSize; i += 4)
+            {
+                var brand = b.Slice(i, 4);
+                if (brand.SequenceEqual("avif"u8) || brand.SequenceEqual("avis"u8)) return "avif";
+            }
+            return "heif";
+        }
+        return "mp4";
+    }
+
+    private static bool IsHeifBrand(ReadOnlySpan<byte> brand) =>
+        brand.SequenceEqual("heic"u8) || brand.SequenceEqual("heix"u8) || brand.SequenceEqual("heim"u8)
+        || brand.SequenceEqual("heis"u8) || brand.SequenceEqual("hevc"u8) || brand.SequenceEqual("hevx"u8)
+        || brand.SequenceEqual("hevm"u8) || brand.SequenceEqual("hevs"u8);
 
     /// <summary>
     /// True when the bytes decode as text: no NUL byte (outside a UTF-16 BOM) and at most 5 %

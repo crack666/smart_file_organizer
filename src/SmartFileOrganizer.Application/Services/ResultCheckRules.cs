@@ -86,17 +86,18 @@ public static class ResultCheckRules
     private enum ContentKind { Image, Video, Audio }
 
     /// <summary>
-    /// The kind of content the first bytes name, else the type by extension. "mp4" (also HEIC and MOV) and
-    /// "mp3" (a weak frame-sync test) are not trusted on their own; the extension decides there.
+    /// The kind of content the first bytes name, else the type by extension. "mp4" (any ISO media file whose brand
+    /// names no image, MOV or audio; in facts stored before 18.11.2026 also HEIC and MOV) and "mp3" (a weak
+    /// frame-sync test) are not trusted on their own; the extension decides there.
     /// </summary>
     private static ContentKind? KindOf(FileNode file, IReadOnlyList<FileFact> facts)
     {
         var format = facts.FirstOrDefault(f => f.Key == FileFactKey.DetectedFormat)?.Value;
         ContentKind? byHeader = format switch
         {
-            "jpeg" or "png" or "gif" or "webp" or "tiff" or "bmp" => ContentKind.Image,
-            "avi" or "matroska" => ContentKind.Video,
-            "flac" or "ogg" or "wav" => ContentKind.Audio,
+            "jpeg" or "png" or "gif" or "webp" or "tiff" or "bmp" or "heif" or "avif" => ContentKind.Image,
+            "avi" or "matroska" or "quicktime" => ContentKind.Video,
+            "flac" or "ogg" or "wav" or "m4a" => ContentKind.Audio,
             _ => null
         };
         if (byHeader is not null) return byHeader;

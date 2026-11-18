@@ -94,6 +94,8 @@ public static class PreviewFormats
         if (detectedFormat is { } f && DecodableImageFormats.Contains(f)) return PreviewKind.Image;
         if (detectedFormat == "pdf") return PreviewKind.Pdf;
         if (detectedFormat == "rtf") return PreviewKind.Rtf;
+        // HEIF and AVIF are images whatever the extension says, and none the decoder reads.
+        if (detectedFormat is "heif" or "avif") return PreviewKind.ImageNotDecoded;
 
         if (ext.Equals(".pdf", StringComparison.OrdinalIgnoreCase)) return PreviewKind.Pdf;
         if (ImageExtensions.Contains(ext))
@@ -117,8 +119,8 @@ public static class PreviewFormats
         {
             "zip" or "rar" or "7z" or "tar" => PreviewKind.Archive,
             "gzip" or "bzip2" or "xz" => PreviewKind.CompressedStream,
-            "mp4" or "avi" or "matroska" => PreviewKind.Video,
-            "mp3" or "flac" or "ogg" or "wav" => PreviewKind.Audio,
+            "mp4" or "quicktime" or "avi" or "matroska" => PreviewKind.Video,
+            "mp3" or "m4a" or "flac" or "ogg" or "wav" => PreviewKind.Audio,
             "ole" => PreviewKind.LegacyOffice,
             "text" => PreviewKind.Text,
             _ => PreviewKind.None

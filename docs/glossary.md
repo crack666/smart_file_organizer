@@ -338,7 +338,7 @@ Counted per run in `model_calls` of `sfo analyze --json`, `sfo eval --json` and 
 
 | Code | Meaning |
 |---|---|
-| `detected_format` | Format recognised from the first bytes (`jpeg`, `pdf`, `zip`, `pe`, ...). |
+| `detected_format` | Format recognised from the first bytes (`jpeg`, `pdf`, `zip`, `pe`, ...). ISO media files by brand: `heif`, `avif`, `quicktime`, `m4a`, else `mp4` (until 18.11.2026 all of them `mp4`). |
 | `width` | Width in pixels of an image or video. |
 | `height` | Height in pixels of an image or video. |
 | `taken_at` | When a photo or video was taken, from its metadata. |

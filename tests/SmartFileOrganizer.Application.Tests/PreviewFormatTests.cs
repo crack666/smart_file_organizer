@@ -41,6 +41,11 @@ public class PreviewFormatTests : IDisposable
     [InlineData(".webp", "webp", PreviewKind.Image)]
     [InlineData(".tif", "tiff", PreviewKind.ImageNotDecoded)]
     [InlineData(".heic", "mp4", PreviewKind.ImageNotDecoded)] // HEIF is an ISO media file, not a video
+    [InlineData(".heic", "heif", PreviewKind.ImageNotDecoded)]
+    [InlineData(".mp4", "heif", PreviewKind.ImageNotDecoded)] // misnamed: the brand decides
+    [InlineData(".bin", "avif", PreviewKind.ImageNotDecoded)]
+    [InlineData(".bin", "quicktime", PreviewKind.Video)]
+    [InlineData(".bin", "m4a", PreviewKind.Audio)]
     [InlineData(".jpg", "text", PreviewKind.ImageNotDecoded)]
     [InlineData(".docx", "zip", PreviewKind.OfficeText)]
     [InlineData(".odp", "zip", PreviewKind.OfficeText)]
