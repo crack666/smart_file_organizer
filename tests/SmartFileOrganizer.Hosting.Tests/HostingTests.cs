@@ -32,7 +32,7 @@ public class HostingTests : IDisposable
         try { Directory.Delete(_dir, recursive: true); } catch (IOException) { }
     }
 
-    private ServiceProvider BuildProvider(FakeOllamaService? ollama = null)
+    private ServiceProvider BuildProvider(IOllamaService? ollama = null, Action<IServiceCollection>? configure = null)
     {
         var services = new ServiceCollection();
         services.AddSmartFileOrganizerCore(o =>
@@ -41,7 +41,8 @@ public class HostingTests : IDisposable
             o.ReloadSettingsOnChange = false;
         });
         if (ollama != null)
-            services.AddSingleton<IOllamaService>(ollama);
+            services.AddSingleton(ollama);
+        configure?.Invoke(services);
 
         // Default scan rules on purpose: the temp directory lives under "AppData" on Windows,
         // and folders above the scan root must not cause a skip.
@@ -73,6 +74,96 @@ public class HostingTests : IDisposable
         Assert.Equal(Path.Combine(Path.GetDirectoryName(paths.DatabasePath)!, "settings.json"), paths.SettingsPath);
 
         AssertNoAvaloniaReachable();
+    }
+
+    /// <summary>
+    /// What the desktop app shows comes from the states of the coordinator. Pausing and resuming while the run
+    /// waits for the model server shows waiting again, not running, and the server coming back does not turn a
+    /// paused run into a running one (https://github.com/crack666/smart_file_organizer/issues/111).
+    /// </summary>
+    [Fact]
+    public async Task PauseAndResume_WhileWaitingForTheModelServer_ShowWaiting_NotRunning()
+    {
+        var root = Path.Combine(_dir, "data");
+        Directory.CreateDirectory(root);
+        await File.WriteAllTextAsync(Path.Combine(root, "notes.txt"), "Shopping list: milk, bread");
+        await File.WriteAllTextAsync(Path.Combine(root, "letter.txt"), "Dear landlord");
+
+        var ollama = new AwayOllamaService();
+        await using var provider = BuildProvider(ollama, services => services.AddSingleton(new ModelServerOptions
+        {
+            OutageAfterFailures = 1, RetryDelaySeconds = 0.001, ProbeIntervalSeconds = 0.02, MaxWaitMinutes = 5, WarmupTimeoutSeconds = 5
+        }));
+        await provider.InitializeSmartFileOrganizerDatabaseAsync();
+        var scans = provider.GetRequiredService<ScanJobService>();
+        var job = await scans.CreateJobAsync(root);
+        var scanDone = new TaskCompletionSource<ScanJob>(TaskCreationOptions.RunContinuationsAsynchronously);
+        scans.JobStateChanged += (_, j) => { if (j.Id == job.Id && j.Status == JobStatus.Completed) scanDone.TrySetResult(j); };
+        await scans.StartAsync(job.Id);
+        await scanDone.Task.WaitAsync(TimeSpan.FromSeconds(30));
+
+        var ai = provider.GetRequiredService<AiClassificationCoordinator>();
+        var states = new List<AiProcessingStateChanged>();
+        ai.StateChanged += (_, e) => { lock (states) states.Add(e); };
+        AiProcessingStateChanged Last() { lock (states) return states[^1]; }
+        async Task UntilAsync(Func<bool> reached, string what)
+        {
+            for (var i = 0; i < 1500 && !reached(); i++)
+                await Task.Delay(20);
+            Assert.True(reached(), $"{what}; last state: {Last().State} '{Last().StatusText}'");
+        }
+
+        ollama.Away = true;
+        await ai.StartOrResumeAsync(job.Id);
+        await UntilAsync(() => Last().State == AiProcessingState.WaitingForModelServer, "the run never waited for the server");
+
+        ai.Pause();
+        Assert.Equal(AiProcessingState.Paused, Last().State);
+        await ai.StartOrResumeAsync(job.Id);
+        Assert.Equal(AiProcessingState.WaitingForModelServer, Last().State);
+        Assert.StartsWith("Waiting for the model server", Last().StatusText);
+
+        // Paused again; the server comes back meanwhile. The display stays paused.
+        ai.Pause();
+        var probesBefore = ollama.Probes;
+        ollama.Away = false;
+        await UntilAsync(() => ollama.Probes > probesBefore, "the gate never probed the server again");
+        await Task.Delay(200);
+        Assert.Equal(AiProcessingState.Paused, Last().State);
+
+        await ai.StartOrResumeAsync(job.Id);
+        Assert.Equal(AiProcessingState.Running, Last().State);
+        await UntilAsync(() => Last().State is AiProcessingState.Completed or AiProcessingState.Failed or AiProcessingState.Unavailable,
+            "the run never ended");
+        Assert.True(Last().State == AiProcessingState.Completed, $"{Last().State}: {Last().StatusText} {Last().ErrorMessage}");
+    }
+
+    /// <summary>The fake behind a server that can be away: calls then fail as unreachable and the probe says no.</summary>
+    private sealed class AwayOllamaService : IOllamaService
+    {
+        private readonly FakeOllamaService _inner = new();
+        private int _probes;
+
+        public volatile bool Away;
+        public int Probes => Volatile.Read(ref _probes);
+
+        /// <summary>True for the check at the start of a run; afterwards the probe of the gate, which sees the outage.</summary>
+        public Task<bool> IsAvailableAsync(CancellationToken ct = default) =>
+            Task.FromResult(Interlocked.Increment(ref _probes) == 1 || !Away);
+
+        public Task<IReadOnlyList<OllamaLocalModel>> GetLocalModelsAsync(CancellationToken ct = default) => _inner.GetLocalModelsAsync(ct);
+        public Task WarmModelAsync(string? model = null, CancellationToken ct = default) => Task.CompletedTask;
+
+        public Task<FileClassification> ClassifyAsync(OllamaClassificationInput input, CancellationToken ct = default) =>
+            Away ? throw Unreachable() : _inner.ClassifyAsync(input, ct);
+
+        public Task<DirectoryPreAssessmentOutcome> PreAssessDirectoryAsync(DirectoryPreAssessmentInput input, CancellationToken ct = default) =>
+            Away ? throw Unreachable() : _inner.PreAssessDirectoryAsync(input, ct);
+
+        public Task<DirectoryClassificationResult> SummarizeDirectoryAsync(DirectorySummaryInput input, CancellationToken ct = default) =>
+            Away ? throw Unreachable() : _inner.SummarizeDirectoryAsync(input, ct);
+
+        private static ModelServerUnavailableException Unreachable() => new(ModelServerFailure.ConnectionFailed, "connection refused");
     }
 
     /// <summary>

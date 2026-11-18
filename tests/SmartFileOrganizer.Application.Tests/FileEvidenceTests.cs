@@ -417,7 +417,7 @@ public class FileEvidenceTests : IDisposable
     [InlineData("3gp4", "3gp4isom", "mp4")]
     public void FileSignature_TellsIsoMediaFilesApartByBrand(string major, string compatible, string expected)
     {
-        var body = System.Text.Encoding.ASCII.GetBytes("ftyp" + major + "    " + compatible);
+        var body = System.Text.Encoding.ASCII.GetBytes("ftyp" + major + "\0\0\0\0" + compatible);
         var size = body.Length + 4;
         byte[] box = [(byte)(size >> 24), (byte)(size >> 16), (byte)(size >> 8), (byte)size, .. body, 0, 0, 0, 8, (byte)'f', (byte)'r', (byte)'e', (byte)'e'];
 

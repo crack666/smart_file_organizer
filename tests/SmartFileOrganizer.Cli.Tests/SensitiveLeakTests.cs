@@ -264,6 +264,36 @@ public class SensitiveLeakTests : IDisposable
     }
 
     /// <summary>
+    /// Mail stores under AppData (Thunderbird profiles, Outlook data files) are not read: the scan skips AppData.
+    /// The folder itself is marked, so the mail shows up as a sensitive finding a person decides
+    /// (https://github.com/crack666/smart_file_organizer/issues/111).
+    /// </summary>
+    [Fact]
+    public async Task MailDataUnderAppData_ShowsUpAsASensitiveFinding_WithoutBeingRead()
+    {
+        var profile = Path.Combine(_root, "Backup", "Max");
+        var inbox = Path.Combine(profile, "AppData", "Roaming", "Thunderbird", "Profiles", "abc.default", "Mail", "Local Folders");
+        var outlook = Path.Combine(profile, "AppData", "Local", "Microsoft", "Outlook");
+        Directory.CreateDirectory(inbox);
+        Directory.CreateDirectory(outlook);
+        File.WriteAllText(Path.Combine(inbox, "Inbox"), $"From - Mon\nSubject: {Secret}");
+        File.WriteAllText(Path.Combine(outlook, "archiv.pst"), Secret);
+        File.WriteAllText(Path.Combine(profile, "notes.txt"), "call the plumber");
+        var job = await ScanAsync();
+
+        var findings = await SfoAsync("findings", job.ToString(), "--json");
+
+        Assert.True(findings.ExitCode == ExitCodes.Ok, findings.Stdout + findings.Stderr);
+        var appData = Assert.Single(findings.Result().GetProperty("items").EnumerateArray(),
+            i => i.GetProperty("relative_path").GetString() == "Backup/Max/AppData");
+        Assert.Equal("sensitive", appData.GetProperty("kind").GetString());
+        Assert.Contains("private_message", appData.GetProperty("markers").EnumerateArray().Select(m => m.GetString()));
+        Assert.True(appData.GetProperty("action").GetProperty("single_decision").GetBoolean());
+        Assert.DoesNotContain("archiv.pst", findings.Stdout);
+        Assert.DoesNotContain(Secret, await AllOutputsAsync(job));
+    }
+
+    /// <summary>
     /// The full SHA-256 of a short secret file confirms a guess of its content. compare keeps it for
     /// unmarked files only; the match path still says where the backup is.
     /// </summary>

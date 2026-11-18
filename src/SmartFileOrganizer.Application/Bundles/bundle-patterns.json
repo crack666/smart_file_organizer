@@ -75,16 +75,20 @@
       ]
     },
     {
+      // Only what an operating system puts there is a key: a data drive often has folders named
+      // "Programme", "Program Files" or "Benutzer" (installers, copies), and with them as keys a whole
+      // drive of personal data became the dump of a computer. Two such names without Windows or
+      // Documents and Settings are no system drive.
       "name": "system-drive",
       "origin": "computer",
       "split": true,
       "at_root": true,
-      "min_score": 3,
+      "min_score": 4,
       "markers": [
         { "dir": "Windows", "weight": 2, "key": true },
         { "dir": "PerfLogs", "weight": 1 },
-        { "dir": "Program Files", "weight": 2, "key": true },
-        { "dir": "Programme", "weight": 2, "key": true },
+        { "dir": "Program Files", "weight": 2 },
+        { "dir": "Programme", "weight": 2 },
         { "dir": "Documents and Settings", "weight": 2, "key": true },
         { "dir": "Dokumente und Einstellungen", "weight": 2, "key": true },
         { "dir": "Program Files (x86)", "weight": 1 },

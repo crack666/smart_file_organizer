@@ -2410,4 +2410,9 @@ The contract is enforced in one place, so a new command does not repeat it:
 
 `CommandRunner` turns the outcome into the envelope or text, maps Ctrl+C to 130 and any
 unexpected exception to 1 (`internal_error`). Parse errors never reach the handler; `SfoApp`
-answers them with exit code 2.
+answers them with exit code 2. When the unexpected exception is a SQLite error, a second error line on
+stderr names the SQLite error codes and the methods of `sfo` that made the call, innermost first, for
+example `SQLite error 5 (extended 5) in: FileRepository.InsertBatchAsync < ScanEngine.RunAsync`
+(since 18.11.2026, [#111](https://github.com/crack666/smart_file_organizer/issues/111)): the envelope
+carries the message only, and a rare `database is locked` on a busy machine could not be traced to the
+call that hit it. The line holds method names only, no SQL text, no values and no paths.

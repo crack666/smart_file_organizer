@@ -24,6 +24,10 @@ public class AiClassificationCoordinator
     private bool _pauseRequested;
     private long _activeJobId;
 
+    /// <summary>The waiting state last reported while the run holds its calls for the model server; null while the
+    /// server answers. Kept so that pausing and resuming during an outage shows waiting again, not running.</summary>
+    private AiProcessingStateChanged? _waitingForServer;
+
     public event EventHandler<AiClassificationProgress>? ProgressChanged;
     public event EventHandler<AiProcessingStateChanged>? StateChanged;
 
@@ -64,7 +68,9 @@ public class AiClassificationCoordinator
                 if (_pauseRequested && _activeJobId == jobId)
                 {
                     _pauseRequested = false;
-                    StateChanged?.Invoke(this, new AiProcessingStateChanged(jobId, AiProcessingState.Running, "AI classification resumed."));
+                    // Resumed into an outage: the run still waits for the model server and nothing is judged.
+                    StateChanged?.Invoke(this, _waitingForServer
+                        ?? new AiProcessingStateChanged(jobId, AiProcessingState.Running, "AI classification resumed."));
                 }
 
                 return Task.CompletedTask;
@@ -73,6 +79,7 @@ public class AiClassificationCoordinator
             _cts = CancellationTokenSource.CreateLinkedTokenSource(appCt);
             _activeJobId = jobId;
             _pauseRequested = false;
+            _waitingForServer = null;
             StateChanged?.Invoke(this, new AiProcessingStateChanged(jobId, AiProcessingState.Starting, "Starting AI classification…"));
 
             var progress = new Progress<AiClassificationProgress>(p => ProgressChanged?.Invoke(this, p));
@@ -89,7 +96,7 @@ public class AiClassificationCoordinator
                         phase => StateChanged?.Invoke(this, new AiProcessingStateChanged(jobId, AiProcessingState.Running, PhaseStartText(phase))),
                         _ => progress,
                         WaitIfPausedAsync,
-                        (phase, wait) => StateChanged?.Invoke(this, WaitStateChange(jobId, phase, wait)),
+                        (phase, wait) => ReportWait(WaitStateChange(jobId, phase, wait)),
                         _cts.Token);
 
                     if (!run.OllamaAvailable)
@@ -244,6 +251,21 @@ public class AiClassificationCoordinator
         if (_waits is null) return;
         try { await _waits.ClearAsync(jobId, CancellationToken.None); }
         catch (Exception ex) { _logger.LogWarning("The wait of job {JobId} could not be cleared: {Error}", jobId, ex.Message); }
+    }
+
+    /// <summary>
+    /// Passes on a change of the wait for the model server and remembers whether the run still waits. While the
+    /// run is paused the display stays paused: the server coming back does not make a paused run a running one.
+    /// </summary>
+    private void ReportWait(AiProcessingStateChanged change)
+    {
+        lock (_sync)
+        {
+            _waitingForServer = change.State == AiProcessingState.WaitingForModelServer ? change : null;
+            if (_pauseRequested)
+                return;
+        }
+        StateChanged?.Invoke(this, change);
     }
 
     private static AiProcessingStateChanged WaitStateChange(long jobId, AiPhases phase, ModelServerWaitEvent wait) => wait.State switch
