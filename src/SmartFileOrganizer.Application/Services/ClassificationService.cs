@@ -140,6 +140,12 @@ public class ClassificationService
         if (retried > 0)
             _logger.LogInformation("Retrying {Count} failed file(s) of job {JobId}.", retried, jobId);
 
+        var released = await _fileRepo.ReleaseStaleSkippedAsync(jobId, ct);
+        if (released > 0)
+            _logger.LogInformation(
+                "{Count} file(s) of job {JobId} were skipped although their directory is judged file by file; they are judged now.",
+                released, jobId);
+
         var totalEligible = await _fileRepo.CountAiEligibleAsync(jobId, ct);
         if (totalEligible == 0)
         {

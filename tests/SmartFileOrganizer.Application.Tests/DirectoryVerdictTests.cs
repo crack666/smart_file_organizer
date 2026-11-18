@@ -178,6 +178,63 @@ public class DirectoryVerdictTests : IDisposable
         Assert.Null(stored.Rule);
     }
 
+    /// <summary>
+    /// A folder recorded shallow has no rows for its subfolders, only their count. Profile and prompt carry that
+    /// count, and no rule takes the folder for a leaf (https://github.com/crack666/smart_file_organizer/issues/111).
+    /// </summary>
+    [Fact]
+    public async Task ShallowFolder_IsJudgedWithItsCountedSubfolders_NotAsALeaf()
+    {
+        var root = MakeTree("Platte");
+        WriteFile(Path.Combine(root, "Games", "launcher.exe"));
+        WriteFile(Path.Combine(root, "Games", "Alpha", "alpha.exe"));
+        WriteFile(Path.Combine(root, "Games", "Beta", "beta.exe"));
+        WriteFile(Path.Combine(root, "Tools", "Gamma", "gamma.exe"));
+        WriteFile(Path.Combine(root, "Briefe", "a.pdf"));
+        WriteFile(Path.Combine(root, "Briefe", "b.pdf"));
+        var rules = new ScanRuleSet
+        {
+            Name = "test",
+            Rules = [new ScanRule("Games", ScanRuleAction.Shallow), new ScanRule("Tools", ScanRuleAction.Shallow)]
+        };
+        var job = await _jobRepo.CreateAsync(new ScanJob
+        {
+            RootPath = root, Status = JobStatus.Created, CreatedAt = DateTime.UtcNow,
+            Rules = ScanRulesFile.ToProfile(rules, "test")
+        });
+        await new ScanEngine(new FileSystemAccessor(), _fileRepo, _dirRepo, _jobRepo, NullLogger<ScanEngine>.Instance)
+            .RunAsync(job, new Progress<ScanProgress>(_ => { }), CancellationToken.None);
+        var games = await _dirRepo.GetByPathAsync(job.Id, Path.Combine(root, "Games"));
+        Assert.Equal(DirectoryStatus.Shallow, games!.DirStatus);
+        Assert.Equal(2, games.SubdirCount);
+        Assert.Null(await _dirRepo.GetByPathAsync(job.Id, Path.Combine(root, "Games", "Alpha")));
+        _ollama.Answer = input => input.Directory.Name == "Briefe" ? DirectoryVerdictKind.Uniform : DirectoryVerdictKind.Unit;
+
+        await NewService().RunAsync(job.Id);
+
+        // One file and counted subfolders: not the single-file rule. No file and counted subfolders: not empty.
+        var inputs = _ollama.PreAssessInputs.ToDictionary(i => i.Directory.Name);
+        Assert.Equal(2, inputs["Games"].Profile.SubdirectoryCount);
+        Assert.True(inputs["Games"].Profile.SubdirectoriesNotListed);
+        Assert.Equal(1, inputs["Tools"].Profile.SubdirectoryCount);
+        Assert.False(inputs["Briefe"].Profile.SubdirectoriesNotListed);
+        var prompt = OllamaService.BuildPreAssessmentDirectoryPart(inputs["Games"]);
+        Assert.Contains("Subdirectories: 2", prompt);
+        Assert.Contains("counted only", prompt);
+        Assert.DoesNotContain("counted only", OllamaService.BuildPreAssessmentDirectoryPart(inputs["Briefe"]));
+
+        foreach (var name in new[] { "Games", "Tools" })
+        {
+            var verdict = await VerdictAsync(job.Id, Path.Combine(root, name));
+            Assert.Equal(VerdictSource.Model, verdict.Source);
+            Assert.Equal(DirectoryVerdictKind.Unit, verdict.Verdict);
+            Assert.True(verdict.Profile.SubdirectoriesNotListed); // profile JSON round-trips
+        }
+        // The parent is judged from its subdirectories, the shallow ones included.
+        Assert.Equal(DirectoryVerdictRules.Container, (await VerdictAsync(job.Id, root)).Rule);
+        await AssertEveryDirectoryHasVerdictOrErrorAsync(job.Id);
+    }
+
     [Fact]
     public async Task PdfExeJpgZip_ProfileSuggestsMixed()
     {

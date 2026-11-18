@@ -626,10 +626,17 @@ call) or `model`.
    verdict judges it, because a folder of its own name may hold anything.
 4. Directories are processed level by level from the root. What no rule decides goes to Ollama in
    parallel (`PreAssessDirectoryAsync`): file list, subdirectory names and the profile. The model returns
-   verdict, purpose, retention and reason, together with the sampling fields used so far
-   (`homogeneity`, `anomalous_files`, `sampling_strategy`, `suggested_sample_size`).
+   verdict, purpose, retention and reason, together with `homogeneity`, `dominant_type`, `theme` and
+   `anomalous_files`. Until 18.11.2026 prompt and schema also asked for `sampling_strategy` and
+   `suggested_sample_size`, which nothing had followed since Issue 8; they are gone, and an older stored
+   answer that carries them is read without them
+   ([#111](https://github.com/crack666/smart_file_organizer/issues/111)).
    `PreAssessmentResponseParser` reads the answer; a missing or unknown verdict is stored as an error.
    A directory the model judges `unit` spares all calls below it.
+   A folder the scan recorded `shallow` (a program folder it did not enter) has rows for its files but
+   not for its subfolders, only their count. Profile and prompt carry that count with the note that the
+   subfolders are not listed (`DirectoryProfile.SubdirectoriesNotListed`), and the rules `empty` and
+   `single-file` apply to fully scanned folders only, so a shallow folder is never taken for a leaf.
 5. Directories without direct files but with subdirectories are decided last, bottom-up, from their
    subdirectories (`container`): all empty → `empty`; only system → `system`; all units, all dumps
    (a `Users` folder with several profiles), or all `uniform` with the same dominant file type →
@@ -643,6 +650,11 @@ call) or `model`.
    uniform directories with more eligible files than the sample size get `stratified_sample`;
    everything else, including a model verdict "empty" for a directory that has files, `analyze_all`.
    Anomalous file names from the model are resolved to ids and later drawn as outliers.
+   Before Phase 2 counts its files, `IFileRepository.ReleaseStaleSkippedAsync` sets back to
+   `Discovered` every file that is `Skipped` without a reason that still holds: no result, no
+   `analysis_skip`, and its directory judged neither `unit` nor `system`. Such rows come from databases
+   written while the model chose a random sample, and from a directory judged again with another
+   verdict ([#111](https://github.com/crack666/smart_file_organizer/issues/111)).
 
 `DirectoryQueryService.GetVerdictAsync` and `GetVerdictsAsync` read verdicts with their profile.
 The CLI read commands use `JobReadService` (see [Read side](#read-side-for-the-cli)).

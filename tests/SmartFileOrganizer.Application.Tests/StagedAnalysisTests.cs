@@ -375,6 +375,41 @@ public class StagedAnalysisTests : IDisposable
         Assert.Null((await _dirClassRepo.GetByDirectoryPathAsync(jobId, Path.Combine(root, "Programm")))?.Error);
     }
 
+    /// <summary>
+    /// A database from before the staged analysis: the model chose a random sample and the files outside it were
+    /// Skipped for good. The next run judges them; files of a unit stay skipped
+    /// (https://github.com/crack666/smart_file_organizer/issues/111, from #8).
+    /// </summary>
+    [Fact]
+    public async Task FilesSkippedByTheFormerRandomSample_AreJudgedOnTheNextRun_FilesOfAUnitStaySkipped()
+    {
+        var root = MakeTree("Alt");
+        foreach (var name in new[] { "a.jpg", "b.jpg", "c.jpg" })
+            WriteFile(Path.Combine(root, "Mix", name));
+        WriteFile(Path.Combine(root, "Programm", "tool.exe"));
+        WriteFile(Path.Combine(root, "Programm", "tool.dll"));
+        _ollama.Answer = input => input.Directory.Name == "Programm" ? DirectoryVerdictKind.Unit : DirectoryVerdictKind.Mixed;
+        var jobId = await ScanAsync(root);
+        await Phase1Async(jobId);
+        await using (var conn = _db.CreateConnection())
+        {
+            await conn.OpenAsync();
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = $"UPDATE file_nodes SET status = {(int)FileNodeStatus.Skipped} WHERE name IN ('b.jpg', 'c.jpg')";
+            Assert.Equal(2, await cmd.ExecuteNonQueryAsync());
+        }
+
+        await Classification().RunAsync(jobId);
+
+        Assert.Equal(["a.jpg", "b.jpg", "c.jpg"], _ollama.ClassifiedNames);
+        Assert.All(await _fileRepo.GetByDirectoryAsync(jobId, Path.Combine(root, "Mix")), f =>
+        {
+            Assert.Equal(FileNodeStatus.AiAnalyzed, f.Status);
+            Assert.NotNull(f.Classification);
+        });
+        Assert.All(await _fileRepo.GetByDirectoryAsync(jobId, Path.Combine(root, "Programm")), f => Assert.Equal(FileNodeStatus.Skipped, f.Status));
+    }
+
     [Fact]
     public async Task EmptyVerdictFromTheModel_ForADirectoryWithFiles_StillJudgesThem()
     {

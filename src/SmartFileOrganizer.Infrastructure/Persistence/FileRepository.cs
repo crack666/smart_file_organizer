@@ -357,6 +357,29 @@ public class FileRepository : IFileRepository
             });
     }
 
+    public async Task<int> ReleaseStaleSkippedAsync(long jobId, CancellationToken ct = default)
+    {
+        await using var conn = _db.CreateConnection();
+        await conn.OpenAsync(ct);
+        return await conn.ExecuteAsync(new CommandDefinition(
+            """
+            UPDATE file_nodes SET status = @discovered
+            WHERE job_id = @jobId AND status = @skipped AND analysis_skip IS NULL
+              AND id NOT IN (SELECT file_node_id FROM ai_results)
+              AND EXISTS (
+                  SELECT 1 FROM directory_nodes d
+                  JOIN directory_verdicts v ON v.directory_node_id = d.id
+                  WHERE d.job_id = file_nodes.job_id AND d.full_path = file_nodes.parent_path
+                    AND v.verdict IS NOT NULL AND v.verdict NOT IN ('unit', 'system'))
+            """,
+            new
+            {
+                discovered = (int)FileNodeStatus.Discovered,
+                jobId,
+                skipped = (int)FileNodeStatus.Skipped
+            }, cancellationToken: ct));
+    }
+
     /// <summary>
     /// Parameter object for inserts and updates. Dapper would bind <see cref="SensitiveMarker"/>
     /// as its integer value; the column holds the fixed token list instead.

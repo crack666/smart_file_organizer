@@ -911,10 +911,9 @@ public class OllamaService : IOllamaService
             outcome.Assessment.DirectoryNodeId = input.Directory.Id;
             outcome.Verdict.DirectoryNodeId = input.Directory.Id;
             _logger.LogInformation(
-                "[Phase1] '{Dir}' in {Elapsed:F1}s — verdict={Verdict}, retention={Retention}, strategy={Strat}, sample={Sample}, anomalies={Anom}{Err}",
+                "[Phase1] '{Dir}' in {Elapsed:F1}s — verdict={Verdict}, retention={Retention}, anomalies={Anom}{Err}",
                 input.Directory.RelativePath, sw.Elapsed.TotalSeconds,
                 outcome.Verdict.Verdict.ToCode(), outcome.Verdict.Retention.ToCode(),
-                outcome.Assessment.SamplingStrategy, outcome.Assessment.SampleSize,
                 CountJsonArray(outcome.Assessment.AnomalousFileIds),
                 outcome.Verdict.Error is null ? string.Empty : ", error stored");
             _traffic.LogDebug("[Phase1] ANSWER for '{Dir}': {Raw}", input.Directory.RelativePath, Trunc(json, 4000));
@@ -957,7 +956,7 @@ public class OllamaService : IOllamaService
     {
         var sb = new StringBuilder();
         sb.AppendLine("You are judging a directory before files are moved: what lies here, and can it be handled as a whole?");
-        sb.AppendLine("You also plan targeted file inspection. The directory is described in the user message.");
+        sb.AppendLine("The directory is described in the user message.");
         sb.AppendLine();
         sb.AppendLine("Tasks:");
         sb.AppendLine("1. Judge the directory as a whole (field verdict), using its profile:");
@@ -972,11 +971,6 @@ public class OllamaService : IOllamaService
         sb.AppendLine("4. reason: one or two sentences why, naming the facts from the profile you relied on.");
         sb.AppendLine("5. Assess homogeneity: high=all same type/theme, medium=mostly similar, low=very mixed.");
         sb.AppendLine("6. Identify anomalous files: different type from the majority, or dramatically larger/smaller than peers.");
-        sb.AppendLine("7. Choose a sampling strategy for deep vision/text analysis:");
-        sb.AppendLine("   analyze_all = ≤10 files or content is too mixed to sample");
-        sb.AppendLine("   random_sample = pick a representative subset (use this for large homogeneous dirs)");
-        sb.AppendLine("   skip = only dir name/path are enough to classify (e.g. a clearly-named system folder)");
-        sb.AppendLine("8. Suggest how many files to analyze (0 for skip, all count for analyze_all).");
         sb.AppendLine();
         sb.AppendLine("Use the codes exactly as written for verdict and retention.");
         if (!string.IsNullOrWhiteSpace(summaryLanguage) &&
@@ -997,7 +991,9 @@ public class OllamaService : IOllamaService
         sb.AppendLine($"Directory: {dir.Name}");
         sb.AppendLine($"Relative path: {dir.RelativePath}");
         sb.AppendLine($"Total direct files: {input.DirectFiles.Count}");
-        sb.AppendLine($"Subdirectories: {input.SubdirectoryNames.Count}");
+        sb.AppendLine($"Subdirectories: {Math.Max(input.SubdirectoryNames.Count, profile.SubdirectoryCount)}");
+        if (profile.SubdirectoriesNotListed)
+            sb.AppendLine("  (counted only: the scan recorded this folder without entering its subdirectories, as it does for program folders; their names and content are unknown)");
 
         AppendProfile(sb, profile);
 
@@ -1072,14 +1068,12 @@ public class OllamaService : IOllamaService
                     },
                     required = new[] { "name", "reason" }
                 }
-            },
-            sampling_strategy = new { type = "string", @enum = new[] { "analyze_all", "random_sample", "skip" } },
-            suggested_sample_size = new { type = "integer" }
+            }
         },
         required = new[]
         {
             "verdict", "purpose", "retention", "reason",
-            "homogeneity", "dominant_type", "theme", "anomalous_files", "sampling_strategy", "suggested_sample_size"
+            "homogeneity", "dominant_type", "theme", "anomalous_files"
         }
     };
 
