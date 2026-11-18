@@ -232,6 +232,13 @@ public class DirectoryPreAssessmentService
         var files = await _fileRepo.GetFileInfoForDirectoryAsync(jobId, dir.FullPath, ct);
         var children = tree.ChildrenOf(dir);
         var profile = DirectoryProfileBuilder.Build(files, children.Select(c => c.Name).ToList());
+        // A folder recorded shallow has no rows for its subfolders; the scan only counted them. Without this the
+        // profile and the prompt would call a program folder with fifty subfolders a folder without any.
+        if (dir.DirStatus == DirectoryStatus.Shallow && children.Count == 0 && dir.SubdirCount > 0)
+        {
+            profile.SubdirectoryCount = dir.SubdirCount;
+            profile.SubdirectoriesNotListed = true;
+        }
         var (unitAncestor, unitPath) = tree.FindUnitAncestor(dir);
         var inDump = unitAncestor is null ? PlaceInDump(dir, tree) : null;
         var dump = unitAncestor is null && inDump?.NoisePath is null
@@ -439,8 +446,9 @@ public class DirectoryPreAssessmentService
     };
 
     /// <summary>
-    /// What the verdict means for the files of a model-judged directory. The sampling fields of the model
-    /// answer are no longer followed: they could leave files without any result.
+    /// What the verdict means for the files of a model-judged directory. The model is not asked how to sample
+    /// (until 18.11.2026 the prompt still asked for a strategy and a size that nothing followed): its advice
+    /// could leave files without any result.
     /// <list type="bullet">
     /// <item>unit or system: no file is analysed (Skipped); the directory carries the result.</item>
     /// <item>uniform: Phase 2 draws a stratified sample (<see cref="DirectorySamplingService"/>).</item>
@@ -454,7 +462,12 @@ public class DirectoryPreAssessmentService
         DirectoryVerdict verdict,
         CancellationToken ct)
     {
-        if (fileInfos.Count == 0) return;
+        if (fileInfos.Count == 0)
+        {
+            assessment.SamplingStrategy = "analyze_all";
+            assessment.SampleSize = 0;
+            return;
+        }
 
         switch (verdict.Verdict)
         {

@@ -58,10 +58,6 @@ public static class PreAssessmentResponseParser
             assessment.Homogeneity = GetString(root, "homogeneity");
             assessment.DominantType = GetString(root, "dominant_type");
             assessment.Theme = GetString(root, "theme");
-            assessment.SamplingStrategy = GetString(root, "sampling_strategy");
-            if (root.TryGetProperty("suggested_sample_size", out var sss) && sss.ValueKind == JsonValueKind.Number
-                && sss.TryGetInt32(out var size))
-                assessment.SampleSize = size;
             if (root.TryGetProperty("anomalous_files", out var anomaly) && anomaly.ValueKind == JsonValueKind.Array)
                 assessment.AnomalousFileIds = anomaly.GetRawText();
 

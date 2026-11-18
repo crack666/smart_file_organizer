@@ -19,10 +19,20 @@ public class DirectoryNode
     /// (<c>backed_up</c>: every file below it is in the library), or null.</summary>
     public string? AnalysisSkip { get; set; }
 
-    // Aggregated statistics (populated after scan)
+    // What the scan saw directly in the folder. Sums over the subtree are not stored: files are moved, rescanned
+    // and removed after the scan, and a stored sum would go stale with each of them. Every reader, CLI and GUI
+    // alike, takes subtree bytes and file counts from JobReadService (DirectoryItem.SizeBytes and .Files), which
+    // computes them from the file rows (https://github.com/crack666/smart_file_organizer/issues/111).
+
+    /// <summary>Bytes of the files directly in the folder (<c>directory_nodes.total_size</c>); not of the subtree.</summary>
     public long TotalSize { get; set; }
     public int DirectFileCount { get; set; }
+
+    /// <summary>Never filled (<c>directory_nodes.recursive_file_count</c> is 0 in every row). The file count of
+    /// the subtree is <c>DirectoryItem.Files</c> of <c>JobReadService</c>.</summary>
     public long RecursiveFileCount { get; set; }
+
+    /// <summary>Direct subfolders the scan saw; for a folder recorded shallow they are counted but have no rows.</summary>
     public int SubdirCount { get; set; }
 
     // JSON-serialised summary strings for dominant types/categories

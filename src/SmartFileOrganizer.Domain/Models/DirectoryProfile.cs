@@ -17,6 +17,13 @@ public sealed class DirectoryProfile
     /// <summary>Number of known subdirectories, including ones the scan skipped.</summary>
     public int SubdirectoryCount { get; set; }
 
+    /// <summary>
+    /// True for a folder the scan recorded shallow: its subdirectories are counted in
+    /// <see cref="SubdirectoryCount"/>, but the scan did not enter them, so neither their names nor their
+    /// content are known.
+    /// </summary>
+    public bool SubdirectoriesNotListed { get; set; }
+
     /// <summary>Distribution by lower-case extension (empty string for files without one), most files first.</summary>
     public List<ProfileBucket> Extensions { get; set; } = [];
 

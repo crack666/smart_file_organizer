@@ -232,6 +232,11 @@ public class ModelCallTests
         var fixedPhase1 = "<system>" + OllamaService.BuildPreAssessmentInstructions();
         Assert.StartsWith(fixedPhase1, Rendered(handler.Requests[0]));
         Assert.StartsWith(fixedPhase1, Rendered(handler.Requests[1]));
+        // Phase 1 asks for nothing it does not use: the sample is drawn from the verdict, not from the model's advice.
+        Assert.DoesNotContain("sampl", fixedPhase1, StringComparison.OrdinalIgnoreCase);
+        var schema = handler.Requests[0].RootElement.GetProperty("format");
+        Assert.DoesNotContain(schema.GetProperty("properties").EnumerateObject(), p => p.Name.Contains("sampl", StringComparison.Ordinal));
+        Assert.DoesNotContain(schema.GetProperty("required").EnumerateArray(), r => r.GetString()!.Contains("sampl", StringComparison.Ordinal));
 
         DirectorySummaryInput Sum(string name) => new()
         {

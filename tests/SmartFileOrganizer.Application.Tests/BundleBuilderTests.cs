@@ -453,4 +453,25 @@ public class BundleBuilderTests
         Assert.False(patterns.IsGenericName("Skifahrt 2015"));
         Assert.False(patterns.IsGenericName("Oma"));
     }
+
+    /// <summary>
+    /// A system drive needs a folder only an operating system creates. Folders named like programs and users on
+    /// a data drive are not enough: the whole drive would become the dump of a computer
+    /// (https://github.com/crack666/smart_file_organizer/issues/111).
+    /// </summary>
+    [Theory]
+    [InlineData(true, "Windows", "Program Files", "Users")]
+    [InlineData(true, "Windows", "Programme", "Dokumente und Einstellungen")]
+    [InlineData(true, "Documents and Settings", "Program Files")]
+    [InlineData(true, "Windows", "Users", "$Recycle.Bin")]
+    [InlineData(false, "Programme", "Benutzer")]
+    [InlineData(false, "Programme", "Benutzer", "$Recycle.Bin", "Fotos")]
+    [InlineData(false, "Program Files", "Program Files (x86)", "Users", "$Recycle.Bin")]
+    [InlineData(false, "Windows", "Fotos")]
+    public void SystemDrive_NeedsAFolderOfTheOperatingSystem(bool expected, params string[] subdirectories)
+    {
+        var dump = BundlePatterns.Default.Recognise(subdirectories, [], isRoot: true, () => 0);
+
+        Assert.Equal(expected ? "system-drive" : null, dump?.Signature.Name);
+    }
 }

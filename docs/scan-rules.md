@@ -133,7 +133,9 @@ limit. Until this was changed, the scan followed every link.
 - The scan root is entered even if it is a link: the user chose it.
 - `{ "match": "All Users", "action": "follow_link" }` lets the scan enter that link. Even then it is not
   entered when its target lies inside the scan root (counted there already), holds the link or the root (a
-  loop), cannot be resolved, or was already entered through another link; the reason says which. There is
+  loop), cannot be resolved, or was already entered through another link; the reason says which. The
+  entered targets are read from the stored folders when a scan is resumed, so this also holds across runs
+  (since 18.11.2026; before, a resumed scan could enter a second link to the same target). There is
   no setting to follow every link.
 - A folder that cannot be read is stored with status `error` and the cause of the error
   (`access_denied`, `not_found`, `path_too_long`, `io_error`), never as an empty folder. A file whose size

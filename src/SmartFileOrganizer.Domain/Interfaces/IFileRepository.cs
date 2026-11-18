@@ -27,6 +27,13 @@ public interface IFileRepository
     /// Returns the number of files released.
     /// </summary>
     Task<int> ReleaseFailedAsync(long jobId, CancellationToken ct = default);
+    /// <summary>
+    /// Sets files back to Discovered that are Skipped although nothing skips them any more: no result, not left
+    /// out as backed up (<c>analysis_skip</c>), and their directory judged neither <c>unit</c> nor <c>system</c>.
+    /// Such rows come from databases written while the model chose a random sample (the files outside it were
+    /// Skipped for good) and from a directory judged again with another verdict. Returns the number released.
+    /// </summary>
+    Task<int> ReleaseStaleSkippedAsync(long jobId, CancellationToken ct = default);
     /// <summary>Files of a job whose stored rule version is missing or lower than <paramref name="version"/>.</summary>
     Task<IReadOnlyList<FileNode>> GetBelowRulesVersionAsync(long jobId, int version, CancellationToken ct = default);
     /// <summary>The files of a job of one type, by id.</summary>

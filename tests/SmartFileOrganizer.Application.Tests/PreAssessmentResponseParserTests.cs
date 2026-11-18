@@ -32,8 +32,9 @@ public class PreAssessmentResponseParserTests
         Assert.Equal("m", verdict.ModelUsed);
 
         Assert.Equal("high", assessment.Homogeneity);
-        Assert.Equal("random_sample", assessment.SamplingStrategy);
-        Assert.Equal(12, assessment.SampleSize);
+        // What an older model answer says about sampling is not read: the verdict decides (#111, from #8).
+        Assert.Null(assessment.SamplingStrategy);
+        Assert.Equal(0, assessment.SampleSize);
         Assert.Contains("IMG_0007.JPG", assessment.AnomalousFileIds);
     }
 
@@ -126,14 +127,15 @@ public class PreAssessmentResponseParserTests
     }
 
     [Fact]
-    public void MissingVerdict_IsAnError_ButSamplingIsKept()
+    public void MissingVerdict_IsAnError_ButTheAssessmentIsKept()
     {
         var (assessment, verdict) = PreAssessmentResponseParser.Parse(
-            Chat("""{"homogeneity":"low","sampling_strategy":"analyze_all","suggested_sample_size":3}"""), "m");
+            Chat("""{"homogeneity":"low","dominant_type":"Document"}"""), "m");
 
         Assert.Null(verdict.Verdict);
         Assert.Equal("The model answer contained no verdict.", verdict.Error);
-        Assert.Equal("analyze_all", assessment.SamplingStrategy);
+        Assert.Equal("low", assessment.Homogeneity);
+        Assert.Equal("Document", assessment.DominantType);
     }
 
     [Fact]

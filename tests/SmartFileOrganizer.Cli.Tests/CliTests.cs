@@ -201,6 +201,28 @@ public class CliTests : IDisposable
         Assert.Equal(JsonValueKind.Null, result.GetProperty("model").GetProperty("available").ValueKind);
     }
 
+    /// <summary>
+    /// A database failure names the SQLite error code and the methods of sfo that made the call, on stderr: the
+    /// envelope has the message only (https://github.com/crack666/smart_file_organizer/issues/111).
+    /// </summary>
+    [Fact]
+    public async Task DatabaseFailure_NamesTheSqliteErrorAndTheCallingMethods_OnStderr()
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(_dbPath)!);
+        await File.WriteAllTextAsync(_dbPath, string.Concat(Enumerable.Repeat("this is no database. ", 400)));
+
+        var run = await SfoAsync(null, "jobs", "--json");
+
+        Assert.Equal(ExitCodes.Failure, run.ExitCode);
+        AssertEnvelope(run.Json(), "jobs", ok: false, ExitCodes.Failure);
+        Assert.Equal(ErrorCodes.InternalError, run.Json().GetProperty("error").GetProperty("code").GetString());
+        var origin = Assert.Single(run.Stderr.Split('\n'), line => line.Contains("SQLite error 26 (extended 26) in: "));
+        Assert.Contains("DatabaseContext.", origin);
+        Assert.DoesNotContain("MoveNext", origin);
+        Assert.DoesNotContain("<", origin[origin.IndexOf(" in: ", StringComparison.Ordinal)..].Replace(" < ", " "));
+        Assert.DoesNotContain(_dir, origin);
+    }
+
     [Fact]
     public async Task Analyze_RetryErrors_CallsOnlyFailedFiles_AndShowReportsTheAttempts()
     {

@@ -57,7 +57,7 @@ nothing below a dump is checked again. A dump nested in folders that hold nothin
 |---|---|---|---|
 | `phone-storage` | `phone` | `DCIM`, `Android`, `LOST.DIR` (alone enough), `WhatsApp`, `MIUI`, `Alarms`, `Notifications`, `Ringtones`, app package names (`com.example.app`, up to 3 counted) | yes |
 | `user-profile` | `computer` | `AppData`, `Application Data`, `Local Settings`, `NTUSER.DAT`, `.bashrc`, `.config` | yes |
-| `system-drive` | `computer` | `Windows`, `Program Files`, `Documents and Settings` | yes |
+| `system-drive` | `computer` | `Windows`, `Documents and Settings` (with a score of 4: `Program Files`, `Programme`, `Users`, `Benutzer` add to it but are no key, since 18.11.2026; before, `Programme` next to `Benutzer` on a data drive was enough) | yes |
 | `removable-drive` | `removable_drive` | `System Volume Information`, `autorun.inf`, `.Trashes`, `.Spotlight-V100` | no |
 | `software` | `software` | `.git`, `.hg`, `node_modules`, `.venv`, `.idea`, `package.json`, `.sln`, `.exe` (with `.dll`) | no |
 

@@ -150,9 +150,9 @@ public class AiClassificationInputPreparer : IClassificationInputPreparer
         FileType.Executable or FileType.Font or FileType.Database => Kind.Rule,
         _ => format switch
         {
-            "jpeg" or "png" or "gif" or "webp" or "tiff" or "bmp" => Kind.Image,
-            "mp4" or "avi" or "matroska" => Kind.Video,
-            "mp3" or "flac" or "ogg" or "wav" => Kind.Audio,
+            "jpeg" or "png" or "gif" or "webp" or "tiff" or "bmp" or "heif" or "avif" => Kind.Image,
+            "mp4" or "quicktime" or "avi" or "matroska" => Kind.Video,
+            "mp3" or "m4a" or "flac" or "ogg" or "wav" => Kind.Audio,
             "zip" or "rar" or "7z" or "tar" or "gzip" or "bzip2" or "xz" => Kind.Archive,
             "pdf" or "rtf" => Kind.Document,
             "text" => Kind.Text,
