@@ -77,6 +77,42 @@ public class HostingTests : IDisposable
     }
 
     /// <summary>
+    /// Sums over a subtree come from one service of the shared core, for the command line and the desktop app alike;
+    /// the columns of <c>directory_nodes</c> hold the folder's own files only and no subtree count
+    /// (https://github.com/crack666/smart_file_organizer/issues/111, from #6).
+    /// </summary>
+    [Fact]
+    public async Task SubtreeSizesAndCounts_ComeFromTheReadServiceOfTheCore_NotFromStoredColumns()
+    {
+        var root = Path.Combine(_dir, "data");
+        Directory.CreateDirectory(Path.Combine(root, "a", "b"));
+        await File.WriteAllBytesAsync(Path.Combine(root, "top.bin"), new byte[10]);
+        await File.WriteAllBytesAsync(Path.Combine(root, "a", "one.bin"), new byte[100]);
+        await File.WriteAllBytesAsync(Path.Combine(root, "a", "b", "two.bin"), new byte[1000]);
+        await File.WriteAllBytesAsync(Path.Combine(root, "a", "b", "three.bin"), new byte[2000]);
+
+        await using var provider = BuildProvider();
+        await provider.InitializeSmartFileOrganizerDatabaseAsync();
+        var scans = provider.GetRequiredService<ScanJobService>();
+        var job = await scans.CreateJobAsync(root);
+        var scanDone = new TaskCompletionSource<ScanJob>(TaskCreationOptions.RunContinuationsAsynchronously);
+        scans.JobStateChanged += (_, j) => { if (j.Id == job.Id && j.Status == JobStatus.Completed) scanDone.TrySetResult(j); };
+        await scans.StartAsync(job.Id);
+        await scanDone.Task.WaitAsync(TimeSpan.FromSeconds(30));
+
+        var page = await provider.GetRequiredService<JobReadService>().ListDirectoriesAsync(new DirectoryListQuery { JobId = job.Id });
+        var byPath = page.Items.ToDictionary(d => d.FullPath);
+        (long, long, long) Sums(string path) => (byPath[path].SizeBytes, byPath[path].Files, byPath[path].DirectFiles);
+        Assert.Equal((3110L, 4L, 1L), Sums(root));
+        Assert.Equal((3100L, 3L, 1L), Sums(Path.Combine(root, "a")));
+        Assert.Equal((3000L, 2L, 2L), Sums(Path.Combine(root, "a", "b")));
+
+        var stored = await provider.GetRequiredService<IDirectoryRepository>().GetByPathAsync(job.Id, Path.Combine(root, "a"));
+        Assert.Equal(100, stored!.TotalSize);
+        Assert.Equal(0, stored.RecursiveFileCount);
+    }
+
+    /// <summary>
     /// What the desktop app shows comes from the states of the coordinator. Pausing and resuming while the run
     /// waits for the model server shows waiting again, not running, and the server coming back does not turn a
     /// paused run into a running one (https://github.com/crack666/smart_file_organizer/issues/111).

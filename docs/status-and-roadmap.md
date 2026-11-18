@@ -83,8 +83,10 @@ most did not; dated counts in the sections below are measurements of their day._
    `dump`, whose parts are judged and whose noise is skipped) with purpose, retention, reason and the profile it rests on, stored
    in `directory_verdicts`. Clear cases are decided by rule without Ollama; the
    rest in one Ollama call. Files of units and system directories are marked
-   `Skipped` (the directory carries the result). The model's sampling fields
-   are still asked for but no longer followed. Not yet shown in the GUI
+   `Skipped` (the directory carries the result). The model is not asked how to
+   sample (until 18.11.2026 this said "The model's sampling fields are still
+   asked for but no longer followed"; prompt and schema dropped them with
+   [#111](https://github.com/crack666/smart_file_organizer/issues/111)). Not yet shown in the GUI
    ([#14](https://github.com/crack666/smart_file_organizer/issues/14)) or the CLI.
 2. **Per-file classification, in stages** (`ClassificationService`,
    `DirectorySamplingService`, `OllamaService`; since 12.11.2026 by
@@ -477,8 +479,14 @@ run by hand on a generated tree against a temp database. No run with a real mode
   (`SecondCheckTests`); how often the real model agrees with itself, and so
   how many extra calls a run costs, is not measured yet
   (https://github.com/crack666/smart_file_organizer/issues/10).
-- `--retry-errors` retries files only; directories whose Phase 1 call failed
-  and summaries already written are not redone by it.
+- `--retry-errors` retries failed files and writes again the summaries that are
+  older than a file result or the verdict of their directory. A directory whose
+  Phase 1 call failed is judged again by every `sfo analyze`, with or without
+  the option (`DirectoryVerdictTests.ModelError_IsStored_AndRetriedOnNextRun`,
+  `ModelServerOutageTests.RetryErrors_RetriesTheFile_AndWritesTheSummaryOfItsFolderAgain`).
+  Until 18.11.2026 this said "retries files only; directories whose Phase 1 call
+  failed and summaries already written are not redone by it", which the code
+  had left behind.
 - gemma4 ignores schema field names; the parser accepts aliases such as
   `classification` for `category`. Other models may differ.
 - No review filters in the file browser yet. Bulk decisions and file
@@ -520,8 +528,9 @@ the development sessions of April 2026 and were not re-measured._
   database, otherwise old results are reused. Exception: Phase 1 decides by
   `directory_verdicts`, so jobs analysed before #7 get their verdicts (and one
   Ollama call per undecided directory) on the next AI run. Files that the old
-  random sampling (before #8) marked `Skipped` stay without a result; start a
-  new scan job for such data.
+  random sampling (before #8) marked `Skipped` are judged on the next AI run
+  (since 18.11.2026, [#111](https://github.com/crack666/smart_file_organizer/issues/111);
+  before, they stayed without a result and needed a new scan job).
 - **Model warm-up.** The first request to a large vision model waits for it
   to load into VRAM. Warm-up and a long `KeepAlive` (default `60m`) help;
   Ollama still unloads after idle time or a restart.

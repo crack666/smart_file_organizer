@@ -2407,6 +2407,15 @@ The contract is enforced in one place, so a new command does not repeat it:
    `SensitiveOutputGuard`.
 4. Register the command in `SfoApp.BuildRoot`, describe it here, and add tests in
    `tests/SmartFileOrganizer.Cli.Tests`.
+5. Call it in `CommandCatalogueTests.EveryCommand_KeepsTheTextOfAccessDataOut`. That test walks the command
+   tree, runs every command (as JSON and as text) on a job with a password list, a library holding a copy of
+   it and a model stand-in that quotes whatever it is shown, and searches all output for the password. A
+   command it does not call fails the test, so none gets around the protection of marked files unnoticed
+   (since 18.11.2026, [#111](https://github.com/crack666/smart_file_organizer/issues/111)).
+6. A decimal value is an option of type text, read with `CultureInfo.InvariantCulture` (see
+   `--max-confidence`): the command line library reads numbers with the language of the machine, and `0.5`
+   became 5 on a German system. `CommandCatalogueTests` refuses an option or argument typed `double`,
+   `float` or `decimal`.
 
 `CommandRunner` turns the outcome into the envelope or text, maps Ctrl+C to 130 and any
 unexpected exception to 1 (`internal_error`). Parse errors never reach the handler; `SfoApp`
