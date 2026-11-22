@@ -492,7 +492,8 @@ where the fingerprint differs by the line ends)._
 | `video_kind` | 24/24 |
 
 23 of the 24 kinds come from container, name or companion files; the stub answers only
-`Videos/Schulauffuehrung_2019.mp4`. A run with a real model on version 9 has not been made.
+`Videos/Schulauffuehrung_2019.mp4`. Real-model runs on version 9 (gemma4:26b, parallel 1 to 8, 22.11.2026) are in
+[messungen.md](messungen.md); until then this said that none had been made.
 
 ### Scripted answers after issue 103 (14.11.2026)
 
