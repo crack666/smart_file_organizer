@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/crack666/smart_file_organizer/schemas/exchange/v1/job.schema.json",
+  "title": "sfo exchange: job.json",
+  "description": "Head of an export: the format version and the job the line files belong to. Written last; when it is there, the line files are complete.",
+  "type": "object",
+  "required": [
+    "format",
+    "format_version",
+    "job_id",
+    "root_path",
+    "parts"
+  ],
+  "properties": {
+    "format": {
+      "const": "sfo-exchange"
+    },
+    "format_version": {
+      "type": "string",
+      "pattern": "^1\\.[0-9]+$",
+      "description": "Major.minor. A reader of major 1 reads every 1.x and ignores keys it does not know."
+    },
+    "exported_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "disclosure": {
+      "enum": [
+        "open",
+        "restricted"
+      ],
+      "description": "The setting Sensitive:Disclosure of the export."
+    },
+    "include_sensitive": {
+      "type": "boolean"
+    },
+    "job_id": {
+      "type": "integer"
+    },
+    "root_path": {
+      "type": "string"
+    },
+    "role": {
+      "$ref": "#/$defs/ScanRole"
+    },
+    "status": {
+      "$ref": "#/$defs/JobStatus"
+    },
+    "structure_only": {
+      "type": "boolean"
+    },
+    "rules_name": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "completed_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "directories": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Lines in directories.jsonl."
+    },
+    "files": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Lines in files.jsonl."
+    },
+    "parts": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "The line files next to job.json."
+    }
+  },
+  "$defs": {
+    "ScanRole": {
+      "oneOf": [
+        {
+          "const": "source",
+          "description": "A medium to be cleaned up (the default)."
+        },
+        {
+          "const": "library",
+          "description": "The organised archive of the person: only read, never changed, never analysed by a model."
+        }
+      ]
+    },
+    "JobStatus": {
+      "enum": [
+        "created",
+        "running",
+        "paused",
+        "completed",
+        "cancelled",
+        "failed"
+      ],
+      "description": "Codes of JobStatus, see docs/glossary.md."
+    }
+  }
+}

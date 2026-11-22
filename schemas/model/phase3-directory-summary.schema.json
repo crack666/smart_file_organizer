@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/crack666/smart_file_organizer/schemas/model/phase3-directory-summary.schema.json",
+  "title": "Answer of Phase 3: the summary of a folder",
+  "description": "Sent to the model server as the format of the answer (Ollama 'format', OpenAI 'response_format'). Written from the code by PublishedSchemaTests; do not edit by hand.",
+  "type": "object",
+  "properties": {
+    "summary": {
+      "type": "string"
+    },
+    "theme": {
+      "type": "string"
+    },
+    "confirmed_anomalies": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "reason"
+        ]
+      }
+    }
+  },
+  "required": [
+    "summary",
+    "theme",
+    "confirmed_anomalies"
+  ]
+}

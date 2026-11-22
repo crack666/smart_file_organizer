@@ -9,6 +9,7 @@ using SmartFileOrganizer.Application.Library;
 using SmartFileOrganizer.Application.Media;
 using SmartFileOrganizer.Application.Bundles;
 using SmartFileOrganizer.Application.Evaluation;
+using SmartFileOrganizer.Application.Exchange;
 using SmartFileOrganizer.Application.Decisions;
 using SmartFileOrganizer.Application.Findings;
 using SmartFileOrganizer.Application.Places;
@@ -216,6 +217,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<CorpusEvaluator>();
         services.AddSingleton<TargetEvaluator>();
         services.AddSingleton<ScanExportService>();
+        services.AddSingleton<ExchangeExportService>();
+        services.AddSingleton<ExchangeImportService>();
         services.AddSingleton<FocusedRescanService>();
         services.AddSingleton<ContentComparisonService>();
 

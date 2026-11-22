@@ -583,21 +583,10 @@ public class OllamaService : IOllamaService
     {
         var properties = new Dictionary<string, object>
         {
-            ["category"] = new
-            {
-                type = "string",
-                @enum = new[]
-                {
-                    "Photo", "DocumentScan", "Screenshot", "Video", "Audio", "Document",
-                    "Invoice", "PersonalDocument", "Letter", "Archive", "Code",
-                    "SoftwareInstaller", "SystemFile", "TrashCandidate", "ReviewNeeded", "Unknown"
-                }
-            },
-            ["importance"] = new
-            {
-                type = "string",
-                @enum = new[] { "Low", "Medium", "High", "Critical", "Unknown" }
-            },
+            // Written from the enums the parser reads into (Enum.TryParse in ParseResponse), so a new value reaches both
+            // sides at once (https://github.com/crack666/smart_file_organizer/issues/34). Unknown last, as before.
+            ["category"] = new { type = "string", @enum = AnswerNames<FileCategory>(FileCategory.Unknown) },
+            ["importance"] = new { type = "string", @enum = AnswerNames<Importance>(Importance.Unknown) },
             ["confidence"] = new { type = "number" },
             ["summary"] = new { type = "string", maxLength = SummaryMaxLength },
             ["sensitive"] = new
@@ -648,6 +637,29 @@ public class OllamaService : IOllamaService
 
         return new { type = "object", properties, required };
     }
+
+    /// <summary>The enum names a model may answer with, <paramref name="last"/> at the end.</summary>
+    public static string[] AnswerNames<TEnum>(TEnum last) where TEnum : struct, Enum =>
+        [.. Enum.GetValues<TEnum>().Where(v => !v.Equals(last)).Select(v => v.ToString()), last.ToString()];
+
+    /// <summary>
+    /// The answer schemas of the three phases as they go to the model server, published under <c>schemas/model/</c>
+    /// (https://github.com/crack666/smart_file_organizer/issues/34, docs/data-format.md). The classification has one file
+    /// per variant: the plain call, the call for a file in a mixed folder (keep hint), a picture or video (description,
+    /// at most the video kinds the model can be offered) and a document (description).
+    /// </summary>
+    public static IReadOnlyList<(string File, string Title, object Schema)> PublishedAnswerSchemas() =>
+    [
+        ("phase1-directory-verdict.schema.json", "Answer of Phase 1: the verdict on a folder", BuildPreAssessmentSchema()),
+        ("phase2-classification.schema.json", "Answer of Phase 2: one file", BuildClassificationSchema(askKeepHint: false)),
+        ("phase2-classification-mixed-folder.schema.json", "Answer of Phase 2: one file of a mixed folder, with keep hint",
+            BuildClassificationSchema(askKeepHint: true)),
+        ("phase2-classification-picture.schema.json", "Answer of Phase 2: a picture or a video the model sees, with its description",
+            BuildClassificationSchema(askKeepHint: false, DescriptionKind.Picture, SmartFileOrganizer.Application.Media.VideoKindRules.RemainingKinds(null))),
+        ("phase2-classification-document.schema.json", "Answer of Phase 2: a document, with its description",
+            BuildClassificationSchema(askKeepHint: false, DescriptionKind.Document)),
+        ("phase3-directory-summary.schema.json", "Answer of Phase 3: the summary of a folder", BuildSummarySchema())
+    ];
 
     /// <summary>
     /// Reads the description fields of an answer into facts with source model. Only fixed codes count for the coded

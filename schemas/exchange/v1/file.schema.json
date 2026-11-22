@@ -1,0 +1,617 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/crack666/smart_file_organizer/schemas/exchange/v1/file.schema.json",
+  "title": "sfo exchange: one line of files.jsonl",
+  "description": "One file of a job with its judgement, as 'sfo export --format jsonl' writes it and 'sfo import-results' reads it. An export writes every key; an import needs only relative_path and result.",
+  "type": "object",
+  "required": [
+    "relative_path"
+  ],
+  "properties": {
+    "id": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "Id of the file in the exporting database. Not used by an import."
+    },
+    "directory_id": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "Id of its directory in directories.jsonl."
+    },
+    "relative_path": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Path relative to the job root, '/' as separator. The key an import matches on."
+    },
+    "name": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "extension": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "With the dot, as on disk ('.pdf'); empty without one."
+    },
+    "file_type": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/FileType"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "size_bytes": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "last_write_time": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "status": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/FileNodeStatus"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "analysis_skip": {
+      "enum": [
+        "backed_up",
+        null
+      ],
+      "description": "'backed_up' when 'sfo analyze --against' left the file out because a library holds it."
+    },
+    "scan_error_cause": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/ScanErrorCause"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "sensitive": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/SensitiveMarker"
+      },
+      "uniqueItems": true,
+      "description": "Markers from every source (rules, model, name). Empty when not sensitive."
+    },
+    "sensitive_rule": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Ids of the rules that marked the file ('name:id_rsa', 'model'). Never content."
+    },
+    "protected": {
+      "type": "boolean",
+      "description": "True when fields that can carry the text of the file were withheld (summary, keep_reason, error, raw_response, free-text facts)."
+    },
+    "result": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/Result"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "facts": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Fact"
+      }
+    },
+    "content": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "Comparison with the libraries of the newest 'sfo compare'; null when the job was never compared.",
+      "properties": {
+        "state": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/ContentState"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "library_job_id": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "The library job that holds the same content; null unless backed_up."
+        }
+      }
+    }
+  },
+  "$defs": {
+    "FileCategory": {
+      "oneOf": [
+        {
+          "const": "unknown",
+          "description": "Not determined: no result, or a binary nothing can read."
+        },
+        {
+          "const": "photo",
+          "description": "A photo taken with a camera or phone."
+        },
+        {
+          "const": "document_scan",
+          "description": "A picture of a paper page: a scan, or a PDF of page images without text, whatever the paper says."
+        },
+        {
+          "const": "screenshot",
+          "description": "A screen capture."
+        },
+        {
+          "const": "video",
+          "description": "A video."
+        },
+        {
+          "const": "audio",
+          "description": "Music or a sound recording."
+        },
+        {
+          "const": "document",
+          "description": "Any other text that is none of the kinds below: a manual, an article, notes, a list, a table, a form."
+        },
+        {
+          "const": "invoice",
+          "description": "A bill or receipt for goods or services: electricity, internet, a craftsman, a shop, a garage."
+        },
+        {
+          "const": "personal_document",
+          "description": "A record about the person that is not correspondence: CV, certificate, contract (rental, employment, loan), tax papers, bank and pay statements, medical findings and doctor letters."
+        },
+        {
+          "const": "letter",
+          "description": "Correspondence written to or from someone: a cancellation, an objection, an application, a complaint, a personal letter."
+        },
+        {
+          "const": "archive",
+          "description": "A ZIP, RAR, 7z or TAR archive, judged by its listing."
+        },
+        {
+          "const": "code",
+          "description": "Source code."
+        },
+        {
+          "const": "software_installer",
+          "description": "An installer, setup or update package, or a program."
+        },
+        {
+          "const": "system_file",
+          "description": "A library, font, driver or other file of the system or of a program."
+        },
+        {
+          "const": "trash_candidate",
+          "description": "A temporary file, log, crash dump or cache that can go."
+        },
+        {
+          "const": "review_needed",
+          "description": "Personal or made by the user, but unclear what it is: a person should look."
+        }
+      ]
+    },
+    "Importance": {
+      "enum": [
+        "unknown",
+        "low",
+        "medium",
+        "high",
+        "critical"
+      ],
+      "description": "Codes of Importance, see docs/glossary.md."
+    },
+    "FileType": {
+      "enum": [
+        "unknown",
+        "image",
+        "video",
+        "audio",
+        "document",
+        "archive",
+        "code",
+        "executable",
+        "database",
+        "font",
+        "other"
+      ],
+      "description": "Codes of FileType, see docs/glossary.md."
+    },
+    "FileNodeStatus": {
+      "enum": [
+        "discovered",
+        "classified",
+        "ai_analyzed",
+        "review_needed",
+        "approved",
+        "skipped",
+        "error",
+        "processing",
+        "deferred",
+        "inherited"
+      ],
+      "description": "Codes of FileNodeStatus, see docs/glossary.md."
+    },
+    "ResultOrigin": {
+      "oneOf": [
+        {
+          "const": "rule",
+          "description": "A deterministic rule decided."
+        },
+        {
+          "const": "model",
+          "description": "The local model judged the file itself, on its own or as a sample member."
+        },
+        {
+          "const": "inherited",
+          "description": "The file was not looked at; category and target were taken over from the confirmed sample of its directory."
+        },
+        {
+          "const": "human",
+          "description": "A person set the result."
+        },
+        {
+          "const": "agent",
+          "description": "A steering agent set the result through the command line."
+        },
+        {
+          "const": "external",
+          "description": "The result was imported from another tool with 'sfo import-results' (data-format.md)."
+        },
+        {
+          "const": "reused",
+          "description": "Taken over from the content store without a model call: the same content (full SHA-256 and size) was judged before, in this or another job, by the same model with the same prompt version. Only what belongs to the content comes along (category, importance, confidence, certainty, summary, keep hint, model markers, description); never a target. In 'user_overrides.origin': a person's correction of the same content, carried over to this file."
+        }
+      ]
+    },
+    "ResultCertainty": {
+      "oneOf": [
+        {
+          "const": "certain",
+          "description": "Two independent signals agree, or an unambiguous rule decided."
+        },
+        {
+          "const": "likely",
+          "description": "One answer that nothing contradicts, an inherited result of a confirmed sample, or a rule category set against the model."
+        },
+        {
+          "const": "uncertain",
+          "description": "A second check was due and did not happen, or a rule decided without being sure."
+        },
+        {
+          "const": "review",
+          "description": "Two answers disagree, or the model could not say what the file is: a person should look."
+        }
+      ]
+    },
+    "SensitiveMarker": {
+      "oneOf": [
+        {
+          "const": "credentials",
+          "description": "Passwords, password stores, login data, recovery codes, API keys or tokens, '.env' files."
+        },
+        {
+          "const": "keys",
+          "description": "Private keys, certificates with a private key, crypto wallets or seed phrases."
+        },
+        {
+          "const": "private_message",
+          "description": "Personal messages between people who know each other: personal letters, chats and chat exports, private e-mails, mail archives and chat databases. Not a formal letter to or from a company, an authority or a landlord, a newsletter or an order confirmation."
+        },
+        {
+          "const": "identity",
+          "description": "Identity cards, passports, driving licences or scans of them."
+        },
+        {
+          "const": "finance",
+          "description": "Papers that show the money, income or debts of the person: bank and credit card statements, tax returns and tax certificates, payslips, depot and loan papers, card numbers. Not an ordinary invoice or receipt, a rental or other contract, or a table of amounts without account, income or debt."
+        },
+        {
+          "const": "health",
+          "description": "Medical findings, doctor letters, health insurance documents."
+        }
+      ]
+    },
+    "KeepHint": {
+      "oneOf": [
+        {
+          "const": "temporary",
+          "description": "An installer, download remainder, duplicate or other file that can be recreated."
+        },
+        {
+          "const": "worth_keeping",
+          "description": "Personal or hard to replace."
+        }
+      ]
+    },
+    "FileFactKey": {
+      "enum": [
+        "detected_format",
+        "width",
+        "height",
+        "taken_at",
+        "device",
+        "has_location",
+        "image_origin",
+        "page_count",
+        "has_text",
+        "title",
+        "author",
+        "created_at",
+        "duration_seconds",
+        "artist",
+        "album",
+        "audio_kind",
+        "entry_count",
+        "unpacked_bytes",
+        "archive_content",
+        "encrypted",
+        "video_kind",
+        "recording_device",
+        "video_title",
+        "release_year",
+        "season_number",
+        "episode_number",
+        "encoder",
+        "frame_rate",
+        "bitrate_kbps",
+        "audio_languages",
+        "subtitle_languages",
+        "chapter_count",
+        "video_kind_disputed",
+        "video_kind_reason",
+        "scene",
+        "activity",
+        "setting",
+        "season",
+        "occasion",
+        "people",
+        "document_kind",
+        "issuer",
+        "year"
+      ],
+      "description": "Codes of FileFactKey, see docs/glossary.md."
+    },
+    "FactSource": {
+      "oneOf": [
+        {
+          "const": "metadata",
+          "description": "Read directly from the file: metadata, tags, properties, page count, archive listing, first bytes."
+        },
+        {
+          "const": "rule",
+          "description": "Derived by a deterministic rule from metadata, name and path."
+        },
+        {
+          "const": "model",
+          "description": "Reported by the local model."
+        },
+        {
+          "const": "name",
+          "description": "Read from the file or folder name by a naming scheme (episode 'S01E02', release name, a camera maker's numbering)."
+        },
+        {
+          "const": "companion",
+          "description": "Read from a file next to it: an info file ('.nfo'), subtitles, cover art, a camera's side file, a download's '.info.json'."
+        }
+      ]
+    },
+    "ContentState": {
+      "oneOf": [
+        {
+          "const": "backed_up",
+          "description": "A file with exactly the same content (same SHA-256) is in the library."
+        },
+        {
+          "const": "new",
+          "description": "No library file has this content, and none has the same name in a folder of the same name."
+        },
+        {
+          "const": "differs",
+          "description": "Not in the library by content, but a file with the same name lies in a folder of the same name there."
+        },
+        {
+          "const": "error",
+          "description": "The content could not be determined (read error, file gone, library unreachable); never counts as 'new' or 'backed_up'."
+        }
+      ]
+    },
+    "ScanErrorCause": {
+      "enum": [
+        "access_denied",
+        "not_found",
+        "path_too_long",
+        "io_error"
+      ],
+      "description": "Codes of ScanErrorCause, see docs/glossary.md."
+    },
+    "Result": {
+      "type": "object",
+      "description": "The judgement of the file. Null when nothing judged it yet.",
+      "required": [
+        "category"
+      ],
+      "properties": {
+        "category": {
+          "$ref": "#/$defs/FileCategory"
+        },
+        "category_source": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/ResultOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Who set the category: 'human' for a correction, 'rule' when a marker raised a disposable file to review, else the origin of the result."
+        },
+        "origin": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/ResultOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Origin of the result. An import always stores 'external'."
+        },
+        "importance": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/Importance"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "confidence": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "certainty": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/ResultCertainty"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "summary": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Model summary; for a protected file a neutral sentence written by sfo."
+        },
+        "keep_hint": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/KeepHint"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "keep_reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Why the file has its keep hint. Null for a protected file."
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Model (or program) that judged the file."
+        },
+        "analyzed_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "inherited_from_directory_id": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "For origin 'inherited': the directory whose sample the result came from."
+        },
+        "attempts": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Error of the last attempt. Null for a protected file."
+        },
+        "raw_response": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The answer of the model as it came. Null for a protected file."
+        }
+      }
+    },
+    "Fact": {
+      "type": "object",
+      "required": [
+        "fact",
+        "value",
+        "source"
+      ],
+      "properties": {
+        "fact": {
+          "$ref": "#/$defs/FileFactKey"
+        },
+        "value": {
+          "type": "string"
+        },
+        "source": {
+          "$ref": "#/$defs/FactSource"
+        },
+        "certainty": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/ResultCertainty"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    }
+  }
+}

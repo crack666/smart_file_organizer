@@ -66,6 +66,10 @@ public sealed class SchemaMigrator
         var pending = _migrations.Where(m => m.Version > current).ToList();
         if (pending.Count == 0) return current;
 
+        // A step that copies a table and renames it back fails on a view that names the table; the views are made
+        // again from this build afterwards (ExchangeViews.EnsureAsync in DatabaseContext).
+        await ExchangeViews.DropAsync(connection, ct);
+
         // Steps rebuild tables and copy rows that older builds left without a parent (the job deletion missed some
         // tables until step 19 removed them). With foreign keys enforced such a copy would fail, so they are off for
         // the steps and restored afterwards. The pragma has no effect inside a transaction, so it runs out here.

@@ -239,6 +239,7 @@ https://github.com/crack666/smart_file_organizer/milestones
 | [controller-guide.md](controller-guide.md) | Deciding targets as a controlling model: candidates, looking at folders, recording decisions, the rules where the local model failed |
 | [evaluation.md](evaluation.md) | Measuring verdicts, categories and markers: test corpus, truth file, test cases from corrections, comparing runs |
 | [glossary.md](glossary.md) | Every fixed code in database, JSON, CLI and prompts, with its meaning |
+| [data-format.md](data-format.md) | The open exchange format: export and import as JSON lines, the schemas under `schemas/`, the answer schemas of the model, the views `v_files` and `v_directories` |
 | [move-notice.md](move-notice.md) | The move notice `sfo plan apply` leaves in emptied source folders: name, text format, how it is written and read |
 | [engineering-decisions.md](engineering-decisions.md) | Library choices, trade-offs, lessons learned |
 | [code-guidelines.md](code-guidelines.md) | Repo-specific conventions and rules |

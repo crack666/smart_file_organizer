@@ -83,6 +83,7 @@ public class DatabaseContext
 
         var migrator = new SchemaMigrator(SchemaMigrator.BuiltIn, _logger);
         var version = await migrator.MigrateAsync(conn, ct);
+        await ExchangeViews.EnsureAsync(conn, ct);
 
         _logger.LogInformation("Database schema at version {Version}", version);
         return version;
