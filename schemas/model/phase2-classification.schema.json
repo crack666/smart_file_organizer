@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/crack666/smart_file_organizer/schemas/model/phase2-classification.schema.json",
+  "title": "Answer of Phase 2: one file",
+  "description": "Sent to the model server as the format of the answer (Ollama 'format', OpenAI 'response_format'). Written from the code by PublishedSchemaTests; do not edit by hand.",
+  "type": "object",
+  "properties": {
+    "category": {
+      "type": "string",
+      "enum": [
+        "Photo",
+        "DocumentScan",
+        "Screenshot",
+        "Video",
+        "Audio",
+        "Document",
+        "Invoice",
+        "PersonalDocument",
+        "Letter",
+        "Archive",
+        "Code",
+        "SoftwareInstaller",
+        "SystemFile",
+        "TrashCandidate",
+        "ReviewNeeded",
+        "Unknown"
+      ]
+    },
+    "importance": {
+      "type": "string",
+      "enum": [
+        "Low",
+        "Medium",
+        "High",
+        "Critical",
+        "Unknown"
+      ]
+    },
+    "confidence": {
+      "type": "number"
+    },
+    "summary": {
+      "type": "string",
+      "maxLength": 200
+    },
+    "sensitive": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "credentials",
+          "keys",
+          "private_message",
+          "identity",
+          "finance",
+          "health"
+        ]
+      }
+    }
+  },
+  "required": [
+    "category",
+    "importance",
+    "confidence",
+    "summary",
+    "sensitive"
+  ]
+}

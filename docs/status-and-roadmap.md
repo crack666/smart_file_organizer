@@ -46,11 +46,18 @@ most did not; dated counts in the sections below are measurements of their day._
   as skipped or shallow are re-evaluated with the job's current rules and
   entered if those let them in (until 12.11.2026 stored shallow decisions
   were kept as they were and re-evaluated skips were not written back).
-- `ScanExportService` (CSV export) exists and is tested; it is
-  registered in DI but not reachable from the UI. Every row goes through
+- `ScanExportService` (CSV export, `sfo export --csv`) exists and is tested. Every row goes through
   `SensitiveOutputGuard`. (Until 12.11.2026 this line said "CSV/JSON
-  export"; the service never wrote JSON. JSON output of a file is
-  `SensitiveOutputGuard.ToJson`.)
+  export"; the service never wrote JSON. Until 22.11.2026 it said the service was "not reachable from the UI";
+  `sfo export --csv` had used it for a while by then.)
+- Exchange format ([#34](https://github.com/crack666/smart_file_organizer/issues/34), 22.11.2026,
+  [data-format.md](data-format.md)): `sfo export --format jsonl` writes `job.json`, `directories.jsonl` and
+  `files.jsonl` through the same guard, each line valid against a JSON schema under `schemas/exchange/v1/` (embedded,
+  JsonSchema.Net); `sfo import-results` reads judgements of another program in the same line format (origin
+  `external`); the answer schemas of the model are published under `schemas/model/`; the views `v_files` and
+  `v_directories` are made again from the enums whenever the database opens. Not yet in the format: findings and
+  plan actions (`findings.jsonl`, `plan.jsonl`), and the `result` parts of the other CLI commands are not described
+  by these schemas.
 - Sensitive files ([#9](https://github.com/crack666/smart_file_organizer/issues/9)):
   rules without a model mark files during the scan
   (`SensitiveFileRules`: names, extensions, folders, keywords, header probe

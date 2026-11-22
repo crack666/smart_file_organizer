@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/crack666/smart_file_organizer/schemas/model/phase1-directory-verdict.schema.json",
+  "title": "Answer of Phase 1: the verdict on a folder",
+  "description": "Sent to the model server as the format of the answer (Ollama 'format', OpenAI 'response_format'). Written from the code by PublishedSchemaTests; do not edit by hand.",
+  "type": "object",
+  "properties": {
+    "verdict": {
+      "type": "string",
+      "enum": [
+        "unit",
+        "uniform",
+        "mixed",
+        "empty",
+        "system"
+      ]
+    },
+    "purpose": {
+      "type": "string"
+    },
+    "retention": {
+      "type": "string",
+      "enum": [
+        "keep",
+        "review",
+        "disposable"
+      ]
+    },
+    "reason": {
+      "type": "string"
+    },
+    "homogeneity": {
+      "type": "string",
+      "enum": [
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "dominant_type": {
+      "type": "string"
+    },
+    "theme": {
+      "type": "string"
+    },
+    "anomalous_files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "reason"
+        ]
+      }
+    }
+  },
+  "required": [
+    "verdict",
+    "purpose",
+    "retention",
+    "reason",
+    "homogeneity",
+    "dominant_type",
+    "theme",
+    "anomalous_files"
+  ]
+}

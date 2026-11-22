@@ -1,0 +1,349 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/crack666/smart_file_organizer/schemas/exchange/v1/directory.schema.json",
+  "title": "sfo exchange: one line of directories.jsonl",
+  "description": "One directory of a job with its verdict, as 'sfo export --format jsonl' writes it.",
+  "type": "object",
+  "required": [
+    "id",
+    "relative_path",
+    "depth",
+    "status",
+    "sensitive"
+  ],
+  "properties": {
+    "id": {
+      "type": "integer"
+    },
+    "parent_id": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "Null for the job root."
+    },
+    "relative_path": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Path relative to the job root, '/' as separator; '.' for the root."
+    },
+    "name": {
+      "type": "string"
+    },
+    "depth": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "status": {
+      "$ref": "#/$defs/DirectoryStatus"
+    },
+    "scan_reason": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Why the scan treated the folder as it did."
+    },
+    "link_kind": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/LinkKind"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "link_target": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "error_cause": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/ScanErrorCause"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "direct_files": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "files": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Files in the whole subtree."
+    },
+    "size_bytes": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Bytes in the whole subtree."
+    },
+    "subdirs": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "sensitive": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/SensitiveMarker"
+      },
+      "uniqueItems": true,
+      "description": "Markers of the folder itself (a folder the scan skipped, such as .ssh)."
+    },
+    "sensitive_rule": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "sensitive_files": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Marked files in the subtree."
+    },
+    "text_withheld": {
+      "type": "boolean",
+      "description": "True when a model text about the folder was replaced because it may name a marked file."
+    },
+    "verdict": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/Verdict"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "summary": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Phase 3 summary of the folder."
+    }
+  },
+  "$defs": {
+    "DirectoryVerdictKind": {
+      "oneOf": [
+        {
+          "const": "unit",
+          "description": "A project, program, game or backup that only makes sense as a whole; never split up file by file."
+        },
+        {
+          "const": "uniform",
+          "description": "A collection of similar content with one purpose, such as the photos of one trip or the invoices of one year."
+        },
+        {
+          "const": "mixed",
+          "description": "Storage without a common purpose (desktop, downloads, misc); its files are handled one by one."
+        },
+        {
+          "const": "empty",
+          "description": "Contains no files, neither directly nor in subdirectories."
+        },
+        {
+          "const": "system",
+          "description": "An operating system, tool or cache directory that is not user content."
+        },
+        {
+          "const": "dump",
+          "description": "A copy of a phone, a computer, a user profile or a removable drive. Recognised as a whole, but not a unit: its worth-keeping parts get verdicts of their own and are analysed, only its noise is skipped. Decided by a rule only; the model is never offered it."
+        }
+      ]
+    },
+    "RetentionValue": {
+      "oneOf": [
+        {
+          "const": "keep",
+          "description": "Personal or hard to replace."
+        },
+        {
+          "const": "review",
+          "description": "Unclear; a person should look."
+        },
+        {
+          "const": "disposable",
+          "description": "Can be recreated or downloaded again (installers, caches, temporary files)."
+        }
+      ]
+    },
+    "VerdictSource": {
+      "oneOf": [
+        {
+          "const": "rule",
+          "description": "A deterministic rule decided without calling the model."
+        },
+        {
+          "const": "model",
+          "description": "The model decided, or was asked and failed."
+        }
+      ]
+    },
+    "DirectoryStatus": {
+      "enum": [
+        "pending",
+        "scanned",
+        "skip",
+        "shallow",
+        "error",
+        "link"
+      ],
+      "description": "Codes of DirectoryStatus, see docs/glossary.md."
+    },
+    "LinkKind": {
+      "enum": [
+        "junction",
+        "symlink",
+        "mount_point"
+      ],
+      "description": "Codes of LinkKind, see docs/glossary.md."
+    },
+    "ScanErrorCause": {
+      "enum": [
+        "access_denied",
+        "not_found",
+        "path_too_long",
+        "io_error"
+      ],
+      "description": "Codes of ScanErrorCause, see docs/glossary.md."
+    },
+    "SensitiveMarker": {
+      "oneOf": [
+        {
+          "const": "credentials",
+          "description": "Passwords, password stores, login data, recovery codes, API keys or tokens, '.env' files."
+        },
+        {
+          "const": "keys",
+          "description": "Private keys, certificates with a private key, crypto wallets or seed phrases."
+        },
+        {
+          "const": "private_message",
+          "description": "Personal messages between people who know each other: personal letters, chats and chat exports, private e-mails, mail archives and chat databases. Not a formal letter to or from a company, an authority or a landlord, a newsletter or an order confirmation."
+        },
+        {
+          "const": "identity",
+          "description": "Identity cards, passports, driving licences or scans of them."
+        },
+        {
+          "const": "finance",
+          "description": "Papers that show the money, income or debts of the person: bank and credit card statements, tax returns and tax certificates, payslips, depot and loan papers, card numbers. Not an ordinary invoice or receipt, a rental or other contract, or a table of amounts without account, income or debt."
+        },
+        {
+          "const": "health",
+          "description": "Medical findings, doctor letters, health insurance documents."
+        }
+      ]
+    },
+    "Verdict": {
+      "type": "object",
+      "required": [
+        "source"
+      ],
+      "properties": {
+        "verdict": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/DirectoryVerdictKind"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Null when Phase 1 failed (see error)."
+        },
+        "source": {
+          "$ref": "#/$defs/VerdictSource"
+        },
+        "rule": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Id of the rule that decided; null when the model decided."
+        },
+        "retention": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/RetentionValue"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "purpose": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Purpose of the folder in one sentence."
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Why the verdict was given."
+        },
+        "unit_directory_id": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "For 'unit': the directory that is the whole."
+        },
+        "escalated_from": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/DirectoryVerdictKind"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The verdict before a sample raised the folder to 'mixed'."
+        },
+        "escalation_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "judged_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "profile": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "description": "What the scan counted in the folder before it was judged: file count, bytes, extensions, file types, dates, name patterns, unit markers. Keys may be added."
+        }
+      }
+    }
+  }
+}

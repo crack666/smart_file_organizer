@@ -5,6 +5,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="JsonSchema.Net" Version="9.7.0" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.15" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.15" />
   </ItemGroup>
@@ -14,6 +15,9 @@
     <EmbeddedResource Include="Library\library-words.json" LogicalName="SmartFileOrganizer.Application.Library.library-words.json" />
     <!-- The shipped patterns that recognise dumps and generic folder names (docs/bundles.md). -->
     <EmbeddedResource Include="Bundles\bundle-patterns.json" LogicalName="SmartFileOrganizer.Application.Bundles.bundle-patterns.json" />
+    <!-- The schemas of the exchange format (docs/data-format.md): the files under schemas/ are the published ones, and
+         the import checks against the same bytes. -->
+    <EmbeddedResource Include="..\..\schemas\exchange\v1\*.schema.json" LogicalName="SmartFileOrganizer.Application.Exchange.v1.%(Filename)%(Extension)" />
   </ItemGroup>
 
   <PropertyGroup>

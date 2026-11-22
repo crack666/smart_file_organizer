@@ -1,0 +1,129 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/crack666/smart_file_organizer/schemas/model/phase2-classification-picture.schema.json",
+  "title": "Answer of Phase 2: a picture or a video the model sees, with its description",
+  "description": "Sent to the model server as the format of the answer (Ollama 'format', OpenAI 'response_format'). Written from the code by PublishedSchemaTests; do not edit by hand.",
+  "type": "object",
+  "properties": {
+    "category": {
+      "type": "string",
+      "enum": [
+        "Photo",
+        "DocumentScan",
+        "Screenshot",
+        "Video",
+        "Audio",
+        "Document",
+        "Invoice",
+        "PersonalDocument",
+        "Letter",
+        "Archive",
+        "Code",
+        "SoftwareInstaller",
+        "SystemFile",
+        "TrashCandidate",
+        "ReviewNeeded",
+        "Unknown"
+      ]
+    },
+    "importance": {
+      "type": "string",
+      "enum": [
+        "Low",
+        "Medium",
+        "High",
+        "Critical",
+        "Unknown"
+      ]
+    },
+    "confidence": {
+      "type": "number"
+    },
+    "summary": {
+      "type": "string",
+      "maxLength": 200
+    },
+    "sensitive": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "credentials",
+          "keys",
+          "private_message",
+          "identity",
+          "finance",
+          "health"
+        ]
+      }
+    },
+    "scene": {
+      "type": "string",
+      "maxLength": 40
+    },
+    "activity": {
+      "type": "string",
+      "maxLength": 40
+    },
+    "setting": {
+      "type": "string",
+      "enum": [
+        "indoor",
+        "outdoor",
+        "unknown"
+      ]
+    },
+    "season": {
+      "type": "string",
+      "enum": [
+        "spring",
+        "summer",
+        "autumn",
+        "winter",
+        "unknown"
+      ]
+    },
+    "occasion": {
+      "type": "string",
+      "enum": [
+        "holiday",
+        "celebration",
+        "outing",
+        "sport",
+        "everyday",
+        "work",
+        "none",
+        "unknown"
+      ]
+    },
+    "people": {
+      "type": "boolean"
+    },
+    "video_kind": {
+      "type": "string",
+      "enum": [
+        "movie",
+        "series_episode",
+        "own_recording",
+        "screen_recording",
+        "web_clip",
+        "music_video",
+        "unknown"
+      ]
+    }
+  },
+  "required": [
+    "category",
+    "importance",
+    "confidence",
+    "summary",
+    "sensitive",
+    "scene",
+    "activity",
+    "setting",
+    "season",
+    "occasion",
+    "people",
+    "video_kind"
+  ]
+}

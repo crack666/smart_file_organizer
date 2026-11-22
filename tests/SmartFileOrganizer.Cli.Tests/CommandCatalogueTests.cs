@@ -260,6 +260,10 @@ public class CommandCatalogueTests : IDisposable
         var csv = Path.Combine(outputs, "export.csv");
         await CallAsync("export", job, "--csv", csv);
         Keep(csv);
+        var exchange = Path.Combine(outputs, "exchange");
+        await CallAsync("export", job, "--format", "jsonl", "--out", exchange);
+        foreach (var part in Directory.GetFiles(exchange))
+            Keep(part);
 
         await CallAsync("library review", lib, "--no-model");
         await CallAsync("library review", lib, "--refresh");
@@ -311,6 +315,12 @@ public class CommandCatalogueTests : IDisposable
         await CallAsync("plan keep-source", job, "--off");
         await CallAsync("places");
         await CallAsync("where", Path.Combine(_root, "docs", "passwords.txt"));
+        // The exported lines back into the job, after everything else has read it: the import stores what the guard
+        // let out, and a second export shows it.
+        await CallAsync("import-results", job, Path.Combine(exchange, "files.jsonl"));
+        await CallAsync("export", job, "--format", "jsonl", "--out", exchange);
+        foreach (var part in Directory.GetFiles(exchange))
+            Keep(part);
 
         // The evaluation runs on a corpus of its own; the password list is put into it.
         var corpus = Path.Combine(_dir, "corpus");
