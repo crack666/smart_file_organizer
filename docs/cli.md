@@ -1505,7 +1505,7 @@ it the facts, [`sfo findings place`](#sfo-findings-place-job-key) records its de
     { "rank": 1, "key": "not_backed_up-880444df56", "kind": "not_backed_up", "certainty": "likely",
       "section": "sure", "state": "open",
       "title": "300 images (60 KB) worth keeping, not in the library: loose files in Neuer Ordner",
-      "reason": "300 images of the 300 in Neuer Ordner are worth keeping by the model, and the comparison with library job 2 on 2026-11-12 found no file with the same content.",
+      "reason": "300 images of the 300 in Neuer Ordner are worth keeping by the model, and the comparison with library job 2 (mostly photos and videos) on 2026-11-12 found no file with the same content.",
       "path": "...", "relative_path": "Neuer Ordner", "bundle_id": null, "bundle_kind": null,
       "files": 300, "bytes": 61200, "group": "images", "by_file_type": { "image": 300 },
       "period": { "from": "2018-08-05T10:00:00", "to": "2018-08-05T14:59:00", "time_source": "file_name" },
@@ -1529,6 +1529,11 @@ it the facts, [`sfo findings place`](#sfo-findings-place-job-key) records its de
   `redundant_files`, `redundant_bytes`, `directories` (at most 10), `directories_total`, `keep` and `scope`
   (`files`, or `folders` when a whole program or system folder exists twice; `directories` are then the copied
   folders). The action keeps the copy in `keep`: `delete_source` for the others with a library, `leave` without.
+- The `reason` of a `not_backed_up` finding names each library compared with and its kind, from the file types of its
+  scan: `mostly documents`, `mostly photos and videos`, `mostly audio`, `mostly archives`, `mostly programs and code`,
+  `mostly other files` or `empty` (since 23.11.2026, [#71](https://github.com/crack666/smart_file_organizer/issues/71)).
+  When none of them holds the finding's kind of file (under 10 % of its files), a note says so and names the
+  `sfo compare` with one more `--against`: photos are new in a pure document archive by necessity.
 - `group` (for `not_backed_up` and `in_noise`): the kind of files, one finding per place and kind
   ([glossary](glossary.md#kind-of-files-of-a-finding-group)); `null` for the other kinds.
 - `target`: `path` (the target folder), `relative_path` (below the library root), `certainty`, `reason`,

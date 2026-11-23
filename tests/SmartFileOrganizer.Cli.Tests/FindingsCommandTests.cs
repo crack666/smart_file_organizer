@@ -539,6 +539,37 @@ public class FindingsCommandTests : IDisposable
         Assert.Equal(ErrorCodes.ComparisonNotFound, missing.ErrorCode());
     }
 
+    /// <summary>
+    /// Issue 71: a finding names the kind of each library it was compared with, and says when none of them holds its
+    /// kind of file, so photos are not "new" merely because the library is a document archive.
+    /// </summary>
+    [Fact]
+    public async Task NotBackedUp_NamesTheKindOfLibrary_AndSaysWhenNoneHoldsItsFiles()
+    {
+        var job = await PrepareAsync(withLibrary: true);
+        var photos = (await OkAsync("findings", job, "--summary")).GetProperty("inputs").GetProperty("library_job_id").GetInt64();
+
+        var documents = Path.Combine(_dir, "library-documents");
+        Directory.CreateDirectory(Path.Combine(documents, "Steuer"));
+        for (var i = 0; i < 5; i++)
+            File.WriteAllText(Path.Combine(documents, "Steuer", $"bescheid_{i}.pdf"), $"%PDF-1.4 tax notice {i}");
+        var documentsId = JobIdOf(await OkAsync("scan", documents, "--role", "library"));
+        await OkAsync("compare", job, "--against", documentsId.ToString());
+
+        var alone = await OkAsync("findings", job, "--against", documentsId.ToString(), "--limit", "200");
+        var loose = Assert.Single(Items(alone), f => Str(f, "kind") == "not_backed_up" && Str(f, "relative_path") == "Neuer Ordner");
+        Assert.Contains($"library job {documentsId} (mostly documents)", Str(loose, "reason"), StringComparison.Ordinal);
+        Assert.Contains(Strings(loose, "notes"), n => n.StartsWith("No library compared holds images", StringComparison.Ordinal)
+                                                       && n.Contains($"sfo compare {job} --against {documentsId} --against <library>", StringComparison.Ordinal));
+
+        // Together with the photo library: both kinds named, and the photos' kind is held, so no such note.
+        await OkAsync("compare", job, "--against", photos.ToString(), "--against", documentsId.ToString());
+        var both = await OkAsync("findings", job, "--limit", "200");
+        var again = Assert.Single(Items(both), f => Str(f, "kind") == "not_backed_up" && Str(f, "relative_path") == "Neuer Ordner");
+        Assert.Contains($"library jobs {photos} (mostly photos and videos) and {documentsId} (mostly documents)", Str(again, "reason"), StringComparison.Ordinal);
+        Assert.DoesNotContain(Strings(again, "notes"), n => n.StartsWith("No library compared holds", StringComparison.Ordinal));
+    }
+
     /// <summary>Fertig-wenn: without a library no finding has a target path, and the summary says no permanent storage is known.</summary>
     [Fact]
     public async Task WithoutLibrary_NoFindingHasATarget_EvenWhenAnAdvisorProposesOne()

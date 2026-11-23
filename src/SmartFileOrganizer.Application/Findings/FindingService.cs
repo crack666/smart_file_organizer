@@ -423,6 +423,10 @@ public sealed class FindingService
         foreach (var id in libSet?.LibraryJobIds ?? [])
             if (await _jobs.GetByIdAsync(id, ct) is { } libraryJob)
                 libraryJobs.Add(libraryJob);
+        // What each library holds: a document library makes every photo "new" (issue 71).
+        var libraryTypes = new List<(long Id, long[] Types)>();
+        foreach (var id in libSet?.LibraryJobIds ?? [])
+            libraryTypes.Add((id, await _read.GetFileTypeCountsAsync(id, ct)));
         var dupHeader = libHeader ?? await _comparisons.GetComparisonAsync(jobId, null, ct);
         var dupRows = dupHeader is null
             ? null
@@ -525,7 +529,7 @@ public sealed class FindingService
                 }
                 findings.Add(noise
                     ? InNoise(job, unit, group, part, sure, unitFiles, libHeader)
-                    : NotBackedUp(job, unit, group, part, sure, unitFiles, libSet!));
+                    : NotBackedUp(job, unit, group, part, sure, unitFiles, libSet!, libraryTypes));
             }
         }
 
@@ -746,14 +750,32 @@ public sealed class FindingService
         };
     }
 
-    private Finding NotBackedUp(ScanJob job, Unit unit, string group, IReadOnlyList<FileFacts> files, bool sure, int unitFiles, LibraryComparisonSet lib)
+    private static double Share(long[] types, FileType type)
+    {
+        var all = types.Sum();
+        return all == 0 ? 0 : (double)types[(int)type] / all;
+    }
+
+    /// <summary>"library job 8 (mostly documents)" or "library jobs 8 (mostly documents) and 9 (mostly photos and videos)".</summary>
+    private static string LibrariesWithKind(IReadOnlyList<(long Id, long[] Types)> libraryTypes, LibraryComparisonSet lib)
+    {
+        if (libraryTypes.Count == 0)
+            return lib.Label;
+        var named = libraryTypes.Select(l => $"{l.Id} ({FindingRules.LibraryKind(l.Types)})").ToList();
+        return named.Count == 1
+            ? $"library job {named[0]}"
+            : $"library jobs {string.Join(", ", named.Take(named.Count - 1))} and {named[^1]}";
+    }
+
+    private Finding NotBackedUp(ScanJob job, Unit unit, string group, IReadOnlyList<FileFacts> files, bool sure, int unitFiles, LibraryComparisonSet lib,
+        IReadOnlyList<(long Id, long[] Types)> libraryTypes)
     {
         var certainty = FindingRules.Weakest(files.Select(x => x.Value.Certainty), ResultCertainty.Uncertain);
         var n = GroupCount(group, files.Count);
         var worth = sure ? "worth keeping" : "possibly worth keeping";
         var title = $"{n} ({FindingRules.Size(files.Sum(x => x.File.Size))}) {worth}, not in the library: {unit.Label}";
         var reason = $"{n} of the {unitFiles} in {unit.Rel} {(files.Count == 1 ? "is" : "are")} {worth} by {Bases(files)}, "
-                     + $"and the comparison with {lib.Label} on {lib.ComparedAt:yyyy-MM-dd} found no file with the same content.";
+                     + $"and the comparison with {LibrariesWithKind(libraryTypes, lib)} on {lib.ComparedAt:yyyy-MM-dd} found no file with the same content.";
         var finding = NewFinding(job, FindingKind.NotBackedUp, $"|{group}" + (sure ? "|sure" : "|unsure"), unit, files, certainty, title, reason,
             new FindingAction(PlanActionKind.Move,
                 "Worth keeping and not in the library: move it there (copy, verify, then remove the original)."),
@@ -763,6 +785,13 @@ public sealed class FindingService
             finding.Notes.Add($"{FindingRules.Count(differs, "file has", "files have")} a namesake with other content in a folder of the same name in the library; compare before replacing anything.");
         if (!lib.Complete)
             finding.Notes.Add("The comparison did not finish; files it did not reach are not counted.");
+        if (FindingRules.TypeOfGroup(group) is { } type && libraryTypes.Count > 0
+            && libraryTypes.All(l => Share(l.Types, type) < FindingRules.LibraryHoldsShare))
+        {
+            var shares = string.Join(", ", libraryTypes.Select(l => $"library job {l.Id}: {LibraryText.Percent(Share(l.Types, type))} of {l.Types.Sum()} files"));
+            finding.Notes.Add($"No library compared holds {group} ({shares}), so these are new there by necessity; "
+                              + $"compare with one that does: sfo compare {job.Id} {string.Join(" ", lib.LibraryJobIds.Select(id => $"--against {id}"))} --against <library>.");
+        }
         finding.Notes.Add($"Where in the library: sfo library match {job.Id} <folder> {string.Join(" ", lib.LibraryJobIds.Select(id => $"--against {id}"))}.");
         return finding;
     }
