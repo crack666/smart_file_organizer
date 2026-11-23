@@ -321,6 +321,9 @@ public static partial class VideoKindRules
 
     private static readonly string[] DownloadFolders = ["download", "downloads", "herunterladen", "heruntergeladen", "téléchargements", "descargas", "scaricati"];
 
+    /// <summary>Whether a download folder (<c>Downloads</c>, <c>Herunterladen</c>, ...) lies on the way to the file; also for images.</summary>
+    public static bool InDownloadFolder(string relativeDir) => DownloadFolder(relativeDir) is not null;
+
     /// <summary>The name of a download folder on the way to the file, or null.</summary>
     private static string? DownloadFolder(string relativeDir) =>
         relativeDir.Replace('\\', '/').Split('/', StringSplitOptions.RemoveEmptyEntries)

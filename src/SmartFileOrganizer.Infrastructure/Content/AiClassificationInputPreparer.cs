@@ -217,10 +217,10 @@ public class AiClassificationInputPreparer : IClassificationInputPreparer
 
         if (!isVideo)
         {
-            if (MediaMetadataReader.DecideOrigin(meta, file.Name, ext) is { } origin)
-                ev.Fact(FileFactKey.ImageOrigin, origin);
+            if (MediaMetadataReader.DecideOrigin(meta, file.Name, ext, file.RelativeDir) is { } origin)
+                ev.Fact(FileFactKey.ImageOrigin, origin.Origin.ToCode(), FactSource.Rule, origin.Certainty);
             else
-                ev.Lacks("image origin (camera, screenshot, scan): the metadata do not tell");
+                ev.Lacks("image origin (camera, screenshot, scan, download, messenger): metadata and name do not tell");
         }
     }
 
@@ -368,9 +368,9 @@ public class AiClassificationInputPreparer : IClassificationInputPreparer
         if (meta.DurationSeconds is null) ev.Lacks("duration: could not be determined");
 
         if (AudioMetadataReader.DecideKind(meta, file.Name, ext, file.RelativeDir) is { } kind)
-            ev.Fact(FileFactKey.AudioKind, kind);
+            ev.Fact(FileFactKey.AudioKind, kind.Kind.ToCode(), FactSource.Rule, kind.Certainty);
         else
-            ev.Lacks("speech or music: tags, format and path do not tell");
+            ev.Lacks("kind of audio (speech, music, audiobook, podcast, sound effect): tags, format and path do not tell");
     }
 
     // ─── Archives ────────────────────────────────────────────────────────────

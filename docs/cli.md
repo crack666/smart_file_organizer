@@ -1370,7 +1370,7 @@ root scanned as `\\server\share\` or `D:\Photos\` listed no subfolders).
 ```
 
 `folder` has the fields of a candidate folder in `findings candidates`, `origin` included (the videos of the folder
-and below); `files` is one page (`--limit` 1 to 1000,
+and below, since 23.11.2026 also its images per origin and audio files per kind); `files` is one page (`--limit` 1 to 1000,
 default 50, `--offset`) of the folder's own files, a marked one with its `markers`. With `Sensitive:Disclosure`
 `restricted` a sensitive folder (`withheld` true) lists no subfolders and only its marked files (path and markers);
 `total` then counts those. Until 14.11.2026 that held for every sensitive folder, so a marked file in the root hid the
@@ -1789,7 +1789,12 @@ folders of the rules (time, names, kinds of files, the same files already there)
   then each kind by content. `described` condenses the stored description facts of the files (`described` of
   `sampled` carried one); a part lists `examples` of its own files.
 - `origin` of a group, of `top_level` entries and of `candidates[].folder` (since 14.11.2026, Issue 103): the kinds of
-  the videos, from the stored facts of the source scan or of the library scan, `null` without a video with a kind.
+  the videos, from the stored facts of the source scan or of the library scan, `null` without a video with a kind
+  (since 23.11.2026: and without an image with an origin or an audio file with a kind). `images` counts images per
+  image origin code (`camera`, `screenshot`, `scan`, `download`, `received`), `audio` audio files per audio kind code
+  (`speech`, `music`, `audiobook`, `podcast`, `sound_effect`), both since 23.11.2026 and `{}` when there are none;
+  `text` then ends with `12 image(s): 9 camera, 3 download` and `5 audio file(s): 5 audiobook`, and a group of
+  undescribed images is labelled that way.
   `kinds` counts videos per video kind code, `devices` own recordings per recording device code, `works` names films,
   series and music videos by title (`Example Show S01-S02`, `Some Film (2009)`, at most 5), `certain` the videos whose
   kind is certain, `disputed` those where the model named another kind; `text` is the same in one line. `reasons`
@@ -1967,7 +1972,9 @@ again from what costs no model: container metadata, file name and companion file
 a drone's telemetry subtitle, a download sidecar, artwork). No model call and no GPU, the files are only read. For a job analysed before 14.11.2026, or one whose
 videos sat in a folder the analysis skipped. A kind the model gave earlier is kept where the files say nothing sure; a
 sure kind replaces it and the model's kind becomes `video_kind_disputed`. Only the video facts are replaced, the
-descriptions stay.
+descriptions stay. Since 23.11.2026 it also reads `image_origin` of every image and `audio_kind` of every audio file
+again from their metadata, name and folder, with the rules of the analysis, and replaces only that one fact
+([glossary.md](glossary.md#image-origin-imageorigin)): `images` and `audio` count them.
 
 ```json
 { "job_id": 4, "videos": 120, "read": 118, "missing": 2,
@@ -1975,12 +1982,20 @@ descriptions stay.
   "model_kinds_kept": 9, "disputed": 1,
   "certainty": { "movie": { "certain": 10, "likely": 2 }, "own_recording": { "certain": 21, "likely": 6, "uncertain": 3 },
                  "series_episode": { "certain": 64 }, "unknown": { "uncertain": 12 } },
-  "files": null }
+  "files": null,
+  "images": { "files": 900, "read": 898, "missing": 2, "kinds": { "camera": 700, "download": 40, "received": 120, "screenshot": 30 },
+              "certainty": { "camera": { "certain": 650, "likely": 50 }, "download": { "likely": 31, "uncertain": 9 },
+                             "received": { "certain": 120 }, "screenshot": { "likely": 30 } }, "open": 8 },
+  "audio": { "files": 60, "read": 60, "missing": 0, "kinds": { "audiobook": 24, "music": 30, "speech": 6 },
+             "certainty": { "audiobook": { "likely": 24 }, "music": { "certain": 12, "likely": 18 }, "speech": { "certain": 6 } }, "open": 0 } }
 ```
 
 `missing` counts videos gone or unreadable (their facts stay as they were), `model_kinds_kept` earlier model kinds that stayed, `disputed` sure kinds
 against which the model had named another. `certainty` (since 14.11.2026, second round of Issue 103) counts per kind how many videos have their
-kind as `certain`, `likely` or `uncertain` (result certainty codes).
+kind as `certain`, `likely` or `uncertain` (result certainty codes). In `images` and `audio` (since 23.11.2026) `missing`
+counts files whose metadata could not be read (their fact stays), `open` read files the rules cannot tell (a fact stored
+before is removed), `kinds` and `certainty` the same per image origin or audio kind code. The text form appends
+`; 898 of 900 image(s) read, 2 missing - camera 700, ...` and the same for audio files.
 
 With `--verbose`, `files` lists every read video with the evidence of the rules, so that a wrong conclusion can be
 traced; the text form prints one line per video and one per piece of evidence. Without it `files` is `null`.

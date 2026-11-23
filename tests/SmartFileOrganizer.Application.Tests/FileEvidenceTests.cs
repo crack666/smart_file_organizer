@@ -198,14 +198,49 @@ public class FileEvidenceTests : IDisposable
 
         var origin = MediaMetadataReader.DecideOrigin(meta, name, Path.GetExtension(name));
 
-        Assert.Equal(expected, origin?.ToCode());
+        Assert.Equal(expected, origin?.Origin.ToCode());
     }
 
     [Fact]
     public void ImageOrigin_ScannerSoftwareWinsOverCameraMake()
     {
         var meta = new MediaMetadata { Make = "Canon", Model = "CanoScan LiDE 220" };
-        Assert.Equal(ImageOrigin.Scan, MediaMetadataReader.DecideOrigin(meta, "x.jpg", ".jpg"));
+        Assert.Equal((ImageOrigin.Scan, ResultCertainty.Certain), MediaMetadataReader.DecideOrigin(meta, "x.jpg", ".jpg"));
+    }
+
+    // Issue 103: downloaded and received pictures, from the name or the folder, each with how sure the rule is.
+    [Theory]
+    [InlineData("IMG-20200101-WA0001.jpg", "", false, "received", "certain")]
+    [InlineData("WhatsApp Image 2021-05-02 at 10.11.12.jpeg", "", false, "received", "certain")]
+    [InlineData("photo_2022-03-04_10-11-12.jpg", "", false, "received", "certain")]
+    [InlineData("signal-2023-01-02-101112.jpg", "", false, "received", "certain")]
+    [InlineData("IMG-20200101-WA0001.jpg", "", true, "received", "certain")]
+    [InlineData("FB_IMG_1588012345678.jpg", "", false, "download", "likely")]
+    [InlineData("123456789_987654321_1122334455_n.jpg", "", false, "download", "likely")]
+    [InlineData("images (3).jpg", "", false, "download", "likely")]
+    [InlineData("unnamed.jpg", "", false, "download", "likely")]
+    [InlineData("pexels-someone-12345.jpg", "", false, "download", "likely")]
+    [InlineData("0123456789abcdef0123456789abcdef.jpg", "", false, "download", "likely")]
+    [InlineData("urlaub.jpg", "Downloads", false, "download", "uncertain")]
+    [InlineData("urlaub.jpg", "Bilder/Herunterladen", false, "download", "uncertain")]
+    [InlineData("urlaub.jpg", "Downloads", true, "camera", "likely")]
+    [InlineData("urlaub.jpg", "Bilder", false, null, null)]
+    [InlineData("image.jpg", "", false, null, null)]
+    public void ImageOrigin_ReadsDownloadsAndMessengerPicturesFromNameAndFolder(string name, string dir, bool takenAt, string? origin, string? certainty)
+    {
+        var meta = new MediaMetadata { Width = 1000, Height = 1000, TakenAt = takenAt ? new DateTime(2020, 1, 1, 10, 0, 0) : null };
+
+        var result = MediaMetadataReader.DecideOrigin(meta, name, Path.GetExtension(name), dir);
+
+        Assert.Equal(origin, result?.Origin.ToCode());
+        Assert.Equal(certainty, result?.Certainty.ToCode());
+    }
+
+    [Fact]
+    public void ImageOrigin_CameraMakeWinsOverAMessengerName()
+    {
+        var meta = new MediaMetadata { Make = "Example", Model = "X1" };
+        Assert.Equal((ImageOrigin.Camera, ResultCertainty.Certain), MediaMetadataReader.DecideOrigin(meta, "IMG-20200101-WA0001.jpg", ".jpg"));
     }
 
     // ─── Audio ────────────────────────────────────────────────────────────────
@@ -237,7 +272,35 @@ public class FileEvidenceTests : IDisposable
     public void AudioKind_IsDecidedFromFormatAndPath_WhenTagsAreMissing(string name, string dir, string? expected)
     {
         var kind = AudioMetadataReader.DecideKind(new AudioMetadata(), name, Path.GetExtension(name), dir);
-        Assert.Equal(expected, kind?.ToCode());
+        Assert.Equal(expected, kind?.Kind.ToCode());
+    }
+
+    // Issue 103: audiobooks, podcasts and sound effects, each with how sure the rule is.
+    [Theory]
+    [InlineData("Kapitel 01.m4b", "", null, null, null, "audiobook", "certain")]
+    [InlineData("book.aax", "", null, null, null, "audiobook", "certain")]
+    [InlineData("01.mp3", "", "Hörbuch", "Some Author", 600.0, "audiobook", "certain")]
+    [InlineData("01.mp3", "", "Audiobook", "Some Author", 600.0, "audiobook", "certain")]
+    [InlineData("ep42.mp3", "", "Podcast", "Some Show", 3000.0, "podcast", "certain")]
+    [InlineData("01.mp3", "Hörbücher/Some Author", null, "Some Author", 600.0, "audiobook", "likely")]
+    [InlineData("01.mp3", "Hoerspiele", null, null, 600.0, "audiobook", "likely")]
+    [InlineData("ep42.mp3", "Podcasts/Some Show", null, "Some Show", 3000.0, "podcast", "likely")]
+    [InlineData("door.wav", "Projekt/SFX", null, null, 12.0, "sound_effect", "likely")]
+    [InlineData("klick.wav", "Soundeffekte", null, null, null, "sound_effect", "likely")]
+    [InlineData("ping.wav", "", null, null, 1.5, "sound_effect", "likely")]
+    [InlineData("song.mp3", "", "Rock", null, 200.0, "music", "certain")]
+    [InlineData("song.mp3", "", null, "Test Band", 200.0, "music", "likely")]
+    [InlineData("song.mp3", "Musik", null, null, 200.0, "music", "likely")]
+    [InlineData("long.wav", "", null, null, 200.0, null, null)]
+    public void AudioKind_ReadsAudiobooksPodcastsAndSoundEffects(
+        string name, string dir, string? genre, string? artist, double? seconds, string? expected, string? certainty)
+    {
+        var meta = new AudioMetadata { Genre = genre, Artist = artist, Title = artist is null ? null : "Title", DurationSeconds = seconds };
+
+        var kind = AudioMetadataReader.DecideKind(meta, name, Path.GetExtension(name), dir);
+
+        Assert.Equal(expected, kind?.Kind.ToCode());
+        Assert.Equal(certainty, kind?.Certainty.ToCode());
     }
 
     // ─── Video ────────────────────────────────────────────────────────────────

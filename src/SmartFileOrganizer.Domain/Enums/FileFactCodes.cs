@@ -55,7 +55,7 @@ public enum FileFactKey
     /// <summary>Album from the audio tags.</summary>
     [JsonStringEnumMemberName("album")] Album,
 
-    /// <summary>Speech recording or music, as an <see cref="AudioKind"/> code.</summary>
+    /// <summary>What an audio file is (speech recording, music, audiobook, podcast, sound effect), as an <see cref="AudioKind"/> code.</summary>
     [JsonStringEnumMemberName("audio_kind")] AudioKind,
 
     /// <summary>Number of file entries listed in an archive (directories not counted).</summary>
@@ -233,14 +233,38 @@ public enum ImageOrigin
     [JsonStringEnumMemberName("screenshot")] Screenshot,
 
     /// <summary>Scanned page: no camera metadata, scanner software or a print resolution of 200 dpi or more.</summary>
-    [JsonStringEnumMemberName("scan")] Scan
+    [JsonStringEnumMemberName("scan")] Scan,
+
+    /// <summary>
+    /// Downloaded or saved from a website or a social network: the naming scheme of a browser, a platform or a stock
+    /// site, or no camera data in a download folder (https://github.com/crack666/smart_file_organizer/issues/103).
+    /// </summary>
+    [JsonStringEnumMemberName("download")] Download,
+
+    /// <summary>Received or forwarded through a messenger, by the messenger's naming scheme (<c>IMG-20200101-WA0001.jpg</c>).</summary>
+    [JsonStringEnumMemberName("received")] Received
 }
 
-/// <summary>Whether an audio file is a speech recording or music, decided from tags, format and path.</summary>
+/// <summary>
+/// What an audio file is, decided from tags, format and path without the model
+/// (https://github.com/crack666/smart_file_organizer/issues/103).
+/// </summary>
 public enum AudioKind
 {
+    /// <summary>An own speech recording: a voice memo, a voice message, an interview, a dictation, a call.</summary>
     [JsonStringEnumMemberName("speech")] Speech,
-    [JsonStringEnumMemberName("music")] Music
+
+    /// <summary>A piece of music.</summary>
+    [JsonStringEnumMemberName("music")] Music,
+
+    /// <summary>An audiobook or radio play: an audiobook format, the genre tag or an audiobook folder.</summary>
+    [JsonStringEnumMemberName("audiobook")] Audiobook,
+
+    /// <summary>A podcast episode: the genre tag or a podcast folder.</summary>
+    [JsonStringEnumMemberName("podcast")] Podcast,
+
+    /// <summary>A sound effect or sample: a sound effect folder, or an untagged sound of a few seconds.</summary>
+    [JsonStringEnumMemberName("sound_effect")] SoundEffect
 }
 
 /// <summary>What an archive mostly holds, decided from its listing without unpacking it.</summary>

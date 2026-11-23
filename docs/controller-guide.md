@@ -31,6 +31,8 @@ All commands with `--json`. `<job>` is the source job, `<lib>` a library job.
    `hints`, what a person wrote about the library in its hints file
    ([where it lies](cli.md#sfo-findings-candidates-job)), and videos carry `origin`: the kind (film, episode, own
    recording, screen recording, web clip, music video), the recording device and the titles of films and series.
+   Since 23.11.2026 `origin` also counts images per origin (`camera`, `screenshot`, `scan`, `download`, `received`)
+   and audio files per kind (`speech`, `music`, `audiobook`, `podcast`, `sound_effect`).
 3. **Look closer where needed.** `sfo library folder <lib> "<relative path>"` lists a folder's subfolders and files.
    `sfo library describe <lib> "<relative path>"` lets the local model describe that one folder from a few of its
    files and stores the description; it is the only step that calls a model. Describe only folders you are about to
@@ -53,7 +55,9 @@ The local model failed at these; the controller should not.
   `hints` of a person, the folders of a candidate with their `origin`), and only then decide. A series episode goes to
   the series and season it names, a film to a folder of its own title and year in the style of its siblings. A kind
   that is `certain` comes from metadata, name or companion files; a `likely` one from the model; `disputed` counts
-  videos where the model said otherwise, so look at them. A mixed finding is split by kind first.
+  videos where the model said otherwise, so look at them. A mixed finding is split by kind first. The same holds for
+  pictures and sound: camera pictures go with the photos of their time, a `download` or a `received` picture rarely
+  does, and an audiobook goes to the audiobooks of the library, not to the music.
 - **The hints of a person come before your reading of the structure.** They are what the owner wants; where the
   folders say something else, follow the hints and say so in the reason.
 

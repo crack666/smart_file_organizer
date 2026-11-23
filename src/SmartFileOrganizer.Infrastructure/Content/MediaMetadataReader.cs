@@ -143,29 +143,59 @@ public static partial class MediaMetadataReader
     [GeneratedRegex(@"(^|[^a-z])(scan|scanned|eingescannt|gescannt)", RegexOptions.IgnoreCase)]
     private static partial Regex ScanName();
 
+    /// <summary>Names a messenger gives a picture it received or sent: WhatsApp, Telegram, Signal.</summary>
+    [GeneratedRegex(@"^(IMG-\d{8}-WA\d{3,}|WhatsApp Image \d{4}-\d{2}-\d{2} at |photo_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}|signal-\d{4}-\d{2}-\d{2}-\d{4,})", RegexOptions.IgnoreCase)]
+    private static partial Regex MessengerName();
+
     /// <summary>
-    /// Decides where an image comes from, without the model. Order: scanner names in the metadata,
-    /// camera metadata, screenshot name or screen-sized PNG, scan name or print resolution.
-    /// Null when the metadata do not tell.
+    /// Names of saved web pictures: a social network's download (<c>FB_IMG_…</c>, <c>123_456_789_n</c>), a browser's
+    /// default name for an image without one (<c>images (3)</c>, <c>unnamed</c>, <c>download</c>), a hash as name, a stock
+    /// photo site's prefix.
     /// </summary>
-    public static ImageOrigin? DecideOrigin(MediaMetadata meta, string fileName, string extension)
+    [GeneratedRegex(@"^(FB_IMG_\d{10,}|\d{6,}_\d{6,}_\d{6,}_[nobs]|(images|unnamed|download)( ?\(\d+\))?|[0-9a-f]{32}|(pexels|unsplash|pixabay|pinterest|shutterstock|istock|adobestock|depositphotos|freepik)[-_ ].*)$", RegexOptions.IgnoreCase)]
+    private static partial Regex DownloadName();
+
+    /// <summary>
+    /// Decides where an image comes from, without the model, and how sure the rule is
+    /// (https://github.com/crack666/smart_file_organizer/issues/103). Order: scanner names in the metadata (certain), camera
+    /// make or model (certain), a messenger's naming scheme (certain), a capture time alone (camera, likely), a screenshot
+    /// name or a screen-sized PNG (likely), a download name (likely), a scan name (likely) or a print resolution
+    /// (uncertain), and last a download folder on the way to the file (download, uncertain). Null when nothing tells.
+    /// A messenger name wins over a capture time alone: messengers keep the date but strip make and model.
+    /// </summary>
+    public static (ImageOrigin Origin, ResultCertainty Certainty)? DecideOrigin(MediaMetadata meta, string fileName, string extension, string relativeDir = "")
     {
         var deviceText = $"{meta.Make} {meta.Model} {meta.Software}";
         if (ScannerWords.Any(w => deviceText.Contains(w, StringComparison.OrdinalIgnoreCase)))
-            return ImageOrigin.Scan;
+            return (ImageOrigin.Scan, ResultCertainty.Certain);
 
-        if (meta.Make is not null || meta.Model is not null || meta.TakenAt is not null)
-            return ImageOrigin.Camera;
+        if (meta.Make is not null || meta.Model is not null)
+            return (ImageOrigin.Camera, ResultCertainty.Certain);
+
+        var stem = Path.GetFileNameWithoutExtension(fileName);
+        if (MessengerName().IsMatch(stem))
+            return (ImageOrigin.Received, ResultCertainty.Certain);
+
+        if (meta.TakenAt is not null)
+            return (ImageOrigin.Camera, ResultCertainty.Likely);
 
         if (ScreenshotName().IsMatch(fileName))
-            return ImageOrigin.Screenshot;
+            return (ImageOrigin.Screenshot, ResultCertainty.Likely);
 
         if (extension.Equals(".png", StringComparison.OrdinalIgnoreCase) && meta.Width is { } w && meta.Height is { } h
             && ScreenSizes.Any(s => (s.W == w && s.H == h) || (s.W == h && s.H == w)))
-            return ImageOrigin.Screenshot;
+            return (ImageOrigin.Screenshot, ResultCertainty.Likely);
 
-        if (ScanName().IsMatch(fileName) || meta.DpiX >= 200)
-            return ImageOrigin.Scan;
+        if (DownloadName().IsMatch(stem))
+            return (ImageOrigin.Download, ResultCertainty.Likely);
+
+        if (ScanName().IsMatch(fileName))
+            return (ImageOrigin.Scan, ResultCertainty.Likely);
+        if (meta.DpiX >= 200)
+            return (ImageOrigin.Scan, ResultCertainty.Uncertain);
+
+        if (SmartFileOrganizer.Application.Media.VideoKindRules.InDownloadFolder(relativeDir))
+            return (ImageOrigin.Download, ResultCertainty.Uncertain);
 
         return null;
     }

@@ -39,14 +39,17 @@ public static class ControllerCommands
     /// <summary>
     /// Kind and origin of the videos of a finding, a part or a library folder (Issue 103): videos per video kind code,
     /// own recordings per recording device code, the films and series by title, how many kinds are certain or disputed,
-    /// and the reasons of the rules with the number of videos.
+    /// and the reasons of the rules with the number of videos; since 23.11.2026 also images per image origin code and audio
+    /// files per audio kind code.
     /// </summary>
     public sealed record OriginView(
         int Videos, IReadOnlyDictionary<string, int> Kinds, IReadOnlyDictionary<string, int> Devices, IReadOnlyList<string> Works,
-        int Certain, int Disputed, string Text, IReadOnlyList<SmartFileOrganizer.Application.Media.VideoReasonCount>? Reasons = null)
+        int Certain, int Disputed, string Text, IReadOnlyList<SmartFileOrganizer.Application.Media.VideoReasonCount>? Reasons = null,
+        IReadOnlyDictionary<string, int>? Images = null, IReadOnlyDictionary<string, int>? Audio = null)
     {
         public static OriginView? From(SmartFileOrganizer.Application.Media.VideoOriginMix? m) =>
-            m is null ? null : new OriginView(m.Videos, m.Kinds, m.Devices, m.Works, m.Certain, m.Disputed, m.Gist(), m.Reasons);
+            m is null ? null : new OriginView(m.Videos, m.Kinds, m.Devices, m.Works, m.Certain, m.Disputed, m.Gist(), m.Reasons,
+                m.Images ?? new Dictionary<string, int>(), m.Audio ?? new Dictionary<string, int>());
     }
 
     /// <summary>What a person wrote about a library in its hints file (Issue 103).</summary>

@@ -353,7 +353,7 @@ Counted per run in `model_calls` of `sfo analyze --json`, `sfo eval --json` and 
 | `duration_seconds` | Playing time of audio or video in whole seconds. |
 | `artist` | Artist from the audio tags. |
 | `album` | Album from the audio tags. |
-| `audio_kind` | Speech recording or music, as an audio kind code. |
+| `audio_kind` | What an audio file is (speech recording, music, audiobook, podcast, sound effect), as an audio kind code. |
 | `entry_count` | Number of file entries listed in an archive. |
 | `unpacked_bytes` | Sum of the uncompressed sizes of the listed archive entries. |
 | `archive_content` | What an archive mostly holds, as an archive content code. |
@@ -452,13 +452,26 @@ names the field, the value read and what the rules made of it.
 | `camera` | Taken with a camera or phone. |
 | `screenshot` | A screen capture. |
 | `scan` | A scanned page. |
+| `download` | Saved from a website or a social network: a platform's or browser's naming scheme (`FB_IMG_…`, `images (3)`, `unnamed`, a hash as name, a stock site prefix), or no camera data in a download folder. Since 23.11.2026. |
+| `received` | Received or sent through a messenger, by its naming scheme (`IMG-20200101-WA0001`, `WhatsApp Image … at …`, Telegram `photo_…`, `signal-…`). Since 23.11.2026. |
+
+The fact carries source `rule` and, since 23.11.2026, a certainty: `certain` for scanner software, camera make or model
+and a messenger name; `likely` for a capture time alone, a screenshot name or size, a download or scan name; `uncertain`
+for a print resolution or a download folder alone.
 
 ### Audio kind (`AudioKind`)
 
 | Code | Meaning |
 |---|---|
-| `speech` | A speech recording such as a voice memo or an interview. |
+| `speech` | An own speech recording such as a voice memo, a voice message or an interview. |
 | `music` | Music. |
+| `audiobook` | An audiobook or radio play: `.m4b`/`.aa`/`.aax`, the genre tag, or an audiobook folder (`Hörbücher`, `Audiobooks`, `Hörspiele`). Since 23.11.2026. |
+| `podcast` | A podcast episode: the genre tag or a `Podcasts` folder. Since 23.11.2026. |
+| `sound_effect` | A sound effect or sample: a `SFX`, `Sounds`, `Soundeffekte` or `Samples` folder, or an untagged sound of at most 3 seconds. Since 23.11.2026. |
+
+The fact carries source `rule` and, since 23.11.2026, a certainty: `certain` for a format or genre tag that says it;
+`likely` for a folder, voice words in the name, tags of artist and title, or a short untagged sound; `uncertain` for an
+untagged mono file at a low bitrate (speech).
 
 ### Archive content (`ArchiveContent`)
 
