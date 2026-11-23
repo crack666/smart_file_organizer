@@ -798,6 +798,17 @@ as listed, or a path relative to the job root (`photos/2024`, `.` for the root).
 before 12.11.2026 (`gemischt`, `behalten`) are no longer accepted. `sfo dirs --help` always lists
 the current codes.
 
+**Schemas of the results.** The `result` of `files`, `dirs`, `show` and `summary` is described by a JSON schema each
+under [`schemas/cli/v1/`](../schemas/cli/v1/) (`files.result.schema.json`, ...; `v1` is the envelope's
+`schema_version`), since 23.11.2026 (https://github.com/crack666/smart_file_organizer/issues/116). Every object lists
+all its keys as required and allows no others. File type, status, category, importance, certainty, markers, verdict,
+retention and fact codes refer to the definitions of the exchange schemas ([data-format.md](data-format.md)), so a
+file reads the same in `sfo files --json` and in `files.jsonl`; the count keys of `summary` (`by_category`, ...) are
+those codes too, plus `unclassified`, `none` and `error` where this page names them. The schemas are written from
+the result records (`CliSchemas`); `CliSchemaTests` fails when a record and its file differ (write them again with
+`SFO_WRITE_SCHEMAS=1 dotnet test --filter CliSchemaTests`), and a test checks real outputs against them. Times in
+the CLI have millisecond precision; free-text fields stay free text.
+
 **Words in the text output.** Without `--json`, verdict, retention, verdict source, result origin
 and sensitive markers are shown as words for people, in German when the summary language in the
 settings is German (`"SummaryLanguage": "Deutsch"`), in English otherwise (`mixed` / `gemischt`,

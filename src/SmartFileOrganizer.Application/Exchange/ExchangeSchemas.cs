@@ -42,9 +42,23 @@ public static class ExchangeSchemas
     /// Checks <paramref name="instance"/> against the schema <paramref name="name"/>. Returns the problems, each with
     /// the location in the instance (<c>/result/category: ...</c>); empty when the instance is valid.
     /// </summary>
-    public static IReadOnlyList<string> Validate(string name, JsonElement instance)
+    public static IReadOnlyList<string> Validate(string name, JsonElement instance) => Problems(Schemas.Value[name], instance);
+
+    /// <summary>
+    /// Checks <paramref name="instance"/> against another schema that may refer to the exchange schemas by their
+    /// <c>$id</c> (the result schemas of the CLI under <c>schemas/cli/</c>). Same output as <see cref="Validate"/>.
+    /// </summary>
+    public static IReadOnlyList<string> ValidateWith(string schemaText, JsonElement instance)
     {
-        var results = Schemas.Value[name].Evaluate(instance, new EvaluationOptions { OutputFormat = OutputFormat.List, RequireFormatValidation = true });
+        var options = new BuildOptions { SchemaRegistry = new SchemaRegistry() };
+        foreach (var name in Names)
+            JsonSchema.FromText(Text(name), options);
+        return Problems(JsonSchema.FromText(schemaText, options), instance);
+    }
+
+    private static IReadOnlyList<string> Problems(JsonSchema schema, JsonElement instance)
+    {
+        var results = schema.Evaluate(instance, new EvaluationOptions { OutputFormat = OutputFormat.List, RequireFormatValidation = true });
         if (results.IsValid) return [];
 
         var problems = new List<string>();
