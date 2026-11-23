@@ -13,7 +13,13 @@ public static class ExchangeSchemas
     public const string DirectorySchema = "directory.schema.json";
     public const string FileSchema = "file.schema.json";
 
-    public static IReadOnlyList<string> Names { get; } = [JobSchema, DirectorySchema, FileSchema];
+    /// <summary>A line of <c>findings.jsonl</c>, since 1.1.</summary>
+    public const string FindingSchema = "finding.schema.json";
+
+    /// <summary>A line of <c>plan.jsonl</c>, since 1.1.</summary>
+    public const string PlanActionSchema = "plan-action.schema.json";
+
+    public static IReadOnlyList<string> Names { get; } = [JobSchema, DirectorySchema, FileSchema, FindingSchema, PlanActionSchema];
 
     private static readonly Lazy<IReadOnlyDictionary<string, JsonSchema>> Schemas = new(() =>
     {

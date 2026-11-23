@@ -185,7 +185,30 @@ public class PublishedSchemaTests
         { ExchangeSchemas.DirectorySchema, "LinkKind", [.. VerdictCodes.All<LinkKind>()] },
         { ExchangeSchemas.DirectorySchema, "SensitiveMarker", [.. SensitiveMarkerNames.AllTokens] },
         { ExchangeSchemas.JobSchema, "ScanRole", [ScanRoleValues.Source, ScanRoleValues.Library] },
-        { ExchangeSchemas.JobSchema, "JobStatus", [.. ExchangeFormat.SnakeCodes<JobStatus>()] }
+        { ExchangeSchemas.JobSchema, "JobStatus", [.. ExchangeFormat.SnakeCodes<JobStatus>()] },
+        { ExchangeSchemas.FindingSchema, "FindingKind", [.. VerdictCodes.All<FindingKind>()] },
+        { ExchangeSchemas.FindingSchema, "FindingState", [.. VerdictCodes.All<FindingState>()] },
+        { ExchangeSchemas.FindingSchema, "ResultCertainty", [.. VerdictCodes.All<ResultCertainty>()] },
+        { ExchangeSchemas.FindingSchema, "ResultOrigin", [.. VerdictCodes.All<ResultOrigin>()] },
+        { ExchangeSchemas.FindingSchema, "BundleKind", [.. VerdictCodes.All<BundleKind>()] },
+        { ExchangeSchemas.FindingSchema, "PlanActionKind", [.. VerdictCodes.All<PlanActionKind>()] },
+        { ExchangeSchemas.FindingSchema, "TargetContentCheck", [.. VerdictCodes.All<TargetContentCheck>()] },
+        { ExchangeSchemas.FindingSchema, "FindingTargetStatus", [.. VerdictCodes.All<FindingTargetStatus>()] },
+        { ExchangeSchemas.FindingSchema, "TargetDecidedBy", [.. VerdictCodes.All<TargetDecidedBy>()] },
+        { ExchangeSchemas.FindingSchema, "TimeSource", [.. VerdictCodes.All<TimeSource>()] },
+        { ExchangeSchemas.FindingSchema, "SensitiveMarker", [.. SensitiveMarkerNames.AllTokens] },
+        { ExchangeSchemas.FindingSchema, "FileType", [.. ExchangeFormat.SnakeCodes<FileType>()] },
+        { ExchangeSchemas.FindingSchema, "ComparisonKey", [.. ContentStateValues.All, "not_compared"] },
+        {
+            ExchangeSchemas.FindingSchema, "Group",
+            [.. System.Enum.GetValues<FileType>().Select(SmartFileOrganizer.Application.Findings.FindingRules.GroupOf).Distinct()
+                .OrderBy(SmartFileOrganizer.Application.Findings.FindingRules.GroupIndex)]
+        },
+        { ExchangeSchemas.PlanActionSchema, "FindingKind", [.. VerdictCodes.All<FindingKind>()] },
+        { ExchangeSchemas.PlanActionSchema, "PlanSourceKind", [.. VerdictCodes.All<PlanSourceKind>()] },
+        { ExchangeSchemas.PlanActionSchema, "PlanActionKind", [.. VerdictCodes.All<PlanActionKind>()] },
+        { ExchangeSchemas.PlanActionSchema, "PlanActionOrigin", [.. VerdictCodes.All<PlanActionOrigin>()] },
+        { ExchangeSchemas.PlanActionSchema, "PlanActionState", [.. VerdictCodes.All<PlanActionState>()] }
     };
 
     [Theory]

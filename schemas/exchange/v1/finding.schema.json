@@ -1,0 +1,860 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/crack666/smart_file_organizer/schemas/exchange/v1/finding.schema.json",
+  "title": "sfo exchange: one line of findings.jsonl",
+  "description": "A finding of a source as 'sfo findings' computes it from stored data, in every state (open, accepted, rejected, wrong), as 'sfo export --format jsonl' writes it. Since format 1.1.",
+  "type": "object",
+  "required": [
+    "key",
+    "rank",
+    "kind",
+    "certainty",
+    "section",
+    "state",
+    "title",
+    "reason",
+    "relative_path",
+    "directory_id",
+    "bundle_id",
+    "bundle_kind",
+    "files",
+    "bytes",
+    "group",
+    "by_file_type",
+    "period",
+    "comparison",
+    "markers",
+    "sensitive_rules",
+    "action",
+    "target",
+    "target_status",
+    "target_decided_by",
+    "target_parts",
+    "duplicates",
+    "examples",
+    "notes",
+    "file_ids",
+    "decided_by",
+    "decided_at",
+    "decision_note"
+  ],
+  "properties": {
+    "key": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Stable key: the same subject gives the same key in every run ('in_noise-4e1f0a9b2c'). Plan actions name it in finding_key."
+    },
+    "rank": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Position in the ordered list of the job, 1 = most important."
+    },
+    "kind": {
+      "$ref": "#/$defs/FindingKind"
+    },
+    "certainty": {
+      "$ref": "#/$defs/ResultCertainty"
+    },
+    "section": {
+      "enum": [
+        "sure",
+        "unsure"
+      ],
+      "description": "unsure for certainty uncertain or review: listed after the sure ones."
+    },
+    "state": {
+      "$ref": "#/$defs/FindingState"
+    },
+    "title": {
+      "type": "string",
+      "description": "One short line: what and where."
+    },
+    "reason": {
+      "type": "string",
+      "description": "One sentence a person can check without looking anything up."
+    },
+    "relative_path": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "The folder or bundle root the finding is about, relative to the job root with '/'; '.' for the root, null for an event without a folder."
+    },
+    "directory_id": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "Id of that folder in directories.jsonl; null when the finding has no folder."
+    },
+    "bundle_id": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The bundle the finding is about, as built at export time (ids change with every 'sfo bundles build')."
+    },
+    "bundle_kind": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/BundleKind"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "files": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Files of the finding."
+    },
+    "bytes": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "group": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/Group"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "For not_backed_up and in_noise: the kind of files, so a mixed folder falls into one finding per kind."
+    },
+    "by_file_type": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/FileType"
+      },
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 0
+      },
+      "description": "Files per file type."
+    },
+    "period": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/Period"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "comparison": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "propertyNames": {
+        "$ref": "#/$defs/ComparisonKey"
+      },
+      "additionalProperties": {
+        "type": "integer",
+        "minimum": 0
+      },
+      "description": "Files per comparison state, when the job was compared with a library."
+    },
+    "markers": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/SensitiveMarker"
+      },
+      "description": "For sensitive: the marker codes. Never content."
+    },
+    "sensitive_rules": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "For sensitive: ids of the rules that set the markers."
+    },
+    "action": {
+      "$ref": "#/$defs/Action"
+    },
+    "target": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/Target"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "target_status": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/FindingTargetStatus"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "For the kinds that need a place: what the stored target match says. Null for the other kinds."
+    },
+    "target_decided_by": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/TargetDecidedBy"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "target_parts": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/TargetPart"
+      },
+      "description": "For target status split: the parts by content, each with its own place. Empty otherwise."
+    },
+    "duplicates": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/Duplicates"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "examples": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "A few file paths relative to the job root."
+    },
+    "notes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "What a person should know beyond the reason."
+    },
+    "file_ids": {
+      "type": "array",
+      "items": {
+        "type": "integer"
+      },
+      "description": "Ids of the files of the finding in files.jsonl, ascending."
+    },
+    "decided_by": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/ResultOrigin"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "human or agent: who decided the state; null while open."
+    },
+    "decided_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "decision_note": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "$defs": {
+    "FindingKind": {
+      "oneOf": [
+        {
+          "const": "not_backed_up",
+          "description": "Files worth keeping whose content is not in the library. Needs a comparison with a library."
+        },
+        {
+          "const": "in_noise",
+          "description": "Files worth keeping in a place without value: app data, a program folder, a mixed or disposable folder."
+        },
+        {
+          "const": "misplaced",
+          "description": "Files whose kind does not fit the purpose of their folder, with a proposed place when there is a library."
+        },
+        {
+          "const": "sensitive",
+          "description": "Files or skipped folders marked sensitive. Always decided one by one; never removed on their own."
+        },
+        {
+          "const": "duplicate",
+          "description": "Files with exactly the same content at several places of the source."
+        }
+      ]
+    },
+    "FindingState": {
+      "oneOf": [
+        {
+          "const": "open",
+          "description": "Not decided yet."
+        },
+        {
+          "const": "accepted",
+          "description": "Taken over: the plan turns it into an action."
+        },
+        {
+          "const": "rejected",
+          "description": "Not wanted; it is not listed again."
+        },
+        {
+          "const": "wrong",
+          "description": "The finding itself is wrong; not listed again and kept as a test case."
+        }
+      ]
+    },
+    "ResultCertainty": {
+      "oneOf": [
+        {
+          "const": "certain",
+          "description": "Two independent signals agree, or an unambiguous rule decided."
+        },
+        {
+          "const": "likely",
+          "description": "One answer that nothing contradicts, an inherited result of a confirmed sample, or a rule category set against the model."
+        },
+        {
+          "const": "uncertain",
+          "description": "A second check was due and did not happen, or a rule decided without being sure."
+        },
+        {
+          "const": "review",
+          "description": "Two answers disagree, or the model could not say what the file is: a person should look."
+        }
+      ]
+    },
+    "ResultOrigin": {
+      "oneOf": [
+        {
+          "const": "rule",
+          "description": "A deterministic rule decided."
+        },
+        {
+          "const": "model",
+          "description": "The local model judged the file itself, on its own or as a sample member."
+        },
+        {
+          "const": "inherited",
+          "description": "The file was not looked at; category and target were taken over from the confirmed sample of its directory."
+        },
+        {
+          "const": "human",
+          "description": "A person set the result."
+        },
+        {
+          "const": "agent",
+          "description": "A steering agent set the result through the command line."
+        },
+        {
+          "const": "external",
+          "description": "The result was imported from another tool with 'sfo import-results' (data-format.md)."
+        },
+        {
+          "const": "reused",
+          "description": "Taken over from the content store without a model call: the same content (full SHA-256 and size) was judged before, in this or another job, by the same model with the same prompt version. Only what belongs to the content comes along (category, importance, confidence, certainty, summary, keep hint, model markers, description); never a target. In 'user_overrides.origin': a person's correction of the same content, carried over to this file."
+        }
+      ]
+    },
+    "BundleKind": {
+      "oneOf": [
+        {
+          "const": "dump",
+          "description": "A copy of a whole device or computer (phone storage, user profile, system drive, USB stick, unpacked software). Left out of every other statistic; its parts are its children."
+        },
+        {
+          "const": "dump_keep",
+          "description": "The part of a dump worth keeping: camera folder, documents, chat media, ... (DumpPart)."
+        },
+        {
+          "const": "dump_noise",
+          "description": "Everything else of a dump: app data, caches, system folders, empty folders."
+        },
+        {
+          "const": "folder",
+          "description": "An existing folder with a meaningful name outside dumps. Taken as it is: never split, never renamed."
+        },
+        {
+          "const": "event",
+          "description": "Loose photos and videos taken close together in time: one occasion."
+        },
+        {
+          "const": "scattered",
+          "description": "Loose photos and videos of one year that formed no group large enough for an event."
+        }
+      ]
+    },
+    "PlanActionKind": {
+      "oneOf": [
+        {
+          "const": "move",
+          "description": "Copy to the target, verify, then remove the original."
+        },
+        {
+          "const": "copy",
+          "description": "Copy to the target; the original stays."
+        },
+        {
+          "const": "quarantine",
+          "description": "Move to a quarantine folder from which it can be restored."
+        },
+        {
+          "const": "delete_source",
+          "description": "Remove the original, because the same content is already in the library."
+        },
+        {
+          "const": "discard",
+          "description": "Clutter: the original goes into the hold folder of its source and nothing is copied anywhere (https://github.com/crack666/smart_file_organizer/issues/105). Needs neither target nor library; taken back by 'sfo plan undo', removed for good only by 'sfo plan purge'. Never recommended by a finding."
+        },
+        {
+          "const": "leave",
+          "description": "Leave the file where it is."
+        }
+      ]
+    },
+    "TargetContentCheck": {
+      "oneOf": [
+        {
+          "const": "not_checked",
+          "description": "Not compared: the target rests on period, names and file types."
+        },
+        {
+          "const": "fits",
+          "description": "The content of the unit fits what the target holds."
+        },
+        {
+          "const": "contradicts",
+          "description": "The content contradicts the target."
+        },
+        {
+          "const": "unclear",
+          "description": "Compared, without a clear answer."
+        }
+      ]
+    },
+    "FindingTargetStatus": {
+      "oneOf": [
+        {
+          "const": "existing_folder",
+          "description": "An existing folder of a library is the target."
+        },
+        {
+          "const": "new_folder",
+          "description": "No existing folder fits; a new folder in the style of the library is the target."
+        },
+        {
+          "const": "not_matched",
+          "description": "The target match has not run for the finding as it is now (never, or its files or descriptions changed)."
+        },
+        {
+          "const": "no_fitting_folder",
+          "description": "No folder of any library fits, and no complete name for a new one could be found."
+        },
+        {
+          "const": "content_unclear",
+          "description": "The content could not be told: the files are not described, so neither a folder nor a name could be chosen."
+        },
+        {
+          "const": "no_model",
+          "description": "A model was needed (content check or the name of a new folder) and none was used or reachable."
+        },
+        {
+          "const": "no_target",
+          "description": "No target on purpose (https://github.com/crack666/smart_file_organizer/issues/85): no existing folder is confirmed by content, and no library holds this kind of content, so a new folder would be a guess as well."
+        },
+        {
+          "const": "split",
+          "description": "The files do not belong together by content (https://github.com/crack666/smart_file_organizer/issues/85): the mixture as a whole gets no target; each part has its own ('finding_target_parts')."
+        },
+        {
+          "const": "excluded",
+          "description": "Not matched on purpose (https://github.com/crack666/smart_file_organizer/issues/85): the files are system clutter (a folder judged 'system') or their worth is unclear (a folder judged as a whole with retention 'review')."
+        },
+        {
+          "const": "inbox",
+          "description": "The inbox of a library (https://github.com/crack666/smart_file_organizer/issues/95): the files have no fitting home yet, so they go into the inbox folder of the library, one subfolder per source, instead of a guessed target."
+        }
+      ]
+    },
+    "TargetDecidedBy": {
+      "oneOf": [
+        {
+          "const": "rules",
+          "description": "The rules of the target match alone (time, names, kinds of files, the same files already there)."
+        },
+        {
+          "const": "local_model",
+          "description": "The target match with the local model ('sfo findings targets --local-model'): content check and folder names."
+        },
+        {
+          "const": "controller",
+          "description": "A steering model or a person decided through 'sfo findings place', from the facts of 'sfo findings candidates'."
+        }
+      ]
+    },
+    "TimeSource": {
+      "oneOf": [
+        {
+          "const": "capture_date",
+          "description": "Capture date from the photo or video metadata."
+        },
+        {
+          "const": "file_name",
+          "description": "A date and time in the file name ('IMG_20150712_143000.jpg', 'WhatsApp Image 2015-07-12 at ...')."
+        },
+        {
+          "const": "modified_date",
+          "description": "Modification time from the file system. Changes with every copy, so the weakest source."
+        },
+        {
+          "const": "mixed",
+          "description": "The files of the bundle rest on more than one of the sources above."
+        }
+      ]
+    },
+    "SensitiveMarker": {
+      "oneOf": [
+        {
+          "const": "credentials",
+          "description": "Passwords, password stores, login data, recovery codes, API keys or tokens, '.env' files."
+        },
+        {
+          "const": "keys",
+          "description": "Private keys, certificates with a private key, crypto wallets or seed phrases."
+        },
+        {
+          "const": "private_message",
+          "description": "Personal messages between people who know each other: personal letters, chats and chat exports, private e-mails, mail archives and chat databases. Not a formal letter to or from a company, an authority or a landlord, a newsletter or an order confirmation."
+        },
+        {
+          "const": "identity",
+          "description": "Identity cards, passports, driving licences or scans of them."
+        },
+        {
+          "const": "finance",
+          "description": "Papers that show the money, income or debts of the person: bank and credit card statements, tax returns and tax certificates, payslips, depot and loan papers, card numbers. Not an ordinary invoice or receipt, a rental or other contract, or a table of amounts without account, income or debt."
+        },
+        {
+          "const": "health",
+          "description": "Medical findings, doctor letters, health insurance documents."
+        }
+      ]
+    },
+    "FileType": {
+      "enum": [
+        "unknown",
+        "image",
+        "video",
+        "audio",
+        "document",
+        "archive",
+        "code",
+        "executable",
+        "database",
+        "font",
+        "other"
+      ],
+      "description": "Codes of FileType, see docs/glossary.md."
+    },
+    "Group": {
+      "oneOf": [
+        {
+          "const": "documents"
+        },
+        {
+          "const": "images"
+        },
+        {
+          "const": "videos"
+        },
+        {
+          "const": "audio"
+        },
+        {
+          "const": "archives"
+        },
+        {
+          "const": "installers"
+        },
+        {
+          "const": "other"
+        }
+      ]
+    },
+    "ComparisonKey": {
+      "oneOf": [
+        {
+          "const": "backed_up",
+          "description": "A file with exactly the same content (same SHA-256) is in the library."
+        },
+        {
+          "const": "new",
+          "description": "No library file has this content, and none has the same name in a folder of the same name."
+        },
+        {
+          "const": "differs",
+          "description": "Not in the library by content, but a file with the same name lies in a folder of the same name there."
+        },
+        {
+          "const": "error",
+          "description": "The content could not be determined (read error, file gone, library unreachable); never counts as 'new' or 'backed_up'."
+        },
+        {
+          "const": "not_compared",
+          "description": "No comparison state: not compared, or not readable."
+        }
+      ]
+    },
+    "Period": {
+      "description": "Earliest and latest time of the files.",
+      "type": "object",
+      "required": [
+        "from_local",
+        "to_local",
+        "time_source"
+      ],
+      "properties": {
+        "from_local": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}$",
+          "description": "Local wall-clock time without an offset, as the bundles record it."
+        },
+        "to_local": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}$",
+          "description": "Local wall-clock time without an offset, as the bundles record it."
+        },
+        "time_source": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/TimeSource"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "Action": {
+      "description": "The recommended action. Nothing is executed by a finding.",
+      "type": "object",
+      "required": [
+        "kind",
+        "reason",
+        "single_decision"
+      ],
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/PlanActionKind"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "single_decision": {
+          "type": "boolean",
+          "description": "True for sensitive files: decided one by one, never in a batch."
+        }
+      }
+    },
+    "Target": {
+      "description": "The proposed place in a library.",
+      "type": "object",
+      "required": [
+        "library_job_id",
+        "library_root",
+        "path",
+        "relative_path",
+        "certainty",
+        "reason",
+        "same_content_files",
+        "content_check"
+      ],
+      "properties": {
+        "library_job_id": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "The library job the place lies in."
+        },
+        "library_root": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Root of that library."
+        },
+        "path": {
+          "type": "string",
+          "description": "Full path of the place."
+        },
+        "relative_path": {
+          "type": "string",
+          "description": "The place relative to the library root, with '/'."
+        },
+        "certainty": {
+          "$ref": "#/$defs/ResultCertainty"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "same_content_files": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Files of the finding whose content already lies there."
+        },
+        "content_check": {
+          "$ref": "#/$defs/TargetContentCheck"
+        }
+      }
+    },
+    "TargetPart": {
+      "type": "object",
+      "required": [
+        "index",
+        "label",
+        "status",
+        "library_job_id",
+        "path",
+        "relative_path",
+        "certainty",
+        "content_check",
+        "reason",
+        "decided_by",
+        "file_ids"
+      ],
+      "properties": {
+        "index": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Position in the finding, from 0, in time order."
+        },
+        "label": {
+          "type": "string",
+          "description": "What the part shows, in a few words, or its first file."
+        },
+        "status": {
+          "$ref": "#/$defs/FindingTargetStatus"
+        },
+        "library_job_id": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "relative_path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "certainty": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/ResultCertainty"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "content_check": {
+          "$ref": "#/$defs/TargetContentCheck"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "decided_by": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/TargetDecidedBy"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "file_ids": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "description": "Ids of the files of this part in files.jsonl."
+        }
+      }
+    },
+    "Duplicates": {
+      "description": "Identical files at several places.",
+      "type": "object",
+      "required": [
+        "groups",
+        "redundant_files",
+        "redundant_bytes",
+        "directories",
+        "directories_total",
+        "keep",
+        "scope"
+      ],
+      "properties": {
+        "groups": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "redundant_files": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "redundant_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "directories": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Folders relative to the job root, at most a few."
+        },
+        "directories_total": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "keep": {
+          "type": "string",
+          "description": "The copy to keep, relative to the job root."
+        },
+        "scope": {
+          "enum": [
+            "files",
+            "folders"
+          ],
+          "description": "files: copies of single files; folders: a whole folder exists twice."
+        }
+      }
+    }
+  }
+}

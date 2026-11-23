@@ -20,7 +20,7 @@ public static class ExportCommand
 
     /// <summary>Result of <c>--format jsonl</c>: the folder, the files written and the lines in each.</summary>
     public sealed record ExchangeExportResult(long JobId, string Format, string FormatVersion, string Path,
-        IReadOnlyList<string> Files, int Directories, int FileLines, bool IncludeSensitive);
+        IReadOnlyList<string> Files, int Directories, int FileLines, bool IncludeSensitive, int? Findings = null, int? PlanActions = null);
 
     public static Command Create(CliHost host, GlobalOptions globals)
     {
@@ -120,8 +120,10 @@ public static class ExportCommand
         }
 
         var result = new ExchangeExportResult(jobId, ExchangeFormat.Name, ExchangeFormat.Version, target, summary.Written,
-            summary.Directories, summary.Files, output.IncludeSensitive);
+            summary.Directories, summary.Files, output.IncludeSensitive, summary.Findings, summary.PlanActions);
         return CommandOutcome.Success(result,
-            () => $"{summary.Directories} directories and {summary.Files} files written to {target} ({ExchangeFormat.Name} {ExchangeFormat.Version})");
+            () => $"{summary.Directories} directories and {summary.Files} files"
+                + (summary.Findings is { } findings ? $", {findings} findings and {summary.PlanActions} plan actions" : string.Empty)
+                + $" written to {target} ({ExchangeFormat.Name} {ExchangeFormat.Version})");
     }
 }

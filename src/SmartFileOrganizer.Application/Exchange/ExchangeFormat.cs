@@ -20,7 +20,7 @@ public static class ExchangeFormat
     /// Major and minor version. New fields raise the minor version; a field that changes meaning or type, or a code
     /// that is removed, raises the major version and gets a new schema folder.
     /// </summary>
-    public const string Version = "1.0";
+    public const string Version = "1.1";
 
     /// <summary>The major version of <see cref="Version"/>; the schema folder is <c>v{Major}</c>.</summary>
     public const int Major = 1;
@@ -28,6 +28,12 @@ public static class ExchangeFormat
     public const string JobFile = "job.json";
     public const string DirectoriesFile = "directories.jsonl";
     public const string FilesFile = "files.jsonl";
+
+    /// <summary>Since 1.1: the findings of a source (https://github.com/crack666/smart_file_organizer/issues/116).</summary>
+    public const string FindingsFile = "findings.jsonl";
+
+    /// <summary>Since 1.1: the actions of the plans of a source.</summary>
+    public const string PlanFile = "plan.jsonl";
 
     /// <summary>
     /// Writing options: snake_case keys as declared, nulls kept (a reader sees every key), umlauts readable, one line per
@@ -115,6 +121,15 @@ public sealed record ExchangeJob
     [JsonPropertyName("completed_at")] public DateTime? CompletedAt { get; init; }
     [JsonPropertyName("directories")] public int Directories { get; init; }
     [JsonPropertyName("files")] public int Files { get; init; }
+
+    /// <summary>Lines of <c>findings.jsonl</c>; null when it was not written (a library job). Since 1.1.</summary>
+    [JsonPropertyName("findings")] public int? Findings { get; init; }
+
+    /// <summary>Lines of <c>plan.jsonl</c>; null when it was not written (a library job). Since 1.1.</summary>
+    [JsonPropertyName("plan_actions")] public int? PlanActions { get; init; }
+
+    /// <summary>The plans of the job, oldest first; their actions are the lines of <c>plan.jsonl</c>. Since 1.1.</summary>
+    [JsonPropertyName("plans")] public IReadOnlyList<ExchangePlan> Plans { get; init; } = [];
 
     /// <summary>The line files next to <c>job.json</c>, in reading order.</summary>
     [JsonPropertyName("parts")] public IReadOnlyList<string> Parts { get; init; } = [ExchangeFormat.DirectoriesFile, ExchangeFormat.FilesFile];

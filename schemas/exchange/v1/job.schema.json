@@ -76,12 +76,40 @@
       "minimum": 0,
       "description": "Lines in files.jsonl."
     },
+    "findings": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0,
+      "description": "Lines of findings.jsonl; null when it was not written (a library job). Since 1.1."
+    },
+    "plan_actions": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0,
+      "description": "Lines of plan.jsonl; null when it was not written (a library job). Since 1.1."
+    },
+    "plans": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Plan"
+      },
+      "description": "The plans of the job, oldest first; their actions are the lines of plan.jsonl. Since 1.1."
+    },
     "parts": {
       "type": "array",
       "items": {
-        "type": "string"
+        "enum": [
+          "directories.jsonl",
+          "files.jsonl",
+          "findings.jsonl",
+          "plan.jsonl"
+        ]
       },
-      "description": "The line files next to job.json."
+      "description": "The line files next to job.json, in reading order. findings.jsonl and plan.jsonl (since 1.1) are written for a source, empty when it has none."
     }
   },
   "$defs": {
@@ -107,6 +135,44 @@
         "failed"
       ],
       "description": "Codes of JobStatus, see docs/glossary.md."
+    },
+    "Plan": {
+      "type": "object",
+      "required": [
+        "id",
+        "created_at",
+        "library_job_ids",
+        "notes",
+        "actions"
+      ],
+      "properties": {
+        "id": {
+          "type": "integer"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "library_job_ids": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          },
+          "description": "The library jobs whose roots its targets may lie in."
+        },
+        "notes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "What the creation left out and why."
+        },
+        "actions": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Its lines in plan.jsonl."
+        }
+      }
     }
   }
 }

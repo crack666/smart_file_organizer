@@ -1083,15 +1083,17 @@ Errors: `job_not_found` (1), `path_not_found` (1, the target folder does not exi
 ### `sfo export <job> --format jsonl --out <folder>`
 
 Writes the job in the open exchange format ([data-format.md](data-format.md)): `job.json`, `directories.jsonl` and
-`files.jsonl` in `<folder>`, one directory or file per line with verdict, result, facts and comparison state, each
-line valid against its schema under `schemas/exchange/v1/`. The folder is created when its parent exists; files of
+`files.jsonl` in `<folder>`, one directory or file per line with verdict, result, facts and comparison state, and
+for a source also `findings.jsonl` (every finding in every state, with the ids of its files and folder) and
+`plan.jsonl` (every action of every plan of the job, with its state), each line valid against its schema under
+`schemas/exchange/v1/` (format 1.1 since 23.11.2026; 1.0 had no findings and plan). The folder is created when its parent exists; files of
 the same names are replaced, nothing else in it is touched. `--out` alone also selects `jsonl`. Every file and
 folder passes the same guard as `sfo files` and `sfo dirs` (`--include-sensitive` as above).
 
 ```json
-{ "job_id": 7, "format": "sfo-exchange", "format_version": "1.0", "path": "/home/me/export",
-  "files": ["job.json", "directories.jsonl", "files.jsonl"], "directories": 212, "file_lines": 1830,
-  "include_sensitive": false }
+{ "job_id": 7, "format": "sfo-exchange", "format_version": "1.1", "path": "/home/me/export",
+  "files": ["job.json", "directories.jsonl", "files.jsonl", "findings.jsonl", "plan.jsonl"], "directories": 212,
+  "file_lines": 1830, "include_sensitive": false, "findings": 25, "plan_actions": 61 }
 ```
 
 Errors: `usage` (2, `--format jsonl` without `--out`, or `--csv` and `--out` together), `job_not_found` (1),
