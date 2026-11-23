@@ -76,6 +76,19 @@ public class JobReadRepository : IJobReadRepository
         return rows.AsList();
     }
 
+    public async Task<long[]> GetFileTypeCountsAsync(long jobId, CancellationToken ct = default)
+    {
+        await using var conn = _db.CreateConnection();
+        await conn.OpenAsync(ct);
+        var rows = await conn.QueryAsync<(long Type, long Files)>(new CommandDefinition(
+            "SELECT file_type, COUNT(*) FROM file_nodes WHERE job_id = @jobId GROUP BY file_type",
+            new { jobId }, cancellationToken: ct));
+        var counts = new long[Enum.GetValues<FileType>().Length];
+        foreach (var (type, files) in rows)
+            if (type >= 0 && type < counts.Length) counts[type] += files;
+        return counts;
+    }
+
     public async IAsyncEnumerable<FileReadRow> StreamFilesAsync(
         FileListFilter filter, [EnumeratorCancellation] CancellationToken ct = default)
     {

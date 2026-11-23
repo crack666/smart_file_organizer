@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using SmartFileOrganizer.Application.Bundles;
+using SmartFileOrganizer.Application.Library;
 using SmartFileOrganizer.Domain.Enums;
 using SmartFileOrganizer.Domain.Models;
 
@@ -312,6 +313,31 @@ public static class FindingRules
         FileType.Executable => "installers",
         _ => "other"
     };
+
+    /// <summary>
+    /// Share of a library's files below which it does not hold a kind of file (the default of
+    /// <see cref="LibraryMatchOptions.MinLibraryKindShare"/>): a file of that kind is "new" there by necessity.
+    /// </summary>
+    public const double LibraryHoldsShare = 0.10;
+
+    /// <summary>The file type of a finding group, or null for <c>other</c>, which spans several.</summary>
+    public static FileType? TypeOfGroup(string group) => group switch
+    {
+        "documents" => FileType.Document,
+        "images" => FileType.Image,
+        "videos" => FileType.Video,
+        "audio" => FileType.Audio,
+        "archives" => FileType.Archive,
+        "installers" => FileType.Executable,
+        _ => null
+    };
+
+    /// <summary>
+    /// The kind of a library from its files per type (https://github.com/crack666/smart_file_organizer/issues/71):
+    /// <c>mostly documents</c>, <c>mostly photos and videos</c>, <c>empty</c>.
+    /// </summary>
+    public static string LibraryKind(long[] types) =>
+        LibraryMap.DominantGroup(types) is { } g ? "mostly " + LibraryMap.GroupWords(g) : "empty";
 
     /// <summary>Order of the groups within one place, as a person goes through a download folder.</summary>
     public static int GroupIndex(string group) => group switch

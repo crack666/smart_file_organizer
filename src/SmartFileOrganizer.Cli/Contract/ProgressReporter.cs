@@ -23,7 +23,8 @@ public sealed record ProgressEvent(
     string? CurrentPath,
     string? Message,
     double? RatePerMinute = null,
-    long? RemainingSeconds = null);
+    long? RemainingSeconds = null,
+    long? RemainingSecondsByCalls = null);
 
 /// <summary>A change in waiting for the model server, as written in <see cref="ProgressMode.Jsonl"/> mode (<c>"type": "wait"</c>).</summary>
 /// <param name="State"><c>waiting</c>, <c>resumed</c> or <c>given_up</c>.</param>
@@ -64,6 +65,13 @@ public sealed class ProgressReporter
 
     public ProgressMode Mode { get; }
 
+    /// <summary>
+    /// The time left from the model calls of this run (https://github.com/crack666/smart_file_organizer/issues/71):
+    /// given the phase, the items this run got through and the items still open, the seconds left, or null when the
+    /// calls do not tell (none yet, or the server reports no times). Set by <c>sfo analyze</c>; null elsewhere.
+    /// </summary>
+    public Func<string, long, long, long?>? RemainingByCalls { get; set; }
+
     public void Report(string phase, long processed, long total, long errors, string? currentPath = null, string? message = null)
     {
         if (Mode == ProgressMode.None)
@@ -71,6 +79,7 @@ public sealed class ProgressReporter
 
         double? rate = null;
         long? remaining = null;
+        long? byCalls = null;
         lock (_sync)
         {
             var now = _clock.ElapsedMilliseconds;
@@ -85,6 +94,8 @@ public sealed class ProgressReporter
                 remaining = (long)Math.Ceiling((total - processed) / rate.Value * 60);
                 rate = Math.Round(rate.Value, 1);
             }
+            if (RemainingByCalls is { } estimate && total > processed)
+                byCalls = estimate(phase, Math.Max(0, processed - start.Processed), total - processed);
             var final = total > 0 && processed >= total;
             if (!final && _lastWrite.TryGetValue(phase, out var last) && now - last < Interval.TotalMilliseconds)
                 return;
@@ -97,7 +108,7 @@ public sealed class ProgressReporter
                 new ProgressEvent(CliJson.SchemaVersion, "progress", phase, processed, total, errors,
                     string.IsNullOrEmpty(currentPath) ? null : currentPath,
                     string.IsNullOrEmpty(message) ? null : message,
-                    rate, remaining),
+                    rate, remaining, byCalls),
                 indented: false));
         }
         else
@@ -105,9 +116,14 @@ public sealed class ProgressReporter
             var errorPart = errors > 0 ? $", {errors} error(s)" : string.Empty;
             var ratePart = rate is { } r && remaining is { } left
                 ? $", {total - processed} open, {r.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture)}/min, about {Commands.StatusCommand.Duration(left)} left"
+                : byCalls is not null
+                    ? $", {total - processed} open"
+                    : string.Empty;
+            var callsPart = byCalls is { } c
+                ? $", about {Commands.StatusCommand.Duration(c)} left by model calls"
                 : string.Empty;
             var pathPart = string.IsNullOrEmpty(currentPath) ? string.Empty : $"  {currentPath}";
-            _stderr.WriteLine($"[{phase}] {processed}/{total}{errorPart}{ratePart}{pathPart}");
+            _stderr.WriteLine($"[{phase}] {processed}/{total}{errorPart}{ratePart}{callsPart}{pathPart}");
         }
     }
 

@@ -74,7 +74,7 @@ public class ModelProviderTests : IDisposable
     [Fact]
     public async Task Doctor_Warns_WhenTheServerAnswersFewerCallsAtOnce()
     {
-        var server = new FakeModelServer { MaxConcurrent = 1, AnswerDelay = TimeSpan.FromMilliseconds(50) };
+        var server = new FakeModelServer { MaxConcurrent = 1, AnswerDelay = TimeSpan.FromMilliseconds(150) };
         var db = Prepare(server, "ollama", parallel: 4);
         var run = await Sfo(server, db, "doctor", "--json");
 

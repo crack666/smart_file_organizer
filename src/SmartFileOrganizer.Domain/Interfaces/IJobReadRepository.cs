@@ -14,6 +14,9 @@ public interface IJobReadRepository
     /// <summary>Count and bytes of the files directly in each directory of the job.</summary>
     Task<IReadOnlyList<DirectoryFileTotals>> GetDirectoryFileTotalsAsync(long jobId, CancellationToken ct = default);
 
+    /// <summary>Number of files of the job per file type, indexed by <see cref="Enums.FileType"/>.</summary>
+    Task<long[]> GetFileTypeCountsAsync(long jobId, CancellationToken ct = default);
+
     /// <summary>
     /// Streams the files matching <paramref name="filter"/> with classification and override loaded,
     /// so a listing over a large job holds only one page in memory.
