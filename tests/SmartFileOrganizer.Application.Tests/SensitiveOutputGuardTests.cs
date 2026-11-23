@@ -75,7 +75,7 @@ public class SensitiveOutputGuardTests
         using var doc = JsonDocument.Parse(json);
         var root = doc.RootElement;
         Assert.Equal("/Scan/Docs/notes.txt", root.GetProperty("full_path").GetString());
-        Assert.Equal("Document", root.GetProperty("file_type").GetString());
+        Assert.Equal("document", root.GetProperty("file_type").GetString());
         Assert.Equal("keys", root.GetProperty("sensitive")[0].GetString());
         Assert.True(root.GetProperty("protected").GetBoolean());
         Assert.Equal(JsonValueKind.Null, root.GetProperty("text_excerpt").ValueKind);
@@ -99,7 +99,7 @@ public class SensitiveOutputGuardTests
         Assert.Contains(ModelSummary, json);
         // Still marked, and still never proposed as disposable.
         Assert.Equal(["health"], record.Sensitive);
-        Assert.Equal(nameof(FileCategory.ReviewNeeded), record.Category);
+        Assert.Equal("review_needed", record.Category);
         Assert.Equal("rule", record.CategorySource);
 
         // Access data: --include-sensitive does not lift it (since 14.11.2026, Issue 99).
@@ -123,9 +123,9 @@ public class SensitiveOutputGuardTests
         Assert.Equal(ModelSummary, record.Summary);
         Assert.Equal(Excerpt, record.TextExcerpt);
         Assert.Equal(RawResponse, record.RawResponse);
-        Assert.Equal("Low", record.Importance);
+        Assert.Equal("low", record.Importance);
         // The review rule is no hiding: a marked file is still never proposed as disposable.
-        Assert.Equal(nameof(FileCategory.ReviewNeeded), record.Category);
+        Assert.Equal("review_needed", record.Category);
         Assert.Equal("rule", record.CategorySource);
     }
 
@@ -145,9 +145,9 @@ public class SensitiveOutputGuardTests
             AssertNoContent(json);
             Assert.True(record.Protected);
             Assert.Equal("logins.txt", record.Name);
-            Assert.Equal(nameof(FileCategory.PersonalDocument), record.Category);
+            Assert.Equal("personal_document", record.Category);
             Assert.Equal("model", record.CategorySource);
-            Assert.Equal("Low", record.Importance);
+            Assert.Equal("low", record.Importance);
             Assert.Equal(0.7, record.Confidence);
             Assert.Null(record.PreviousError);
             Assert.Contains("Content withheld", record.Summary);
@@ -218,7 +218,7 @@ public class SensitiveOutputGuardTests
         Assert.Equal(Excerpt, record.TextExcerpt);
         Assert.Equal(RawResponse, record.RawResponse);
         Assert.Equal(ModelSummary, record.Summary);
-        Assert.Equal(nameof(FileCategory.TrashCandidate), record.Category);
+        Assert.Equal("trash_candidate", record.Category);
         Assert.Equal("model", record.CategorySource);
     }
 
@@ -255,11 +255,11 @@ public class SensitiveOutputGuardTests
     public void ProtectedRecord_IsReviewNeeded_UnlessTheUserDecided()
     {
         var file = MakeFile("Kontoauszug_2014.pdf");
-        Assert.Equal(nameof(FileCategory.ReviewNeeded), SensitiveOutputGuard.Project(file).Category);
+        Assert.Equal("review_needed", SensitiveOutputGuard.Project(file).Category);
 
         file.Override = new UserOverride { FileNodeId = 7, OverriddenCategory = FileCategory.Invoice, OverriddenTarget = Target };
         var record = SensitiveOutputGuard.Project(file);
-        Assert.Equal(nameof(FileCategory.Invoice), record.Category);
+        Assert.Equal("invoice", record.Category);
         Assert.Equal("human", record.CategorySource);
         Assert.Null(record.SuggestedTarget);
     }
@@ -322,8 +322,8 @@ public class SensitiveOutputGuardTests
 
         AssertNoContent(row);
         Assert.Contains("health", row);
-        Assert.Contains(nameof(FileCategory.ReviewNeeded), row);
-        Assert.DoesNotContain(nameof(FileCategory.TrashCandidate), row);
+        Assert.Contains("review_needed", row);
+        Assert.DoesNotContain("trash_candidate", row);
     }
 
     [Fact]

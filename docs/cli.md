@@ -1069,6 +1069,9 @@ A path that is neither a directory nor a file of the job fails with `path_not_fo
 Writes every file of the job as CSV (UTF-8 with BOM, the columns of `ScanExportService`) and
 nothing else. An existing file is replaced. `--include-sensitive` as above. The column `suggested_target`
 stays for sheets that address columns by position and is always empty (deprecated, see `sfo show`).
+File type, status, category and importance are the codes of the exchange format (`document`, `ai_analyzed`,
+`review_needed`, `medium`); until 23.11.2026 the CSV, like the files of `sfo findings show`, wrote the enum names
+(`Document`, `AiAnalyzed`, `ReviewNeeded`, `Medium`) (https://github.com/crack666/smart_file_organizer/issues/116).
 
 ```json
 { "job_id": 7, "path": "/home/me/usb-stick.csv", "rows": 1830, "include_sensitive": false }

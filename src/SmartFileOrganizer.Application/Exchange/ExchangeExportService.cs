@@ -185,7 +185,7 @@ public sealed class ExchangeExportService
         ExchangeResult? result = null;
         if (record.Category is not null)
         {
-            var category = Enum.TryParse<FileCategory>(record.Category, out var c) ? c : FileCategory.Unknown;
+            var category = ExchangeFormat.TryParseSnake<FileCategory>(record.Category, out var c) ? c : FileCategory.Unknown;
             // The guard names a correction human and a review raised by a marker rule; otherwise the stored origin counts.
             var source = record.CategorySource == ResultOrigin.Model.ToCode() && ai?.Origin is { } origin
                 ? origin.ToCode()

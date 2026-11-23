@@ -1,6 +1,7 @@
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using SmartFileOrganizer.Application.Exchange;
 using SmartFileOrganizer.Domain.Enums;
 using SmartFileOrganizer.Domain.Models;
 
@@ -113,7 +114,9 @@ public sealed record SensitiveOutputOptions
 /// <summary>
 /// One file as it may leave the machine. Built only by <see cref="SensitiveOutputGuard.Project"/>;
 /// CLI commands and exports serialize this record instead of reading <see cref="FileNode"/> and
-/// <see cref="FileClassification"/> themselves.
+/// <see cref="FileClassification"/> themselves. File type, status, category and importance are the <c>snake_case</c>
+/// codes of the exchange format (<see cref="ExchangeFormat.Snake{TEnum}"/>), the same in every command and export
+/// (https://github.com/crack666/smart_file_organizer/issues/116).
 /// </summary>
 public sealed record FileOutputRecord
 {
@@ -256,10 +259,10 @@ public static class SensitiveOutputGuard
             Name = file.Name,
             RelativeDir = file.RelativeDir,
             Extension = file.Extension,
-            FileType = file.FileType.ToString(),
+            FileType = ExchangeFormat.Snake(file.FileType),
             SizeBytes = file.Size,
             LastWriteTime = file.LastWriteTime == default ? null : file.LastWriteTime,
-            Status = file.Status.ToString(),
+            Status = ExchangeFormat.Snake(file.Status),
             Sensitive = SensitiveMarkerNames.ToTokens(match.Markers),
             SensitiveRule = match.Rule,
             Protected = isProtected,
@@ -272,7 +275,7 @@ public static class SensitiveOutputGuard
             // Restricted: nothing derived from the content except the markers themselves.
             return record with
             {
-                Category = ovr is not null ? ovr.OverriddenCategory.ToString() : nameof(FileCategory.ReviewNeeded),
+                Category = ExchangeFormat.Snake(ovr is not null ? ovr.OverriddenCategory : FileCategory.ReviewNeeded),
                 CategorySource = (ovr is not null ? ResultOrigin.Human : ResultOrigin.Rule).ToCode(),
                 Summary = NeutralSummary(match.Markers, file.FileType)
             };
@@ -282,18 +285,18 @@ public static class SensitiveOutputGuard
         string? categorySource;
         if (ovr is not null)
         {
-            category = ovr.OverriddenCategory.ToString();
+            category = ExchangeFormat.Snake(ovr.OverriddenCategory);
             categorySource = ResultOrigin.Human.ToCode();
         }
         else if (ai is not null)
         {
             var effective = ApplyReviewRule(ai.Category, match.Markers);
-            category = effective.ToString();
+            category = ExchangeFormat.Snake(effective);
             categorySource = (effective != ai.Category ? ResultOrigin.Rule : ResultOrigin.Model).ToCode();
         }
         else
         {
-            category = match.IsMatch ? nameof(FileCategory.ReviewNeeded) : null;
+            category = match.IsMatch ? ExchangeFormat.Snake(FileCategory.ReviewNeeded) : null;
             categorySource = match.IsMatch ? ResultOrigin.Rule.ToCode() : null;
         }
 
@@ -305,7 +308,7 @@ public static class SensitiveOutputGuard
             {
                 Category = category,
                 CategorySource = categorySource,
-                Importance = ai?.Importance.ToString(),
+                Importance = ai is null ? null : ExchangeFormat.Snake(ai.Importance),
                 Confidence = ai?.Confidence,
                 Summary = NeutralSummary(match.Markers, file.FileType),
                 ModelUsed = ai?.ModelUsed,
@@ -317,7 +320,7 @@ public static class SensitiveOutputGuard
         {
             Category = category,
             CategorySource = categorySource,
-            Importance = ai?.Importance.ToString(),
+            Importance = ai is null ? null : ExchangeFormat.Snake(ai.Importance),
             Confidence = ai?.Confidence,
             Summary = ai?.Summary,
             // Deprecated (https://github.com/crack666/smart_file_organizer/issues/74): the old free-text target per file
