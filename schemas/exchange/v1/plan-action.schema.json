@@ -1,0 +1,268 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/crack666/smart_file_organizer/schemas/exchange/v1/plan-action.schema.json",
+  "title": "sfo exchange: one line of plan.jsonl",
+  "description": "An action of a plan of the job with its state, as 'sfo plan show' lists it and 'sfo export --format jsonl' writes it. Since format 1.1.",
+  "type": "object",
+  "required": [
+    "plan_id",
+    "id",
+    "finding_key",
+    "finding_kind",
+    "unit",
+    "source_kind",
+    "relative_path",
+    "file_id",
+    "directory_id",
+    "files",
+    "bytes",
+    "kind",
+    "recommended",
+    "target_path",
+    "library_job_id",
+    "reason",
+    "note",
+    "origin",
+    "state",
+    "sensitive",
+    "single_decision",
+    "decided_by",
+    "decided_at",
+    "updated_at"
+  ],
+  "properties": {
+    "plan_id": {
+      "type": "integer",
+      "description": "The plan, listed in 'plans' of job.json."
+    },
+    "id": {
+      "type": "integer",
+      "description": "Id of the action, as 'sfo plan show' and 'sfo plan approve --action' name it."
+    },
+    "finding_key": {
+      "type": "string",
+      "description": "Key of the finding in findings.jsonl the action comes from."
+    },
+    "finding_kind": {
+      "$ref": "#/$defs/FindingKind"
+    },
+    "unit": {
+      "type": "string",
+      "description": "The title of the finding: what and where, in one line."
+    },
+    "source_kind": {
+      "$ref": "#/$defs/PlanSourceKind"
+    },
+    "relative_path": {
+      "type": "string",
+      "description": "The file or folder relative to the job root, with '/'."
+    },
+    "file_id": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "For a file action: its id in files.jsonl."
+    },
+    "directory_id": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "For a folder action: its id in directories.jsonl."
+    },
+    "files": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "bytes": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "kind": {
+      "$ref": "#/$defs/PlanActionKind"
+    },
+    "recommended": {
+      "$ref": "#/$defs/PlanActionKind",
+      "description": "What the finding recommended; differs from kind when a check turned it into leave."
+    },
+    "target_path": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Full path at the target; for delete_source the place in the library that already holds the content."
+    },
+    "library_job_id": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "description": "The library job whose root holds target_path."
+    },
+    "reason": {
+      "type": "string"
+    },
+    "note": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "What a person should know: why the kind became leave, that the content is in a library already."
+    },
+    "origin": {
+      "$ref": "#/$defs/PlanActionOrigin"
+    },
+    "state": {
+      "$ref": "#/$defs/PlanActionState"
+    },
+    "sensitive": {
+      "type": "boolean",
+      "description": "The source is marked sensitive; decided one by one."
+    },
+    "single_decision": {
+      "type": "boolean",
+      "description": "Only 'sfo plan approve --action' confirms it."
+    },
+    "decided_by": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/PlanActionOrigin"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "human or agent: who confirmed or rejected it last."
+    },
+    "decided_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "$defs": {
+    "FindingKind": {
+      "oneOf": [
+        {
+          "const": "not_backed_up",
+          "description": "Files worth keeping whose content is not in the library. Needs a comparison with a library."
+        },
+        {
+          "const": "in_noise",
+          "description": "Files worth keeping in a place without value: app data, a program folder, a mixed or disposable folder."
+        },
+        {
+          "const": "misplaced",
+          "description": "Files whose kind does not fit the purpose of their folder, with a proposed place when there is a library."
+        },
+        {
+          "const": "sensitive",
+          "description": "Files or skipped folders marked sensitive. Always decided one by one; never removed on their own."
+        },
+        {
+          "const": "duplicate",
+          "description": "Files with exactly the same content at several places of the source."
+        }
+      ]
+    },
+    "PlanSourceKind": {
+      "oneOf": [
+        {
+          "const": "file",
+          "description": "One file."
+        },
+        {
+          "const": "folder",
+          "description": "A whole folder with everything below it; its name stays."
+        }
+      ]
+    },
+    "PlanActionKind": {
+      "oneOf": [
+        {
+          "const": "move",
+          "description": "Copy to the target, verify, then remove the original."
+        },
+        {
+          "const": "copy",
+          "description": "Copy to the target; the original stays."
+        },
+        {
+          "const": "quarantine",
+          "description": "Move to a quarantine folder from which it can be restored."
+        },
+        {
+          "const": "delete_source",
+          "description": "Remove the original, because the same content is already in the library."
+        },
+        {
+          "const": "discard",
+          "description": "Clutter: the original goes into the hold folder of its source and nothing is copied anywhere (https://github.com/crack666/smart_file_organizer/issues/105). Needs neither target nor library; taken back by 'sfo plan undo', removed for good only by 'sfo plan purge'. Never recommended by a finding."
+        },
+        {
+          "const": "leave",
+          "description": "Leave the file where it is."
+        }
+      ]
+    },
+    "PlanActionOrigin": {
+      "oneOf": [
+        {
+          "const": "rule",
+          "description": "The rules of 'sfo plan create', from accepted findings and stored decisions."
+        },
+        {
+          "const": "model",
+          "description": "A model answer taken over as it was."
+        },
+        {
+          "const": "agent",
+          "description": "A steering agent through 'sfo plan set' or 'sfo plan import' with '--by agent'."
+        },
+        {
+          "const": "human",
+          "description": "A person."
+        }
+      ]
+    },
+    "PlanActionState": {
+      "oneOf": [
+        {
+          "const": "proposed",
+          "description": "Proposed and not confirmed; also after every change of kind, target or reason."
+        },
+        {
+          "const": "approved",
+          "description": "Confirmed by a person or a steering agent; only an action without problems can be confirmed."
+        },
+        {
+          "const": "rejected",
+          "description": "Not wanted; it is not executed."
+        },
+        {
+          "const": "verified",
+          "description": "The first step of the execution is done: the copy at the target is written and checked by its full checksum (for 'delete_source': the copy in the library is checked), and the original waits for the second, separately confirmed step that removes it."
+        },
+        {
+          "const": "executed",
+          "description": "Carried out by the execution step."
+        },
+        {
+          "const": "failed",
+          "description": "The execution step tried and stopped; the original stays."
+        },
+        {
+          "const": "undone",
+          "description": "Carried out and taken back."
+        }
+      ]
+    }
+  }
+}

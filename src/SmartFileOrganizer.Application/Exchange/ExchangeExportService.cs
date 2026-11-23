@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using SmartFileOrganizer.Application.Findings;
 using SmartFileOrganizer.Application.Sensitivity;
 using SmartFileOrganizer.Application.Services;
 using SmartFileOrganizer.Domain.Enums;
@@ -26,9 +27,12 @@ public sealed class ExchangeExportService
     private readonly IDirectoryVerdictRepository _verdicts;
     private readonly IFileFactRepository _facts;
     private readonly IContentComparisonRepository _comparisons;
+    private readonly FindingService _findings;
+    private readonly IPlanRepository _plans;
 
     public ExchangeExportService(IScanJobRepository jobs, IJobReadRepository read, JobReadService readService,
-        IDirectoryVerdictRepository verdicts, IFileFactRepository facts, IContentComparisonRepository comparisons)
+        IDirectoryVerdictRepository verdicts, IFileFactRepository facts, IContentComparisonRepository comparisons,
+        FindingService findings, IPlanRepository plans)
     {
         _jobs = jobs;
         _read = read;
@@ -36,14 +40,18 @@ public sealed class ExchangeExportService
         _verdicts = verdicts;
         _facts = facts;
         _comparisons = comparisons;
+        _findings = findings;
+        _plans = plans;
     }
 
-    /// <summary>What an export wrote.</summary>
-    public sealed record ExportSummary(string Folder, int Directories, int Files, IReadOnlyList<string> Written);
+    /// <summary>What an export wrote. <paramref name="Findings"/> and <paramref name="PlanActions"/> are null for a library job.</summary>
+    public sealed record ExportSummary(string Folder, int Directories, int Files, IReadOnlyList<string> Written,
+        int? Findings = null, int? PlanActions = null);
 
     /// <summary>
     /// Writes <c>job.json</c>, <c>directories.jsonl</c> and <c>files.jsonl</c> of <paramref name="jobId"/> into
-    /// <paramref name="folder"/> (which must exist). Existing files of the same names are replaced.
+    /// <paramref name="folder"/> (which must exist), and for a source also <c>findings.jsonl</c> and <c>plan.jsonl</c>
+    /// (empty when there is none). Existing files of the same names are replaced.
     /// </summary>
     public async Task<ExportSummary> ExportAsync(long jobId, string folder, SensitiveOutputOptions output, CancellationToken ct = default)
     {
@@ -55,6 +63,21 @@ public sealed class ExchangeExportService
 
         var dirCount = await WriteLinesAsync(Path.Combine(folder, ExchangeFormat.DirectoriesFile), directories.Lines, ct);
         var fileCount = await WriteLinesAsync(Path.Combine(folder, ExchangeFormat.FilesFile), FilesAsync(job, dirIds, output, ct), ct);
+
+        List<string> parts = [ExchangeFormat.DirectoriesFile, ExchangeFormat.FilesFile];
+        int? findingCount = null, actionCount = null;
+        IReadOnlyList<ExchangePlan> plans = [];
+        // Findings and plans are about sources; a library has neither (FindingService refuses it).
+        if (job.Role != ScanRole.Library)
+        {
+            var findings = await BuildFindingsAsync(job, dirIds, ct);
+            findingCount = await WriteLinesAsync(Path.Combine(folder, ExchangeFormat.FindingsFile), findings, ct);
+            var (planHeads, actions) = await BuildPlanAsync(job, ct);
+            actionCount = await WriteLinesAsync(Path.Combine(folder, ExchangeFormat.PlanFile), actions, ct);
+            plans = planHeads;
+            parts.Add(ExchangeFormat.FindingsFile);
+            parts.Add(ExchangeFormat.PlanFile);
+        }
 
         var head = new ExchangeJob
         {
@@ -70,15 +93,156 @@ public sealed class ExchangeExportService
             CreatedAt = ExchangeFormat.Utc(job.CreatedAt),
             CompletedAt = ExchangeFormat.Utc(job.CompletedAt),
             Directories = dirCount,
-            Files = fileCount
+            Files = fileCount,
+            Findings = findingCount,
+            PlanActions = actionCount,
+            Plans = plans,
+            Parts = parts
         };
         // job.json last: a reader that finds it knows the line files are complete.
         await File.WriteAllTextAsync(Path.Combine(folder, ExchangeFormat.JobFile),
             JsonSerializer.Serialize(head, ExchangeFormat.IndentedOptions) + "\n", new UTF8Encoding(false), ct);
 
-        return new ExportSummary(folder, dirCount, fileCount,
-            [ExchangeFormat.JobFile, ExchangeFormat.DirectoriesFile, ExchangeFormat.FilesFile]);
+        return new ExportSummary(folder, dirCount, fileCount, [ExchangeFormat.JobFile, .. parts], findingCount, actionCount);
     }
+
+    /// <summary>The findings of a source in every state, in rank order, each with the ids of its files and its folder.</summary>
+    public async Task<IReadOnlyList<ExchangeFinding>> BuildFindingsAsync(ScanJob job, IReadOnlyDictionary<string, long> directoryIds,
+        CancellationToken ct = default)
+    {
+        var report = await _findings.ComputeAsync(job.Id, ct);
+        return report.Findings.OrderBy(f => f.Rank).Select(f => ToLine(f, directoryIds)).ToList();
+    }
+
+    /// <summary>The line of one finding. Public for tests.</summary>
+    public static ExchangeFinding ToLine(Finding f, IReadOnlyDictionary<string, long> directoryIds) => new()
+    {
+        Key = f.Key,
+        Rank = f.Rank,
+        Kind = f.Kind.ToCode(),
+        Certainty = f.Certainty.ToCode(),
+        Section = f.Unsure ? "unsure" : "sure",
+        State = f.State.ToCode(),
+        Title = f.Title,
+        Reason = f.Reason,
+        RelativePath = f.RelativePath is null ? null : ExchangeFormat.PortablePath(f.RelativePath),
+        DirectoryId = f.Path is { } path && directoryIds.TryGetValue(path, out var dirId) ? dirId : null,
+        BundleId = f.BundleId,
+        BundleKind = f.BundleKind.ToCode(),
+        Files = f.Files,
+        Bytes = f.Bytes,
+        Group = f.Group,
+        ByFileType = f.ByFileType,
+        Period = f.Period is { } p
+            ? new ExchangePeriod { FromLocal = Local(p.From), ToLocal = Local(p.To), TimeSource = p.Source.ToCode() }
+            : null,
+        Comparison = f.Comparison,
+        Markers = f.Markers,
+        SensitiveRules = f.SensitiveRules,
+        Action = new ExchangeFindingAction { Kind = f.Action.Kind.ToCode(), Reason = f.Action.Reason, SingleDecision = f.Action.SingleDecision },
+        Target = f.Target is { } t
+            ? new ExchangeFindingTarget
+            {
+                LibraryJobId = t.LibraryJobId,
+                LibraryRoot = t.LibraryRoot,
+                Path = t.Path,
+                RelativePath = ExchangeFormat.PortablePath(t.RelativePath),
+                Certainty = t.Certainty.ToCode(),
+                Reason = t.Reason,
+                SameContentFiles = t.SameContentFiles,
+                ContentCheck = t.ContentCheck.ToCode()
+            }
+            : null,
+        TargetStatus = f.TargetStatus.ToCode(),
+        TargetDecidedBy = f.TargetDecidedBy.ToCode(),
+        TargetParts = f.TargetParts.Select(part => new ExchangeTargetPart
+        {
+            Index = part.Index,
+            Label = part.Label,
+            Status = part.Status.ToCode(),
+            LibraryJobId = part.LibraryJobId,
+            Path = part.Path,
+            RelativePath = part.RelativePath is null ? null : ExchangeFormat.PortablePath(part.RelativePath),
+            Certainty = part.Certainty.ToCode(),
+            ContentCheck = part.ContentCheck.ToCode(),
+            Reason = part.Reason,
+            DecidedBy = part.DecidedBy.ToCode(),
+            FileIds = part.FileIds.Order().ToList()
+        }).ToList(),
+        Duplicates = f.Duplicates is { } d
+            ? new ExchangeDuplicates
+            {
+                Groups = d.Groups,
+                RedundantFiles = d.RedundantFiles,
+                RedundantBytes = d.RedundantBytes,
+                Directories = d.Directories.Select(ExchangeFormat.PortablePath).ToList(),
+                DirectoriesTotal = d.DirectoriesTotal,
+                Keep = ExchangeFormat.PortablePath(d.Keep),
+                Scope = d.Scope
+            }
+            : null,
+        Examples = f.Examples.Select(ExchangeFormat.PortablePath).ToList(),
+        Notes = f.Notes,
+        FileIds = f.FileIds.Order().ToList(),
+        DecidedBy = f.DecidedBy.ToCode(),
+        DecidedAt = ExchangeFormat.Utc(f.DecidedAt),
+        DecisionNote = f.DecisionNote
+    };
+
+    /// <summary>Local wall-clock time without an offset, as <c>sfo bundles</c> and <c>sfo findings</c> write it.</summary>
+    private static string? Local(DateTime? time) =>
+        time?.ToString("yyyy-MM-dd'T'HH:mm:ss", System.Globalization.CultureInfo.InvariantCulture);
+
+    /// <summary>The plans of a source, oldest first, and their actions in plan and id order.</summary>
+    public async Task<(IReadOnlyList<ExchangePlan> Plans, IReadOnlyList<ExchangePlanAction> Actions)> BuildPlanAsync(
+        ScanJob job, CancellationToken ct = default)
+    {
+        var heads = new List<ExchangePlan>();
+        var lines = new List<ExchangePlanAction>();
+        foreach (var plan in (await _plans.GetByJobAsync(job.Id, ct)).OrderBy(p => p.Id))
+        {
+            var actions = (await _plans.GetActionsAsync(plan.Id, ct)).OrderBy(a => a.Id).ToList();
+            heads.Add(new ExchangePlan
+            {
+                Id = plan.Id,
+                CreatedAt = ExchangeFormat.Utc(plan.CreatedAt),
+                LibraryJobIds = plan.Libraries,
+                Notes = plan.Notes,
+                Actions = actions.Count
+            });
+            lines.AddRange(actions.Select(ToLine));
+        }
+        return (heads, lines);
+    }
+
+    /// <summary>The line of one plan action. Public for tests.</summary>
+    public static ExchangePlanAction ToLine(PlanAction a) => new()
+    {
+        PlanId = a.PlanId,
+        Id = a.Id,
+        FindingKey = a.FindingKey,
+        FindingKind = a.FindingKind.ToCode(),
+        Unit = a.Unit,
+        SourceKind = a.SourceKind.ToCode(),
+        RelativePath = ExchangeFormat.PortablePath(a.RelativePath),
+        FileId = a.SourceKind == PlanSourceKind.File ? a.FileNodeId : null,
+        DirectoryId = a.SourceKind == PlanSourceKind.Folder ? a.DirectoryNodeId : null,
+        Files = a.Files,
+        Bytes = a.Bytes,
+        Kind = a.Kind.ToCode(),
+        Recommended = a.Recommended.ToCode(),
+        TargetPath = a.TargetPath,
+        LibraryJobId = a.LibraryJobId,
+        Reason = a.Reason,
+        Note = a.Note,
+        Origin = a.Origin.ToCode(),
+        State = a.State.ToCode(),
+        Sensitive = a.Sensitive,
+        SingleDecision = a.SingleDecision,
+        DecidedBy = a.DecidedBy.ToCode(),
+        DecidedAt = ExchangeFormat.Utc(a.DecidedAt),
+        UpdatedAt = ExchangeFormat.Utc(a.UpdatedAt)
+    };
 
     /// <summary>One line object per directory, in path order.</summary>
     public async Task<(IReadOnlyList<DirectoryReadRow> Rows, IReadOnlyList<ExchangeDirectory> Lines)> BuildDirectoriesAsync(
@@ -185,7 +349,7 @@ public sealed class ExchangeExportService
         ExchangeResult? result = null;
         if (record.Category is not null)
         {
-            var category = Enum.TryParse<FileCategory>(record.Category, out var c) ? c : FileCategory.Unknown;
+            var category = ExchangeFormat.TryParseSnake<FileCategory>(record.Category, out var c) ? c : FileCategory.Unknown;
             // The guard names a correction human and a review raised by a marker rule; otherwise the stored origin counts.
             var source = record.CategorySource == ResultOrigin.Model.ToCode() && ai?.Origin is { } origin
                 ? origin.ToCode()

@@ -22,9 +22,13 @@ Codes and their meanings: [glossary.md](glossary.md). Commands: [cli.md](cli.md#
 | `job.json` | Head: format name and version, the job, the disclosure the export ran with, the number of lines. Written last: when it is there, the line files are complete. |
 | `directories.jsonl` | One directory per line, with its verdict. |
 | `files.jsonl` | One file per line, with its result, facts and comparison state. |
+| `findings.jsonl` | Since 1.1, for a source: one finding per line, in every state, with the ids of its files and folder. |
+| `plan.jsonl` | Since 1.1, for a source: one action of a plan of the job per line, with its state. |
 
-Later versions may add `findings.jsonl` and `plan.jsonl` (findings and plan actions); `parts` in `job.json`
-lists the line files there are.
+`parts` in `job.json` lists the line files there are. A source always gets `findings.jsonl` and `plan.jsonl`, empty
+when it has no finding or no plan; a library job gets neither (findings are about sources), and `findings` and
+`plan_actions` in `job.json` are then `null`. The two were added on 23.11.2026
+(https://github.com/crack666/smart_file_organizer/issues/116); a reader of 1.0 ignores them.
 
 Every line is one JSON object, readable on its own, UTF-8 without BOM, ending with `\n` on every system. Keys are
 `snake_case`, fixed values are codes, times are ISO 8601 UTC with `Z`, and every key is written, `null` when empty.
@@ -39,9 +43,12 @@ The schemas (JSON Schema 2020-12) are in the repository and embedded in `sfo`:
 | [`schemas/exchange/v1/job.schema.json`](../schemas/exchange/v1/job.schema.json) | `job.json` |
 | [`schemas/exchange/v1/directory.schema.json`](../schemas/exchange/v1/directory.schema.json) | a line of `directories.jsonl` |
 | [`schemas/exchange/v1/file.schema.json`](../schemas/exchange/v1/file.schema.json) | a line of `files.jsonl`, and the input of `sfo import-results` |
+| [`schemas/exchange/v1/finding.schema.json`](../schemas/exchange/v1/finding.schema.json) | a line of `findings.jsonl` (1.1) |
+| [`schemas/exchange/v1/plan-action.schema.json`](../schemas/exchange/v1/plan-action.schema.json) | a line of `plan.jsonl` (1.1) |
 
 Fixed values are enumerations in the schemas; for the judgement codes (verdict, retention, category, origin,
-certainty, markers, keep hint, fact source, comparison state) each value carries its meaning. A test checks every
+certainty, markers, keep hint, fact source, comparison state, finding kind and state, action kind, target status)
+each value carries its meaning. A test checks every
 enumeration against the code (`PublishedSchemaTests`) and every exported line against its schema
 (`ExchangeFormatTests`).
 
@@ -72,6 +79,37 @@ There is no target per file: the old free-text target was dropped
 `retention`, `purpose`, `reason`, `unit_directory_id`, `escalated_from`, `escalation_reason`, `model`,
 `judged_at`, `error` and `profile` (what the scan counted in the folder before it was judged).
 
+### A line of `findings.jsonl`
+
+What `sfo findings` computes from the stored data at export time, against the libraries of the newest `sfo compare`,
+in rank order and in every state (`open`, `accepted`, `rejected`, `wrong`), not only the listed ones.
+
+| Key | Meaning |
+|---|---|
+| `key` | Stable key: the same subject gives the same key in every run. Plan actions name it in `finding_key`. |
+| `rank`, `kind`, `certainty`, `section`, `state` | Position (1 = most important), what it says, how sure, `sure`/`unsure`, the decision. |
+| `title`, `reason`, `notes`, `examples` | One line, one checkable sentence, what else to know, a few file paths. |
+| `relative_path`, `directory_id` | The folder it is about and its id in `directories.jsonl`; both `null` for an event without a folder. |
+| `bundle_id`, `bundle_kind` | The bundle, as built at export time (ids change with every `sfo bundles build`). |
+| `files`, `bytes`, `group`, `by_file_type`, `period`, `comparison` | Size, kind of files (`images`, ...), files per type, earliest and latest time (`from_local`, `to_local`: local wall-clock time without offset, as the bundles record it), files per comparison state. |
+| `markers`, `sensitive_rules` | For `sensitive`: marker codes and rule ids. Never content. |
+| `action` | Recommended `kind`, `reason`, `single_decision`. Nothing is executed by a finding. |
+| `target`, `target_status`, `target_decided_by`, `target_parts` | The place in a library (`library_job_id`, `library_root`, `path`, `relative_path` from the library root, `certainty`, `content_check`, ...), what the target match says, who decided, and for `split` the parts with their own place and `file_ids`. |
+| `duplicates` | For `duplicate`: groups, redundant files and bytes, folders, the copy to keep, `files` or `folders`. |
+| `file_ids` | Ids of its files in `files.jsonl`, ascending. |
+| `decided_by`, `decided_at`, `decision_note` | Who decided the state (`human`, `agent`), when, with what note. |
+
+### A line of `plan.jsonl`
+
+Every action of every plan of the job (`sfo plan create`), in plan and id order, as `sfo plan show` lists it. The
+plans themselves stand in `plans` of `job.json` (`id`, `created_at`, `library_job_ids`, `notes`, `actions`).
+
+`plan_id`, `id`, `finding_key` (the line of `findings.jsonl` it comes from), `finding_kind`, `unit`, `source_kind`
+(`file` or `folder`), `relative_path`, `file_id` (for a file: its id in `files.jsonl`) or `directory_id` (for a
+folder: its id in `directories.jsonl`), `files`, `bytes`, `kind`, `recommended`, `target_path` (full path at the
+target), `library_job_id`, `reason`, `note`, `origin`, `state` (`proposed`, `approved`, ..., what `sfo plan apply`
+did), `sensitive`, `single_decision`, `decided_by`, `decided_at`, `updated_at`.
+
 ### Protected files
 
 The export passes the same guard as `sfo files` and `sfo dirs` (setting `Sensitive:Disclosure`, option
@@ -83,7 +121,7 @@ Folder texts that name a withheld file are replaced and `text_withheld` is set.
 
 ## Example
 
-Generated on 22.11.2026 from a scanned test folder (`sfo scan`), one result through `sfo import-results` (the
+Generated on 22.11.2026 (format 1.0) from a scanned test folder (`sfo scan`), one result through `sfo import-results` (the
 line under "Import" below), a folder verdict written into the database by hand, then `sfo export --format jsonl`.
 Ids and times are from that run; the root path is shortened.
 
@@ -125,6 +163,19 @@ Ids and times are from that run; the root path is shortened.
 ```json
 {"id":2,"directory_id":2,"relative_path":"docs/letter.txt","name":"letter.txt","extension":".txt","file_type":"document","size_bytes":27,"last_write_time":"2026-11-22T15:20:50.4338654Z","status":"ai_analyzed","analysis_skip":null,"scan_error_cause":null,"sensitive":[],"sensitive_rule":null,"protected":false,"result":{"category":"letter","category_source":"external","origin":"external","importance":"medium","confidence":0.8,"certainty":"likely","summary":"Letter to the landlord about the rent.","keep_hint":null,"keep_reason":null,"model":"other-tool 2.1","analyzed_at":"2026-11-22T15:20:53.2844363Z","inherited_from_directory_id":null,"attempts":1,"error":null,"raw_response":null},"facts":[],"content":null}
 {"id":1,"directory_id":1,"relative_path":"notes.txt","name":"notes.txt","extension":".txt","file_type":"document","size_bytes":10,"last_write_time":"2026-11-22T15:20:50.4343994Z","status":"discovered","analysis_skip":null,"scan_error_cause":null,"sensitive":[],"sensitive_rule":null,"protected":false,"result":null,"facts":[],"content":null}
+```
+
+Since 1.1 a source also gets `findings.jsonl` and `plan.jsonl`, and `job.json` carries `findings`, `plan_actions` and
+`plans`. Generated on 23.11.2026 from the test source of `PlanCommandTests` (analysed with scripted answers, compared
+with a library, every finding accepted, a plan created and approved); the library path is shortened. The first line
+of each:
+
+```json
+{"key":"not_backed_up-916f672f83","rank":1,"kind":"not_backed_up","certainty":"certain","section":"sure","state":"accepted","title":"4 images (36 B) worth keeping, not in the library: folder Urlaub Kroatien 2021","reason":"4 images of the 4 in Urlaub Kroatien 2021 are worth keeping by the model, and the comparison with library job 2 on 2026-11-23 found no file with the same content.","relative_path":"Urlaub Kroatien 2021","directory_id":5,"bundle_id":2,"bundle_kind":"folder","files":4,"bytes":36,"group":"images","by_file_type":{"image":4},"period":{"from_local":"2021-07-03T10:00:00","to_local":"2021-07-03T13:00:00","time_source":"file_name"},"comparison":{"new":4},"markers":[],"sensitive_rules":[],"action":{"kind":"move","reason":"Worth keeping and not in the library: move it there (copy, verify, then remove the original).","single_decision":false},"target":null,"target_status":"not_matched","target_decided_by":null,"target_parts":[],"duplicates":null,"examples":["Urlaub Kroatien 2021/IMG_20210703_100000.jpg","Urlaub Kroatien 2021/IMG_20210703_110000.jpg","Urlaub Kroatien 2021/IMG_20210703_120000.jpg"],"notes":["Where in the library: sfo library match 1 <folder> --against 2."],"file_ids":[10,11,12,13],"decided_by":"human","decided_at":"2026-11-23T00:35:34.2930807Z","decision_note":null}
+```
+
+```json
+{"plan_id":1,"id":1,"finding_key":"not_backed_up-916f672f83","finding_kind":"not_backed_up","unit":"4 images (36 B) worth keeping, not in the library: folder Urlaub Kroatien 2021","source_kind":"folder","relative_path":"Urlaub Kroatien 2021","file_id":null,"directory_id":5,"files":4,"bytes":36,"kind":"move","recommended":"move","target_path":"/media/library/Fotos/Urlaub Kroatien 2021","library_job_id":2,"reason":"The folder is one whole (uniform): it moves as it is, its name stays. Worth keeping and not in the library: move it there (copy, verify, then remove the original).","note":null,"origin":"rule","state":"approved","sensitive":false,"single_decision":false,"decided_by":"human","decided_at":"2026-11-23T00:35:34.5830481Z","updated_at":"2026-11-23T00:35:34.5830481Z"}
 ```
 
 Read without `sfo`, in Python with nothing but the standard library:
@@ -214,7 +265,8 @@ what the database holds, without the output guard: whatever leaves the machine g
 
 ## Rules for changes
 
-- **Minor version** (`1.0` → `1.1`): new keys, a new line file, a new code in an enumeration. A reader of version 1
+- **Minor version** (`1.0` → `1.1`): new keys, a new line file, a new code in an enumeration. 1.1 (23.11.2026) added
+  `findings.jsonl`, `plan.jsonl` and `findings`, `plan_actions`, `plans` in `job.json`. A reader of version 1
   ignores keys it does not know and treats an unknown code like `unknown`.
 - **Major version** (`1.x` → `2.0`, new folder `schemas/exchange/v2/`): a key that changes meaning or type, a key that
   is removed, a code that is removed or renamed. `sfo import-results` reads only the major version it was built with.

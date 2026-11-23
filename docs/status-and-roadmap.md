@@ -55,9 +55,12 @@ most did not; dated counts in the sections below are measurements of their day._
   `files.jsonl` through the same guard, each line valid against a JSON schema under `schemas/exchange/v1/` (embedded,
   JsonSchema.Net); `sfo import-results` reads judgements of another program in the same line format (origin
   `external`); the answer schemas of the model are published under `schemas/model/`; the views `v_files` and
-  `v_directories` are made again from the enums whenever the database opens. Not yet in the format: findings and
-  plan actions (`findings.jsonl`, `plan.jsonl`), and the `result` parts of the other CLI commands are not described
-  by these schemas.
+  `v_directories` are made again from the enums whenever the database opens. Since 23.11.2026
+  ([#116](https://github.com/crack666/smart_file_organizer/issues/116)), format 1.1: a source also gets
+  `findings.jsonl` and `plan.jsonl` with their schemas; the `result` of `files`, `dirs`, `show` and `summary` has a
+  schema under `schemas/cli/v1/` whose code fields refer to the exchange schemas, and the files of
+  `sfo findings show` and the CSV export write the same codes (they wrote enum names before). (Until 23.11.2026
+  this line said findings, plan actions and the CLI results were not yet described.)
 - Sensitive files ([#9](https://github.com/crack666/smart_file_organizer/issues/9)):
   rules without a model mark files during the scan
   (`SensitiveFileRules`: names, extensions, folders, keywords, header probe

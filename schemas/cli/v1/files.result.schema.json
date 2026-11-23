@@ -1,0 +1,254 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/crack666/smart_file_organizer/schemas/cli/v1/files.result.schema.json",
+  "title": "sfo files --json: result",
+  "description": "The 'result' of 'sfo files --json' (envelope schema_version 1). Generated from the result records; code fields refer to the exchange schemas. docs/cli.md describes every field.",
+  "type": "object",
+  "properties": {
+    "job_id": {
+      "type": "integer"
+    },
+    "total": {
+      "type": "integer"
+    },
+    "limit": {
+      "type": "integer"
+    },
+    "offset": {
+      "type": "integer"
+    },
+    "next_offset": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "file_type": {
+            "oneOf": [
+              {
+                "$ref": "https://github.com/crack666/smart_file_organizer/schemas/exchange/v1/file.schema.json#/$defs/FileType"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "size_bytes": {
+            "type": "integer"
+          },
+          "last_write_time": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "status": {
+            "oneOf": [
+              {
+                "$ref": "https://github.com/crack666/smart_file_organizer/schemas/exchange/v1/file.schema.json#/$defs/FileNodeStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "category": {
+            "oneOf": [
+              {
+                "$ref": "https://github.com/crack666/smart_file_organizer/schemas/exchange/v1/file.schema.json#/$defs/FileCategory"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "category_source": {
+            "oneOf": [
+              {
+                "$ref": "https://github.com/crack666/smart_file_organizer/schemas/exchange/v1/file.schema.json#/$defs/ResultOrigin"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "confidence": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "summary": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sensitive": {
+            "type": "array",
+            "items": {
+              "$ref": "https://github.com/crack666/smart_file_organizer/schemas/exchange/v1/file.schema.json#/$defs/SensitiveMarker"
+            }
+          },
+          "protected": {
+            "type": "boolean"
+          },
+          "dir_verdict": {
+            "oneOf": [
+              {
+                "anyOf": [
+                  {
+                    "$ref": "https://github.com/crack666/smart_file_organizer/schemas/exchange/v1/directory.schema.json#/$defs/DirectoryVerdictKind"
+                  },
+                  {
+                    "enum": [
+                      "error"
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "certainty": {
+            "oneOf": [
+              {
+                "$ref": "https://github.com/crack666/smart_file_organizer/schemas/exchange/v1/file.schema.json#/$defs/ResultCertainty"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "origin": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string"
+              },
+              "source": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "certainty": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "device": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "default": null
+              },
+              "title": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "default": null
+              },
+              "year": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "default": null
+              },
+              "season": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "default": null
+              },
+              "episode": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "default": null
+              },
+              "disputed": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "default": null
+              },
+              "reason": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "default": null
+              }
+            },
+            "required": [
+              "kind",
+              "source",
+              "certainty",
+              "device",
+              "title",
+              "year",
+              "season",
+              "episode",
+              "disputed",
+              "reason"
+            ],
+            "default": null,
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "path",
+          "name",
+          "file_type",
+          "size_bytes",
+          "last_write_time",
+          "status",
+          "category",
+          "category_source",
+          "confidence",
+          "summary",
+          "sensitive",
+          "protected",
+          "dir_verdict",
+          "certainty",
+          "origin"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "job_id",
+    "total",
+    "limit",
+    "offset",
+    "next_offset",
+    "items"
+  ],
+  "additionalProperties": false
+}

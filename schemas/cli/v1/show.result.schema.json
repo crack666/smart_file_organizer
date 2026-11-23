@@ -1,0 +1,974 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/crack666/smart_file_organizer/schemas/cli/v1/show.result.schema.json",
+  "title": "sfo show --json: result",
+  "description": "The 'result' of 'sfo show --json' (envelope schema_version 1). Generated from the result records; code fields refer to the exchange schemas. docs/cli.md describes every field.",
+  "type": "object",
+  "properties": {
+    "job_id": {
+      "type": "integer"
+    },
+    "kind": {
+      "type": "string"
+    },
+    "directory": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "relative_path": {
+          "type": "string"
+        },
+        "depth": {
+          "type": "integer"
+        },
+        "status": {
+          "enum": [
+            "pending",
+            "scanned",
+            "skip",
+            "shallow",
+            "error",
+            "link"
+          ]
+        },
+        "size_bytes": {
+          "type": "integer"
+        },
+        "files": {
+          "type": "integer"
+        },
+        "direct_files": {
+          "type": "integer"
+        },
+        "subdirs": {
+          "type": "integer"
+        },
+        "sensitive_files": {
+          "type": "integer"
+        },
+        "sensitive": {
+          "type": "array",
+          "items": {
+            "$ref": "https://github.com/crack666/smart_file_organizer/schemas/exchange/v1/directory.schema.json#/$defs/SensitiveMarker"
+          }
+        },
+        "sensitive_rule": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sensitive_dirs": {
+          "type": "integer"
+        },
+        "verdict": {
+          "oneOf": [
+            {
+              "$ref": "https://github.com/crack666/smart_file_organizer/schemas/exchange/v1/directory.schema.json#/$defs/DirectoryVerdictKind"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "verdict_source": {
+          "oneOf": [
+            {
+              "$ref": "https://github.com/crack666/smart_file_organizer/schemas/exchange/v1/directory.schema.json#/$defs/VerdictSource"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "verdict_rule": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "retention": {
+          "oneOf": [
+            {
+              "$ref": "https://github.com/crack666/smart_file_organizer/schemas/exchange/v1/directory.schema.json#/$defs/RetentionValue"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "purpose": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "verdict_error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "unit_directory": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "verdict_model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "judged_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "verdict_raw_response": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "profile": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "file_count": {
+              "type": "integer"
+            },
+            "total_bytes": {
+              "type": "integer"
+            },
+            "subdirectory_count": {
+              "type": "integer"
+            },
+            "subdirectories_not_listed": {
+              "type": "boolean"
+            },
+            "extensions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "type": "string"
+                  },
+                  "count": {
+                    "type": "integer"
+                  },
+                  "bytes": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "key",
+                  "count",
+                  "bytes"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "file_types": {
+              "type": "array",
+              "items": {
+                "$ref": "#/properties/directory/properties/profile/properties/extensions/items"
+              }
+            },
+            "oldest_write": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date-time"
+            },
+            "newest_write": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date-time"
+            },
+            "span_days": {
+              "type": "integer"
+            },
+            "name_patterns": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "pattern": {
+                    "type": "string"
+                  },
+                  "count": {
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "pattern",
+                  "count"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "subdirectory_dominant_type": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "unit_markers": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "suggests": {
+              "enum": [
+                "unit",
+                "uniform",
+                "mixed",
+                "empty",
+                "system",
+                "dump",
+                null
+              ]
+            },
+            "suggestion_reason": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "file_count",
+            "total_bytes",
+            "subdirectory_count",
+            "subdirectories_not_listed",
+            "extensions",
+            "file_types",
+            "oldest_write",
+            "newest_write",
+            "span_days",
+            "name_patterns",
+            "subdirectory_dominant_type",
+            "unit_markers",
+            "suggests",
+            "suggestion_reason"
+          ],
+          "additionalProperties": false
+        },
+        "summary": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "summary_error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "analyses": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "phase": {
+                "type": "string"
+              },
+              "summary": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "theme": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "homogeneity": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "dominant_type": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "sampling_strategy": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "sample_size": {
+                "type": "integer"
+              },
+              "anomalies": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {
+                      "type": "string"
+                    },
+                    "reason": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "name",
+                    "reason"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "model_used": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "analyzed_at": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "error": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "phase",
+              "summary",
+              "theme",
+              "homogeneity",
+              "dominant_type",
+              "sampling_strategy",
+              "sample_size",
+              "anomalies",
+              "model_used",
+              "analyzed_at",
+              "error"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "text_withheld": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "path",
+        "relative_path",
+        "depth",
+        "status",
+        "size_bytes",
+        "files",
+        "direct_files",
+        "subdirs",
+        "sensitive_files",
+        "sensitive",
+        "sensitive_rule",
+        "sensitive_dirs",
+        "verdict",
+        "verdict_source",
+        "verdict_rule",
+        "retention",
+        "purpose",
+        "reason",
+        "verdict_error",
+        "unit_directory",
+        "verdict_model",
+        "judged_at",
+        "verdict_raw_response",
+        "profile",
+        "summary",
+        "summary_error",
+        "analyses",
+        "text_withheld"
+      ],
+      "additionalProperties": false
+    },
+    "file": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "relative_dir": {
+          "type": "string"
+        },
+        "extension": {
+          "type": "string"
+        },
+        "file_type": {
+          "oneOf": [
+            {
+              "$ref": "https://github.com/crack666/smart_file_organizer/schemas/exchange/v1/file.schema.json#/$defs/FileType"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "size_bytes": {
+          "type": "integer"
+        },
+        "last_write_time": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "status": {
+          "oneOf": [
+            {
+              "$ref": "https://github.com/crack666/smart_file_organizer/schemas/exchange/v1/file.schema.json#/$defs/FileNodeStatus"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "category": {
+          "oneOf": [
+            {
+              "$ref": "https://github.com/crack666/smart_file_organizer/schemas/exchange/v1/file.schema.json#/$defs/FileCategory"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "category_source": {
+          "oneOf": [
+            {
+              "$ref": "https://github.com/crack666/smart_file_organizer/schemas/exchange/v1/file.schema.json#/$defs/ResultOrigin"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "importance": {
+          "oneOf": [
+            {
+              "$ref": "https://github.com/crack666/smart_file_organizer/schemas/exchange/v1/file.schema.json#/$defs/Importance"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "confidence": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "summary": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "suggested_target": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "model_used": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "analyzed_at": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time"
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "raw_response": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sensitive": {
+          "type": "array",
+          "items": {
+            "$ref": "https://github.com/crack666/smart_file_organizer/schemas/exchange/v1/file.schema.json#/$defs/SensitiveMarker"
+          }
+        },
+        "sensitive_rule": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "protected": {
+          "type": "boolean"
+        },
+        "dir_verdict": {
+          "oneOf": [
+            {
+              "anyOf": [
+                {
+                  "$ref": "https://github.com/crack666/smart_file_organizer/schemas/exchange/v1/directory.schema.json#/$defs/DirectoryVerdictKind"
+                },
+                {
+                  "enum": [
+                    "error"
+                  ]
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "dir_retention": {
+          "oneOf": [
+            {
+              "$ref": "https://github.com/crack666/smart_file_organizer/schemas/exchange/v1/directory.schema.json#/$defs/RetentionValue"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "certainty": {
+          "oneOf": [
+            {
+              "$ref": "https://github.com/crack666/smart_file_organizer/schemas/exchange/v1/file.schema.json#/$defs/ResultCertainty"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "attempts": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "previous_error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "checks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "reasons": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "outcome": {
+                "type": "string"
+              },
+              "rule_note": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "first": {
+                "type": "object",
+                "properties": {
+                  "category": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "importance": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "confidence": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "keep_hint": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "summary": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "suggested_target": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "keep_reason": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "model_used": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "error": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "raw_response": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "category",
+                  "importance",
+                  "confidence",
+                  "keep_hint",
+                  "summary",
+                  "suggested_target",
+                  "keep_reason",
+                  "model_used",
+                  "error",
+                  "raw_response"
+                ],
+                "additionalProperties": false
+              },
+              "second": {
+                "type": [
+                  "object",
+                  "null"
+                ],
+                "properties": {
+                  "category": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "importance": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "confidence": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "keep_hint": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "summary": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "suggested_target": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "keep_reason": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "model_used": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "error": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "raw_response": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "category",
+                  "importance",
+                  "confidence",
+                  "keep_hint",
+                  "summary",
+                  "suggested_target",
+                  "keep_reason",
+                  "model_used",
+                  "error",
+                  "raw_response"
+                ],
+                "additionalProperties": false
+              },
+              "checked_at": {
+                "type": "string",
+                "format": "date-time"
+              }
+            },
+            "required": [
+              "reasons",
+              "outcome",
+              "rule_note",
+              "first",
+              "second",
+              "checked_at"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "origin": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "kind": {
+              "type": "string"
+            },
+            "source": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "certainty": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "device": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            },
+            "title": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            },
+            "year": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "default": null
+            },
+            "season": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "default": null
+            },
+            "episode": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "default": null
+            },
+            "disputed": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            },
+            "reason": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "default": null
+            }
+          },
+          "required": [
+            "kind",
+            "source",
+            "certainty",
+            "device",
+            "title",
+            "year",
+            "season",
+            "episode",
+            "disputed",
+            "reason"
+          ],
+          "default": null,
+          "additionalProperties": false
+        },
+        "facts": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "object",
+            "properties": {
+              "fact": {
+                "$ref": "https://github.com/crack666/smart_file_organizer/schemas/exchange/v1/file.schema.json#/$defs/FileFactKey"
+              },
+              "value": {
+                "type": "string"
+              },
+              "source": {
+                "$ref": "https://github.com/crack666/smart_file_organizer/schemas/exchange/v1/file.schema.json#/$defs/FactSource"
+              },
+              "certainty": {
+                "oneOf": [
+                  {
+                    "$ref": "https://github.com/crack666/smart_file_organizer/schemas/exchange/v1/file.schema.json#/$defs/ResultCertainty"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "fact",
+              "value",
+              "source",
+              "certainty"
+            ],
+            "additionalProperties": false
+          },
+          "default": null
+        }
+      },
+      "required": [
+        "path",
+        "name",
+        "relative_dir",
+        "extension",
+        "file_type",
+        "size_bytes",
+        "last_write_time",
+        "status",
+        "category",
+        "category_source",
+        "importance",
+        "confidence",
+        "summary",
+        "suggested_target",
+        "model_used",
+        "analyzed_at",
+        "error",
+        "raw_response",
+        "sensitive",
+        "sensitive_rule",
+        "protected",
+        "dir_verdict",
+        "dir_retention",
+        "certainty",
+        "attempts",
+        "previous_error",
+        "checks",
+        "origin",
+        "facts"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "job_id",
+    "kind",
+    "directory",
+    "file"
+  ],
+  "additionalProperties": false
+}

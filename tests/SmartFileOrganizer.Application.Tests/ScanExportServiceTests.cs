@@ -111,7 +111,7 @@ public class ScanExportServiceTests : IDisposable
         ScanExportService.WriteRow(sw, MakeClassifiedFile());
 
         var fields = sw.ToString().TrimEnd('\r', '\n').Split(',');
-        Assert.Equal(nameof(FileCategory.Photo), fields[ColumnIndex("category")]);
+        Assert.Equal("photo", fields[ColumnIndex("category")]);
         Assert.Equal("model", fields[ColumnIndex("category_source")]);
     }
 
@@ -130,7 +130,7 @@ public class ScanExportServiceTests : IDisposable
         ScanExportService.WriteRow(sw, file);
 
         var fields = sw.ToString().TrimEnd('\r', '\n').Split(',');
-        Assert.Equal(nameof(FileCategory.TrashCandidate), fields[ColumnIndex("category")]);
+        Assert.Equal("trash_candidate", fields[ColumnIndex("category")]);
         Assert.Equal("human", fields[ColumnIndex("category_source")]);
         // The column stays for the sheets that address it by position, but is always empty (deprecated, issue 74).
         Assert.Equal(string.Empty, fields[ColumnIndex("suggested_target")]);

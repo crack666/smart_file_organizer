@@ -1,0 +1,200 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/crack666/smart_file_organizer/schemas/cli/v1/dirs.result.schema.json",
+  "title": "sfo dirs --json: result",
+  "description": "The 'result' of 'sfo dirs --json' (envelope schema_version 1). Generated from the result records; code fields refer to the exchange schemas. docs/cli.md describes every field.",
+  "type": "object",
+  "properties": {
+    "job_id": {
+      "type": "integer"
+    },
+    "total": {
+      "type": "integer"
+    },
+    "limit": {
+      "type": "integer"
+    },
+    "offset": {
+      "type": "integer"
+    },
+    "next_offset": {
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "type": "string"
+          },
+          "relative_path": {
+            "type": "string"
+          },
+          "depth": {
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "scanned",
+              "skip",
+              "shallow",
+              "error",
+              "link"
+            ]
+          },
+          "size_bytes": {
+            "type": "integer"
+          },
+          "files": {
+            "type": "integer"
+          },
+          "direct_files": {
+            "type": "integer"
+          },
+          "subdirs": {
+            "type": "integer"
+          },
+          "verdict": {
+            "oneOf": [
+              {
+                "anyOf": [
+                  {
+                    "$ref": "https://github.com/crack666/smart_file_organizer/schemas/exchange/v1/directory.schema.json#/$defs/DirectoryVerdictKind"
+                  },
+                  {
+                    "enum": [
+                      "error"
+                    ]
+                  }
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "verdict_source": {
+            "oneOf": [
+              {
+                "$ref": "https://github.com/crack666/smart_file_organizer/schemas/exchange/v1/directory.schema.json#/$defs/VerdictSource"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "retention": {
+            "oneOf": [
+              {
+                "$ref": "https://github.com/crack666/smart_file_organizer/schemas/exchange/v1/directory.schema.json#/$defs/RetentionValue"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sensitive_files": {
+            "type": "integer"
+          },
+          "sensitive": {
+            "type": "array",
+            "items": {
+              "$ref": "https://github.com/crack666/smart_file_organizer/schemas/exchange/v1/directory.schema.json#/$defs/SensitiveMarker"
+            }
+          },
+          "sensitive_rule": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "sensitive_dirs": {
+            "type": "integer"
+          },
+          "purpose": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "summary": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "text_withheld": {
+            "type": "boolean"
+          },
+          "scan_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "link_kind": {
+            "oneOf": [
+              {
+                "$ref": "https://github.com/crack666/smart_file_organizer/schemas/exchange/v1/directory.schema.json#/$defs/LinkKind"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "link_target": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "error_cause": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "path",
+          "relative_path",
+          "depth",
+          "status",
+          "size_bytes",
+          "files",
+          "direct_files",
+          "subdirs",
+          "verdict",
+          "verdict_source",
+          "retention",
+          "sensitive_files",
+          "sensitive",
+          "sensitive_rule",
+          "sensitive_dirs",
+          "purpose",
+          "summary",
+          "text_withheld",
+          "scan_reason",
+          "link_kind",
+          "link_target",
+          "error_cause"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "job_id",
+    "total",
+    "limit",
+    "offset",
+    "next_offset",
+    "items"
+  ],
+  "additionalProperties": false
+}

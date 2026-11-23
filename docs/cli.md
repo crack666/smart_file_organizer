@@ -798,6 +798,17 @@ as listed, or a path relative to the job root (`photos/2024`, `.` for the root).
 before 12.11.2026 (`gemischt`, `behalten`) are no longer accepted. `sfo dirs --help` always lists
 the current codes.
 
+**Schemas of the results.** The `result` of `files`, `dirs`, `show` and `summary` is described by a JSON schema each
+under [`schemas/cli/v1/`](../schemas/cli/v1/) (`files.result.schema.json`, ...; `v1` is the envelope's
+`schema_version`), since 23.11.2026 (https://github.com/crack666/smart_file_organizer/issues/116). Every object lists
+all its keys as required and allows no others. File type, status, category, importance, certainty, markers, verdict,
+retention and fact codes refer to the definitions of the exchange schemas ([data-format.md](data-format.md)), so a
+file reads the same in `sfo files --json` and in `files.jsonl`; the count keys of `summary` (`by_category`, ...) are
+those codes too, plus `unclassified`, `none` and `error` where this page names them. The schemas are written from
+the result records (`CliSchemas`); `CliSchemaTests` fails when a record and its file differ (write them again with
+`SFO_WRITE_SCHEMAS=1 dotnet test --filter CliSchemaTests`), and a test checks real outputs against them. Times in
+the CLI have millisecond precision; free-text fields stay free text.
+
 **Words in the text output.** Without `--json`, verdict, retention, verdict source, result origin
 and sensitive markers are shown as words for people, in German when the summary language in the
 settings is German (`"SummaryLanguage": "Deutsch"`), in English otherwise (`mixed` / `gemischt`,
@@ -1069,6 +1080,9 @@ A path that is neither a directory nor a file of the job fails with `path_not_fo
 Writes every file of the job as CSV (UTF-8 with BOM, the columns of `ScanExportService`) and
 nothing else. An existing file is replaced. `--include-sensitive` as above. The column `suggested_target`
 stays for sheets that address columns by position and is always empty (deprecated, see `sfo show`).
+File type, status, category and importance are the codes of the exchange format (`document`, `ai_analyzed`,
+`review_needed`, `medium`); until 23.11.2026 the CSV, like the files of `sfo findings show`, wrote the enum names
+(`Document`, `AiAnalyzed`, `ReviewNeeded`, `Medium`) (https://github.com/crack666/smart_file_organizer/issues/116).
 
 ```json
 { "job_id": 7, "path": "/home/me/usb-stick.csv", "rows": 1830, "include_sensitive": false }
@@ -1080,15 +1094,17 @@ Errors: `job_not_found` (1), `path_not_found` (1, the target folder does not exi
 ### `sfo export <job> --format jsonl --out <folder>`
 
 Writes the job in the open exchange format ([data-format.md](data-format.md)): `job.json`, `directories.jsonl` and
-`files.jsonl` in `<folder>`, one directory or file per line with verdict, result, facts and comparison state, each
-line valid against its schema under `schemas/exchange/v1/`. The folder is created when its parent exists; files of
+`files.jsonl` in `<folder>`, one directory or file per line with verdict, result, facts and comparison state, and
+for a source also `findings.jsonl` (every finding in every state, with the ids of its files and folder) and
+`plan.jsonl` (every action of every plan of the job, with its state), each line valid against its schema under
+`schemas/exchange/v1/` (format 1.1 since 23.11.2026; 1.0 had no findings and plan). The folder is created when its parent exists; files of
 the same names are replaced, nothing else in it is touched. `--out` alone also selects `jsonl`. Every file and
 folder passes the same guard as `sfo files` and `sfo dirs` (`--include-sensitive` as above).
 
 ```json
-{ "job_id": 7, "format": "sfo-exchange", "format_version": "1.0", "path": "/home/me/export",
-  "files": ["job.json", "directories.jsonl", "files.jsonl"], "directories": 212, "file_lines": 1830,
-  "include_sensitive": false }
+{ "job_id": 7, "format": "sfo-exchange", "format_version": "1.1", "path": "/home/me/export",
+  "files": ["job.json", "directories.jsonl", "files.jsonl", "findings.jsonl", "plan.jsonl"], "directories": 212,
+  "file_lines": 1830, "include_sensitive": false, "findings": 25, "plan_actions": 61 }
 ```
 
 Errors: `usage` (2, `--format jsonl` without `--out`, or `--csv` and `--out` together), `job_not_found` (1),

@@ -1,4 +1,5 @@
 using System.Text.Json;
+using SmartFileOrganizer.Application.Exchange;
 using SmartFileOrganizer.Application.Sensitivity;
 using SmartFileOrganizer.Domain.Enums;
 using SmartFileOrganizer.Domain.Interfaces;
@@ -378,7 +379,7 @@ public class JobReadService
 
         if (query.Categories.Count > 0)
         {
-            var category = Enum.TryParse<FileCategory>(record.Category, out var c) ? c : FileCategory.Unknown;
+            var category = ExchangeFormat.TryParseSnake<FileCategory>(record.Category, out var c) ? c : FileCategory.Unknown;
             if (!query.Categories.Contains(category))
                 return false;
         }

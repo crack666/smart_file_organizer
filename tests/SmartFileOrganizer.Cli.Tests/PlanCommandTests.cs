@@ -11,7 +11,7 @@ namespace SmartFileOrganizer.Cli.Tests;
 /// generated library. The source is analysed with scripted answers (<c>sfo eval --stub</c>); no model runs and no file
 /// is moved. Every name and every file is invented; the "profile" is a folder of the test, named as protected place.
 /// </summary>
-public class PlanCommandTests : IDisposable
+public partial class PlanCommandTests : IDisposable
 {
     private readonly string _dir;
     private readonly string _dbPath;
