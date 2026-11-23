@@ -1505,7 +1505,7 @@ it the facts, [`sfo findings place`](#sfo-findings-place-job-key) records its de
     { "rank": 1, "key": "not_backed_up-880444df56", "kind": "not_backed_up", "certainty": "likely",
       "section": "sure", "state": "open",
       "title": "300 images (60 KB) worth keeping, not in the library: loose files in Neuer Ordner",
-      "reason": "300 images of the 300 in Neuer Ordner are worth keeping by the model, and the comparison with library job 2 on 2026-11-12 found no file with the same content.",
+      "reason": "300 images of the 300 in Neuer Ordner are worth keeping by the model, and the comparison with library job 2 (mostly photos and videos) on 2026-11-12 found no file with the same content.",
       "path": "...", "relative_path": "Neuer Ordner", "bundle_id": null, "bundle_kind": null,
       "files": 300, "bytes": 61200, "group": "images", "by_file_type": { "image": 300 },
       "period": { "from": "2018-08-05T10:00:00", "to": "2018-08-05T14:59:00", "time_source": "file_name" },
@@ -1529,6 +1529,11 @@ it the facts, [`sfo findings place`](#sfo-findings-place-job-key) records its de
   `redundant_files`, `redundant_bytes`, `directories` (at most 10), `directories_total`, `keep` and `scope`
   (`files`, or `folders` when a whole program or system folder exists twice; `directories` are then the copied
   folders). The action keeps the copy in `keep`: `delete_source` for the others with a library, `leave` without.
+- The `reason` of a `not_backed_up` finding names each library compared with and its kind, from the file types of its
+  scan: `mostly documents`, `mostly photos and videos`, `mostly audio`, `mostly archives`, `mostly programs and code`,
+  `mostly other files` or `empty` (since 23.11.2026, [#71](https://github.com/crack666/smart_file_organizer/issues/71)).
+  When none of them holds the finding's kind of file (under 10 % of its files), a note says so and names the
+  `sfo compare` with one more `--against`: photos are new in a pure document archive by necessity.
 - `group` (for `not_backed_up` and `in_noise`): the kind of files, one finding per place and kind
   ([glossary](glossary.md#kind-of-files-of-a-finding-group)); `null` for the other kinds.
 - `target`: `path` (the target folder), `relative_path` (below the library root), `certainty`, `reason`,
@@ -2428,7 +2433,7 @@ UTC with a trailing `Z`.
 one JSON object with `schema_version` and `type`:
 
 ```json
-{"schema_version":1,"type":"progress","phase":"scan","processed":120,"total":480,"errors":0,"current_path":"/media/usb-stick/photos","message":null,"rate_per_minute":null,"remaining_seconds":null}
+{"schema_version":1,"type":"progress","phase":"scan","processed":120,"total":480,"errors":0,"current_path":"/media/usb-stick/photos","message":null,"rate_per_minute":null,"remaining_seconds":null,"remaining_seconds_by_calls":null}
 {"schema_version":1,"type":"log","level":"warning","category":"ClassificationService","message":"...","exception":null}
 ```
 
@@ -2436,7 +2441,13 @@ one JSON object with `schema_version` and `type`:
 one line per phase every 500 ms, plus the final line of a phase. `rate_per_minute` and `remaining_seconds` are
 filled after the first 5 seconds of a phase: the rate counts only what this run got through since its first line
 (files counted as done before, such as those skipped by rule, are left out), the time left rests on the open rest.
-Text lines then end in `, 277 open, 12.5/min, about 23 min left`. `sfo analyze` also writes `"type":"wait"`
+Text lines then end in `, 277 open, 12.5/min, about 23 min left`. In `sfo analyze`,
+`remaining_seconds_by_calls` is the time left from the model calls of this run, known after the first call of a phase
+(since 23.11.2026, [#71](https://github.com/crack666/smart_file_organizer/issues/71)): the server time of the calls
+per item done so far (second checks count with their file, items decided by rule add none), times the open items,
+divided by `--parallel`. It leaves out reading files and waiting for the server, so it can be lower than
+`remaining_seconds`; it is `null` before the first call, in other commands and when the server reports no times.
+Text lines add `, about 20 min left by model calls`. `sfo analyze` also writes `"type":"wait"`
 lines when it starts or stops waiting for the model server (see `sfo analyze`); they are never throttled.
 
 **Exit codes.**

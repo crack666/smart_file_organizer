@@ -113,6 +113,9 @@ public static class AnalyzeCommand
                 ollama.MaxParallelRequests = n;
 
             var phases = ParsePhases(ctx.ParseResult.GetValue(phase));
+            var meter = services.GetRequiredService<ModelUsageMeter>();
+            var slots = Math.Clamp(ollama.MaxParallelRequests, 1, 8);
+            ctx.Progress.RemainingByCalls = (name, done, open) => RemainingByCalls(meter.Snapshot(), name, done, open, slots);
             var progress = new SynchronousProgress<AiPhaseProgress>(p => ctx.Progress.Report(
                 PhaseName(p.Phase), p.Progress.ProcessedFiles, p.Progress.TotalFiles, p.Progress.ErrorCount,
                 p.Progress.CurrentPath, p.Progress.StatusText));
@@ -160,6 +163,30 @@ public static class AnalyzeCommand
         });
 
         return command;
+    }
+
+    /// <summary>
+    /// Seconds left in a phase from the model calls of this run (https://github.com/crack666/smart_file_organizer/issues/71):
+    /// the server time its calls took per item done so far (a second check counts with its file, an item decided by rule
+    /// adds none), times the open items, spread over the parallel calls. Null before the first call of the phase, for a
+    /// phase without model calls, and when the server reports no times. Leaves out reading the files and waiting for the
+    /// server; the rate in the same line covers those once it has its first seconds.
+    /// </summary>
+    public static long? RemainingByCalls(IReadOnlyList<ModelCallUsage> calls, string phase, long done, long open, int parallel)
+    {
+        string[] kinds = phase switch
+        {
+            "pre_assessment" => [ModelCallKinds.PreAssessment],
+            "classification" => [ModelCallKinds.Classification, ModelCallKinds.SecondCheck],
+            "summary" => [ModelCallKinds.Summary],
+            _ => []
+        };
+        if (done <= 0 || open <= 0 || kinds.Length == 0)
+            return null;
+        var seconds = calls.Where(c => kinds.Contains(c.Kind, StringComparer.Ordinal)).Sum(c => c.Calls * c.MeanSeconds);
+        if (seconds <= 0)
+            return null;
+        return (long)Math.Ceiling(seconds / done * open / Math.Max(1, parallel));
     }
 
     public static AiPhases ParsePhases(string[]? names)
