@@ -1319,13 +1319,20 @@ public class OllamaService : IOllamaService
         var sent = Math.Clamp(requested, 1, 8);
         if (sent <= 1)
             return 1;
-        var one = await TimeProbesAsync(1, ct);
-        if (one is null)
+        // The first call carries one-off costs (connection setup, JIT, a cold model); timed alone it looks slow,
+        // and a queue of `sent` warm calls then fits under 1.3 times it and reads as full parallelism.
+        // The shorter of two single calls is the warm one.
+        var first = await TimeProbesAsync(1, ct);
+        if (first is null)
             return null;
+        var second = await TimeProbesAsync(1, ct);
+        if (second is null)
+            return null;
+        var one = first.Value < second.Value ? first.Value : second.Value;
         var wall = await TimeProbesAsync(sent, ct);
         if (wall is null)
             return null;
-        return ModelWire.EstimateSlots(sent, one.Value, wall.Value);
+        return ModelWire.EstimateSlots(sent, one, wall.Value);
     }
 
     private async Task<TimeSpan?> TimeProbesAsync(int count, CancellationToken ct)
