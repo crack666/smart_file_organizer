@@ -310,8 +310,8 @@ public sealed partial class LibraryTargetService
         _facts is null ? new Dictionary<long, IReadOnlyList<FileFact>>() : await _facts.GetByJobAsync(library.Id, ct);
 
     /// <summary>
-    /// Kind and origin of the videos in a folder and below, from the library's stored facts. A marked file adds what the
-    /// disclosure shows of it.
+    /// Kind and origin of the videos in a folder and below, with the origin of its images and the kind of its audio files,
+    /// from the library's stored facts. A marked file adds what the disclosure shows of it.
     /// </summary>
     private Media.VideoOriginMix? FolderOrigin(LibraryMap map, LibraryMapEntry entry, IReadOnlyDictionary<long, IReadOnlyList<FileFact>> facts)
     {
@@ -324,7 +324,8 @@ public sealed partial class LibraryTargetService
         {
             foreach (var file in node.Files)
             {
-                if (file.FileType != (int)FileType.Video || !facts.TryGetValue(file.Id, out var list)) continue;
+                if (file.FileType is not ((int)FileType.Video or (int)FileType.Image or (int)FileType.Audio)
+                    || !facts.TryGetValue(file.Id, out var list)) continue;
                 var markers = markedFiles.GetValueOrDefault(file.Id);
                 if (_disclosure.ShowsClassification(markers))
                     shown.Add(_disclosure.ShownFacts(markers, list));

@@ -93,6 +93,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton(_ => new VideoFrameExtractor());
         // Kind and origin of a video from container, name and companions, without a model (Issue 103).
         services.TryAddSingleton<IVideoOriginReader, VideoOriginReader>();
+        // Origin of an image and kind of an audio file, for sfo facts refresh (Issue 103).
+        services.TryAddSingleton<IMediaOriginReader, MediaOriginReader>();
         services.AddSingleton<IClassificationInputPreparer>(sp => new AiClassificationInputPreparer(
             sp.GetRequiredService<FileContentExtractor>(),
             sp.GetRequiredService<OllamaOptions>(),

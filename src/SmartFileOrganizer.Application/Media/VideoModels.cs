@@ -164,6 +164,19 @@ public interface IVideoOriginReader
     VideoOriginReading? Read(FileNode file);
 }
 
+/// <summary>
+/// Reads where an image comes from (<c>image_origin</c>) or what an audio file is (<c>audio_kind</c>) from its metadata,
+/// name and folder, without a model (https://github.com/crack666/smart_file_organizer/issues/103).
+/// </summary>
+public interface IMediaOriginReader
+{
+    /// <summary>The reading of an image or audio file; null when it is neither or its metadata cannot be read.</summary>
+    MediaOriginReading? Read(FileNode file);
+}
+
+/// <summary>One reading of an image or audio file: the fact the rules decided, or null when they cannot tell.</summary>
+public sealed record MediaOriginReading(FileFact? Fact);
+
 /// <summary>One reading of a video: what the container and the companions said, and what the rules decided.</summary>
 public sealed record VideoOriginReading(VideoContainerInfo? Container, VideoCompanions Companions, VideoOrigin Origin)
 {

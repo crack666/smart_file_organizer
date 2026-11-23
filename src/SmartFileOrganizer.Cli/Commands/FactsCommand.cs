@@ -8,8 +8,8 @@ namespace SmartFileOrganizer.Cli.Commands;
 
 /// <summary>
 /// <c>sfo facts refresh &lt;job&gt;</c>: reads the video facts of a stored job again from container, name and companion
-/// files (https://github.com/crack666/smart_file_organizer/issues/103). Never calls the model server and needs no GPU;
-/// the analysis of the job stays as it is.
+/// files (https://github.com/crack666/smart_file_organizer/issues/103), and since 23.11.2026 the origin of its images and
+/// the kind of its audio files. Never calls the model server and needs no GPU; the analysis of the job stays as it is.
 /// </summary>
 public static class FactsCommand
 {
@@ -24,7 +24,8 @@ public static class FactsCommand
     {
         var job = JobArguments.Create("Job id (see sfo jobs): a source or a library scan.");
         var command = new Command("refresh",
-            "Read video kind, device, title, year, season and episode again from container, name and companion files. No model call. " +
+            "Read video kind, device, title, year, season and episode again from container, name and companion files, " +
+            "and the origin of images (image_origin) and the kind of audio files (audio_kind). No model call. " +
             "With --verbose, each video with the evidence the rules looked at (field, value, effect).") { job };
         CommandRunner.SetHandler(command, host, globals, async (ctx, ct) =>
         {
@@ -49,7 +50,8 @@ public static class FactsCommand
         var text = $"job {result.JobId}: {result.Read} of {result.Videos} video(s) read, {result.Missing} missing" +
             (result.Kinds.Count == 0 ? string.Empty : " - " + string.Join(", ", result.Kinds.Select(Kind))) +
             (result.ModelKindsKept > 0 ? $"; {result.ModelKindsKept} kind(s) kept from the model" : string.Empty) +
-            (result.Disputed > 0 ? $"; {result.Disputed} disputed" : string.Empty);
+            (result.Disputed > 0 ? $"; {result.Disputed} disputed" : string.Empty) +
+            Media("image(s)", result.Images) + Media("audio file(s)", result.Audio);
         if (result.Files is null) return text;
 
         var sb = new System.Text.StringBuilder(text);
@@ -64,4 +66,10 @@ public static class FactsCommand
         }
         return sb.ToString();
     }
+
+    private static string Media(string what, MediaFactRefresh? m) =>
+        m is null || m.Files == 0 ? string.Empty
+            : $"; {m.Read} of {m.Files} {what} read, {m.Missing} missing" +
+              (m.Kinds.Count == 0 ? string.Empty : " - " + string.Join(", ", m.Kinds.Select(k => $"{k.Key} {k.Value}"))) +
+              (m.Open > 0 ? $", {m.Open} open" : string.Empty);
 }
