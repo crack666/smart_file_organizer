@@ -54,7 +54,13 @@
                     ToolTip.Tip="Pläne der geöffneten Datenbank durchsehen, bestätigen und ausführen"
                     Command="{Binding OpenPlanCommand}"
                     CommandParameter="{x:Null}"
-                    Margin="0,0,12,0" />
+                    Margin="0,0,4,0" />
+
+                <Button Content="CSV exportieren…"
+                        Command="{Binding ExportCsvCommand}"
+                        IsVisible="{Binding IsBrowserVisible}"
+                        ToolTip.Tip="Alle Dateien des Jobs als CSV, wie sfo export"
+                        Margin="0,0,12,0" />
 
                 <!-- Progress -->
                 <StackPanel Orientation="Vertical" VerticalAlignment="Center">
@@ -155,6 +161,10 @@
                 <TextBlock Text="{Binding OllamaStatusText}"
                            FontSize="11"
                            TextTrimming="CharacterEllipsis" />
+                <TextBlock Text="{Binding ExportStatusText}"
+                           FontSize="11"
+                           TextTrimming="CharacterEllipsis"
+                           IsVisible="{Binding ExportStatusText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
                 <TextBlock Text="{Binding ScanProgress.CurrentPath}"
                            FontSize="11"
                            TextTrimming="CharacterEllipsis"
@@ -277,7 +287,7 @@
         </Grid>
 
         <!-- Browser (tree + table + detail) -->
-        <Grid ColumnDefinitions="260,4,*" Background="#1E1E1E"
+        <Grid ColumnDefinitions="300,4,*" Background="#1E1E1E"
               IsVisible="{Binding IsBrowserVisible}">
 
             <!-- Left: Folder Tree -->
@@ -312,8 +322,28 @@
                                                           Command="{Binding RescanDirectoryCommand}" />
                                             </ContextMenu>
                                         </StackPanel.ContextMenu>
-                                        <TextBlock Text="📁" FontSize="12"/>
-                                        <TextBlock Text="{Binding DisplayName}" />
+                                        <TextBlock Text="📁" FontSize="12" VerticalAlignment="Top" Margin="0,1,0,0" />
+                                        <StackPanel Spacing="2" ToolTip.Tip="{Binding FactsToolTip}">
+                                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                                <TextBlock Text="{Binding DisplayName}" />
+                                                <TextBlock Text="{Binding SizeText}" FontSize="11" Opacity="0.55" VerticalAlignment="Center" />
+                                            </StackPanel>
+                                            <StackPanel Orientation="Horizontal" Spacing="4" IsVisible="{Binding HasFacts}">
+                                                <Border Background="{Binding VerdictColor}" CornerRadius="3" Padding="5,0"
+                                                        IsVisible="{Binding HasVerdict}">
+                                                    <TextBlock Text="{Binding VerdictLabel}" FontSize="10" Foreground="White" />
+                                                </Border>
+                                                <TextBlock Text="✎" FontSize="10" Foreground="#E8A838" IsVisible="{Binding IsOverridden}"
+                                                           ToolTip.Tip="Urteil von Hand gesetzt" />
+                                                <Border BorderBrush="{Binding RetentionColor}" BorderThickness="1" CornerRadius="3" Padding="4,0"
+                                                        IsVisible="{Binding HasRetention}">
+                                                    <TextBlock Text="{Binding RetentionLabel}" FontSize="10" Foreground="#DDDDDD" />
+                                                </Border>
+                                                <Border Background="#B3261E" CornerRadius="3" Padding="4,0" IsVisible="{Binding HasSensitive}">
+                                                    <TextBlock Text="{Binding SensitiveText}" FontSize="10" Foreground="White" />
+                                                </Border>
+                                            </StackPanel>
+                                        </StackPanel>
                                     </StackPanel>
                                 </TreeDataTemplate>
                             </TreeView.ItemTemplate>
@@ -329,24 +359,149 @@
 
             <!-- Right: File Table + Detail panel -->
             <Grid Grid.Column="2"
-                RowDefinitions="Auto,3*,4,2*"
+                RowDefinitions="Auto,Auto,Auto,3*,4,2*"
                 Background="#252526">
 
-                <!-- Directory AI summary banner -->
+                <!-- Folder banner: verdict, reason, purpose, own verdict (https://github.com/crack666/smart_file_organizer/issues/14) -->
                 <Border Grid.Row="0"
-                        Background="#1A2A1A"
-                        BorderBrush="#3A5A3A"
+                        Background="#1F2328"
+                        BorderBrush="#3E3E42"
                         BorderThickness="0,0,0,1"
-                        Padding="10,5"
-                        IsVisible="{Binding SelectedDirSummary, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
-                    <TextBlock Text="{Binding SelectedDirSummary}"
-                               Foreground="#90C090"
-                               FontSize="12"
-                               TextWrapping="Wrap" />
+                        Padding="10,6"
+                        IsVisible="{Binding Directory.IsVisible}">
+                    <ScrollViewer MaxHeight="230" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                        <StackPanel Spacing="3">
+                            <DockPanel>
+                                <Button DockPanel.Dock="Right"
+                                        Content="Urteil ändern…"
+                                        Command="{Binding Directory.ToggleEditCommand}"
+                                        FontSize="11" Padding="8,2" VerticalAlignment="Center" />
+                                <WrapPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                    <TextBlock Text="{Binding Directory.Title}" FontWeight="SemiBold" FontSize="14" Margin="0,0,8,0" VerticalAlignment="Center" />
+                                    <Border Background="{Binding Directory.VerdictColor}" CornerRadius="3" Padding="6,1" Margin="0,0,6,0"
+                                            IsVisible="{Binding Directory.HasVerdict}" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding Directory.VerdictLabel}" FontSize="11" Foreground="White" />
+                                    </Border>
+                                    <TextBlock Text="{Binding Directory.SourceText}" FontSize="11" Opacity="0.7" Margin="0,0,8,0" VerticalAlignment="Center" />
+                                    <Border BorderBrush="{Binding Directory.RetentionColor}" BorderThickness="1" CornerRadius="3" Padding="5,0" Margin="0,0,8,0"
+                                            IsVisible="{Binding Directory.HasRetention}" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding Directory.RetentionLabel}" FontSize="11" />
+                                    </Border>
+                                    <TextBlock Text="{Binding Directory.SizeText}" FontSize="11" Opacity="0.7" Margin="0,0,8,0" VerticalAlignment="Center" />
+                                    <Border Background="#B3261E" CornerRadius="3" Padding="5,0" VerticalAlignment="Center"
+                                            IsVisible="{Binding Directory.SensitiveText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                                        <TextBlock Text="{Binding Directory.SensitiveText}" FontSize="11" Foreground="White" />
+                                    </Border>
+                                </WrapPanel>
+                            </DockPanel>
+                            <TextBlock TextWrapping="Wrap" FontSize="12"
+                                       IsVisible="{Binding Directory.Purpose, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                                <Run Text="Zweck: " FontWeight="SemiBold" /><Run Text="{Binding Directory.Purpose}" />
+                            </TextBlock>
+                            <TextBlock TextWrapping="Wrap" FontSize="12"
+                                       IsVisible="{Binding Directory.Reason, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                                <Run Text="Begründung: " FontWeight="SemiBold" /><Run Text="{Binding Directory.Reason}" />
+                            </TextBlock>
+                            <TextBlock Text="{Binding Directory.EscalationText}" TextWrapping="Wrap" FontSize="12" Foreground="#E8A838"
+                                       IsVisible="{Binding Directory.EscalationText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                            <TextBlock Text="{Binding Directory.OverrideText}" TextWrapping="Wrap" FontSize="11" Foreground="#E8A838"
+                                       IsVisible="{Binding Directory.IsOverridden}" />
+                            <TextBlock Text="{Binding Directory.ErrorText}" TextWrapping="Wrap" FontSize="11" Foreground="#FF7B72"
+                                       IsVisible="{Binding Directory.ErrorText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                            <TextBlock Text="{Binding Directory.SkipText}" TextWrapping="Wrap" FontSize="11" Opacity="0.8"
+                                       IsVisible="{Binding Directory.SkipText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                            <TextBlock Text="{Binding Directory.Summary}" TextWrapping="Wrap" FontSize="12" Foreground="#90C090"
+                                       IsVisible="{Binding Directory.Summary, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+
+                            <!-- Own verdict -->
+                            <Border IsVisible="{Binding Directory.IsEditing}" Background="#2A2D33" CornerRadius="4" Padding="8,6" Margin="0,4,0,0">
+                                <StackPanel Spacing="6">
+                                    <WrapPanel Orientation="Horizontal">
+                                        <TextBlock Text="Urteil" FontSize="11" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                        <ComboBox ItemsSource="{Binding Directory.VerdictOptions}"
+                                                  SelectedItem="{Binding Directory.SelectedVerdict, Mode=TwoWay}"
+                                                  Width="150" Margin="0,0,12,0">
+                                            <ComboBox.ItemTemplate>
+                                                <DataTemplate x:DataType="vm:VerdictOption">
+                                                    <TextBlock Text="{Binding Label}" />
+                                                </DataTemplate>
+                                            </ComboBox.ItemTemplate>
+                                        </ComboBox>
+                                        <TextBlock Text="Erhaltungswert" FontSize="11" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                        <ComboBox ItemsSource="{x:Static vm:DirectoryBannerViewModel.RetentionOptions}"
+                                                  SelectedItem="{Binding Directory.SelectedRetention, Mode=TwoWay}"
+                                                  Width="130" Margin="0,0,12,0">
+                                            <ComboBox.ItemTemplate>
+                                                <DataTemplate x:DataType="vm:RetentionOption">
+                                                    <TextBlock Text="{Binding Label}" />
+                                                </DataTemplate>
+                                            </ComboBox.ItemTemplate>
+                                        </ComboBox>
+                                        <TextBox Text="{Binding Directory.Note, Mode=TwoWay}" Watermark="Warum? (optional)" Width="260" />
+                                    </WrapPanel>
+                                    <TextBlock Text="{Binding Directory.EffectText}" TextWrapping="Wrap" FontSize="11" Opacity="0.8" />
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <Button Content="Speichern" Command="{Binding Directory.SaveOverrideCommand}" />
+                                        <Button Content="Eigenes Urteil zurücknehmen" Command="{Binding Directory.ResetOverrideCommand}"
+                                                ToolTip.Tip="Das Urteil von Regel oder Modell gilt wieder" />
+                                        <Button Content="Abbrechen" Command="{Binding Directory.ToggleEditCommand}" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </Border>
+                            <TextBlock Text="{Binding Directory.EditStatus}" TextWrapping="Wrap" FontSize="11" Foreground="#E8A838"
+                                       IsVisible="{Binding Directory.EditStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                        </StackPanel>
+                    </ScrollViewer>
+                </Border>
+
+                <!-- Filters -->
+                <Border Grid.Row="1" Background="#252526" Padding="8,4" BorderBrush="#3E3E42" BorderThickness="0,0,0,1">
+                    <WrapPanel Orientation="Horizontal">
+                        <ComboBox ItemsSource="{x:Static vm:FileTableViewModel.CategoryFilters}"
+                                  SelectedItem="{Binding FileTable.SelectedCategoryFilter, Mode=TwoWay}"
+                                  Width="170" Margin="0,0,6,0" FontSize="12">
+                        </ComboBox>
+                        <ComboBox ItemsSource="{x:Static vm:FileTableViewModel.StatusFilters}"
+                                  SelectedItem="{Binding FileTable.SelectedStatusFilter, Mode=TwoWay}"
+                                  Width="170" Margin="0,0,10,0" FontSize="12">
+                        </ComboBox>
+                        <CheckBox Content="niedrige Konfidenz" IsChecked="{Binding FileTable.OnlyLowConfidence, Mode=TwoWay}"
+                                  ToolTip.Tip="{Binding FileTable.LowConfidenceHint}" Margin="0,0,10,0" FontSize="12" />
+                        <CheckBox Content="sensibel" IsChecked="{Binding FileTable.OnlySensitive, Mode=TwoWay}" Margin="0,0,10,0" FontSize="12" />
+                        <CheckBox Content="temporär" IsChecked="{Binding FileTable.OnlyTemporary, Mode=TwoWay}"
+                                  ToolTip.Tip="Vom Modell als vorübergehend eingestuft: Installer, Download-Rest, Doppel" Margin="0,0,10,0" FontSize="12" />
+                        <Button Content="Filter aus" Command="{Binding FileTable.ResetFiltersCommand}" IsVisible="{Binding FileTable.IsFiltered}"
+                                FontSize="11" Padding="6,2" Margin="0,0,10,0" VerticalAlignment="Center" />
+                        <TextBlock Text="{Binding FileTable.CountText}" FontSize="12" Opacity="0.7" VerticalAlignment="Center" />
+                    </WrapPanel>
+                </Border>
+
+                <!-- Common correction of the checked files -->
+                <Border Grid.Row="2" Background="#2A2D33" Padding="8,4">
+                    <WrapPanel Orientation="Horizontal">
+                        <Button Content="Alle sichtbaren auswählen" Command="{Binding FileTable.CheckAllShownCommand}"
+                                FontSize="11" Padding="6,2" Margin="0,0,6,0" VerticalAlignment="Center" />
+                        <Button Content="Auswahl aufheben" Command="{Binding FileTable.ClearChecksCommand}" IsVisible="{Binding FileTable.HasChecked}"
+                                FontSize="11" Padding="6,2" Margin="0,0,10,0" VerticalAlignment="Center" />
+                        <TextBlock Text="{Binding FileTable.CheckedText}" IsVisible="{Binding FileTable.HasChecked}"
+                                   FontSize="12" VerticalAlignment="Center" Margin="0,0,8,0" />
+                        <ComboBox ItemsSource="{x:Static vm:FileTableViewModel.AllCategories}"
+                                  SelectedItem="{Binding FileTable.BulkCategory, Mode=TwoWay}"
+                                  PlaceholderText="Kategorie…"
+                                  IsVisible="{Binding FileTable.HasChecked}"
+                                  Width="160" Margin="0,0,6,0" FontSize="12" />
+                        <Button Content="Kategorie setzen" Command="{Binding FileTable.ApplyCategoryToCheckedCommand}"
+                                IsVisible="{Binding FileTable.HasChecked}" FontSize="11" Padding="8,2" Margin="0,0,10,0" VerticalAlignment="Center" />
+                        <TextBlock Text="{Binding FileTable.BulkStatus}" FontSize="11" Foreground="#E8A838" VerticalAlignment="Center" TextWrapping="Wrap"
+                                   IsVisible="{Binding FileTable.BulkStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                    </WrapPanel>
                 </Border>
 
                 <!-- File Table -->
-                <DataGrid Grid.Row="1"
+                <TextBlock Grid.Row="3" Text="{Binding FileTable.EmptyText}" Opacity="0.6" Margin="12,40,12,0"
+                           HorizontalAlignment="Center" ZIndex="1" IsHitTestVisible="False"
+                           IsVisible="{Binding FileTable.EmptyText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                <DataGrid Grid.Row="3"
                           ItemsSource="{Binding FileTable.Rows}"
                           SelectedItem="{Binding FileTable.SelectedRow, Mode=TwoWay}"
                           AutoGenerateColumns="False"
@@ -361,7 +516,7 @@
                           RowBackground="#1E1E1E"
                           BorderBrush="#3E3E42"
                           BorderThickness="1"
-                          HeadersVisibility="All">
+                          HeadersVisibility="Column">
                     <DataGrid.Styles>
                         <Style Selector="DataGridRow">
                             <Setter Property="Foreground" Value="White" />
@@ -390,30 +545,49 @@
                             </DataGridTemplateColumn.CellTemplate>
                         </DataGridTemplateColumn>
 
-                        <DataGridTemplateColumn Header="Dateiname" Width="2*" IsReadOnly="True">
+                        <DataGridTemplateColumn Width="34" CanUserResize="False" CanUserSort="False">
                             <DataGridTemplateColumn.CellTemplate>
                                 <DataTemplate x:DataType="vm:FileRowViewModel">
-                                    <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis">
-                                        <TextBlock.ContextMenu>
+                                    <CheckBox IsChecked="{Binding IsChecked, Mode=TwoWay}" HorizontalAlignment="Center" MinWidth="0"
+                                              ToolTip.Tip="Für die Sammelkorrektur auswählen" />
+                                </DataTemplate>
+                            </DataGridTemplateColumn.CellTemplate>
+                        </DataGridTemplateColumn>
+
+                        <DataGridTemplateColumn Header="Dateiname" Width="2*" IsReadOnly="True" SortMemberPath="Name">
+                            <DataGridTemplateColumn.CellTemplate>
+                                <DataTemplate x:DataType="vm:FileRowViewModel">
+                                    <DockPanel Margin="4,0">
+                                        <DockPanel.ContextMenu>
                                             <ContextMenu>
                                                 <MenuItem Header="Datei neu analysieren"
                                                           Command="{Binding ReanalyzeCommand}" />
                                             </ContextMenu>
-                                        </TextBlock.ContextMenu>
-                                    </TextBlock>
+                                        </DockPanel.ContextMenu>
+                                        <Border DockPanel.Dock="Right" Background="#B3261E" CornerRadius="3" Padding="4,0" Margin="4,0,0,0"
+                                                VerticalAlignment="Center" IsVisible="{Binding IsSensitive}"
+                                                ToolTip.Tip="Sensible Datei: Vorschau erst nach Klick">
+                                            <TextBlock Text="{Binding SensitiveText}" FontSize="10" Foreground="White" />
+                                        </Border>
+                                        <Border DockPanel.Dock="Right" Background="#6B5B1E" CornerRadius="3" Padding="4,0" Margin="4,0,0,0"
+                                                VerticalAlignment="Center" IsVisible="{Binding IsTemporary}"
+                                                ToolTip.Tip="Vom Modell als vorübergehend eingestuft">
+                                            <TextBlock Text="temporär" FontSize="10" Foreground="White" />
+                                        </Border>
+                                        <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                                    </DockPanel>
                                 </DataTemplate>
                             </DataGridTemplateColumn.CellTemplate>
                         </DataGridTemplateColumn>
-                        <DataGridTextColumn Header="Typ"           Binding="{Binding Extension}"   Width="55"  IsReadOnly="True" />
-                        <DataGridTextColumn Header="Größe"         Binding="{Binding SizeText}"    Width="85"  IsReadOnly="True" />
-                        <DataGridTextColumn Header="Art"           Binding="{Binding FileType}"    Width="85"  IsReadOnly="True" />
-                        <DataGridTextColumn Header="Konfidenz"     Binding="{Binding Confidence}"  Width="80"  IsReadOnly="True" />
+                        <DataGridTextColumn Header="Zustand"       Binding="{Binding StatusText}"  Width="92"  IsReadOnly="True" />
+                        <DataGridTextColumn Header="Größe"         Binding="{Binding SizeText}"    Width="80"  IsReadOnly="True" />
+                        <DataGridTextColumn Header="Konfidenz"     Binding="{Binding Confidence}"  Width="92"  IsReadOnly="True" />
 
                         <!-- Zusammenfassung -->
-                        <DataGridTextColumn Header="Zusammenfassung" Binding="{Binding Summary}"  Width="3*"  IsReadOnly="True" />
+                        <DataGridTextColumn Header="Zusammenfassung" Binding="{Binding Summary}"  Width="2*"  IsReadOnly="True" />
 
                         <!-- Kategorie — inline ComboBox, auto-saves on change -->
-                        <DataGridTemplateColumn Header="Kategorie" Width="155" CanUserSort="False">
+                        <DataGridTemplateColumn Header="Kategorie" Width="140" CanUserSort="False">
                             <DataGridTemplateColumn.CellTemplate>
                                 <DataTemplate x:DataType="vm:FileRowViewModel">
                                     <Border Background="{Binding CategoryColor}"
@@ -434,7 +608,7 @@
                         </DataGridTemplateColumn>
 
                         <!-- Zielordner — inline TextBox, saves on Enter -->
-                        <DataGridTemplateColumn Header="Zielordner" Width="170" CanUserSort="False">
+                        <DataGridTemplateColumn Header="Zielordner" Width="100" CanUserSort="False">
                             <DataGridTemplateColumn.CellTemplate>
                                 <DataTemplate x:DataType="vm:FileRowViewModel">
                                     <Border Background="#2A2A2A"
@@ -458,7 +632,7 @@
                         </DataGridTemplateColumn>
 
                         <!-- Review — ○ / ✓ / ✎ toggle -->
-                        <DataGridTemplateColumn Header="Review" Width="65" CanUserSort="False">
+                        <DataGridTemplateColumn Header="Review" Width="55" CanUserSort="False">
                             <DataGridTemplateColumn.CellTemplate>
                                 <DataTemplate x:DataType="vm:FileRowViewModel">
                                     <Button Content="{Binding ReviewStatusDisplay}"
@@ -479,12 +653,12 @@
                     </DataGrid.Columns>
                 </DataGrid>
 
-                <GridSplitter Grid.Row="2"
+                <GridSplitter Grid.Row="4"
                               ResizeDirection="Rows"
                               Background="#2D2D30" />
 
                 <!-- Detail Panel -->
-                <Border Grid.Row="3"
+                <Border Grid.Row="5"
                         Background="#252526"
                         BorderBrush="#3E3E42"
                         BorderThickness="1,1,0,0"

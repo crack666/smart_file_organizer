@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using SmartFileOrganizer.Application.Sensitivity;
 using SmartFileOrganizer.Application.Services;
 using SmartFileOrganizer.Desktop.Services;
 using SmartFileOrganizer.Domain.Interfaces;
@@ -23,8 +24,10 @@ public partial class MainViewModel : ViewModelBase
     private readonly FileDetailViewModel _fileDetail;
     private readonly ScanProgressViewModel _scanProgress;
     private readonly AiProgressViewModel _aiProgress;
-    private readonly IDirectoryClassificationRepository _dirClassRepo;
     private readonly FocusedRescanService _focusedRescanService;
+    private readonly DirectoryBannerViewModel _directory;
+    private readonly ScanExportService _export;
+    private readonly SensitiveOutputOptions _exportOptions;
 
     private long _activeJobId;
     private CancellationTokenSource? _uiCts;
@@ -39,6 +42,9 @@ public partial class MainViewModel : ViewModelBase
     public ScanProgressViewModel ScanProgress => _scanProgress;
     public AiProgressViewModel AiProgress => _aiProgress;
     public PlanViewModel Plan { get; }
+
+    /// <summary>The selected folder, above the file table.</summary>
+    public DirectoryBannerViewModel Directory => _directory;
 
     /// <summary>Which database the window works on; always visible in the status bar.</summary>
     public string DatabaseText => Plan.DatabaseText;
@@ -70,7 +76,13 @@ public partial class MainViewModel : ViewModelBase
     [ObservableProperty] private ScanJob? _selectedJob;
     [ObservableProperty] private ObservableCollection<OllamaModelViewModel> _availableOllamaModels = [];
     [ObservableProperty] private OllamaModelViewModel? _selectedOllamaModel;
-    [ObservableProperty] private string _selectedDirSummary = string.Empty;
+
+    /// <summary>Result of the last CSV export; empty before the first.</summary>
+    [ObservableProperty] private string _exportStatusText = string.Empty;
+
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(ExportCsvCommand))]
+    private bool _isExporting;
 
     partial void OnSelectedOllamaModelChanged(OllamaModelViewModel? value)
     {
@@ -90,6 +102,9 @@ public partial class MainViewModel : ViewModelBase
     // Injected by the view for folder-picker dialog
     public Func<Task<string?>>? PickFolderDialog { get; set; }
 
+    // Injected by the view for the save dialog of the CSV export; receives the suggested file name
+    public Func<string, Task<string?>>? PickSaveFileDialog { get; set; }
+
     // Injected by the view to open the AI prompt settings dialog;
     // receives the pre-populated VM and returns true when the user confirms
     public Func<AiPromptSettingsViewModel, Task<bool>>? OpenPromptSettingsDialog { get; set; }
@@ -106,11 +121,16 @@ public partial class MainViewModel : ViewModelBase
         FileDetailViewModel fileDetail,
         ScanProgressViewModel scanProgress,
         AiProgressViewModel aiProgress,
-        IDirectoryClassificationRepository dirClassRepo,
         FocusedRescanService focusedRescanService,
-        PlanViewModel plan)
+        PlanViewModel plan,
+        DirectoryBannerViewModel directory,
+        ScanExportService export,
+        SensitiveOutputOptions exportOptions)
     {
         Plan = plan;
+        _directory = directory;
+        _export = export;
+        _exportOptions = exportOptions;
         _scanJobService = scanJobService;
         _fileQueryService = fileQueryService;
         _aiCoordinator = aiCoordinator;
@@ -122,7 +142,6 @@ public partial class MainViewModel : ViewModelBase
         _fileDetail = fileDetail;
         _scanProgress = scanProgress;
         _aiProgress = aiProgress;
-        _dirClassRepo = dirClassRepo;
         _focusedRescanService = focusedRescanService;
 
         _scanJobService.ProgressChanged += OnProgressChanged;
@@ -131,15 +150,28 @@ public partial class MainViewModel : ViewModelBase
         _aiCoordinator.StateChanged += OnAiStateChanged;
 
         _folderTree.DirectorySelected += OnDirectorySelected;
+        _folderTree.FactsLoaded += (_, _) =>
+        {
+            if (_directory.IsVisible) _directory.ApplyFacts(_folderTree.FactsOf(_directory.Path));
+        };
         _folderTree.RescanDirectoryAction = RescanDirectoryAsync;
+        _directory.VerdictChanged += OnVerdictChanged;
+        _fileTable.BulkApplied += ids =>
+        {
+            if (_selectedFileId is { } id && ids.Contains(id)) _ = LoadFileDetailAsync(id);
+        };
         _fileDetail.ReviewApplied += OnReviewApplied;
         _fileTable.ReanalyzeFileAction = ReanalyzeFileAsync;
 
         _fileTable.PropertyChanged += (_, e) =>
         {
+            // Filled again (progress of the analysis) is no new selection: the row comes back by its id.
+            if (_fileTable.IsLoading) return;
+
             if (e.PropertyName == nameof(FileTableViewModel.SelectedRow) &&
                 _fileTable.SelectedRow != null)
             {
+                if (_selectedFileId == _fileTable.SelectedRow.Id) return;
                 _selectedFileId = _fileTable.SelectedRow.Id;
                 _ = LoadFileDetailAsync(_fileTable.SelectedRow.Id);
             }
@@ -193,7 +225,7 @@ public partial class MainViewModel : ViewModelBase
     [RelayCommand]
     private async Task OpenRecentScanAsync(ScanJob job)
     {
-        _activeJobId = job.Id;
+        SetActiveJob(job.Id);
         RootPath = job.RootPath;
         IsShowingWelcome = false;
         IsShowingPlan = false;
@@ -215,7 +247,7 @@ public partial class MainViewModel : ViewModelBase
         _uiCts = new CancellationTokenSource();
 
         var job = await _scanJobService.CreateJobAsync(RootPath, _uiCts.Token);
-        _activeJobId = job.Id;
+        SetActiveJob(job.Id);
         _scanProgress.Apply(job);
 
         await _scanJobService.StartAsync(job.Id, _uiCts.Token);
@@ -244,6 +276,51 @@ public partial class MainViewModel : ViewModelBase
         _scanProgress.StatusText = "Resuming scan…";
     }
 
+    /// <summary>Another job: nothing of the one before stays in banner, table, detail and export line.</summary>
+    private void SetActiveJob(long jobId)
+    {
+        if (_activeJobId != jobId)
+        {
+            _selectedDirectoryPath = string.Empty;
+            _selectedFileId = null;
+            _fileTable.Clear();
+            _fileDetail.Clear();
+            _directory.Clear();
+            ExportStatusText = string.Empty;
+        }
+        _activeJobId = jobId;
+        ExportCsvCommand.NotifyCanExecuteChanged();
+    }
+
+    /// <summary>Writes every file of the open job as CSV, as <c>sfo export</c> does, to a file the person picks.</summary>
+    [RelayCommand(CanExecute = nameof(CanExportCsv))]
+    private async Task ExportCsvAsync()
+    {
+        if (PickSaveFileDialog is null || _activeJobId <= 0) return;
+        var jobId = _activeJobId;
+        var path = await PickSaveFileDialog($"sfo-job-{jobId}.csv");
+        if (string.IsNullOrWhiteSpace(path)) return;
+
+        IsExporting = true;
+        ExportStatusText = $"CSV-Export läuft: {path}";
+        try
+        {
+            // The disclosure of the settings, as in the CLI: the file leaves the program.
+            var rows = await Task.Run(() => _export.ExportJobToFileAsync(jobId, path, _exportOptions));
+            ExportStatusText = $"CSV-Export fertig: {PlanDisplay.Files(rows)} in {path}";
+        }
+        catch (Exception ex)
+        {
+            ExportStatusText = $"CSV-Export fehlgeschlagen: {ex.Message}";
+        }
+        finally
+        {
+            IsExporting = false;
+        }
+    }
+
+    private bool CanExportCsv() => _activeJobId > 0 && !IsExporting;
+
     /// <summary>Shows the plans of the open job (or of the newest job with a plan).</summary>
     [RelayCommand]
     public async Task OpenPlanAsync(ScanJob? job = null)
@@ -271,12 +348,11 @@ public partial class MainViewModel : ViewModelBase
 
         _selectedDirectoryPath = string.Empty;
         _selectedFileId = null;
-        SelectedDirSummary = string.Empty;
 
         _fileTable.Clear();
         _fileDetail.Clear();
-        _folderTree.Roots.Clear();
-        _folderTree.SelectedItem = null;
+        _folderTree.Clear();
+        _directory.Clear();
 
         var all = await _scanJobService.GetAllJobsAsync();
         RecentScans.Clear();
@@ -502,10 +578,11 @@ public partial class MainViewModel : ViewModelBase
         System.Diagnostics.Debug.WriteLine($"[DIR SELECT] _activeJobId={_activeJobId}  path='{path}'");
         if (_activeJobId <= 0) return;
         _selectedDirectoryPath = path;
+        _selectedFileId = null;
         try
         {
             await _fileTable.LoadAsync(_activeJobId, path);
-            await LoadDirectorySummaryAsync(path);
+            await LoadDirectoryAsync(path);
         }
         catch (Exception ex)
         {
@@ -514,17 +591,31 @@ public partial class MainViewModel : ViewModelBase
         _fileDetail.Clear();
     }
 
-    private async Task LoadDirectorySummaryAsync(string path)
+    private async Task LoadDirectoryAsync(string path)
     {
-        if (_activeJobId <= 0) { SelectedDirSummary = string.Empty; return; }
         try
         {
-            var dir = await _dirClassRepo.GetByDirectoryPathAsync(_activeJobId, path);
-            SelectedDirSummary = dir?.Summary ?? string.Empty;
+            await _directory.LoadAsync(_activeJobId, path, _folderTree.FactsOf(path));
         }
-        catch
+        catch (Exception ex)
         {
-            SelectedDirSummary = string.Empty;
+            System.Diagnostics.Debug.WriteLine($"[LoadDirectoryAsync] {ex}");
+            _directory.Clear();
+        }
+    }
+
+    /// <summary>A person set or took back a verdict: the tree shows it, and the files of the folder follow.</summary>
+    private async void OnVerdictChanged(string path, DirectoryVerdict? verdict)
+    {
+        _folderTree.ApplyVerdict(path, verdict);
+        try
+        {
+            if (_activeJobId > 0 && path == _selectedDirectoryPath)
+                await _fileTable.LoadAsync(_activeJobId, path);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[OnVerdictChanged] {ex}");
         }
     }
 
@@ -568,6 +659,7 @@ public partial class MainViewModel : ViewModelBase
 
     private async Task MaybeRefreshActiveDirectoryAsync(bool force)
     {
+        _ = RefreshFactsAsync(force);
         if (_activeJobId <= 0 || string.IsNullOrWhiteSpace(_selectedDirectoryPath))
             return;
 
@@ -577,9 +669,23 @@ public partial class MainViewModel : ViewModelBase
 
         _lastAiRefreshUtc = now;
         await _fileTable.LoadAsync(_activeJobId, _selectedDirectoryPath);
+        await LoadDirectoryAsync(_selectedDirectoryPath);
 
         if (_selectedFileId is long selectedFileId)
             await LoadFileDetailAsync(selectedFileId);
+    }
+
+    /// <summary>Verdicts and sizes in the tree while the analysis runs, and once more when it ends.</summary>
+    private async Task RefreshFactsAsync(bool force)
+    {
+        try
+        {
+            await (force ? _folderTree.RefreshFactsAsync() : _folderTree.RefreshFactsIfDueAsync());
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[RefreshFactsAsync] {ex}");
+        }
     }
 
     private void OnReviewApplied(object? sender, EventArgs e)
@@ -617,7 +723,7 @@ public partial class MainViewModel : ViewModelBase
 
             await _folderTree.LoadJobAsync(_activeJobId);
             await _fileTable.LoadAsync(_activeJobId, directoryPath);
-            await LoadDirectorySummaryAsync(directoryPath);
+            await LoadDirectoryAsync(directoryPath);
             _fileDetail.Clear();
 
             _scanProgress.StatusText = "Directory rescanned and reanalyzed.";
@@ -650,7 +756,7 @@ public partial class MainViewModel : ViewModelBase
                 _selectedDirectoryPath = directoryPath;
                 await _fileTable.LoadAsync(_activeJobId, directoryPath);
                 _fileTable.SelectedRow = _fileTable.Rows.FirstOrDefault(r => r.Id == row.Id);
-                await LoadDirectorySummaryAsync(directoryPath);
+                await LoadDirectoryAsync(directoryPath);
             }
 
             await LoadFileDetailAsync(row.Id);

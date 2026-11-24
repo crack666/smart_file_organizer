@@ -180,7 +180,7 @@ public class PlanViewRenderTests
     }
 
     /// <summary>Renders the window, checks the frame has real content, and saves it when screenshots are asked for.</summary>
-    private static void Frame(Window window, string? dir, string name)
+    internal static void Frame(Window window, string? dir, string name)
     {
         Dispatcher.UIThread.RunJobs();
         AvaloniaHeadlessPlatform.ForceRenderTimerTick();
@@ -208,13 +208,13 @@ public class PlanViewRenderTests
             File.WriteAllBytes(Path.Combine(dir, name), png.ToArray());
     }
 
-    private static List<string> Visible(Window window) => window.GetVisualDescendants()
+    internal static List<string> Visible(Window window) => window.GetVisualDescendants()
         .OfType<TextBlock>()
         .Where(t => t.IsEffectivelyVisible)
         .Select(t => t.Text ?? string.Join("", t.Inlines?.OfType<Avalonia.Controls.Documents.Run>().Select(r => r.Text) ?? []))
         .ToList();
 
-    private static async Task Until(Func<bool> condition)
+    internal static async Task Until(Func<bool> condition)
     {
         for (var i = 0; i < 500 && !condition(); i++)
         {
