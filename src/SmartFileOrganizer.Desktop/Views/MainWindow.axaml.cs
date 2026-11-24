@@ -1,4 +1,5 @@
 using Avalonia.Controls;
+using Avalonia.Input;
 using Avalonia.Platform.Storage;
 using SmartFileOrganizer.Desktop.ViewModels;
 
@@ -9,6 +10,15 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+
+        // Ctrl+F anywhere in the window goes to the search of the open job.
+        KeyDown += (_, e) =>
+        {
+            if (e is not { Key: Key.F, KeyModifiers: KeyModifiers.Control } || !SearchBox.IsEffectivelyVisible) return;
+            SearchBox.Focus();
+            SearchBox.SelectAll();
+            e.Handled = true;
+        };
 
         if (DataContext is MainViewModel vm)
             WireDialogs(vm);

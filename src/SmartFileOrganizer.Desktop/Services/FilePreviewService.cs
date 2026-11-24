@@ -121,6 +121,43 @@ public class FilePreviewService
         }
     }
 
+    /// <summary>
+    /// One small picture of a photo or video, <paramref name="width"/> pixels wide, for a strip of many
+    /// (https://github.com/crack666/smart_file_organizer/issues/27); null when there is none. Decoded at that width and off
+    /// the UI thread, so a strip of large photos stays small in memory. A video gives the first picture of its stored
+    /// filmstrip, else one picture from its first third (not stored).
+    /// </summary>
+    public async Task<Bitmap?> BuildThumbnailAsync(FileNode file, int width, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(file.FullPath) || !File.Exists(file.FullPath)) return null;
+        try
+        {
+            byte[]? bytes;
+            if (file.FileType == FileType.Video)
+            {
+                if (_frames is not { IsAvailable: true }) return null;
+                var stored = await Task.Run(() => ReadCache(CacheKey(new FileInfo(file.FullPath))), ct);
+                bytes = stored is not null
+                    ? stored[0].Png
+                    : await _frames.ExtractOneAsync(file.FullPath, await Task.Run(() => Duration(file.FullPath), ct) / 3, width, ct);
+            }
+            else
+            {
+                bytes = (await Task.Run(() => _extractor.ExtractAsync(file, ct), ct)).ImageBytes;
+            }
+            if (bytes is null) return null;
+            return await Task.Run(() =>
+            {
+                using var stream = new MemoryStream(bytes, writable: false);
+                return Bitmap.DecodeToWidth(stream, width);
+            }, ct);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return null; // not decodable: the strip leaves it out
+        }
+    }
+
     private static FilePreviewData AudioPreview() => new()
     {
         CanPlay = true,

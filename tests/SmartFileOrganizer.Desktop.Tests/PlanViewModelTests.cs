@@ -256,7 +256,7 @@ public class PlanViewModelTests : IDisposable
         var picker = vm.TargetPicker!;
         var root = picker.Roots[0];
         Assert.Equal("bibliothek", root.Label);
-        Assert.Equal("Rechnung_Strom.pdf", picker.Rows.Single().Name);
+        Assert.Equal("Ziel für Rechnung_Strom.pdf", picker.Title);
         Assert.Equal(Row(vm, "Rechnung_Strom.pdf").Action.Reason, picker.ReasonText);
         Assert.Equal("Jetzt: bibliothek/Dokumente/Rechnung_Strom.pdf", picker.CurrentText);
         // The inbox folder first, then the folders of the scan, read through the library's folder view.

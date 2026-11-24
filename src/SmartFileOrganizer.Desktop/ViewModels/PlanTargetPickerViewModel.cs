@@ -96,6 +96,8 @@ public partial class PlanTargetPickerViewModel : ViewModelBase
 {
     private readonly LibraryTargetService _libraries;
     private readonly Func<string, Task<string?>> _apply;
+    private readonly string _name;
+    private readonly int _others;
     private readonly TaskCompletionSource<bool> _closed = new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     /// <param name="apply">Sets the targets below the chosen folder (full path); returns why it was refused, or null.</param>
@@ -105,7 +107,8 @@ public partial class PlanTargetPickerViewModel : ViewModelBase
     {
         _libraries = libraryService;
         _apply = apply;
-        Rows = rows;
+        _name = rows[0].Name.TrimEnd('/');
+        _others = rows.Count - 1;
         Libraries = libraries;
         Title = rows.Count == 1 ? $"Ziel für {rows[0].Name}" : $"Ziel für {rows.Count} Aktionen";
         CurrentText = rows.Count == 1 ? "Jetzt: " + rows[0].ShortTargetText : string.Empty;
@@ -113,13 +116,32 @@ public partial class PlanTargetPickerViewModel : ViewModelBase
             rows.Select(r => r.Action.Reason).Where(r => !string.IsNullOrWhiteSpace(r)).Distinct().Take(3));
     }
 
-    public IReadOnlyList<PlanActionRowViewModel> Rows { get; }
+    /// <summary>For findings (https://github.com/crack666/smart_file_organizer/issues/27): the chosen folder itself is the target.</summary>
+    /// <param name="others">How many more go to the same folder.</param>
+    public PlanTargetPickerViewModel(
+        string title, string currentText, string reasonText, int others, IReadOnlyList<ScanJob> libraries,
+        LibraryTargetService libraryService, Func<string, Task<string?>> apply)
+    {
+        _libraries = libraryService;
+        _apply = apply;
+        _name = string.Empty;
+        _others = others;
+        Libraries = libraries;
+        Title = title;
+        CurrentText = currentText;
+        ReasonText = reasonText;
+        AcceptHint = "Ziel des Fundstücks; die Regeln der Bibliothek prüfen es. Der Plan übernimmt es beim Anlegen.";
+    }
+
     public IReadOnlyList<ScanJob> Libraries { get; }
     public string Title { get; }
     public string CurrentText { get; }
 
     /// <summary>Why the plan proposed what it proposed, shown beside the tree.</summary>
     public string ReasonText { get; }
+
+    /// <summary>Tooltip of "Ziel übernehmen".</summary>
+    public string AcceptHint { get; } = "Die Regeln des Plans prüfen das Ziel; danach ist die Aktion neu freizugeben";
 
     public ObservableCollection<PlanTargetFolderNode> Roots { get; } = [];
 
@@ -133,8 +155,8 @@ public partial class PlanTargetPickerViewModel : ViewModelBase
     /// <summary>The new target of the first action below the chosen folder.</summary>
     public string PreviewText => SelectedFolder is { IsPlaceholder: false } f
         ? "Neues Ziel: " + PlanActionRowViewModel.ShortTarget(
-            PlanChecks.Join(f.FullPath, Rows[0].Name.TrimEnd('/')), Libraries.Select(l => l.RootPath).ToList())
-          + (Rows.Count > 1 ? $" (und {Rows.Count - 1} weitere in denselben Ordner)" : string.Empty)
+            _name.Length == 0 ? f.FullPath : PlanChecks.Join(f.FullPath, _name), Libraries.Select(l => l.RootPath).ToList())
+          + (_others > 0 ? $" (und {_others} weitere in denselben Ordner)" : string.Empty)
         : "Einen Ordner wählen.";
 
     public bool CanAccept => SelectedFolder is { IsPlaceholder: false } && !IsBusy;

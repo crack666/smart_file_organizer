@@ -154,6 +154,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<FileQueryService>();
         services.AddSingleton<DirectoryQueryService>();
         services.AddSingleton<JobReadService>();
+        services.AddSingleton<JobSearchService>();
         services.AddSingleton<LibraryService>();
         services.AddSingleton<ClassificationService>(sp => new ClassificationService(
             sp.GetRequiredService<IFileRepository>(),

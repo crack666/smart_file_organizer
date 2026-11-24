@@ -119,6 +119,24 @@ public partial class FileTableViewModel : ViewModelBase
         }
     }
 
+    /// <summary>Shows the hits of a search over the job instead of a folder, each with its folder.</summary>
+    public void ShowSearch(JobSearchResult search)
+    {
+        _loadVersion++;
+        IsLoading = false;
+        _shown = (search.JobId, SearchPath);
+        BulkStatus = string.Empty;
+        _moreHits = search.FileIds.Count - search.Files.Count;
+        SetRows(search.Files.Select(f => FileRowViewModel.From(f, _reviewService, ReanalyzeFileAction, withFolder: true)).ToList(), new HashSet<long>());
+        ApplyFilter(null);
+    }
+
+    /// <summary>True while the table shows the hits of a search.</summary>
+    public bool IsSearch => _shown.Path == SearchPath;
+
+    private const string SearchPath = "\0search";
+    private int _moreHits;
+
     public void Clear()
     {
         _loadVersion++;
@@ -233,8 +251,10 @@ public partial class FileTableViewModel : ViewModelBase
         SelectedRow = selectedId is { } id ? Rows.FirstOrDefault(r => r.Id == id) : null;
         CountChecked();
         CountText = IsFiltered ? $"{Rows.Count} von {PlanDisplay.Files(_all.Count)}" : PlanDisplay.Files(_all.Count);
+        if (IsSearch) CountText += _moreHits > 0 ? $" in der Suche (die ersten von {_all.Count + _moreHits})" : " in der Suche";
         EmptyText = Rows.Count > 0 ? string.Empty
-            : _all.Count > 0 ? "Kein Filtertreffer in diesem Ordner."
+            : _all.Count > 0 ? IsSearch ? "Kein Filtertreffer in der Suche." : "Kein Filtertreffer in diesem Ordner."
+            : IsSearch ? "Keine Datei passt zur Suche."
             : _shown.JobId > 0 ? "Keine Dateien direkt in diesem Ordner." : "Links einen Ordner wählen.";
         OnPropertyChanged(nameof(IsFiltered));
     }

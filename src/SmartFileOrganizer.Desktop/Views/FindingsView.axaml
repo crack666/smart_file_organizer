@@ -1,0 +1,256 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:SmartFileOrganizer.Desktop.ViewModels"
+             xmlns:views="using:SmartFileOrganizer.Desktop.Views"
+             x:Class="SmartFileOrganizer.Desktop.Views.FindingsView"
+             x:DataType="vm:FindingsViewModel"
+             Background="#1E1E1E">
+
+    <UserControl.Styles>
+        <Style Selector="TextBlock.small">
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="Foreground" Value="#A0A7B0" />
+        </Style>
+        <Style Selector="TextBlock.label">
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="Foreground" Value="#8B949E" />
+            <Setter Property="Margin" Value="0,8,0,1" />
+        </Style>
+        <Style Selector="Button.compact">
+            <Setter Property="Padding" Value="8,3" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Margin" Value="0,0,4,4" />
+        </Style>
+        <Style Selector="Button.accept">
+            <Setter Property="Background" Value="#1F5F2A" />
+            <Setter Property="Foreground" Value="White" />
+        </Style>
+        <Style Selector="Button.reject">
+            <Setter Property="Background" Value="#6B2420" />
+            <Setter Property="Foreground" Value="White" />
+        </Style>
+        <Style Selector="Button.link">
+            <Setter Property="Background" Value="Transparent" />
+            <Setter Property="Padding" Value="2,0" />
+            <Setter Property="MinWidth" Value="18" />
+        </Style>
+        <Style Selector="Border.group">
+            <Setter Property="Background" Value="#2A2D33" />
+        </Style>
+        <Style Selector="ListBoxItem:selected Border.group">
+            <Setter Property="Background" Value="Transparent" />
+        </Style>
+        <Style Selector="ListBoxItem">
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="MinHeight" Value="0" />
+        </Style>
+    </UserControl.Styles>
+
+    <Panel>
+    <Grid RowDefinitions="Auto,Auto,*,Auto">
+
+        <!-- ===== Count, what is shown, order, language ===== -->
+        <Border Grid.Row="0" Background="#252526" Padding="8,6" BorderBrush="#3E3E42" BorderThickness="0,0,0,1">
+            <DockPanel>
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="6">
+                    <ComboBox ItemsSource="{Binding StateFilters}" SelectedItem="{Binding SelectedStateFilter, Mode=TwoWay}" Width="185" FontSize="12"
+                              ToolTip.Tip="Welche Entscheidungen die Liste zeigt" />
+                    <ComboBox ItemsSource="{Binding Groupings}" SelectedItem="{Binding SelectedGrouping, Mode=TwoWay}" Width="150" FontSize="12"
+                              ToolTip.Tip="Nach Bündel gruppiert oder alle nach Wichtigkeit" />
+                    <ComboBox ItemsSource="{Binding Languages}" SelectedItem="{Binding SelectedLanguage, Mode=TwoWay}" Width="100" FontSize="12"
+                              ToolTip.Tip="Sprache der Codes (Arten, Zustände, Aktionen); Begründungen bleiben, wie sie gespeichert sind" />
+                    <Button Classes="compact" Content="Neu laden" Command="{Binding ReloadCommand}" Margin="0" VerticalAlignment="Center"
+                            ToolTip.Tip="Neu rechnen: was Analyse, Vergleich oder ein Agent inzwischen geändert hat" />
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <TextBlock Text="Fundstücke" FontSize="16" FontWeight="SemiBold" Foreground="White" VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding CountText}" Classes="small" FontSize="12" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                    <ProgressBar IsIndeterminate="True" Width="80" Height="4" VerticalAlignment="Center" IsVisible="{Binding IsLoading}" />
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+        <!-- ===== What was not computed ===== -->
+        <Border Grid.Row="1" Background="#2D2A1C" Padding="10,4" IsVisible="{Binding HasMissing}">
+            <TextBlock Text="{Binding MissingText}" ToolTip.Tip="{Binding MissingToolTip}" FontSize="11" Foreground="#E3B341"
+                       TextWrapping="Wrap" MaxLines="3" TextTrimming="CharacterEllipsis" />
+        </Border>
+
+        <!-- ===== List and detail ===== -->
+        <Grid Grid.Row="2" ColumnDefinitions="*,4,430">
+            <Panel Grid.Column="0">
+                <ListBox Name="FindingList"
+                         ItemsSource="{Binding Rows}"
+                         SelectedItems="{Binding SelectedRows}"
+                         SelectionMode="Multiple"
+                         Background="#1E1E1E" BorderThickness="0"
+                         ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                    <ListBox.DataTemplates>
+                        <!-- Bundle -->
+                        <DataTemplate x:DataType="vm:FindingGroupViewModel">
+                            <Border Classes="group" Padding="6,5" BorderBrush="#3E3E42" BorderThickness="0,0,0,1">
+                                <Grid ColumnDefinitions="22,*">
+                                    <Button Grid.Column="0" Classes="link" Content="{Binding ExpandGlyph}" VerticalAlignment="Top"
+                                            Command="{Binding $parent[ListBox].((vm:FindingsViewModel)DataContext).ToggleGroupCommand}"
+                                            CommandParameter="{Binding}"
+                                            IsVisible="{Binding HasFindings}" Focusable="False" />
+                                    <StackPanel Grid.Column="1">
+                                        <TextBlock Text="{Binding Title}" FontWeight="SemiBold" Foreground="White" TextTrimming="CharacterEllipsis" />
+                                        <TextBlock Text="{Binding Summary}" Classes="small" TextTrimming="CharacterEllipsis" />
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                        <!-- Finding -->
+                        <DataTemplate x:DataType="vm:FindingRowViewModel">
+                            <Border Padding="8,5" BorderBrush="#2D2D30" BorderThickness="0,0,0,1" Background="Transparent">
+                                <Grid ColumnDefinitions="118,*,Auto">
+                                    <Border Grid.Column="0" Background="{Binding KindColor}" CornerRadius="3" Padding="6,1"
+                                            HorizontalAlignment="Left" VerticalAlignment="Top">
+                                        <TextBlock Text="{Binding KindLabel}" FontSize="11" Foreground="White" />
+                                    </Border>
+                                    <StackPanel Grid.Column="1" Spacing="1">
+                                        <TextBlock Text="{Binding Title}" Foreground="White" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Title}" />
+                                        <TextBlock Text="{Binding ActionText}" FontSize="12" Foreground="#C9D1D9" TextTrimming="CharacterEllipsis"
+                                                   ToolTip.Tip="{Binding ActionText}" />
+                                        <TextBlock Text="{Binding FactsText}" Classes="small" TextTrimming="CharacterEllipsis" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2" Margin="8,0,0,0" Spacing="1">
+                                        <TextBlock Text="{Binding StateLabel}" FontSize="12" Foreground="{Binding StateColor}" HorizontalAlignment="Right" />
+                                        <TextBlock Text="{Binding CertaintyLabel}" FontSize="11" Foreground="{Binding CertaintyColor}" HorizontalAlignment="Right" />
+                                        <TextBlock Text="einzeln" FontSize="11" Foreground="#FF9E64" HorizontalAlignment="Right"
+                                                   IsVisible="{Binding SingleDecision}" ToolTip.Tip="Sensibel: nur einzeln zu entscheiden" />
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+                        </DataTemplate>
+                    </ListBox.DataTemplates>
+                </ListBox>
+                <TextBlock Text="{Binding EmptyText}" IsVisible="{Binding HasEmptyText}" Opacity="0.7" Margin="24,40"
+                           HorizontalAlignment="Center" TextWrapping="Wrap" IsHitTestVisible="False" />
+            </Panel>
+
+            <GridSplitter Grid.Column="1" ResizeDirection="Columns" Background="#2D2D30" />
+
+            <!-- Detail -->
+            <Border Grid.Column="2" Background="#252526">
+                <Panel>
+                    <TextBlock Text="Ein Fundstück oder Bündel wählen." Opacity="0.6" HorizontalAlignment="Center" Margin="0,40,0,0"
+                               IsVisible="{Binding !HasDetail}" />
+                    <ScrollViewer IsVisible="{Binding HasDetail}" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                        <StackPanel Margin="12,10">
+                            <DockPanel>
+                                <Border DockPanel.Dock="Left" Background="{Binding DetailKindColor}" CornerRadius="3" Padding="6,1" Margin="0,2,8,0"
+                                        VerticalAlignment="Top" IsVisible="{Binding DetailKind, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                                    <TextBlock Text="{Binding DetailKind}" FontSize="11" Foreground="White" />
+                                </Border>
+                                <TextBlock Text="{Binding DetailTitle}" FontSize="15" FontWeight="SemiBold" Foreground="White" TextWrapping="Wrap" />
+                            </DockPanel>
+                            <TextBlock Text="{Binding DetailState}" FontSize="12" Foreground="{Binding DetailStateColor}" TextWrapping="Wrap" Margin="0,4,0,0"
+                                       IsVisible="{Binding DetailState, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                            <TextBlock Text="{Binding DetailFacts}" FontSize="12" Foreground="#C9D1D9" TextWrapping="Wrap" Margin="0,4,0,0" />
+                            <DockPanel Margin="0,4,0,0">
+                                <Button DockPanel.Dock="Right" Classes="compact" Content="Im Dateimanager" Command="{Binding RevealCommand}"
+                                        Margin="6,0,0,0" VerticalAlignment="Top" />
+                                <SelectableTextBlock Text="{Binding DetailPath}" FontSize="11" Foreground="#A0A7B0" TextWrapping="Wrap" VerticalAlignment="Center" />
+                            </DockPanel>
+
+                            <!-- Preview -->
+                            <TextBlock Text="{Binding PreviewMessage}" FontSize="12" Foreground="#E3B341" TextWrapping="Wrap" Margin="0,8,0,0"
+                                       IsVisible="{Binding PreviewMessage, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                            <Button Classes="compact" Content="Anzeigen" Command="{Binding ShowPreviewCommand}" IsVisible="{Binding IsPreviewLocked}" Margin="0,4,0,0" />
+                            <ItemsControl ItemsSource="{Binding Pictures}" IsVisible="{Binding HasPictures}" Margin="0,8,0,0">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate><WrapPanel /></ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="vm:FindingPicture">
+                                        <Border Width="98" Height="74" Margin="0,0,4,4" Background="#111111" CornerRadius="3" ClipToBounds="True"
+                                                ToolTip.Tip="{Binding Name}">
+                                            <Image Source="{Binding Image}" Stretch="Uniform" />
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <StackPanel IsVisible="{Binding HasDocument}" Margin="0,8,0,0" Spacing="3">
+                                <TextBlock Text="{Binding DocumentTitle}" Classes="small" TextTrimming="CharacterEllipsis" />
+                                <Border Background="White" IsVisible="{Binding HasDocumentImage}" HorizontalAlignment="Left" CornerRadius="2">
+                                    <Image Source="{Binding DocumentImage}" MaxHeight="300" Stretch="Uniform" />
+                                </Border>
+                                <Border Background="#1E1E1E" Padding="8,6" CornerRadius="3" IsVisible="{Binding HasDocumentText}">
+                                    <TextBlock Text="{Binding DocumentText}" FontSize="11" Foreground="#C9D1D9" TextWrapping="Wrap" MaxLines="16" />
+                                </Border>
+                            </StackPanel>
+
+                            <TextBlock Text="Empfohlene Aktion" Classes="label" />
+                            <TextBlock Text="{Binding DetailAction}" Foreground="White" FontSize="13" TextWrapping="Wrap" />
+                            <TextBlock Text="{Binding DetailActionReason}" FontSize="12" Foreground="#C9D1D9" TextWrapping="Wrap"
+                                       IsVisible="{Binding DetailActionReason, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                            <TextBlock Text="Warum" Classes="label" />
+                            <TextBlock Text="{Binding DetailReason}" FontSize="12" Foreground="#C9D1D9" TextWrapping="Wrap" />
+                            <TextBlock Text="{Binding DetailNotes}" FontSize="11" Foreground="#A0A7B0" TextWrapping="Wrap" Margin="0,4,0,0"
+                                       IsVisible="{Binding DetailNotes, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+
+                            <TextBlock Text="{Binding FileListTitle}" Classes="label" />
+                            <ItemsControl ItemsSource="{Binding FileItems}" IsVisible="{Binding HasFileItems}">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="vm:FindingFileItem">
+                                        <Border Padding="0,3" BorderBrush="#33373D" BorderThickness="0,0,0,1" Background="Transparent"
+                                                DoubleTapped="OnFileDoubleTapped" ToolTip.Tip="Doppelklick öffnet die Datei im Standardprogramm">
+                                            <StackPanel>
+                                                <DockPanel>
+                                                    <TextBlock DockPanel.Dock="Right" Text="{Binding FactsText}" Classes="small" Margin="8,0,0,0" />
+                                                    <Border DockPanel.Dock="Right" Background="#B3261E" CornerRadius="3" Padding="4,0" Margin="4,0,0,0"
+                                                            IsVisible="{Binding HasMarker}" VerticalAlignment="Center">
+                                                        <TextBlock Text="{Binding Marker}" FontSize="10" Foreground="White" />
+                                                    </Border>
+                                                    <TextBlock Text="{Binding RelativePath}" FontSize="12" Foreground="White" TextTrimming="CharacterEllipsis"
+                                                               ToolTip.Tip="{Binding RelativePath}" />
+                                                </DockPanel>
+                                                <TextBlock Text="{Binding Summary}" Classes="small" TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis"
+                                                           IsVisible="{Binding HasSummary}" />
+                                            </StackPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </ScrollViewer>
+                </Panel>
+            </Border>
+        </Grid>
+
+        <!-- ===== Decide ===== -->
+        <Border Grid.Row="3" Background="#252526" Padding="8,6,8,2" BorderBrush="#3E3E42" BorderThickness="0,1,0,0">
+            <StackPanel>
+                <WrapPanel>
+                    <Button Classes="compact accept" Content="Annehmen (A)" Command="{Binding AcceptCommand}"
+                            ToolTip.Tip="Aktion und Ziel gelten; der nächste Plan enthält sie. Es ändert keine Datei." />
+                    <Button Classes="compact" Content="Ziel ändern… (Z)" Command="{Binding ChangeTargetCommand}"
+                            ToolTip.Tip="Einen Ordner der Bibliothek wählen" />
+                    <Button Classes="compact reject" Content="Ablehnen (N)" Command="{Binding RejectCommand}"
+                            ToolTip.Tip="Das Fundstück stimmt, soll aber nicht in den Plan" />
+                    <Button Classes="compact" Content="Falsch" Command="{Binding WrongCommand}"
+                            ToolTip.Tip="Das Fundstück selbst stimmt nicht; es wird als Prüffall gespeichert" />
+                    <Button Classes="compact" Content="Wieder offen (O)" Command="{Binding ReopenCommand}"
+                            ToolTip.Tip="Die Entscheidung zurücknehmen" />
+                    <Button Classes="compact" Content="Ohne Ziel" Command="{Binding NoTargetCommand}"
+                            ToolTip.Tip="Bewusst kein Ziel: die Dateien bleiben, wo sie sind" />
+                    <Button Classes="compact" Content="Zielvorgabe zurück" Command="{Binding WithdrawTargetCommand}"
+                            ToolTip.Tip="Das von Hand oder vom Agenten gesetzte Ziel zurücknehmen" />
+                    <TextBox Text="{Binding Note, Mode=TwoWay}" Watermark="Notiz (optional)" Width="220" FontSize="12" MinHeight="26" Padding="6,3" Margin="4,0,8,4"
+                             ToolTip.Tip="Wird mit der Entscheidung gespeichert; beim Ziel als Begründung" />
+                    <TextBlock Text="{Binding SelectionText}" Classes="small" FontSize="12" VerticalAlignment="Center" Margin="0,0,0,4" />
+                </WrapPanel>
+                <TextBlock Text="{Binding StatusText}" FontSize="12" Foreground="#E8A838" TextWrapping="Wrap" Margin="0,0,0,4"
+                           IsVisible="{Binding StatusText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+            </StackPanel>
+        </Border>
+    </Grid>
+
+    <!-- ===== Change the target ===== -->
+    <Border IsVisible="{Binding HasTargetPicker}" Background="#B0000000">
+        <views:TargetPickerView DataContext="{Binding TargetPicker}" />
+    </Border>
+    </Panel>
+</UserControl>

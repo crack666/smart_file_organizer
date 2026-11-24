@@ -31,6 +31,7 @@ public class BrowserViewRenderTests
         window.Show();
         var job = (await services.GetRequiredService<ScanJobService>().GetJobAsync(bed.JobId))!;
         await main.OpenRecentScanCommand.ExecuteAsync(job);
+        main.ShowFoldersCommand.Execute(null); // a finished source job opens with its findings
         await Until(() => main.FolderTree.Roots.SelectMany(r => r.Children).Count(c => c.HasFacts) == 3);
 
         // 1: the tree with verdict, retention and size; Downloads selected, two photos checked for a common category.

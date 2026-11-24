@@ -8,6 +8,8 @@ public interface IFileRepository
     Task ReplaceDirectoryFilesAsync(long jobId, string parentPath, IEnumerable<FileNode> nodes, CancellationToken ct = default);
     Task<FileNode?> GetByIdAsync(long id, CancellationToken ct = default);
     Task<IReadOnlyList<FileNode>> GetByDirectoryAsync(long jobId, string parentPath, CancellationToken ct = default);
+    /// <summary>The files with these ids, with classification and override, by path; unknown ids are left out.</summary>
+    Task<IReadOnlyList<FileNode>> GetByIdsAsync(IReadOnlyCollection<long> ids, CancellationToken ct = default);
     Task<IReadOnlyList<FileNode>> GetPendingAiAnalysisAsync(long jobId, int batchSize, CancellationToken ct = default);
     Task<long> CountAiEligibleAsync(long jobId, CancellationToken ct = default);
     Task<long> CountPendingAiAnalysisAsync(long jobId, CancellationToken ct = default);

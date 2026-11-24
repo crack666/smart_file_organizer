@@ -10,6 +10,8 @@ decided in https://github.com/crack666/smart_file_organizer/issues/35.
   on the summary language in the settings. JSON always carries the code.
 - In code, a code belongs to an enum. The heading of each table below names it. `GlossaryTests`
   fails when an enum value has no code or no entry here, so a new value cannot be added silently.
+- The findings view of the GUI (since 24.11.2026, https://github.com/crack666/smart_file_organizer/issues/27) shows the
+  codes of findings, their actions and targets, and bundles in the language chosen there.
 - Before https://github.com/crack666/smart_file_organizer/issues/35 the first groups below were stored
   as German words (`einheit`, `gemischt`, `zugangsdaten`, ...). Schema step 13 rewrites existing
   databases; a model answer that still uses a German word is read, and only the code is stored.

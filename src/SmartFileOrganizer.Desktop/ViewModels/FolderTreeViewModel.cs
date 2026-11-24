@@ -25,12 +25,11 @@ public partial class FolderTreeItemViewModel : ViewModelBase
 
     [ObservableProperty] private ObservableCollection<FolderTreeItemViewModel> _children = [];
     [ObservableProperty] private bool _isExpanded;
-    [ObservableProperty] private bool _isSelected;
 
     /// <summary>Verdict, retention and size of the folder; null until the job's facts are read.</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasFacts), nameof(VerdictLabel), nameof(VerdictColor), nameof(HasVerdict),
-        nameof(RetentionLabel), nameof(RetentionColor), nameof(HasRetention), nameof(SizeText), nameof(IsOverridden),
+        nameof(RetentionLabel), nameof(RetentionColor), nameof(HasRetention), nameof(SizeText), nameof(FilesText), nameof(IsOverridden),
         nameof(SensitiveText), nameof(HasSensitive), nameof(FactsToolTip))]
     private DirectoryItem? _facts;
 
@@ -66,6 +65,9 @@ public partial class FolderTreeItemViewModel : ViewModelBase
     public string RetentionLabel => BrowserDisplay.RetentionLabel(Facts?.Retention);
     public string RetentionColor => BrowserDisplay.RetentionColor(Facts?.Retention);
     public string SizeText => Facts is { } f ? PlanDisplay.Size(f.SizeBytes) : string.Empty;
+
+    /// <summary>Files below the folder, with its subfolders.</summary>
+    public string FilesText => Facts is { } f ? PlanDisplay.Files(f.Files) : string.Empty;
 
     /// <summary>The verdict was set by a person.</summary>
     public bool IsOverridden => Facts?.VerdictSource == VerdictSource.Human.ToCode();
@@ -126,6 +128,14 @@ public partial class FolderTreeItemViewModel : ViewModelBase
         foreach (var child in Children) child.RefreshFacts();
     }
 
+    /// <summary>Orders the loaded subfolders anew, here and below.</summary>
+    internal void SortChildren()
+    {
+        if (Node is null || _owner is null || HasPlaceholder) return;
+        _owner.Sort(Children);
+        foreach (var child in Children) child.SortChildren();
+    }
+
     partial void OnIsExpandedChanged(bool value)
     {
         if (value && !_childrenLoaded)
@@ -138,13 +148,24 @@ public partial class FolderTreeItemViewModel : ViewModelBase
         Children.Clear();
 
         var dirs = await _dirQuery.GetChildrenAsync(_jobId, Node.FullPath);
-        foreach (var d in dirs)
+        var items = dirs.Select(d => new FolderTreeItemViewModel(d, _dirQuery, _jobId, _owner)).ToList();
+        foreach (var item in _owner?.Sorted(items) ?? items)
         {
-            var item = new FolderTreeItemViewModel(d, _dirQuery, _jobId, _owner);
             item.AddPlaceholder();
             Children.Add(item);
         }
     }
+}
+
+/// <summary>The order of the folders in the tree.</summary>
+public sealed record FolderSort(string Label)
+{
+    public static FolderSort Name { get; } = new("nach Name");
+    public static FolderSort Size { get; } = new("nach Größe");
+    public static FolderSort Files { get; } = new("nach Dateizahl");
+    public static IReadOnlyList<FolderSort> All { get; } = [Name, Size, Files];
+
+    public override string ToString() => Label;
 }
 
 /// <summary>
@@ -169,6 +190,13 @@ public partial class FolderTreeViewModel : ViewModelBase
     [ObservableProperty] private ObservableCollection<FolderTreeItemViewModel> _roots = [];
     [ObservableProperty] private FolderTreeItemViewModel? _selectedItem;
     [ObservableProperty] private bool _isLoading;
+
+    /// <summary>The order of the folders, at every level; size and file count as they are shown, with subfolders.</summary>
+    [ObservableProperty] private FolderSort _selectedSort = FolderSort.Name;
+
+    public IReadOnlyList<FolderSort> Sorts => FolderSort.All;
+
+    private bool _sorting;
 
     public Func<string, Task>? RescanDirectoryAction { get; set; }
 
@@ -249,6 +277,7 @@ public partial class FolderTreeViewModel : ViewModelBase
 
             _facts = facts;
             foreach (var root in Roots) root.RefreshFacts();
+            if (SelectedSort != FolderSort.Name) SortTree();
             FactsLoaded?.Invoke(this, EventArgs.Empty);
         }
         finally
@@ -282,10 +311,49 @@ public partial class FolderTreeViewModel : ViewModelBase
         foreach (var root in Roots) root.RefreshFacts();
     }
 
+    partial void OnSelectedSortChanged(FolderSort value) => SortTree();
+
+    /// <summary>Orders the whole tree anew; open folders and the selection stay.</summary>
+    private void SortTree()
+    {
+        var selected = SelectedItem;
+        _sorting = true;
+        try
+        {
+            Sort(Roots);
+            foreach (var root in Roots) root.SortChildren();
+            SelectedItem = selected;
+        }
+        finally
+        {
+            _sorting = false;
+        }
+    }
+
+    /// <summary>The folders in the chosen order; without facts yet they keep the order of their names.</summary>
+    internal IEnumerable<FolderTreeItemViewModel> Sorted(IEnumerable<FolderTreeItemViewModel> items)
+    {
+        var byName = items.OrderBy(i => i.DisplayName, StringComparer.CurrentCultureIgnoreCase);
+        return SelectedSort == FolderSort.Size ? byName.OrderByDescending(i => i.Facts?.SizeBytes ?? 0)
+            : SelectedSort == FolderSort.Files ? byName.OrderByDescending(i => i.Facts?.Files ?? 0)
+            : byName;
+    }
+
+    /// <summary>Moves only what is out of place, so the tree keeps its open folders.</summary>
+    internal void Sort(ObservableCollection<FolderTreeItemViewModel> items)
+    {
+        var wanted = Sorted(items).ToList();
+        for (var i = 0; i < wanted.Count; i++)
+        {
+            var at = items.IndexOf(wanted[i]);
+            if (at != i) items.Move(at, i);
+        }
+    }
+
     partial void OnSelectedItemChanged(FolderTreeItemViewModel? value)
     {
         Debug.WriteLine($"[TREE SELECT] value='{value?.FullPath ?? "(null)"}'  subscribers={DirectorySelected?.GetInvocationList().Length ?? 0}");
-        if (value != null)
+        if (value != null && !_sorting)
             DirectorySelected?.Invoke(this, value.FullPath);
     }
 }

@@ -96,6 +96,14 @@ Other options: `AppSettingsDirectory` (where the shipped `appsettings.json` defa
 5. selected file details are loaded through `FileQueryService`
 6. `FileDetailViewModel` maps metadata and asks `FilePreviewService` for preview content
 
+A finished source job opens with its findings instead (since 24.11.2026,
+[#27](https://github.com/crack666/smart_file_organizer/issues/27)): `FindingsViewModel` computes them with
+`FindingService.ComputeAsync` off the UI thread and records a decision with `FindingService.RecordAsync`, which does not
+compute the job again (the CLI's `DecideAsync` does, and then records the same way). A changed target does: it goes
+through `FindingPlacementService` and changes action, certainty and rank. A search (`JobSearchService`, one pass over
+the files of the job) filters the findings by their file ids and fills the file table with its hits; the summary of a
+file whose content may not be shown is not searched.
+
 ## Preview flow
 
 `FileContentExtractor` (Infrastructure) reads the content once, without UI types; `FilePreviewService` (Desktop) only decodes the returned image bytes into Avalonia bitmaps and makes the filmstrip of a video. Preview and model input therefore come from the same code.

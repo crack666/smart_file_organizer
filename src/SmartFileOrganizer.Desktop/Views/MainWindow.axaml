@@ -9,6 +9,13 @@
         MinWidth="900" MinHeight="600"
         Background="#1E1E1E">
 
+    <Window.Styles>
+        <Style Selector="Button.active">
+            <Setter Property="Background" Value="#2F6FD6" />
+            <Setter Property="Foreground" Value="White" />
+        </Style>
+    </Window.Styles>
+
     <DockPanel Background="#1E1E1E">
 
         <!-- ===== Toolbar ===== -->
@@ -58,7 +65,7 @@
 
                 <Button Content="CSV exportieren…"
                         Command="{Binding ExportCsvCommand}"
-                        IsVisible="{Binding IsBrowserVisible}"
+                        IsVisible="{Binding IsJobViewVisible}"
                         ToolTip.Tip="Alle Dateien des Jobs als CSV, wie sfo export"
                         Margin="0,0,12,0" />
 
@@ -170,6 +177,79 @@
                            TextTrimming="CharacterEllipsis"
                            Opacity="0.8" />
             </StackPanel>
+        </Border>
+
+        <!-- ===== Views of the open job and search (https://github.com/crack666/smart_file_organizer/issues/27) ===== -->
+        <Border DockPanel.Dock="Top" Background="#252526" BorderBrush="#3E3E42" BorderThickness="0,1,0,1" Padding="8,4"
+                IsVisible="{Binding IsJobOpen}">
+            <DockPanel>
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="6" IsVisible="{Binding IsJobViewVisible}">
+                    <TextBlock Text="{Binding SearchStatus}" FontSize="12" Opacity="0.7" VerticalAlignment="Center" />
+                    <TextBox Name="SearchBox" Text="{Binding SearchText, Mode=TwoWay}" Width="300" FontSize="12" MinHeight="26" Padding="6,3"
+                             Watermark="Suche: Name, Pfad, Zusammenfassung"
+                             ToolTip.Tip="Im geöffneten Job; mehrere Wörter müssen alle vorkommen (Strg+F, Esc beendet)">
+                        <TextBox.KeyBindings>
+                            <KeyBinding Gesture="Enter" Command="{Binding SearchCommand}" />
+                            <KeyBinding Gesture="Escape" Command="{Binding ClearSearchCommand}" />
+                        </TextBox.KeyBindings>
+                    </TextBox>
+                    <Button Content="✕" Command="{Binding ClearSearchCommand}" Padding="6,2" FontSize="11" VerticalAlignment="Center"
+                            IsVisible="{Binding SearchText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" ToolTip.Tip="Suche beenden" />
+                </StackPanel>
+                <StackPanel Orientation="Horizontal" Spacing="4">
+                    <ToggleButton Content="☰ Jobs" IsChecked="{Binding IsSidebarOpen, Mode=TwoWay}" IsVisible="{Binding IsJobViewVisible}" FontSize="12" Padding="8,3"
+                                  ToolTip.Tip="Jobs und Schnellfilter an der Seite" />
+                    <Button Classes.active="{Binding IsFindingsVisible}" Content="Fundstücke" Command="{Binding ShowFindingsCommand}" FontSize="12" Padding="12,3"
+                            ToolTip.Tip="Fundstücke und Bündel des Quell-Jobs" />
+                    <Button Classes.active="{Binding IsBrowserVisible}" Content="Ordner" Command="{Binding ShowFoldersCommand}" FontSize="12" Padding="12,3"
+                            ToolTip.Tip="Ordnerbaum und Dateien" />
+                    <Button Classes.active="{Binding IsShowingPlan}" Content="Plan" Command="{Binding OpenPlanCommand}" CommandParameter="{x:Null}" FontSize="12" Padding="12,3"
+                            ToolTip.Tip="Pläne dieses Jobs" />
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+        <!-- ===== Side bar: jobs and quick filters ===== -->
+        <Border DockPanel.Dock="Left" Width="210" Background="#1F2328" BorderBrush="#3E3E42" BorderThickness="0,0,1,0"
+                IsVisible="{Binding IsSidebarVisible}">
+            <DockPanel>
+                <StackPanel DockPanel.Dock="Bottom" Margin="10,8" Spacing="4">
+                    <TextBlock Text="Schnellfilter" FontSize="12" FontWeight="SemiBold" Foreground="White" />
+                    <ItemsControl ItemsSource="{Binding Findings.QuickFilters}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="vm:FindingQuickFilterViewModel">
+                                <ToggleButton IsChecked="{Binding IsActive, Mode=TwoWay}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"
+                                              Padding="8,3" Margin="0,0,0,3" FontSize="12" ToolTip.Tip="{Binding Hint}">
+                                    <DockPanel>
+                                        <TextBlock DockPanel.Dock="Right" Text="{Binding Count}" Opacity="0.7" />
+                                        <TextBlock Text="{Binding Label}" />
+                                    </DockPanel>
+                                </ToggleButton>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                    <Button Content="Filter aus" Command="{Binding Findings.ResetFiltersCommand}" IsVisible="{Binding Findings.IsFiltered}" FontSize="11" Padding="6,2" />
+                </StackPanel>
+                <TextBlock DockPanel.Dock="Top" Text="Jobs" FontSize="12" FontWeight="SemiBold" Foreground="White" Margin="10,8,10,4" />
+                <ListBox ItemsSource="{Binding JobBar.Items}" SelectedItem="{Binding JobBar.Selected, Mode=TwoWay}"
+                         Background="Transparent" BorderThickness="0" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate x:DataType="vm:JobBarItemViewModel">
+                            <StackPanel Margin="-2,0" ToolTip.Tip="{Binding Job.RootPath}">
+                                <DockPanel>
+                                    <Border DockPanel.Dock="Right" Background="{Binding RoleColor}" CornerRadius="3" Padding="4,0" VerticalAlignment="Center">
+                                        <TextBlock Text="{Binding RoleLabel}" FontSize="10" Foreground="White" />
+                                    </Border>
+                                    <TextBlock Text="{Binding Name}" FontSize="13" Foreground="White" TextTrimming="CharacterEllipsis" Margin="0,0,4,0" />
+                                </DockPanel>
+                                <TextBlock Text="{Binding FilesText}" FontSize="11" Foreground="#A0A7B0" />
+                                <TextBlock Text="{Binding StatusLabel}" FontSize="11" Foreground="{Binding StatusColor}" />
+                                <TextBlock Text="{Binding AnalysisText}" FontSize="11" Foreground="#A0A7B0" IsVisible="{Binding HasAnalysis}" />
+                            </StackPanel>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </DockPanel>
         </Border>
 
         <!-- ===== Main area ===== -->
@@ -287,7 +367,7 @@
         </Grid>
 
         <!-- Browser (tree + table + detail) -->
-        <Grid ColumnDefinitions="300,4,*" Background="#1E1E1E"
+        <Grid ColumnDefinitions="320,4,*" Background="#1E1E1E"
               IsVisible="{Binding IsBrowserVisible}">
 
             <!-- Left: Folder Tree -->
@@ -296,18 +376,18 @@
                     BorderThickness="0,0,1,0"
                     BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}">
                 <DockPanel>
-                    <TextBlock DockPanel.Dock="Top"
-                               Text="Folder Tree"
-                               FontWeight="SemiBold"
-                               Margin="8,6,8,4" />
+                    <DockPanel DockPanel.Dock="Top" Margin="8,4">
+                        <ComboBox DockPanel.Dock="Right" ItemsSource="{Binding FolderTree.Sorts}" SelectedItem="{Binding FolderTree.SelectedSort, Mode=TwoWay}"
+                                  Width="125" FontSize="11" MinHeight="24" Padding="6,2" ToolTip.Tip="Reihenfolge der Ordner; Größe und Dateizahl mit Unterordnern" />
+                        <TextBlock Text="Ordner" FontWeight="SemiBold" VerticalAlignment="Center" />
+                    </DockPanel>
                     <ScrollViewer>
                         <TreeView ItemsSource="{Binding FolderTree.Roots}"
                                   SelectedItem="{Binding FolderTree.SelectedItem, Mode=TwoWay}">
-                            <!-- Bind IsExpanded/IsSelected on each container so lazy-load fires -->
+                            <!-- Bind IsExpanded on each container so lazy-load fires; the selection is the tree's alone -->
                             <TreeView.Styles>
                                 <Style Selector="TreeViewItem">
                                     <Setter Property="IsExpanded" Value="{ReflectionBinding IsExpanded, Mode=TwoWay}" />
-                                    <Setter Property="IsSelected" Value="{ReflectionBinding IsSelected, Mode=TwoWay}" />
                                 </Style>
                             </TreeView.Styles>
                             <TreeView.ItemTemplate>
@@ -327,6 +407,7 @@
                                             <StackPanel Orientation="Horizontal" Spacing="6">
                                                 <TextBlock Text="{Binding DisplayName}" />
                                                 <TextBlock Text="{Binding SizeText}" FontSize="11" Opacity="0.55" VerticalAlignment="Center" />
+                                                <TextBlock Text="{Binding FilesText}" FontSize="11" Opacity="0.55" VerticalAlignment="Center" />
                                             </StackPanel>
                                             <StackPanel Orientation="Horizontal" Spacing="4" IsVisible="{Binding HasFacts}">
                                                 <Border Background="{Binding VerdictColor}" CornerRadius="3" Padding="5,0"
@@ -574,7 +655,11 @@
                                                 ToolTip.Tip="Vom Modell als vorübergehend eingestuft">
                                             <TextBlock Text="temporär" FontSize="10" Foreground="White" />
                                         </Border>
-                                        <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                                        <StackPanel VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                                            <TextBlock Text="{Binding FolderText}" FontSize="11" Opacity="0.6" TextTrimming="CharacterEllipsis"
+                                                       IsVisible="{Binding HasFolderText}" />
+                                        </StackPanel>
                                     </DockPanel>
                                 </DataTemplate>
                             </DataGridTemplateColumn.CellTemplate>
@@ -669,6 +754,11 @@
             </Grid>
 
         </Grid>
+
+        <!-- Findings and bundles (https://github.com/crack666/smart_file_organizer/issues/27) -->
+        <Border IsVisible="{Binding IsFindingsVisible}" Background="#1E1E1E">
+            <views:FindingsView Name="FindingsPane" DataContext="{Binding Findings}" />
+        </Border>
 
         <!-- Plan: review, confirm, execute (https://github.com/crack666/smart_file_organizer/issues/15) -->
         <Border IsVisible="{Binding IsShowingPlan}" Background="#1E1E1E">

@@ -57,7 +57,13 @@ public static class ServiceConfigurator
             sp.GetRequiredService<PlanViewModel>(),
             sp.GetRequiredService<DirectoryBannerViewModel>(),
             sp.GetRequiredService<ScanExportService>(),
-            sp.GetRequiredService<SensitiveOutputOptions>()));
+            sp.GetRequiredService<SensitiveOutputOptions>(),
+            sp.GetRequiredService<FindingsViewModel>(),
+            sp.GetRequiredService<JobBarViewModel>(),
+            sp.GetRequiredService<JobSearchService>()));
+        // Findings and bundles of a job, and the jobs at the side (https://github.com/crack666/smart_file_organizer/issues/27).
+        services.AddTransient<FindingsViewModel>();
+        services.AddTransient<JobBarViewModel>();
         services.AddTransient<FolderTreeViewModel>();
         services.AddTransient<FileTableViewModel>(sp => new FileTableViewModel(
             sp.GetRequiredService<FileQueryService>(),

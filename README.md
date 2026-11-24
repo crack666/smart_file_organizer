@@ -88,9 +88,24 @@ person then releases all, a group or a selection at once, and changes a
 target in a folder tree of the libraries. Screenshots from a generated test
 folder: [docs/images](docs/images/01-plan-agent.png).
 
+A finished source job opens with its findings and bundles since 24.11.2026
+([#27](https://github.com/crack666/smart_file_organizer/issues/27); until then
+with the folder tree): kind, period, count, size, reason and recommended action
+with target per finding, grouped by bundle. A accepts, Z changes the target in
+the folder tree of the library, N rejects, O reopens, for one finding or a
+selection; sensitive findings only one by one. The detail shows a picture
+strip, the first page or text of a document and the files, for a sensitive
+finding after a click and for access data never. A side bar holds the jobs with
+role and status and the quick filters (nicht gesichert, sensibel, prüfen,
+doppelt); the search covers name, path and summary of the open job. Codes are
+shown in German or English. Nothing in this view changes a file.
+
+![Findings of a job](docs/images/17-findings.png)
+
 Since 24.11.2026 ([#14](https://github.com/crack666/smart_file_organizer/issues/14))
-the browser of an analysed job shows each folder's verdict (`Einheit`,
-`einheitlich`, `gemischt`, ...), retention value and size in the tree, and a
+the folder view ("Ordner") of an analysed job shows each folder's verdict (`Einheit`,
+`einheitlich`, `gemischt`, ...), retention value, size and file count in the
+tree (sortable by name, size or file count), and a
 banner with purpose, reason and why a folder was raised to mixed. A person sets
 a folder's verdict there and takes it back; it is stored beside the verdict of
 rule or model and wins wherever the verdict is read (`sfo` included). The file

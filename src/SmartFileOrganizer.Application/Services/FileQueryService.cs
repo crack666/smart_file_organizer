@@ -19,6 +19,9 @@ public class FileQueryService
     public Task<FileNode?> GetFileByIdAsync(long id, CancellationToken ct = default)
         => _fileRepo.GetByIdAsync(id, ct);
 
+    public Task<IReadOnlyList<FileNode>> GetFilesAsync(IReadOnlyCollection<long> ids, CancellationToken ct = default)
+        => _fileRepo.GetByIdsAsync(ids, ct);
+
     public Task<long> CountFilesAsync(long jobId, CancellationToken ct = default)
         => _fileRepo.CountByJobAsync(jobId, ct);
 }
