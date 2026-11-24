@@ -266,7 +266,9 @@ what the database holds, without the output guard: whatever leaves the machine g
 ## Rules for changes
 
 - **Minor version** (`1.0` → `1.1`): new keys, a new line file, a new code in an enumeration. 1.1 (23.11.2026) added
-  `findings.jsonl`, `plan.jsonl` and `findings`, `plan_actions`, `plans` in `job.json`. A reader of version 1
+  `findings.jsonl`, `plan.jsonl` and `findings`, `plan_actions`, `plans` in `job.json`. 1.2 (24.11.2026) added the
+  code `human` to `verdict_source` of `directories.jsonl` and `v_directories`: a verdict a person set
+  ([#14](https://github.com/crack666/smart_file_organizer/issues/14)). A reader of version 1
   ignores keys it does not know and treats an unknown code like `unknown`.
 - **Major version** (`1.x` → `2.0`, new folder `schemas/exchange/v2/`): a key that changes meaning or type, a key that
   is removed, a code that is removed or renamed. `sfo import-results` reads only the major version it was built with.

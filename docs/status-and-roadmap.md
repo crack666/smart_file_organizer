@@ -96,8 +96,11 @@ most did not; dated counts in the sections below are measurements of their day._
    `Skipped` (the directory carries the result). The model is not asked how to
    sample (until 18.11.2026 this said "The model's sampling fields are still
    asked for but no longer followed"; prompt and schema dropped them with
-   [#111](https://github.com/crack666/smart_file_organizer/issues/111)). Not yet shown in the GUI
-   ([#14](https://github.com/crack666/smart_file_organizer/issues/14)) or the CLI.
+   [#111](https://github.com/crack666/smart_file_organizer/issues/111)). Shown in the GUI since 24.11.2026
+   ([#14](https://github.com/crack666/smart_file_organizer/issues/14): tree and folder banner, and a person's own
+   verdict in `directory_overrides`, which wins over rule and model; source `human`) and by `sfo dirs`/`sfo show`.
+   Until 24.11.2026 this said "Not yet shown in the GUI (#14) or the CLI"; the CLI had shown it since the read
+   commands.
 2. **Per-file classification, in stages** (`ClassificationService`,
    `DirectorySamplingService`, `OllamaService`; since 12.11.2026 by
    [#8](https://github.com/crack666/smart_file_organizer/issues/8)): a uniform
@@ -165,8 +168,18 @@ yet against a real Ollama restart.
 
 - Root folder selection; scan start, pause, cancel.
 - AI classification start, pause, resume, cancel, independent of the scan.
-- Lazy folder tree; file table with category colour, confidence, summary.
-- Directory summary banner above the file table.
+- Lazy folder tree with verdict, retention value, size and marked files per folder, read off the UI thread and
+  again while the analysis runs (since 24.11.2026,
+  [#14](https://github.com/crack666/smart_file_organizer/issues/14)); file table with category colour, state,
+  confidence, summary, and marks for sensitive and temporary files.
+- Folder banner above the file table: verdict and who decided, retention, purpose, reason, escalation to mixed,
+  the model's summary, `analysis_skip`; the person sets the folder's verdict and retention there with a note, and
+  takes it back (`DirectoryReviewService`, table `directory_overrides`). Until 24.11.2026 only the model's summary.
+- Filters of the file table (category, state, low confidence below `SecondCheck:BelowConfidence` and not yet
+  reviewed, sensitive, temporary) that stay from folder to folder; check marks with a common category for the
+  checked files (`ReviewService.ApplyCategoryAsync`). A mark counts only while its row is shown.
+- Sensitive files: the preview of the detail opens on "Vorschau zeigen", that of access data never; their summary is
+  not shown. "CSV exportieren…" in the toolbar writes the job like `sfo export`.
 - File detail panel with metadata and image, text and first-page PDF preview.
 - Manual review: accept or override category and target per file, in the
   detail panel and in the table row (`ReviewService`, `UserOverride`).
