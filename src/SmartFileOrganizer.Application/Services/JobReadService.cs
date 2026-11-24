@@ -418,6 +418,7 @@ public class JobReadService
             LinkKind = r.LinkKind,
             LinkTarget = r.LinkTarget,
             ErrorCause = r.ScanErrorCause,
+            AnalysisSkip = r.AnalysisSkip,
             Verdict = r.Verdict,
             VerdictSource = r.VerdictSource,
             VerdictRule = r.VerdictRule,

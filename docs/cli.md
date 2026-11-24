@@ -285,7 +285,10 @@ sfo status 7 --json
 
 `phases.scan.errors` counts the folders and files the scan could not read. `scan_errors` groups them by
 cause (`access_denied`, `not_found`, `path_too_long`, `io_error`) with counts and the first three paths of
-each; `errors` lists the AI phases only. `links` lists the links the scan found, by kind (`junction`,
+each; `errors` lists the AI phases only: `phase` `pre_assessment`, `classification` or `summary` for a failed model
+call, and `directory_verdict` (since 24.11.2026, issue 71) for a folder left without a verdict although its call did not
+fail (the answer held no valid verdict, or a rule waits for its subfolders), so a folder counted as open names its
+cause. `links` lists the links the scan found, by kind (`junction`,
 `symlink`, `mount_point`): folders not entered, folders a `follow_link` rule entered, and files that are
 links; none of them counts as content ([scan-rules.md](scan-rules.md#links-and-read-errors)). After a
 finished scan `directories_total` equals `directories_processed` and `files_total` equals `files_processed`:
@@ -1018,10 +1021,16 @@ sfo files 7 --dir photos --max-confidence 0.5 --json
       "file_type": "image", "size_bytes": 482113, "last_write_time": "2019-07-02T10:14:00.000Z",
       "status": "ai_analyzed", "category": "document_scan", "category_source": "model",
       "confidence": 0.42, "summary": "Scanned page of a rental contract.",
-      "sensitive": [], "protected": false, "dir_verdict": "...", "certainty": "likely", "origin": null }
+      "sensitive": [], "protected": false, "dir_verdict": "...", "certainty": "likely", "origin": null,
+      "analysis_skip": null }
   ]
 }
 ```
+
+`analysis_skip` (since 24.11.2026, https://github.com/crack666/smart_file_organizer/issues/71): why the analysis left the
+file out, `backed_up` when `sfo analyze --against` found it in a library, else `null`. It says why a `skipped` file
+carries no result; the text output marks such a line `[backed_up: in the library, not analysed]`, and `sfo show` prints
+it as `skipped` for the file and for a fully backed-up folder (`directory.analysis_skip`).
 
 `origin` (since 14.11.2026, https://github.com/crack666/smart_file_organizer/issues/103): for a video, its kind and origin
 from the stored facts, else `null`. `kind` is a video kind code, `source` a fact source code (`metadata`, `name`,
@@ -1555,7 +1564,9 @@ it the facts, [`sfo findings place`](#sfo-findings-place-job-key) records its de
   `sfo plan create` moves each file with its part.
 - `inputs.library_job_ids` lists every library the findings rest on; `library_job_id` and `library_compared_at` are
   those of the first one.
-- `sensitive` findings name path, marker and rule ids; what their files show is decided by `Sensitive:Disclosure`
+- `sensitive` findings, one per folder (inside noise one per noise part), name path, every marker of its files (access
+  data first, with a note `By marker: credentials 2 files, finance 3 files.`; until 24.11.2026 one finding per folder
+  and marker set) and rule ids; what their files show is decided by `Sensitive:Disclosure`
   ([Sensitive files](#sensitive-files)). Marked files stay in `sensitive` findings, decided one by one, in either setting.
 - `--summary` gives `{ "job_id", "root_path", "inputs", "coverage", "missing_steps", "listed", "sure", "unsure",
   "by_kind": { "<kind>": { "findings", "sure", "unsure", "files", "bytes" } }, "by_certainty", "by_state",

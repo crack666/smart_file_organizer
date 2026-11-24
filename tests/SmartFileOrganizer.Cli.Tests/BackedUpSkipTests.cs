@@ -143,6 +143,32 @@ public class BackedUpSkipTests : IDisposable
         Assert.Equal([library, secondId], skip.GetProperty("libraries").EnumerateArray().Select(x => x.GetInt64()));
     }
 
+    /// <summary>Nachtrag 13.11.2026 in issue 71: show and files say why a file carries no result.</summary>
+    [Fact]
+    public async Task ShowAndFiles_NameTheSkipReason_OfABackedUpFileAndFolder()
+    {
+        var (source, library) = await ScanAndCompareAsync();
+        var run = await SfoAsync("analyze", source.ToString(), "--against", library.ToString(), "--json");
+        Assert.True(run.ExitCode == 0, run.Stderr + run.Stdout);
+
+        var file = await SfoAsync("show", source.ToString(), "saved/letter.txt", "--json");
+        Assert.True(file.ExitCode == 0, file.Stderr + file.Stdout);
+        Assert.Equal("backed_up", file.Json().GetProperty("result").GetProperty("file").GetProperty("analysis_skip").GetString());
+        var fileText = await SfoAsync("show", source.ToString(), "saved/letter.txt");
+        Assert.Contains("skipped     backed_up: in the library", fileText.Stdout);
+
+        var folder = await SfoAsync("show", source.ToString(), "saved", "--json");
+        Assert.Equal("backed_up", folder.Json().GetProperty("result").GetProperty("directory").GetProperty("analysis_skip").GetString());
+
+        var files = await SfoAsync("files", source.ToString(), "--json");
+        var skips = files.Json().GetProperty("result").GetProperty("items").EnumerateArray()
+            .ToDictionary(f => f.GetProperty("name").GetString()!, f => f.GetProperty("analysis_skip").GetString());
+        Assert.Equal("backed_up", skips["recipe.txt"]);
+        Assert.Null(skips["diary.txt"]);
+        var filesText = await SfoAsync("files", source.ToString());
+        Assert.Contains(filesText.Stdout.Split('\n'), l => l.Contains("recipe.txt") && l.Contains("[backed_up: in the library"));
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────
 
     private static void Write(string root, string relative, string text)

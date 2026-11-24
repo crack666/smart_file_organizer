@@ -104,6 +104,15 @@ public class JobStatisticsRepository : IJobStatisticsRepository
                     SELECT r.phase, n.full_path, r.error, r.analyzed_at
                     FROM ai_directory_results r JOIN directory_nodes n ON n.id = r.directory_node_id
                     WHERE n.job_id = @jobId AND r.error IS NOT NULL
+                    UNION ALL
+                    -- A folder left without a verdict whose pre-assessment itself had no error (the model answered,
+                    -- but with no valid verdict; a rule could not decide yet): until 24.11.2026 status counted it as
+                    -- open and never said why (issue 71, Nachtrag 13.11.2026).
+                    SELECT 'directory_verdict', n.full_path, v.error, v.judged_at
+                    FROM directory_verdicts v JOIN directory_nodes n ON n.id = v.directory_node_id
+                    WHERE n.job_id = @jobId AND v.verdict IS NULL AND v.error IS NOT NULL
+                      AND NOT EXISTS (SELECT 1 FROM ai_directory_results r
+                                      WHERE r.directory_node_id = n.id AND r.phase = 'pre_assessment' AND r.error IS NOT NULL)
                 )
                 ORDER BY at DESC, path
                 LIMIT @maxErrors

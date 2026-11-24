@@ -851,18 +851,21 @@ public sealed class FindingService
 
     private IEnumerable<Finding> Sensitive(ScanJob job, IReadOnlyList<FileFacts> facts, IReadOnlyList<DirectoryReadRow> dirs, bool withLibrary)
     {
-        // Outside noise one finding per folder and marker set: the person looks at each place. Inside app data or a
-        // program folder one per noise bundle and marker set, so the browser and mail profiles of an old user
-        // profile do not fill the list.
+        // Outside noise one finding per folder: the person looks at each place, and its markers are a list, access data
+        // first (credentials, keys lead the enum order). Until 24.11.2026 one per folder and marker set, so one folder
+        // could fill eleven lines (issue 71, Nachtrag 13.11.2026). Inside app data or a program folder one per noise
+        // bundle, so the browser and mail profiles of an old user profile do not fill the list.
         foreach (var g in facts.Where(x => x.Match.IsMatch)
-                     .GroupBy(x => (Place: x.Unit is { Bundle: not null, Noise: not null } u ? u.Subject : "dir|" + x.File.ParentPath, x.Match.Markers)))
+                     .GroupBy(x => x.Unit is { Bundle: not null, Noise: not null } u ? u.Subject : "dir|" + x.File.ParentPath, StringComparer.Ordinal))
         {
-            var files = g.ToList();
+            // Files with access data first, so the examples of the finding name them.
+            var files = g.OrderBy(x => SensitiveOutputOptions.IsAccessData(x.Match.Markers) ? 0 : 1).ThenBy(x => x.File.FullPath, StringComparer.Ordinal).ToList();
             var first = files[0];
             var inNoise = first.Unit is { Bundle: not null, Noise: not null };
             var rel = inNoise ? first.Unit.Rel : FindingRules.Rel(first.File.RelativeDir);
             var where = inNoise ? first.Unit.Label : rel;
-            var tokens = SensitiveMarkerNames.ToTokens(g.Key.Markers);
+            var all = files.Aggregate(SensitiveMarker.None, (m, x) => m | x.Match.Markers);
+            var tokens = SensitiveMarkerNames.ToTokens(all);
             var rules = files.SelectMany(x => FindingRules.SplitRules(x.Match.Rule)).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToList();
             var shownRules = rules.Count <= 5 ? string.Join(", ", rules) : string.Join(", ", rules.Take(5)) + $" and {rules.Count - 5} more";
             var certainty = FindingRules.Weakest(
@@ -878,6 +881,14 @@ public sealed class FindingService
                 SensitiveAction, withComparison: withLibrary);
             finding.Markers = tokens;
             finding.SensitiveRules = rules;
+            if (tokens.Count > 1)
+            {
+                finding.Notes.Add("By marker: " + string.Join(", ", SensitiveMarkerNames.ToTokens(all).Select(t =>
+                {
+                    SensitiveMarkerNames.TryParseToken(t, out var m);
+                    return $"{t} {FindingRules.Count(files.Count(x => (x.Match.Markers & m) != 0), "file", "files")}";
+                })) + ".");
+            }
             if (withLibrary)
             {
                 var backed = files.Count(x => x.Row?.State == ContentState.BackedUp);

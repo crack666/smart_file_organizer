@@ -55,6 +55,9 @@ public sealed class DirectoryReadRow
     /// <summary>Marked files that entered the Phase 3 summary as their neutral line (JSON list); null when unknown.</summary>
     public string? AiSummaryMarkedInputs { get; set; }
 
+    /// <summary>Why the analysis left the folder out (<c>backed_up</c>: every file is in a library); null otherwise.</summary>
+    public string? AnalysisSkip { get; set; }
+
     /// <summary>Stored markers of a skipped folder (<see cref="DirectoryNode.SensitiveMarkers"/>).</summary>
     public SensitiveMarker SensitiveMarkers { get; set; }
 

@@ -166,6 +166,23 @@ public class ReadCommandTests : IDisposable
         return jobId;
     }
 
+    // ------------------------------------------------------------------ status
+
+    /// <summary>Issue 71, Nachtrag 13.11.2026: a folder left without a verdict names its cause in status.</summary>
+    [Fact]
+    public async Task Status_ListsTheCauseOfAFolderLeftWithoutVerdict()
+    {
+        var jobId = await PrepareAsync();
+
+        var errors = (await OkAsync("status", jobId.ToString())).Result().GetProperty("errors").EnumerateArray().ToList();
+        var open = Assert.Single(errors, e => e.GetProperty("phase").GetString() == "directory_verdict");
+        Assert.Equal(P("keys"), open.GetProperty("path").GetString());
+        Assert.Equal("Ollama request timed out.", open.GetProperty("message").GetString());
+
+        var text = await SfoAsync("status", jobId.ToString());
+        Assert.Contains("Ollama request timed out.", text.Stdout);
+    }
+
     // ------------------------------------------------------------------ dirs
 
     [Fact]

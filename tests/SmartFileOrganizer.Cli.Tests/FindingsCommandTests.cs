@@ -284,6 +284,34 @@ public class FindingsCommandTests : IDisposable
         Assert.True(file.GetProperty("protected").GetBoolean());
     }
 
+    /// <summary>
+    /// Issue 71, Nachtrag 13.11.2026: on the real profile one folder showed two findings of twelve videos each, one
+    /// not_backed_up and one in_noise. A file belongs to at most one of not_backed_up, in_noise and sensitive.
+    /// </summary>
+    [Fact]
+    public async Task AFile_IsInAtMostOneFindingOfNotBackedUp_InNoise_AndSensitive()
+    {
+        var job = await PrepareAsync(withLibrary: true);
+        var export = Path.Combine(_dir, "export");
+        await OkAsync("export", job, "--format", "jsonl", "--out", export);
+
+        var owners = new Dictionary<long, List<string>>();
+        foreach (var line in File.ReadAllLines(Path.Combine(export, "findings.jsonl")).Where(l => l.Length > 0))
+        {
+            using var doc = JsonDocument.Parse(line);
+            var f = doc.RootElement;
+            if (Str(f, "kind") is not ("not_backed_up" or "in_noise" or "sensitive")) continue;
+            foreach (var id in f.GetProperty("file_ids").EnumerateArray().Select(x => x.GetInt64()))
+            {
+                if (!owners.TryGetValue(id, out var keys)) owners[id] = keys = [];
+                keys.Add(Str(f, "key")!);
+            }
+        }
+
+        Assert.NotEmpty(owners);
+        Assert.Empty(owners.Where(o => o.Value.Count > 1).Select(o => $"{o.Key}: {string.Join(" | ", o.Value)}"));
+    }
+
     /// <summary>Accept, reject and wrong change only the state of a finding; wrong keeps a test case.</summary>
     [Fact]
     public async Task Decisions_AreStored_AndChangeNoFile()

@@ -179,6 +179,13 @@ public static class ReadFormat
         return true;
     }
 
+    /// <summary>Text for an <c>analysis_skip</c> code: why the analysis left a file or folder out.</summary>
+    public static string SkipText(string code) => code switch
+    {
+        "backed_up" => "backed_up: in the library, not analysed",
+        _ => code
+    };
+
     public static string Size(long bytes)
     {
         string[] units = ["B", "KB", "MB", "GB", "TB"];
@@ -273,19 +280,21 @@ public sealed record FileListView(
     bool Protected,
     string? DirVerdict,
     string? Certainty,
-    SmartFileOrganizer.Application.Media.VideoOriginSummary? Origin = null)
+    SmartFileOrganizer.Application.Media.VideoOriginSummary? Origin = null,
+    string? AnalysisSkip = null)
 {
     public static FileListView From(FileItem f)
     {
         var r = f.Record;
         return new FileListView(r.FullPath, r.Name, ReadFormat.Snake(r.FileType), r.SizeBytes, r.LastWriteTime,
             ReadFormat.Snake(r.Status), ReadFormat.Snake(r.Category), r.CategorySource, r.Confidence, r.Summary,
-            r.Sensitive, r.Protected, f.DirectoryVerdict, r.Certainty, f.Origin);
+            r.Sensitive, r.Protected, f.DirectoryVerdict, r.Certainty, f.Origin, r.AnalysisSkip);
     }
 
     public string ToLine(DisplayLanguage language) =>
         $"{Category ?? "-",-18} {(Confidence is { } c ? c.ToString("0.00", CultureInfo.InvariantCulture) : "-"),5}  {Certainty ?? "-",-9} {Status,-12}"
         + (Sensitive.Count > 0 ? $" [{ReadFormat.Markers(Sensitive, language)}]" : string.Empty)
+        + (AnalysisSkip is null ? string.Empty : $" [{ReadFormat.SkipText(AnalysisSkip)}]")
         + $"  {Path}"
         + (Origin is null ? string.Empty : $"  [{Origin.ToText()}]");
 }

@@ -219,6 +219,13 @@
             ],
             "default": null,
             "additionalProperties": false
+          },
+          "analysis_skip": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "default": null
           }
         },
         "required": [
@@ -236,7 +243,8 @@
           "protected",
           "dir_verdict",
           "certainty",
-          "origin"
+          "origin",
+          "analysis_skip"
         ],
         "additionalProperties": false
       }

@@ -151,6 +151,9 @@ public sealed record DirectoryItem
     public string? Purpose { get; init; }
     public string? Reason { get; init; }
 
+    /// <summary>Why the analysis left the folder out (<c>backed_up</c>); null otherwise.</summary>
+    public string? AnalysisSkip { get; init; }
+
     /// <summary>Phase 3 summary of the model.</summary>
     public string? Summary { get; init; }
 
