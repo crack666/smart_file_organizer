@@ -1018,10 +1018,16 @@ sfo files 7 --dir photos --max-confidence 0.5 --json
       "file_type": "image", "size_bytes": 482113, "last_write_time": "2019-07-02T10:14:00.000Z",
       "status": "ai_analyzed", "category": "document_scan", "category_source": "model",
       "confidence": 0.42, "summary": "Scanned page of a rental contract.",
-      "sensitive": [], "protected": false, "dir_verdict": "...", "certainty": "likely", "origin": null }
+      "sensitive": [], "protected": false, "dir_verdict": "...", "certainty": "likely", "origin": null,
+      "analysis_skip": null }
   ]
 }
 ```
+
+`analysis_skip` (since 24.11.2026, https://github.com/crack666/smart_file_organizer/issues/71): why the analysis left the
+file out, `backed_up` when `sfo analyze --against` found it in a library, else `null`. It says why a `skipped` file
+carries no result; the text output marks such a line `[backed_up: in the library, not analysed]`, and `sfo show` prints
+it as `skipped` for the file and for a fully backed-up folder (`directory.analysis_skip`).
 
 `origin` (since 14.11.2026, https://github.com/crack666/smart_file_organizer/issues/103): for a video, its kind and origin
 from the stored facts, else `null`. `kind` is a video kind code, `source` a fact source code (`metadata`, `name`,

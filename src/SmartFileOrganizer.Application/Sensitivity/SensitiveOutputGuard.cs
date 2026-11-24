@@ -129,6 +129,10 @@ public sealed record FileOutputRecord
     [JsonPropertyName("last_write_time")] public DateTime? LastWriteTime { get; init; }
     [JsonPropertyName("status")] public string Status { get; init; } = string.Empty;
 
+    /// <summary>Why the analysis left the file out: <c>backed_up</c> (a library holds the same content); null otherwise.
+    /// Explains why a <c>skipped</c> file carries no result.</summary>
+    [JsonPropertyName("analysis_skip")] public string? AnalysisSkip { get; init; }
+
     /// <summary>Fixed marker tokens (<c>credentials</c>, <c>keys</c>, ...); empty when not sensitive.</summary>
     [JsonPropertyName("sensitive")] public IReadOnlyList<string> Sensitive { get; init; } = [];
 
@@ -263,6 +267,7 @@ public static class SensitiveOutputGuard
             SizeBytes = file.Size,
             LastWriteTime = file.LastWriteTime == default ? null : file.LastWriteTime,
             Status = ExchangeFormat.Snake(file.Status),
+            AnalysisSkip = file.AnalysisSkip,
             Sensitive = SensitiveMarkerNames.ToTokens(match.Markers),
             SensitiveRule = match.Rule,
             Protected = isProtected,

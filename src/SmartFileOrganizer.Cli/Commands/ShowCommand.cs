@@ -42,7 +42,8 @@ public static class ShowCommand
         string? PreviousError,
         IReadOnlyList<CheckView> Checks,
         SmartFileOrganizer.Application.Media.VideoOriginSummary? Origin = null,
-        IReadOnlyList<FactItem>? Facts = null)
+        IReadOnlyList<FactItem>? Facts = null,
+        string? AnalysisSkip = null)
     {
         public static FileDetailView From(FileItem f)
         {
@@ -51,7 +52,8 @@ public static class ShowCommand
                 r.SizeBytes, r.LastWriteTime, ReadFormat.Snake(r.Status), ReadFormat.Snake(r.Category), r.CategorySource,
                 ReadFormat.Snake(r.Importance), r.Confidence, r.Summary, r.SuggestedTarget, r.ModelUsed, r.AnalyzedAt,
                 r.Error, r.RawResponse, r.Sensitive, r.SensitiveRule, r.Protected, f.DirectoryVerdict, f.DirectoryRetention,
-                r.Certainty, r.Attempts, r.PreviousError, f.Checks.Select(CheckView.From).ToList(), f.Origin, f.Facts);
+                r.Certainty, r.Attempts, r.PreviousError, f.Checks.Select(CheckView.From).ToList(), f.Origin, f.Facts,
+                r.AnalysisSkip);
         }
     }
 
@@ -102,7 +104,8 @@ public static class ShowCommand
         string? Summary,
         string? SummaryError,
         IReadOnlyList<DirectoryAnalysisItem> Analyses,
-        bool TextWithheld)
+        bool TextWithheld,
+        string? AnalysisSkip = null)
     {
         public static DirectoryDetailView From(DirectoryDetail detail)
         {
@@ -110,7 +113,8 @@ public static class ShowCommand
             return new DirectoryDetailView(d.FullPath, d.RelativePath, d.Depth, d.Status, d.SizeBytes, d.Files,
                 d.DirectFiles, d.Subdirs, d.SensitiveFiles, d.Sensitive, d.SensitiveRule, d.SensitiveDirs, d.Verdict, d.VerdictSource, d.VerdictRule, d.Retention,
                 d.Purpose, d.Reason, d.VerdictError, detail.UnitDirectory, detail.VerdictModel, detail.JudgedAt,
-                detail.VerdictRawResponse, detail.Profile, d.Summary, d.SummaryError, detail.Analyses, d.TextWithheld);
+                detail.VerdictRawResponse, detail.Profile, d.Summary, d.SummaryError, detail.Analyses, d.TextWithheld,
+                d.AnalysisSkip);
         }
     }
 
@@ -168,6 +172,7 @@ public static class ShowCommand
             sb.AppendLine(f.Path);
             Line(sb, "type", $"{f.FileType}, {ReadFormat.Size(f.SizeBytes)}");
             Line(sb, "status", f.Status);
+            Line(sb, "skipped", f.AnalysisSkip is null ? null : ReadFormat.SkipText(f.AnalysisSkip));
             Line(sb, "video", f.Origin?.ToText());
             Line(sb, "category", f.Category is null ? null : $"{f.Category} ({CodeLabels.LabelOfCode<ResultOrigin>(f.CategorySource, language)})");
             Line(sb, "confidence", f.Confidence?.ToString("0.00", CultureInfo.InvariantCulture));
@@ -194,6 +199,7 @@ public static class ShowCommand
             Line(sb, "size", $"{ReadFormat.Size(d.SizeBytes)}, {d.Files} files ({d.DirectFiles} direct), {d.Subdirs} subdirectories");
             Line(sb, "verdict", d.Verdict is null ? null
                 : $"{Verdict(d.Verdict)} ({CodeLabels.LabelOfCode<VerdictSource>(d.VerdictSource, language)}{(d.VerdictRule is null ? "" : ": " + d.VerdictRule)})");
+            Line(sb, "skipped", d.AnalysisSkip is null ? null : ReadFormat.SkipText(d.AnalysisSkip));
             Line(sb, "retention", Retention(d.Retention));
             Line(sb, "purpose", d.Purpose);
             Line(sb, "reason", d.Reason);

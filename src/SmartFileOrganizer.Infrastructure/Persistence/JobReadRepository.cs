@@ -12,7 +12,7 @@ public class JobReadRepository : IJobReadRepository
     private const string FileSelect = """
         SELECT f.id, f.job_id, f.full_path, f.name, f.parent_path, f.root_path, f.relative_path,
                f.relative_dir, f.depth, f.size, f.last_write_time, f.extension, f.file_type, f.status,
-               f.scanned_at, f.sensitive_markers, f.sensitive_rule,
+               f.scanned_at, f.sensitive_markers, f.sensitive_rule, f.analysis_skip,
                a.id AS ai_id, a.category AS ai_category, a.importance AS ai_importance,
                a.confidence AS ai_confidence, a.summary AS ai_summary,
                a.suggested_target AS ai_suggested_target, a.model_used AS ai_model_used,
@@ -45,7 +45,7 @@ public class JobReadRepository : IJobReadRepository
         var rows = await conn.QueryAsync<DirectoryReadRow>(new CommandDefinition(
             """
             SELECT d.id, d.full_path, d.name, d.parent_path, d.relative_path, d.depth, d.dir_status,
-                   d.subdir_count, d.sensitive_markers, d.sensitive_rule,
+                   d.subdir_count, d.sensitive_markers, d.sensitive_rule, d.analysis_skip,
                    d.dir_reason AS scan_reason, d.link_kind, d.link_target, d.scan_error_cause,
                    dv.verdict, dv.source AS verdict_source, dv.rule AS verdict_rule, dv.retention,
                    dv.purpose, dv.reason, dv.error AS verdict_error, dv.escalated_from,
@@ -181,6 +181,7 @@ public class JobReadRepository : IJobReadRepository
         public DateTime ScannedAt { get; set; }
         public string? SensitiveMarkers { get; set; }
         public string? SensitiveRule { get; set; }
+        public string? AnalysisSkip { get; set; }
 
         public long? AiId { get; set; }
         public int AiCategory { get; set; }
@@ -229,7 +230,8 @@ public class JobReadRepository : IJobReadRepository
                 Status = (FileNodeStatus)Status,
                 ScannedAt = ScannedAt,
                 SensitiveMarkers = SensitiveMarkerNames.Parse(SensitiveMarkers),
-                SensitiveRule = SensitiveRule
+                SensitiveRule = SensitiveRule,
+                AnalysisSkip = AnalysisSkip
             };
 
             if (AiId is { } aiId)

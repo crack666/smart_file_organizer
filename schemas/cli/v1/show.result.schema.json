@@ -389,6 +389,13 @@
         },
         "text_withheld": {
           "type": "boolean"
+        },
+        "analysis_skip": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
         }
       },
       "required": [
@@ -419,7 +426,8 @@
         "summary",
         "summary_error",
         "analyses",
-        "text_withheld"
+        "text_withheld",
+        "analysis_skip"
       ],
       "additionalProperties": false
     },
@@ -928,6 +936,13 @@
             "additionalProperties": false
           },
           "default": null
+        },
+        "analysis_skip": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
         }
       },
       "required": [
@@ -959,7 +974,8 @@
         "previous_error",
         "checks",
         "origin",
-        "facts"
+        "facts",
+        "analysis_skip"
       ],
       "additionalProperties": false
     }
