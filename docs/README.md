@@ -21,6 +21,7 @@ _Status checked against the code on 12.11.2026; details and limits in
 | 🌲 Interactive folder tree with lazy loading | ✅ Done |
 | 📊 File table with category color-coding, confidence & summary | ✅ Done |
 | 🗒️ Directory AI summary banner (per-folder insight) | ✅ Done |
+| 🧾 Findings and bundles as start view: accept, change, reject, search, quick filters | ✅ Done (24.11.2026) |
 | 🔎 Reveal in Explorer (right-click folder) | ✅ Done (Windows only) |
 | ✏️ Manual review & category override | ✅ Done |
 | ⚙️ Configurable Ollama model, timeout, language | ✅ Done |

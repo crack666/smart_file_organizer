@@ -28,8 +28,15 @@ public partial class MainViewModel : ViewModelBase
     private readonly DirectoryBannerViewModel _directory;
     private readonly ScanExportService _export;
     private readonly SensitiveOutputOptions _exportOptions;
+    private readonly JobSearchService _searchService;
+
+    private static readonly TimeSpan SearchDelay = TimeSpan.FromMilliseconds(350);
 
     private long _activeJobId;
+    private ScanJob? _activeJob;
+    private CancellationTokenSource? _searchCts;
+    private bool _suspendSearch;
+    private FolderTreeItemViewModel? _folderBeforeSearch;
     private CancellationTokenSource? _uiCts;
     private string _selectedDirectoryPath = string.Empty;
     private long? _selectedFileId;
@@ -43,6 +50,12 @@ public partial class MainViewModel : ViewModelBase
     public AiProgressViewModel AiProgress => _aiProgress;
     public PlanViewModel Plan { get; }
 
+    /// <summary>Findings and bundles of the open job: what it opens with.</summary>
+    public FindingsViewModel Findings { get; }
+
+    /// <summary>The jobs of the database in the side bar.</summary>
+    public JobBarViewModel JobBar { get; }
+
     /// <summary>The selected folder, above the file table.</summary>
     public DirectoryBannerViewModel Directory => _directory;
 
@@ -53,16 +66,65 @@ public partial class MainViewModel : ViewModelBase
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsWelcomeVisible))]
     [NotifyPropertyChangedFor(nameof(IsBrowserVisible))]
+    [NotifyPropertyChangedFor(nameof(IsFindingsVisible))]
+    [NotifyPropertyChangedFor(nameof(IsSidebarVisible))]
+    [NotifyPropertyChangedFor(nameof(IsJobViewVisible))]
     private bool _isShowingPlan;
 
-    public bool IsWelcomeVisible => IsShowingWelcome && !IsShowingPlan;
-    public bool IsBrowserVisible => !IsShowingWelcome && !IsShowingPlan;
+    /// <summary>The findings instead of folder tree and file table (https://github.com/crack666/smart_file_organizer/issues/27).</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsBrowserVisible))]
+    [NotifyPropertyChangedFor(nameof(IsFindingsVisible))]
+    [NotifyPropertyChangedFor(nameof(IsSidebarVisible))]
+    private bool _isShowingFindings;
 
-    partial void OnIsShowingWelcomeChanged(bool value)
+    public bool IsWelcomeVisible => IsShowingWelcome && !IsShowingPlan;
+    public bool IsBrowserVisible => !IsShowingWelcome && !IsShowingPlan && !IsShowingFindings;
+    public bool IsFindingsVisible => !IsShowingWelcome && !IsShowingPlan && IsShowingFindings;
+
+    /// <summary>A job is open: the line with its views and the search is there.</summary>
+    public bool IsJobOpen => _activeJobId > 0 && !IsShowingWelcome;
+
+    /// <summary>Findings or folders of the open job; the search and the CSV export belong to them.</summary>
+    public bool IsJobViewVisible => IsJobOpen && !IsShowingPlan;
+
+    private bool _sidebarInFindings = true;
+    private bool _sidebarInFolders;
+
+    /// <summary>Jobs and quick filters at the side: open beside the findings, closed beside the folders, until it is switched.</summary>
+    public bool IsSidebarOpen
+    {
+        get => IsShowingFindings ? _sidebarInFindings : _sidebarInFolders;
+        set
+        {
+            if (IsShowingFindings) _sidebarInFindings = value;
+            else _sidebarInFolders = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(IsSidebarVisible));
+        }
+    }
+
+    public bool IsSidebarVisible => IsJobViewVisible && IsSidebarOpen;
+
+    partial void OnIsShowingFindingsChanged(bool value) => OnPropertyChanged(nameof(IsSidebarOpen));
+
+    partial void OnIsShowingWelcomeChanged(bool value) => JobViewChanged();
+
+    private void JobViewChanged()
     {
         OnPropertyChanged(nameof(IsWelcomeVisible));
         OnPropertyChanged(nameof(IsBrowserVisible));
+        OnPropertyChanged(nameof(IsFindingsVisible));
+        OnPropertyChanged(nameof(IsJobOpen));
+        OnPropertyChanged(nameof(IsJobViewVisible));
+        OnPropertyChanged(nameof(IsSidebarVisible));
     }
+
+    /// <summary>Searched for in name, path and summary of the open job, and in its findings and bundles.</summary>
+    [ObservableProperty] private string _searchText = string.Empty;
+
+    /// <summary>"12 Dateien"; empty without a search.</summary>
+    [ObservableProperty] private string _searchStatus = string.Empty;
 
     [ObservableProperty] private string _rootPath = string.Empty;
     [ObservableProperty] private bool _isScanRunning;
@@ -125,8 +187,14 @@ public partial class MainViewModel : ViewModelBase
         PlanViewModel plan,
         DirectoryBannerViewModel directory,
         ScanExportService export,
-        SensitiveOutputOptions exportOptions)
+        SensitiveOutputOptions exportOptions,
+        FindingsViewModel findings,
+        JobBarViewModel jobBar,
+        JobSearchService search)
     {
+        Findings = findings;
+        JobBar = jobBar;
+        _searchService = search;
         Plan = plan;
         _directory = directory;
         _export = export;
@@ -181,6 +249,15 @@ public partial class MainViewModel : ViewModelBase
             }
         };
 
+        JobBar.JobPicked += job => OpenRecentScanCommand.Execute(job);
+        foreach (var filter in Findings.QuickFilters)
+            filter.PropertyChanged += (_, e) =>
+            {
+                // A quick filter is one of the findings: switching it on shows them.
+                if (e.PropertyName == nameof(FindingQuickFilterViewModel.IsActive) && filter.IsActive && !IsFindingsVisible)
+                    ShowFindingsCommand.Execute(null);
+            };
+
         OllamaBaseUrl = _ollamaOptions.BaseUrl;
         OllamaKeepAlive = _ollamaOptions.KeepAlive;
         OllamaParallelRequests = _ollamaOptions.MaxParallelRequests.ToString();
@@ -200,6 +277,8 @@ public partial class MainViewModel : ViewModelBase
             RootPath = path;
             CanStartScan = true;
             IsShowingWelcome = false;
+            IsShowingPlan = false;
+            IsShowingFindings = false;
         }
     }
 
@@ -220,18 +299,148 @@ public partial class MainViewModel : ViewModelBase
         var item = RecentScans.FirstOrDefault(r => r.Job.Id == job.Id);
         if (item != null) RecentScans.Remove(item);
         if (RecentScans.Count == 0) IsShowingWelcome = false;
+        if (_activeJobId != job.Id) return;
+        _activeJobId = 0;
+        _activeJob = null;
+        JobViewChanged();
+        ShowFindingsCommand.NotifyCanExecuteChanged();
+        ExportCsvCommand.NotifyCanExecuteChanged();
     }
 
     [RelayCommand]
     private async Task OpenRecentScanAsync(ScanJob job)
     {
-        SetActiveJob(job.Id);
+        SetActiveJob(job);
         RootPath = job.RootPath;
         IsShowingWelcome = false;
         IsShowingPlan = false;
+        // What a finished source job holds is the question; a library or a scan under way has no findings to decide.
+        IsShowingFindings = job is { Role: Domain.Enums.ScanRole.Source, Status: Domain.Enums.JobStatus.Completed };
         _scanProgress.Apply(job);
-        await _folderTree.LoadJobAsync(job.Id);
         UpdateCanStartScan();
+        _ = LoadJobBarAsync();
+        var tree = _folderTree.LoadJobAsync(job.Id);
+        if (IsShowingFindings) await Findings.LoadAsync(job);
+        await tree;
+    }
+
+    /// <summary>The findings of the open job, computed again.</summary>
+    [RelayCommand(CanExecute = nameof(CanShowFindings))]
+    private async Task ShowFindingsAsync()
+    {
+        if (_activeJob is not { } job) return;
+        IsShowingPlan = false;
+        IsShowingFindings = true;
+        await Findings.LoadAsync(job);
+    }
+
+    private bool CanShowFindings() => _activeJob is { Role: Domain.Enums.ScanRole.Source };
+
+    /// <summary>Folder tree and files of the open job.</summary>
+    [RelayCommand]
+    private void ShowFolders()
+    {
+        IsShowingPlan = false;
+        IsShowingFindings = false;
+    }
+
+    [RelayCommand]
+    private void ToggleSidebar() => IsSidebarOpen = !IsSidebarOpen;
+
+    private async Task LoadJobBarAsync()
+    {
+        try
+        {
+            await JobBar.LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[LoadJobBarAsync] {ex}");
+        }
+    }
+
+    // ── Search ────────────────────────────────────────────────────────────
+
+    partial void OnSearchTextChanged(string value)
+    {
+        if (_suspendSearch) return;
+        _searchCts?.Cancel();
+        if (JobSearchService.TermsOf(value).Count == 0)
+        {
+            EndSearch(reload: true);
+            return;
+        }
+        var cts = _searchCts = new CancellationTokenSource();
+        _ = SearchSoonAsync(cts.Token);
+    }
+
+    private async Task SearchSoonAsync(CancellationToken ct)
+    {
+        try
+        {
+            await Task.Delay(SearchDelay, ct);
+            await SearchAsync();
+        }
+        catch (OperationCanceledException)
+        {
+            // Typed on.
+        }
+    }
+
+    /// <summary>Searches the open job now; findings and files show what was found.</summary>
+    [RelayCommand]
+    private async Task SearchAsync()
+    {
+        _searchCts?.Cancel();
+        if (_activeJobId <= 0 || JobSearchService.TermsOf(SearchText).Count == 0) return;
+        var ct = (_searchCts = new CancellationTokenSource()).Token;
+        var (jobId, text) = (_activeJobId, SearchText);
+        SearchStatus = "sucht …";
+        try
+        {
+            // Off the UI thread: one pass over every file of the job.
+            var result = await Task.Run(() => _searchService.SearchAsync(jobId, text, _exportOptions with { IncludeSensitive = true }, ct: ct), ct);
+            if (ct.IsCancellationRequested || jobId != _activeJobId) return;
+            _folderBeforeSearch = _folderTree.SelectedItem ?? _folderBeforeSearch;
+            _selectedDirectoryPath = string.Empty;
+            _selectedFileId = null;
+            _folderTree.SelectedItem = null;
+            _directory.Clear();
+            _fileDetail.Clear();
+            _fileTable.ShowSearch(result);
+            Findings.ApplySearch(result);
+            SearchStatus = PlanDisplay.Files(result.FileIds.Count);
+        }
+        catch (OperationCanceledException)
+        {
+            // Another search, or the job was left.
+        }
+        catch (Exception ex)
+        {
+            SearchStatus = "Suche fehlgeschlagen: " + ex.Message;
+        }
+    }
+
+    [RelayCommand]
+    private void ClearSearch() => SearchText = string.Empty;
+
+    /// <summary>Every finding again; with <paramref name="reload"/> the folder shown before the search.</summary>
+    private void EndSearch(bool reload)
+    {
+        _searchCts?.Cancel();
+        _suspendSearch = true;
+        SearchText = string.Empty;
+        _suspendSearch = false;
+        SearchStatus = string.Empty;
+        Findings.ApplySearch(null);
+        var folder = _folderBeforeSearch;
+        _folderBeforeSearch = null;
+        if (!_fileTable.IsSearch) return;
+        _fileTable.Clear();
+        _fileDetail.Clear();
+        _selectedFileId = null;
+        if (reload && folder is not null && _folderTree.SelectedItem is null)
+            _folderTree.SelectedItem = folder; // loads its files
     }
 
     [RelayCommand(CanExecute = nameof(CanStartScan))]
@@ -240,6 +449,8 @@ public partial class MainViewModel : ViewModelBase
         if (string.IsNullOrWhiteSpace(RootPath)) return;
 
         IsShowingWelcome = false;
+        IsShowingPlan = false;
+        IsShowingFindings = false;
         IsScanRunning = true;
         UpdateCanStartScan();
         _scanProgress.StatusText = "Starting…";
@@ -247,8 +458,9 @@ public partial class MainViewModel : ViewModelBase
         _uiCts = new CancellationTokenSource();
 
         var job = await _scanJobService.CreateJobAsync(RootPath, _uiCts.Token);
-        SetActiveJob(job.Id);
+        SetActiveJob(job);
         _scanProgress.Apply(job);
+        _ = LoadJobBarAsync();
 
         await _scanJobService.StartAsync(job.Id, _uiCts.Token);
     }
@@ -277,10 +489,13 @@ public partial class MainViewModel : ViewModelBase
     }
 
     /// <summary>Another job: nothing of the one before stays in banner, table, detail and export line.</summary>
-    private void SetActiveJob(long jobId)
+    private void SetActiveJob(ScanJob job)
     {
-        if (_activeJobId != jobId)
+        if (_activeJobId != job.Id)
         {
+            EndSearch(reload: false);
+            Findings.Clear();
+            Findings.ResetFiltersCommand.Execute(null);
             _selectedDirectoryPath = string.Empty;
             _selectedFileId = null;
             _fileTable.Clear();
@@ -288,7 +503,11 @@ public partial class MainViewModel : ViewModelBase
             _directory.Clear();
             ExportStatusText = string.Empty;
         }
-        _activeJobId = jobId;
+        _activeJobId = job.Id;
+        _activeJob = job;
+        JobBar.SetActive(job.Id);
+        JobViewChanged();
+        ShowFindingsCommand.NotifyCanExecuteChanged();
         ExportCsvCommand.NotifyCanExecuteChanged();
     }
 
@@ -349,10 +568,13 @@ public partial class MainViewModel : ViewModelBase
         _selectedDirectoryPath = string.Empty;
         _selectedFileId = null;
 
+        EndSearch(reload: false);
         _fileTable.Clear();
         _fileDetail.Clear();
         _folderTree.Clear();
         _directory.Clear();
+        Findings.Clear();
+        IsShowingFindings = false;
 
         var all = await _scanJobService.GetAllJobsAsync();
         RecentScans.Clear();
@@ -536,6 +758,8 @@ public partial class MainViewModel : ViewModelBase
             ResumeScanCommand.NotifyCanExecuteChanged();
             UpsertJobInCollections(job);
             _scanProgress.Apply(job);
+            if (job.Id == _activeJobId) _activeJob = job;
+            _ = LoadJobBarAsync();
 
             // Refresh tree with scanned data
             if (_activeJobId > 0)
@@ -577,6 +801,8 @@ public partial class MainViewModel : ViewModelBase
     {
         System.Diagnostics.Debug.WriteLine($"[DIR SELECT] _activeJobId={_activeJobId}  path='{path}'");
         if (_activeJobId <= 0) return;
+        // A folder chosen in the tree ends a search.
+        if (SearchText.Length > 0) EndSearch(reload: false);
         _selectedDirectoryPath = path;
         _selectedFileId = null;
         try
@@ -653,7 +879,11 @@ public partial class MainViewModel : ViewModelBase
             CancelAiCommand.NotifyCanExecuteChanged();
 
             if (state.State is AiProcessingState.Completed or AiProcessingState.Cancelled or AiProcessingState.Failed or AiProcessingState.Unavailable)
+            {
                 await MaybeRefreshActiveDirectoryAsync(force: true);
+                _ = LoadJobBarAsync();
+                if (IsFindingsVisible) await Findings.ReloadAsync();
+            }
         });
     }
 
@@ -694,6 +924,8 @@ public partial class MainViewModel : ViewModelBase
         {
             if (!string.IsNullOrWhiteSpace(_selectedDirectoryPath) && _activeJobId > 0)
                 await _fileTable.LoadAsync(_activeJobId, _selectedDirectoryPath);
+            else if (_fileTable.IsSearch)
+                await SearchAsync();
         });
     }
 
@@ -751,7 +983,12 @@ public partial class MainViewModel : ViewModelBase
                 ? _selectedDirectoryPath
                 : row.ParentPath;
 
-            if (!string.IsNullOrWhiteSpace(directoryPath))
+            if (_fileTable.IsSearch)
+            {
+                await SearchAsync();
+                _fileTable.SelectedRow = _fileTable.Rows.FirstOrDefault(r => r.Id == row.Id);
+            }
+            else if (!string.IsNullOrWhiteSpace(directoryPath))
             {
                 _selectedDirectoryPath = directoryPath;
                 await _fileTable.LoadAsync(_activeJobId, directoryPath);

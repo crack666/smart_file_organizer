@@ -52,6 +52,58 @@ public static class CodeLabels
         Verdict(KeepHint.Temporary, "temporary", "vorübergehend"),
         Verdict(KeepHint.WorthKeeping, "worth keeping", "aufhebenswert"),
 
+        // Findings, their actions and targets, and bundles (the findings view of the GUI,
+        // https://github.com/crack666/smart_file_organizer/issues/27).
+        Verdict(FindingKind.NotBackedUp, "not backed up", "nicht gesichert"),
+        Verdict(FindingKind.InNoise, "among noise", "zwischen Ballast"),
+        Verdict(FindingKind.Misplaced, "misplaced", "am falschen Ort"),
+        Verdict(FindingKind.Sensitive, "sensitive", "sensibel"),
+        Verdict(FindingKind.Duplicate, "duplicate", "doppelt"),
+
+        Verdict(FindingState.Open, "open", "offen"),
+        Verdict(FindingState.Accepted, "accepted", "angenommen"),
+        Verdict(FindingState.Rejected, "rejected", "abgelehnt"),
+        Verdict(FindingState.Wrong, "wrong", "falsch"),
+
+        Verdict(ResultCertainty.Certain, "certain", "sicher"),
+        Verdict(ResultCertainty.Likely, "likely", "wahrscheinlich"),
+        Verdict(ResultCertainty.Uncertain, "uncertain", "unsicher"),
+        Verdict(ResultCertainty.Review, "to review", "zu prüfen"),
+
+        Verdict(PlanActionKind.Move, "move", "umziehen"),
+        Verdict(PlanActionKind.Copy, "copy", "kopieren"),
+        Verdict(PlanActionKind.Quarantine, "quarantine", "Quarantäne"),
+        Verdict(PlanActionKind.DeleteSource, "remove here", "hier entfernen"),
+        Verdict(PlanActionKind.Discard, "bin", "Papierkorb"),
+        Verdict(PlanActionKind.Leave, "leave", "hier lassen"),
+
+        Verdict(FindingTargetStatus.ExistingFolder, "existing folder", "vorhandener Ordner"),
+        Verdict(FindingTargetStatus.NewFolder, "new folder", "neuer Ordner"),
+        Verdict(FindingTargetStatus.NotMatched, "no target looked up yet", "noch kein Ziel gesucht"),
+        Verdict(FindingTargetStatus.NoFittingFolder, "no fitting folder", "kein passender Ordner"),
+        Verdict(FindingTargetStatus.ContentUnclear, "content unclear", "Inhalt unklar"),
+        Verdict(FindingTargetStatus.NoModel, "no model", "kein Modell"),
+        Verdict(FindingTargetStatus.NoTarget, "no target on purpose", "bewusst ohne Ziel"),
+        Verdict(FindingTargetStatus.Split, "split by content", "nach Inhalt geteilt"),
+        Verdict(FindingTargetStatus.Excluded, "excluded", "ausgenommen"),
+        Verdict(FindingTargetStatus.Inbox, "inbox", "Eingangsordner"),
+
+        Verdict(TargetDecidedBy.Rules, "rules", "Regeln"),
+        Verdict(TargetDecidedBy.LocalModel, "local model", "lokales Modell"),
+        Verdict(TargetDecidedBy.Controller, "person or agent", "Mensch oder Agent"),
+
+        Verdict(BundleKind.Dump, "device copy", "Abzug"),
+        Verdict(BundleKind.DumpKeep, "part worth keeping", "aufhebenswerter Teil"),
+        Verdict(BundleKind.DumpNoise, "noise of a device copy", "Ballast eines Abzugs"),
+        Verdict(BundleKind.Folder, "folder", "Ordner"),
+        Verdict(BundleKind.Event, "event", "Anlass"),
+        Verdict(BundleKind.Scattered, "scattered", "Einzelbilder"),
+
+        Verdict(TimeSource.CaptureDate, "capture date", "Aufnahmedatum"),
+        Verdict(TimeSource.FileName, "file name", "Dateiname"),
+        Verdict(TimeSource.ModifiedDate, "modification date", "Änderungsdatum"),
+        Verdict(TimeSource.Mixed, "mixed sources", "verschiedene Quellen"),
+
         Marker(SensitiveMarker.Credentials, "credentials", "Zugangsdaten"),
         Marker(SensitiveMarker.Keys, "keys", "Schlüssel"),
         Marker(SensitiveMarker.PrivateMessage, "private message", "private Nachricht"),

@@ -270,11 +270,24 @@ public sealed class FindingService
     public async Task<(Finding Finding, EvalCase? Case)> DecideAsync(
         long jobId, string key, FindingState state, ResultOrigin origin, string? note, CancellationToken ct = default)
     {
+        var computed = await ComputeInternalAsync(jobId, ct);
+        var finding = Find(computed.Report, key);
+        return (finding, await RecordAsync(computed.Report.Job, finding, state, origin, note, ct));
+    }
+
+    /// <summary>
+    /// Records a decision about a finding as it was computed and shown (the GUI,
+    /// https://github.com/crack666/smart_file_organizer/issues/27): the findings of the whole job are not computed again
+    /// for it, which on a large job takes seconds per decision. Otherwise as <see cref="DecideAsync"/>; the state is set
+    /// on <paramref name="finding"/>. Returns the test case of a finding reported wrong.
+    /// </summary>
+    public async Task<EvalCase?> RecordAsync(
+        ScanJob job, Finding finding, FindingState state, ResultOrigin origin, string? note, CancellationToken ct = default)
+    {
         if (origin is not (ResultOrigin.Human or ResultOrigin.Agent))
             throw new ArgumentException("Only a person (human) or a steering agent (agent) decides a finding.", nameof(origin));
 
-        var computed = await ComputeInternalAsync(jobId, ct);
-        var finding = Find(computed.Report, key);
+        var jobId = job.Id;
         if (state == FindingState.Open)
         {
             await _decisions.DeleteAsync(jobId, finding.Key, ct);
@@ -282,7 +295,7 @@ public sealed class FindingService
             finding.DecidedBy = null;
             finding.DecidedAt = null;
             finding.DecisionNote = null;
-            return (finding, null);
+            return null;
         }
 
         var now = DateTime.UtcNow;
@@ -304,8 +317,8 @@ public sealed class FindingService
 
         EvalCase? evalCase = null;
         if (state == FindingState.Wrong)
-            evalCase = await RecordWrongAsync(computed.Report.Job, finding, note, now, ct);
-        return (finding, evalCase);
+            evalCase = await RecordWrongAsync(job, finding, note, now, ct);
+        return evalCase;
     }
 
     /// <summary>

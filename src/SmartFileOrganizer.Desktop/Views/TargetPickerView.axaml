@@ -1,0 +1,67 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:vm="using:SmartFileOrganizer.Desktop.ViewModels"
+             x:Class="SmartFileOrganizer.Desktop.Views.TargetPickerView"
+             x:DataType="vm:PlanTargetPickerViewModel">
+
+    <UserControl.Styles>
+        <Style Selector="TextBlock.small">
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="Foreground" Value="#A0A7B0" />
+        </Style>
+        <Style Selector="TextBlock.label">
+            <Setter Property="FontSize" Value="11" />
+            <Setter Property="Foreground" Value="#8B949E" />
+        </Style>
+        <Style Selector="Button.compact">
+            <Setter Property="Padding" Value="8,3" />
+            <Setter Property="FontSize" Value="12" />
+        </Style>
+    </UserControl.Styles>
+
+    <Border Background="#2D2D30" BorderBrush="#5A626B" BorderThickness="1" CornerRadius="6" Padding="20,16"
+            Width="760" HorizontalAlignment="Center" VerticalAlignment="Center">
+        <Grid RowDefinitions="Auto,Auto,Auto,*,Auto,Auto,Auto,Auto" ColumnDefinitions="*" MaxHeight="680">
+            <TextBlock Grid.Row="0" Text="{Binding Title}" FontSize="16" FontWeight="SemiBold" Foreground="White"
+                       TextTrimming="CharacterEllipsis" />
+            <TextBlock Grid.Row="1" Text="{Binding CurrentText}" Classes="small" Margin="0,4,0,0" TextWrapping="Wrap" />
+            <StackPanel Grid.Row="2" Margin="0,6,0,6" Spacing="1">
+                <TextBlock Text="Begründung des Vorschlags" Classes="label" Margin="0" />
+                <TextBlock Text="{Binding ReasonText}" Foreground="#D0D0D0" FontSize="12" TextWrapping="Wrap" />
+            </StackPanel>
+            <Border Grid.Row="3" BorderBrush="#3E3E42" BorderThickness="1" CornerRadius="3" Background="#1E1E1E" MinHeight="300">
+                <TreeView ItemsSource="{Binding Roots}"
+                          SelectedItem="{Binding SelectedFolder, Mode=TwoWay}">
+                    <TreeView.Styles>
+                        <Style Selector="TreeViewItem" x:DataType="vm:PlanTargetFolderNode">
+                            <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" />
+                            <Setter Property="MinHeight" Value="26" />
+                        </Style>
+                    </TreeView.Styles>
+                    <TreeView.ItemTemplate>
+                        <TreeDataTemplate x:DataType="vm:PlanTargetFolderNode" ItemsSource="{Binding Children}">
+                            <StackPanel Orientation="Horizontal" Spacing="8">
+                                <TextBlock Text="{Binding Label}" Foreground="White" FontSize="13" />
+                                <TextBlock Text="{Binding Note}" Foreground="#E3B341" FontSize="11" VerticalAlignment="Center"
+                                           IsVisible="{Binding HasNote}" />
+                            </StackPanel>
+                        </TreeDataTemplate>
+                    </TreeView.ItemTemplate>
+                </TreeView>
+            </Border>
+            <DockPanel Grid.Row="4" Margin="0,8,0,0">
+                <Button DockPanel.Dock="Right" Classes="compact" Content="Neuer Ordner hier" Command="{Binding AddFolderCommand}"
+                        Margin="6,0,0,0" ToolTip.Tip="Unter dem gewählten Ordner; angelegt wird er erst beim Ausführen" />
+                <TextBox Text="{Binding NewFolderName, Mode=TwoWay}" Watermark="Name des neuen Ordners" FontSize="12" />
+            </DockPanel>
+            <TextBlock Grid.Row="5" Text="{Binding PreviewText}" Foreground="White" FontSize="12" Margin="0,8,0,0" TextWrapping="Wrap" />
+            <TextBlock Grid.Row="6" Text="{Binding ErrorText}" Foreground="#FF7B72" FontSize="12" TextWrapping="Wrap" Margin="0,4,0,0"
+                       IsVisible="{Binding HasError}" />
+            <StackPanel Grid.Row="7" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8" Margin="0,10,0,0">
+                <Button Content="Abbrechen" Command="{Binding CancelCommand}" />
+                <Button Content="Ziel übernehmen" Command="{Binding AcceptCommand}" Background="#2F6FD6" Foreground="White"
+                        ToolTip.Tip="{Binding AcceptHint}" />
+            </StackPanel>
+        </Grid>
+    </Border>
+</UserControl>

@@ -144,6 +144,31 @@ public class FileRepository : IFileRepository
         return nodes;
     }
 
+    public async Task<IReadOnlyList<FileNode>> GetByIdsAsync(IReadOnlyCollection<long> ids, CancellationToken ct = default)
+    {
+        await using var conn = _db.CreateConnection();
+        await conn.OpenAsync(ct);
+        var nodes = new List<FileNode>(ids.Count);
+        // In portions: every id is a parameter of the statement, and SQLite limits them.
+        foreach (var part in ids.Distinct().Chunk(500))
+        {
+            ct.ThrowIfCancellationRequested();
+            var found = (await conn.QueryAsync<FileNode>("SELECT * FROM file_nodes WHERE id IN @part", new { part })).AsList();
+            var classifications = (await conn.QueryAsync<ClassificationRepository.Row>(
+                ClassificationRepository.SelectSql + " WHERE file_node_id IN @part",
+                new { part })).Select(r => r.Finish()).ToDictionary(c => c.FileNodeId);
+            var overrides = (await conn.QueryAsync<UserOverride>(
+                "SELECT * FROM user_overrides WHERE file_node_id IN @part", new { part })).ToDictionary(u => u.FileNodeId);
+            foreach (var node in found)
+            {
+                if (classifications.TryGetValue(node.Id, out var cls)) node.Classification = cls;
+                if (overrides.TryGetValue(node.Id, out var uo)) node.Override = uo;
+            }
+            nodes.AddRange(found);
+        }
+        return nodes.OrderBy(n => n.FullPath, StringComparer.Ordinal).ToList();
+    }
+
     public async Task<IReadOnlyList<FileNode>> GetPendingAiAnalysisAsync(
         long jobId, int batchSize, CancellationToken ct = default)
     {

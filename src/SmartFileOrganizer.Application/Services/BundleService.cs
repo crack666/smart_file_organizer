@@ -220,6 +220,22 @@ public sealed class BundleService
         return result;
     }
 
+    /// <summary>Every bundle of the job with its counts, flat, parents before children; empty when none were built.</summary>
+    public async Task<IReadOnlyList<BundleItem>> GetAllAsync(long jobId, CancellationToken ct = default)
+    {
+        var (all, items) = await LoadItemsAsync(jobId, ct);
+        return all.Select(b => items[b.Id]).ToList();
+    }
+
+    /// <summary>Ids of the files of the bundle and of every bundle below it.</summary>
+    public async Task<IReadOnlyList<long>> GetFileIdsAsync(long jobId, long bundleId, CancellationToken ct = default)
+    {
+        var all = await _bundles.GetAllAsync(jobId, ct);
+        var wanted = SelfAndDescendants(all, bundleId).ToHashSet();
+        var membership = await _bundles.GetMembershipAsync(jobId, ct);
+        return membership.Where(m => wanted.Contains(m.Value)).Select(m => m.Key).Order().ToList();
+    }
+
     private async Task<(IReadOnlyList<Bundle> All, Dictionary<long, BundleItem> Items)> LoadItemsAsync(long jobId, CancellationToken ct)
     {
         _ = await _jobs.GetByIdAsync(jobId, ct)

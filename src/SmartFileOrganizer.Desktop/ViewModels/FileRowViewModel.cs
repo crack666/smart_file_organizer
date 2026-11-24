@@ -18,6 +18,11 @@ public partial class FileRowViewModel : ViewModelBase
     public string FullPath   { get; init; } = string.Empty;
     public string ParentPath { get; init; } = string.Empty;
     public string Name       { get; init; } = string.Empty;
+
+    /// <summary>The folder of the file below the job root, in the hits of a search; empty in the table of a folder.</summary>
+    public string FolderText { get; init; } = string.Empty;
+
+    public bool HasFolderText => FolderText.Length > 0;
     public string Extension  { get; init; } = string.Empty;
     public string FileType   { get; init; } = string.Empty;
     public string SizeText   { get; init; } = string.Empty;
@@ -142,7 +147,8 @@ public partial class FileRowViewModel : ViewModelBase
         OnPropertyChanged(nameof(ReviewStatusTooltip));
     }
 
-    public static FileRowViewModel From(FileNode f, ReviewService reviewService, Func<FileRowViewModel, Task>? reanalyzeFileAction = null)
+    public static FileRowViewModel From(
+        FileNode f, ReviewService reviewService, Func<FileRowViewModel, Task>? reanalyzeFileAction = null, bool withFolder = false)
     {
         var markers = SensitiveOutputGuard.GetMarkers(f);
         var vm = new FileRowViewModel(reviewService, reanalyzeFileAction)
@@ -151,6 +157,7 @@ public partial class FileRowViewModel : ViewModelBase
             FullPath     = f.FullPath,
             ParentPath   = f.ParentPath,
             Name         = f.Name,
+            FolderText   = withFolder ? FindingDisplay.Place(Path.GetDirectoryName(f.RelativePath)) : string.Empty,
             Extension    = f.Extension,
             FileType     = f.FileType.ToString(),
             SizeText     = FormatSize(f.Size),

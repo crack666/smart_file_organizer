@@ -168,7 +168,24 @@ yet against a real Ollama restart.
 
 - Root folder selection; scan start, pause, cancel.
 - AI classification start, pause, resume, cancel, independent of the scan.
-- Lazy folder tree with verdict, retention value, size and marked files per folder, read off the UI thread and
+- Findings view (since 24.11.2026, [#27](https://github.com/crack666/smart_file_organizer/issues/27)): what a finished
+  source job opens with (until then the folder tree; a library and an unfinished scan still open with it). Findings of
+  `FindingService` grouped by bundle or by importance, with kind, period, count, size, recommended action with target,
+  certainty and state; bundles without a finding come last. Accept, reject, "Falsch", reopen, change or withdraw the
+  target and "Ohne Ziel" for one, several (Shift, Ctrl) or a whole bundle, with the keyboard (A, N, O, Z; arrows close
+  and open a bundle). Decisions go through `FindingService.RecordAsync` with the origin `human`, targets through
+  `FindingPlacementService` with its checks; a sensitive finding is decided only as the one selected row. Filters by
+  state, quick filters in the side bar (nicht gesichert, sensibel, prüfen, doppelt), codes in German or English
+  (`CodeLabels`). Detail with reason, a strip of up to 8 pictures spread over the entry, first page or text of the
+  first document, up to 200 files; a sensitive finding after a click, the content of access data never, a marked file
+  in another finding is listed, not shown.
+- Side bar with the jobs of the database (role, scan status, judged files) and the quick filters; search over name,
+  path and summary of the open job (`JobSearchService`, Ctrl+F), shown in findings and file table alike.
+  _Checked 24.11.2026: `FindingsViewModelTests` (13) and one pass with the keyboard in the main window at 1300 px
+  ([screenshots](images/17-findings.png)) on Windows; the real window was not driven by hand, and no job of real size
+  was opened._
+- Lazy folder tree with verdict, retention value, size, file count (since 24.11.2026, #27; sortable by name, size or
+  file count at every level) and marked files per folder, read off the UI thread and
   again while the analysis runs (since 24.11.2026,
   [#14](https://github.com/crack666/smart_file_organizer/issues/14)); file table with category colour, state,
   confidence, summary, and marks for sensitive and temporary files.

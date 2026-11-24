@@ -33,7 +33,9 @@ public sealed class PlanTestbed : IDisposable
     /// <param name="withMedia">Also a video, a Word 97-2003 document, a .jfif photo and a file of an unknown format in
     /// Downloads (https://github.com/crack666/smart_file_organizer/issues/109). The video is made by <c>ffmpeg</c> when it
     /// is on the PATH, else it is a bare MP4 header that no tool can decode.</param>
-    public PlanTestbed(string? root = null, bool withMedia = false)
+    /// <param name="withCopies">Also a folder with the same large photo twice: a duplicate among the findings
+    /// (https://github.com/crack666/smart_file_organizer/issues/27).</param>
+    public PlanTestbed(string? root = null, bool withMedia = false, bool withCopies = false)
     {
         _keep = root is not null;
         Root = root ?? Path.Combine(Path.GetTempPath(), $"sfo_gui_{Guid.NewGuid():N}");
@@ -71,6 +73,15 @@ public sealed class PlanTestbed : IDisposable
             Video("Downloads/Ausflug_2023.mp4");
         }
 
+        if (withCopies)
+        {
+            // Large enough for a finding of its own (Findings:DuplicateMinBytes); what follows the picture is ignored by a decoder.
+            Folder("Alte Kopien", "mixed");
+            var large = PhotoBytes(1).Concat(new byte[1_300_000]).ToArray();
+            WriteBytes("Alte Kopien/Panorama.jpg", "photo", large);
+            WriteBytes("Alte Kopien/Panorama (1).jpg", "photo", large);
+        }
+
         // Sensitive: decided one by one.
         Folder("Privat", "mixed");
         Write("Privat/passwoerter.txt", "document", "mail: dummy-not-real", ["credentials"]);
@@ -92,6 +103,7 @@ public sealed class PlanTestbed : IDisposable
     public string Profile { get; }
 
     public long JobId { get; private set; }
+    public long LibraryJobId { get; private set; }
     public long PlanId { get; private set; }
 
     public RecordingShell Shell { get; } = new();
@@ -153,12 +165,12 @@ public sealed class PlanTestbed : IDisposable
         return Convert.ToInt64(await cmd.ExecuteScalarAsync());
     }
 
-    /// <summary>Scans, compares, decides and accepts every finding, then lets an agent create and confirm the plan.</summary>
-    public async Task<long> CreatePlanAsync(bool agentApproves = true)
+    /// <summary>The analysed job with everything its findings need (library, comparison, bundles, targets), nothing decided.</summary>
+    public async Task PrepareFindingsAsync()
     {
         JobId = (await OkAsync("eval", Corpus, "--stub", Path.Combine(Corpus, EvalTruth.FileName))).GetProperty("job_id").GetInt64();
-        var library = (await OkAsync("scan", Library, "--role", "library")).GetProperty("job").GetProperty("id").GetInt64();
-        await OkAsync("compare", JobId.ToString(), "--against", library.ToString());
+        LibraryJobId = (await OkAsync("scan", Library, "--role", "library")).GetProperty("job").GetProperty("id").GetInt64();
+        await OkAsync("compare", JobId.ToString(), "--against", LibraryJobId.ToString());
         await OkAsync("bundles", "build", JobId.ToString());
 
         var targets = Path.Combine(Root, "targets.json");
@@ -170,7 +182,12 @@ public sealed class PlanTestbed : IDisposable
                 { "id": "documents", "path": "Dokumente", "pattern": null, "holds": ["document"], "reason": null, "examples": [] } ] }
             """);
         await OkAsync("decide", JobId.ToString(), "--targets", targets);
+    }
 
+    /// <summary>Scans, compares, decides and accepts every finding, then lets an agent create and confirm the plan.</summary>
+    public async Task<long> CreatePlanAsync(bool agentApproves = true)
+    {
+        await PrepareFindingsAsync();
         var findings = await OkAsync("findings", JobId.ToString(), "--limit", "200");
         var keys = findings.GetProperty("items").EnumerateArray().Select(f => f.GetProperty("key").GetString()!).ToList();
         Assert.NotEmpty(keys);
