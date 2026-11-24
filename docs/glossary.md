@@ -41,6 +41,7 @@ decided in https://github.com/crack666/smart_file_organizer/issues/35.
 |---|---|
 | `rule` | A deterministic rule decided without calling the model. |
 | `model` | The model decided, or was asked and failed. |
+| `human` | A person set the verdict by hand; it wins over rule and model. Since format 1.2 (24.11.2026, https://github.com/crack666/smart_file_organizer/issues/14). |
 
 ### Origin of a file result (`ResultOrigin`)
 

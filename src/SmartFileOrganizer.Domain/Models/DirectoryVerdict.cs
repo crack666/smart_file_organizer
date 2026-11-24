@@ -49,6 +49,16 @@ public sealed class DirectoryVerdict
     /// <summary>Why the directory was raised to mixed, for example which share of the sample deviated.</summary>
     public string? EscalationReason { get; set; }
 
+    /// <summary>
+    /// The correction of a person that decided <see cref="Verdict"/> (then <see cref="Source"/> is
+    /// <see cref="VerdictSource.Human"/>); null otherwise. Filled when reading, not stored with the verdict.
+    /// </summary>
+    public DirectoryOverride? Override { get; set; }
+
+    /// <summary>With <see cref="Override"/>: what rule or model said, unchanged in the database; null when neither had
+    /// judged the directory.</summary>
+    public DirectoryVerdict? Replaced { get; set; }
+
     // Filled when reading, from directory_nodes; not stored in directory_verdicts.
     public string? DirectoryFullPath { get; set; }
     public string? DirectoryRelativePath { get; set; }

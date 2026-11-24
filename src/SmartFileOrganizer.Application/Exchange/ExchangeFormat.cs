@@ -20,7 +20,7 @@ public static class ExchangeFormat
     /// Major and minor version. New fields raise the minor version; a field that changes meaning or type, or a code
     /// that is removed, raises the major version and gets a new schema folder.
     /// </summary>
-    public const string Version = "1.1";
+    public const string Version = "1.2";
 
     /// <summary>The major version of <see cref="Version"/>; the schema folder is <c>v{Major}</c>.</summary>
     public const int Major = 1;

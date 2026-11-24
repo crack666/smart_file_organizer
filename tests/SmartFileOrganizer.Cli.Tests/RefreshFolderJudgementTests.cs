@@ -102,6 +102,43 @@ public class RefreshFolderJudgementTests : IDisposable
             $"WHERE d.job_id = {second} AND u.job_id <> {second}"));
     }
 
+    /// <summary>A verdict a person set stays with its folder, changed or not, and is not asked again (Issue 14).</summary>
+    [Fact]
+    public async Task VerdictSetByAPerson_StaysWithTheFolder_EvenWhenAFileInItChanged()
+    {
+        var first = await ScanAsync();
+        await AnalyzeAsync(first);
+        await using (var conn = new SqliteConnection($"Data Source={_dbPath}"))
+        {
+            await conn.OpenAsync();
+            await using var insert = conn.CreateCommand();
+            insert.CommandText = $"""
+                INSERT INTO directory_overrides (directory_node_id, verdict, retention, overridden_at)
+                SELECT id, 'mixed', 'keep', '2026-11-24T10:00:00Z' FROM directory_nodes WHERE job_id = {first} AND name IN ('notes', 'recipes')
+                """;
+            Assert.Equal(2, await insert.ExecuteNonQueryAsync());
+        }
+        var changed = Path.Combine(_source, "notes", "today.txt");
+        File.AppendAllText(changed, " And the electrician.");
+        File.SetLastWriteTimeUtc(changed, DateTime.UtcNow.AddMinutes(1));
+
+        var scan = await SfoAsync("scan", _source, "--refresh", "--json");
+        Assert.True(scan.ExitCode == 0, scan.Stderr + scan.Stdout);
+        var second = scan.Json().GetProperty("result").GetProperty("job").GetProperty("id").GetInt64();
+        Assert.Equal(2, await ScalarAsync(
+            $"SELECT COUNT(*) FROM v_directories WHERE job_id = {second} AND verdict = 'mixed' AND verdict_source = 'human' AND retention = 'keep'"));
+
+        // The changed file is judged, its folder is not asked about: the person has said what it is. And the status
+        // counts the folder as done, or the analysis would look unfinished for ever.
+        var before = _server.Log.Count;
+        await AnalyzeAsync(second);
+        var asked = _server.Log.Skip(before).ToList();
+        Assert.DoesNotContain(asked, r => r.Kind == "pre_assessment" && r.Name is { } n && n.StartsWith("notes", StringComparison.Ordinal));
+        Assert.Equal(["today.txt"], asked.Where(r => r.Kind == "classification").Select(r => r.Name));
+        var status = await SfoAsync("status", second.ToString(), "--json");
+        Assert.True(status.ExitCode == 0, status.Stderr + status.Stdout);
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────
 
     private void Write(string relative, string text)

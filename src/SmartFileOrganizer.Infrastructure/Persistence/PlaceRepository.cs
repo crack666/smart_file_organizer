@@ -189,7 +189,8 @@ public class PlaceRepository : IPlaceRepository
 
     /// <summary>
     /// Folders whose files are all unchanged (no new, changed, missing or moved file at or below them, same scan status)
-    /// keep the verdict, the pre-assessment and summary and the sample of the previous job, and their files keep their
+    /// keep the verdict, the pre-assessment and summary and the sample of the previous job (a verdict a person set stays
+    /// with every folder that still exists), and their files keep their
     /// status (a file skipped under a folder judged whole stays skipped): <c>sfo analyze</c> asks no model for them
     /// again. Every other folder of the new job that had a verdict or summary before, or is new, is to be judged anew.
     /// File ids inside the carried rows (the members of a sample, the outliers of a pre-assessment) are moved to the
@@ -248,6 +249,18 @@ public class PlaceRepository : IPlaceRepository
         var verdicts = await CopyFolderRowsAsync(conn, tx, "directory_verdicts", ct);
         var assessments = await CopyFolderRowsAsync(conn, tx, "ai_directory_results", ct);
         var samples = await CopyFolderRowsAsync(conn, tx, "directory_samples", ct);
+
+        // A verdict a person set belongs to the folder, not to what rule or model saw in it: it stays with the same path
+        // even when files in it changed, and the person takes it back when it no longer fits.
+        await conn.ExecuteAsync(new CommandDefinition(
+            """
+            INSERT INTO directory_overrides (directory_node_id, verdict, retention, note, overridden_at)
+            SELECT n.id, o.verdict, o.retention, o.note, o.overridden_at
+            FROM directory_overrides o
+            JOIN directory_nodes p ON p.id = o.directory_node_id AND p.job_id = @previousJobId
+            JOIN directory_nodes n ON n.job_id = @jobId AND n.full_path = p.full_path
+            WHERE NOT EXISTS (SELECT 1 FROM directory_overrides x WHERE x.directory_node_id = n.id)
+            """, new { previousJobId, jobId }, tx, cancellationToken: ct));
 
         // Files directly in a kept folder keep their status (skipped under a whole, deferred to a carried sample).
         await conn.ExecuteAsync(new CommandDefinition(

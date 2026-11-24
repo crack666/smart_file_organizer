@@ -5,6 +5,10 @@ using SmartFileOrganizer.Domain.Models;
 
 namespace SmartFileOrganizer.Application.Services;
 
+/// <summary>Outcome of a correction of several files at once.</summary>
+/// <param name="Errors">The message of each file that could not be stored.</param>
+public sealed record BulkReviewResult(int Applied, IReadOnlyList<string> Errors);
+
 /// <summary>
 /// Handles manual user overrides for file classifications. A category that differs from the
 /// model's answer is also kept as a test case (<see cref="EvalCaseService"/>), so later changes
@@ -54,6 +58,34 @@ public class ReviewService
         // Never fails the override; returns null when there is nothing to keep.
         if (_evalCases != null)
             await _evalCases.RecordCategoryCorrectionAsync(fileNodeId, category, ct);
+    }
+
+    /// <summary>
+    /// The same category for several files (https://github.com/crack666/smart_file_organizer/issues/14): each is stored as
+    /// a correction of its own; target and note of an earlier correction stay. A file that fails does not stop the rest.
+    /// </summary>
+    /// <param name="onApplied">Called with each file id after it was stored.</param>
+    public async Task<BulkReviewResult> ApplyCategoryAsync(IReadOnlyCollection<long> fileNodeIds, FileCategory category,
+        Action<long>? onApplied = null, CancellationToken ct = default)
+    {
+        var applied = 0;
+        var errors = new List<string>();
+        foreach (var id in fileNodeIds)
+        {
+            ct.ThrowIfCancellationRequested();
+            try
+            {
+                var existing = await _overrideRepo.GetByFileNodeIdAsync(id, ct);
+                await ApplyOverrideAsync(id, category, existing?.OverriddenTarget, existing?.Note, ct);
+                applied++;
+                onApplied?.Invoke(id);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                errors.Add(ex.Message);
+            }
+        }
+        return new BulkReviewResult(applied, errors);
     }
 
     /// <summary>

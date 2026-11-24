@@ -694,7 +694,7 @@ public class DirectoryVerdictTests : IDisposable
         // Only a rule decides dump; the model is offered the others.
         Assert.Equal(new[] { "unit", "uniform", "mixed", "empty", "system" }, DirectoryVerdictKinds.ModelCodes);
         Assert.Equal(new[] { "keep", "review", "disposable" }, VerdictCodes.All<RetentionValue>());
-        Assert.Equal(new[] { "rule", "model" }, VerdictCodes.All<VerdictSource>());
+        Assert.Equal(new[] { "rule", "model", "human" }, VerdictCodes.All<VerdictSource>());
 
         Assert.True(VerdictCodes.TryParse<DirectoryVerdictKind>("Uniform", out var k));
         Assert.Equal(DirectoryVerdictKind.Uniform, k);

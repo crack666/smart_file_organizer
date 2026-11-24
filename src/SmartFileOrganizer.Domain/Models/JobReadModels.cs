@@ -32,7 +32,7 @@ public sealed class DirectoryReadRow
     /// <summary>Stored verdict code (<c>unit</c>, ...); null when there is no verdict or only an error.</summary>
     public string? Verdict { get; set; }
 
-    /// <summary><c>rule</c> or <c>model</c>; null when Phase 1 has not reached the directory.</summary>
+    /// <summary><c>rule</c>, <c>model</c> or <c>human</c> (a correction of a person); null when Phase 1 has not reached the directory.</summary>
     public string? VerdictSource { get; set; }
 
     public string? VerdictRule { get; set; }

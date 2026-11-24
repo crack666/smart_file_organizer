@@ -253,9 +253,12 @@ public sealed class CorpusEvaluator
     }
 
     private static string DecidedBy(DirectoryVerdict verdict) =>
-        verdict.Source == VerdictSource.Rule
-            ? $"rule {verdict.Rule}"
-            : $"model {verdict.ModelUsed}";
+        verdict.Source switch
+        {
+            VerdictSource.Rule => $"rule {verdict.Rule}",
+            VerdictSource.Human => "human",
+            _ => $"model {verdict.ModelUsed}"
+        };
 
     public static string Key(EvalKind kind, string path) => $"{kind.ToCode()}:{path}";
 }

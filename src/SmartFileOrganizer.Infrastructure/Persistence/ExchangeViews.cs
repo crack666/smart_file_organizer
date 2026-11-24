@@ -98,18 +98,19 @@ public static class ExchangeViews
                    d.sensitive_markers AS sensitive_markers,
                    d.sensitive_rule AS sensitive_rule,
                    d.analysis_skip AS analysis_skip,
-                   v.verdict AS verdict,
-                   v.source AS verdict_source,
-                   v.rule AS verdict_rule,
-                   v.retention AS retention,
+                   COALESCE(dov.verdict, v.verdict) AS verdict,
+                   CASE WHEN dov.id IS NOT NULL THEN 'human' ELSE v.source END AS verdict_source,
+                   CASE WHEN dov.id IS NULL THEN v.rule END AS verdict_rule,
+                   COALESCE(dov.retention, v.retention) AS retention,
                    v.purpose AS purpose,
-                   v.reason AS reason,
-                   v.escalated_from AS escalated_from,
-                   v.model_used AS model,
-                   v.judged_at AS judged_at,
-                   v.error AS verdict_error
+                   CASE WHEN dov.id IS NOT NULL THEN dov.note ELSE v.reason END AS reason,
+                   CASE WHEN dov.id IS NULL THEN v.escalated_from END AS escalated_from,
+                   CASE WHEN dov.id IS NULL THEN v.model_used END AS model,
+                   COALESCE(dov.overridden_at, v.judged_at) AS judged_at,
+                   CASE WHEN dov.id IS NULL THEN v.error END AS verdict_error
             FROM directory_nodes d
             LEFT JOIN directory_verdicts v ON v.directory_node_id = d.id
+            LEFT JOIN directory_overrides dov ON dov.directory_node_id = d.id
             """
     };
 

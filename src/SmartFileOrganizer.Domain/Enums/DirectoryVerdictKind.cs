@@ -64,5 +64,9 @@ public enum VerdictSource
     [JsonStringEnumMemberName("rule")] Rule,
 
     /// <summary>The model decided (or was asked and failed).</summary>
-    [JsonStringEnumMemberName("model")] Model
+    [JsonStringEnumMemberName("model")] Model,
+
+    /// <summary>A person set the verdict by hand (<c>directory_overrides</c>); it wins over rule and model
+    /// (https://github.com/crack666/smart_file_organizer/issues/14). Never stored in <c>directory_verdicts</c>.</summary>
+    [JsonStringEnumMemberName("human")] Human
 }

@@ -39,6 +39,7 @@ public static class CodeLabels
 
         Verdict(VerdictSource.Rule, "rule", "Regel"),
         Verdict(VerdictSource.Model, "model", "Modell"),
+        Verdict(VerdictSource.Human, "human", "Mensch"),
 
         Verdict(ResultOrigin.Rule, "rule", "Regel"),
         Verdict(ResultOrigin.Model, "model", "Modell"),

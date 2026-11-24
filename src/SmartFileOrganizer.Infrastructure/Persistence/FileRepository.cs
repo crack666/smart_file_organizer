@@ -368,9 +368,10 @@ public class FileRepository : IFileRepository
               AND id NOT IN (SELECT file_node_id FROM ai_results)
               AND EXISTS (
                   SELECT 1 FROM directory_nodes d
-                  JOIN directory_verdicts v ON v.directory_node_id = d.id
+                  LEFT JOIN directory_verdicts v ON v.directory_node_id = d.id
+                  LEFT JOIN directory_overrides dov ON dov.directory_node_id = d.id
                   WHERE d.job_id = file_nodes.job_id AND d.full_path = file_nodes.parent_path
-                    AND v.verdict IS NOT NULL AND v.verdict NOT IN ('unit', 'system'))
+                    AND COALESCE(dov.verdict, v.verdict) NOT IN ('unit', 'system'))
             """,
             new
             {
