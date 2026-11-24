@@ -24,11 +24,10 @@ public static class SmallCorpusFindings
         new("in_noise", "alt", Group: "documents", Note: "A scanned letter and a table in an old mixed folder."),
         new("in_noise", "alt", Group: "images", Note: "An application photo in the old mixed folder."),
 
-        // Sensitive places, one per folder and marker set; skipped folders by name or place.
+        // Sensitive places, one per folder with its markers as a list (until 24.11.2026 one per folder and marker set,
+        // issue 71); skipped folders by name or place.
         new("sensitive", ".ssh", Markers: ["keys"]),
-        new("sensitive", "Desktop", Markers: ["credentials"]),
-        new("sensitive", "Desktop", Markers: ["keys"]),
-        new("sensitive", "Desktop", Markers: ["private_message"]),
+        new("sensitive", "Desktop", Markers: ["credentials", "keys", "private_message"]),
         new("sensitive", "Dokumente/Bank", Markers: ["finance"]),
         new("sensitive", "Dokumente/Briefe", Markers: ["private_message"]),
         new("sensitive", "Dokumente/Gesundheit", Markers: ["health"]),

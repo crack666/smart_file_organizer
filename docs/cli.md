@@ -1561,7 +1561,9 @@ it the facts, [`sfo findings place`](#sfo-findings-place-job-key) records its de
   `sfo plan create` moves each file with its part.
 - `inputs.library_job_ids` lists every library the findings rest on; `library_job_id` and `library_compared_at` are
   those of the first one.
-- `sensitive` findings name path, marker and rule ids; what their files show is decided by `Sensitive:Disclosure`
+- `sensitive` findings, one per folder (inside noise one per noise part), name path, every marker of its files (access
+  data first, with a note `By marker: credentials 2 files, finance 3 files.`; until 24.11.2026 one finding per folder
+  and marker set) and rule ids; what their files show is decided by `Sensitive:Disclosure`
   ([Sensitive files](#sensitive-files)). Marked files stay in `sensitive` findings, decided one by one, in either setting.
 - `--summary` gives `{ "job_id", "root_path", "inputs", "coverage", "missing_steps", "listed", "sure", "unsure",
   "by_kind": { "<kind>": { "findings", "sure", "unsure", "files", "bytes" } }, "by_certainty", "by_state",

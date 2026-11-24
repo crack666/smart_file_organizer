@@ -350,7 +350,8 @@ ids, never content; files of `sfo findings show` pass the output guard; no check
 **Summarized, then ranked.** One unit per worth-keeping part of a device copy, device copy without parts, or
 named folder; loose files (events, scattered, no bundle) one unit per folder however many events it holds, so
 300 loose photos are one finding; noise per noise part or program folder, else per folder; `sensitive` per
-folder and marker set, inside noise per noise part and marker set; `duplicate` per set of folders (`scope: files`) or per set
+folder, inside noise per noise part, with every marker of its files in `markers` (access data first) and a note
+counting the files per marker (until 24.11.2026 one finding per folder and marker set, issue 71); `duplicate` per set of folders (`scope: files`) or per set
 of copied wholes (`scope: folders`: a tool unpacked twice is one finding, folder against folder; copies within one whole
 are none); `misplaced`
 per folder and foreign group. `not_backed_up` and `in_noise` split by kind of file (`group`: `documents`, `images`, `videos`, `audio`,
