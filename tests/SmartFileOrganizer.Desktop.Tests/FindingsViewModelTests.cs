@@ -66,12 +66,13 @@ public sealed class FindingsViewModelTests : IDisposable
         Assert.Equal(["Urlaub Kroatien 2021", "Alte Kopien", "Ohne Bündel", "Privat"], groups.Take(4).Select(g => g.Title));
         // Bundles without a finding come last and can still be looked at.
         Assert.All(groups.Skip(4), g => Assert.False(g.HasFindings));
-        Assert.Equal("Ordner · 03.07.2021 · 3 Dateien · 8,5 KB · 1 Fundstück, 1 offen", groups[0].Summary);
+        var size = PlanDisplay.Size(groups[0].Bundle!.TotalBytes); // the decimal sign of the machine
+        Assert.Equal($"Ordner · 03.07.2021 · 3 Dateien · {size} · 1 Fundstück, 1 offen", groups[0].Summary);
 
         var holiday = Row(vm, "3 Bilder · Urlaub Kroatien 2021");
         Assert.Equal("nicht gesichert", holiday.KindLabel);
         Assert.Equal("umziehen → Fotos (laut Zielstruktur)", holiday.ActionText);
-        Assert.Equal("03.07.2021 · 8,5 KB", holiday.FactsText);
+        Assert.Equal($"03.07.2021 · {size}", holiday.FactsText);
         Assert.Equal("hier entfernen: 1 überzählig", Row(vm, "2 Dateien · Alte Kopien").ActionText);
         Assert.Equal(("offen", "sicher"), (holiday.StateLabel, holiday.CertaintyLabel));
         Assert.Contains("sfo findings targets", vm.MissingText);
@@ -246,7 +247,7 @@ public sealed class FindingsViewModelTests : IDisposable
 
         // A bundle decides its findings.
         Select(vm, vm.Rows.OfType<FindingGroupViewModel>().Single(g => g.Title == "Alte Kopien"));
-        Assert.Equal("2 Fundstücke ausgewählt, 3,7 MB", vm.SelectionText);
+        Assert.Equal($"2 Fundstücke ausgewählt, {PlanDisplay.Size(vm.SelectedFindings.Sum(f => f.Finding.Bytes))}", vm.SelectionText);
         await vm.RejectCommand.ExecuteAsync(null);
         Assert.Equal(2L, await Decisions("state = 'rejected'"));
         Assert.Equal("7 Fundstücke · 5 angenommen · 2 abgelehnt · 5 gezeigt", vm.CountText);

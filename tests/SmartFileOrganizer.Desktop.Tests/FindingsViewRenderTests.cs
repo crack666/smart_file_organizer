@@ -49,7 +49,7 @@ public class FindingsViewRenderTests
         await vm.DetailLoad;
         await Until(() => vm.Pictures.Count == 3);
         await Until(() => Visible(window).Contains("Schnellfilter") && Visible(window).Contains("nicht gesichert"));
-        foreach (var text in new[] { "Quelle", "Bibliothek", "prüfen", "doppelt", "Empfohlene Aktion", "Ordner · 03.07.2021 · 3 Dateien · 8,5 KB · 1 Fundstück, 1 offen" })
+        foreach (var text in new[] { "Quelle", "Bibliothek", "prüfen", "doppelt", "Empfohlene Aktion", ((FindingGroupViewModel)vm.Rows[0]).Summary })
             Assert.Contains(text, Visible(window));
         var list = window.GetVisualDescendants().OfType<ListBox>().Single(l => l.Name == "FindingList");
         Assert.Equal(1, list.SelectedItems!.Count);

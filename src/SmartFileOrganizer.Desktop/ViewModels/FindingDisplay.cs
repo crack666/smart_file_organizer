@@ -56,7 +56,7 @@ public static class FindingDisplay
     };
 
     private static string Count(long n, string one, string many) =>
-        n == 1 ? "1 " + one : n.ToString("N0", CultureInfo.GetCultureInfo("de-DE")) + " " + many;
+        n == 1 ? "1 " + one : $"{n} {many}";
 
     /// <summary>"12.07.2015 – 19.07.2015", one day as one date; empty without a time.</summary>
     public static string Period(DateTime? from, DateTime? to)
