@@ -285,7 +285,10 @@ sfo status 7 --json
 
 `phases.scan.errors` counts the folders and files the scan could not read. `scan_errors` groups them by
 cause (`access_denied`, `not_found`, `path_too_long`, `io_error`) with counts and the first three paths of
-each; `errors` lists the AI phases only. `links` lists the links the scan found, by kind (`junction`,
+each; `errors` lists the AI phases only: `phase` `pre_assessment`, `classification` or `summary` for a failed model
+call, and `directory_verdict` (since 24.11.2026, issue 71) for a folder left without a verdict although its call did not
+fail (the answer held no valid verdict, or a rule waits for its subfolders), so a folder counted as open names its
+cause. `links` lists the links the scan found, by kind (`junction`,
 `symlink`, `mount_point`): folders not entered, folders a `follow_link` rule entered, and files that are
 links; none of them counts as content ([scan-rules.md](scan-rules.md#links-and-read-errors)). After a
 finished scan `directories_total` equals `directories_processed` and `files_total` equals `files_processed`:
