@@ -53,13 +53,17 @@ public static class ServiceConfigurator
             sp.GetRequiredService<FileDetailViewModel>(),
             sp.GetRequiredService<ScanProgressViewModel>(),
             sp.GetRequiredService<AiProgressViewModel>(),
-            sp.GetRequiredService<IDirectoryClassificationRepository>(),
             sp.GetRequiredService<FocusedRescanService>(),
-            sp.GetRequiredService<PlanViewModel>()));
+            sp.GetRequiredService<PlanViewModel>(),
+            sp.GetRequiredService<DirectoryBannerViewModel>(),
+            sp.GetRequiredService<ScanExportService>(),
+            sp.GetRequiredService<SensitiveOutputOptions>()));
         services.AddTransient<FolderTreeViewModel>();
         services.AddTransient<FileTableViewModel>(sp => new FileTableViewModel(
             sp.GetRequiredService<FileQueryService>(),
-            sp.GetRequiredService<ReviewService>()));
+            sp.GetRequiredService<ReviewService>(),
+            sp.GetRequiredService<SecondCheckOptions>()));
+        services.AddTransient<DirectoryBannerViewModel>();
         services.AddTransient<FileDetailViewModel>(sp => new FileDetailViewModel(
             sp.GetRequiredService<FilePreviewService>(),
             sp.GetRequiredService<ReviewService>()));

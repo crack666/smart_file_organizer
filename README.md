@@ -88,6 +88,19 @@ person then releases all, a group or a selection at once, and changes a
 target in a folder tree of the libraries. Screenshots from a generated test
 folder: [docs/images](docs/images/01-plan-agent.png).
 
+Since 24.11.2026 ([#14](https://github.com/crack666/smart_file_organizer/issues/14))
+the browser of an analysed job shows each folder's verdict (`Einheit`,
+`einheitlich`, `gemischt`, ...), retention value and size in the tree, and a
+banner with purpose, reason and why a folder was raised to mixed. A person sets
+a folder's verdict there and takes it back; it is stored beside the verdict of
+rule or model and wins wherever the verdict is read (`sfo` included). The file
+table filters by category, state, low confidence, sensitive and temporary, and
+sets one category for several checked files. Sensitive files are marked; their
+preview opens on a click, that of access data never. "CSV exportieren…" writes
+the job like `sfo export`.
+
+![Browser of an analysed job](docs/images/14-browser-tree-banner.png)
+
 The same work runs from the command line, with `--json` output for scripts
 and models ([docs/cli.md](docs/cli.md)):
 

@@ -18,6 +18,13 @@
                            FontSize="13"
                            Margin="0,0,0,6" />
 
+                <Border Background="#B3261E" CornerRadius="3" Padding="6,2" Margin="0,0,0,6"
+                        HorizontalAlignment="Left" IsVisible="{Binding IsSensitive}">
+                    <TextBlock Foreground="White" FontSize="12" TextWrapping="Wrap">
+                        <Run Text="Sensibel: " FontWeight="SemiBold" /><Run Text="{Binding SensitiveText}" />
+                    </TextBlock>
+                </Border>
+
                 <Grid ColumnDefinitions="Auto,8,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
 
                     <TextBlock Grid.Row="0" Grid.Column="0" Text="Name:"          FontWeight="SemiBold" />
@@ -164,6 +171,12 @@
                                      BorderThickness="0"
                                      IsVisible="{Binding HasTextPreview}" />
                         </ScrollViewer>
+
+                        <StackPanel IsVisible="{Binding IsPreviewLocked}" Spacing="8" VerticalAlignment="Center" HorizontalAlignment="Center">
+                            <TextBlock Text="Sensible Datei: die Vorschau zeigt den Inhalt erst auf Klick."
+                                       TextWrapping="Wrap" Foreground="#DCDCDC" HorizontalAlignment="Center" />
+                            <Button Content="Vorschau zeigen" Command="{Binding ShowPreviewCommand}" HorizontalAlignment="Center" />
+                        </StackPanel>
 
                         <ScrollViewer HorizontalScrollBarVisibility="Disabled"
                                       VerticalScrollBarVisibility="Auto"

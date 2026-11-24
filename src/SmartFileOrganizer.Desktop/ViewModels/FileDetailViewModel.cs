@@ -1,6 +1,7 @@
 using Avalonia.Media.Imaging;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using SmartFileOrganizer.Application.Sensitivity;
 using SmartFileOrganizer.Application.Services;
 using SmartFileOrganizer.Desktop.Services;
 using SmartFileOrganizer.Domain.Enums;
@@ -14,6 +15,9 @@ public partial class FileDetailViewModel : ViewModelBase
     private readonly ReviewService _reviewService;
 
     private long _fileNodeId;
+    private FileNode? _file;
+    private long _revealedFileId;
+    private int _previewVersion;
 
     // ── File metadata ──────────────────────────────────────────────────────
     [ObservableProperty] private string _name = string.Empty;
@@ -45,6 +49,19 @@ public partial class FileDetailViewModel : ViewModelBase
     [ObservableProperty] private FileCategory _selectedCategory = FileCategory.Unknown;
     [ObservableProperty] private string _editTarget = string.Empty;
 
+    // ── Sensitive files ───────────────────────────────────────────────────
+    /// <summary>The markers of the file in words; empty when it has none.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsSensitive))]
+    private string _sensitiveText = string.Empty;
+
+    public bool IsSensitive => SensitiveText.Length > 0;
+
+    /// <summary>A sensitive file: nothing of its content is read until the person asks for the preview.</summary>
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(ShowPreviewCommand))]
+    private bool _isPreviewLocked;
+
     // ── Preview ───────────────────────────────────────────────────────────
     [ObservableProperty] private Bitmap? _imagePreview;
     [ObservableProperty] private string _textPreview = string.Empty;
@@ -69,6 +86,10 @@ public partial class FileDetailViewModel : ViewModelBase
     public async Task ApplyAsync(FileNode file, CancellationToken ct = default)
     {
         _fileNodeId = file.Id;
+        _file = file;
+        var markers = SensitiveOutputGuard.GetMarkers(file);
+        var accessData = SensitiveOutputOptions.IsAccessData(markers);
+        SensitiveText = BrowserDisplay.MarkerText(markers);
 
         Name = file.Name;
         FullPath = file.FullPath;
@@ -80,10 +101,10 @@ public partial class FileDetailViewModel : ViewModelBase
         if (file.Classification is { } cls)
         {
             HasClassification = true;
-            Category = cls.Category.ToString();
+            Category = SensitiveOutputGuard.ApplyReviewRule(cls.Category, markers).ToString();
             Importance = cls.Importance.ToString();
             Confidence = $"{cls.Confidence:P0}";
-            Summary = cls.Summary ?? string.Empty;
+            Summary = accessData ? BrowserDisplay.AccessDataHint : cls.Summary ?? string.Empty;
             // The old free-text target of the model is no target (deprecated): targets lie only in a library.
             SuggestedTarget = string.Empty;
             ModelUsed = cls.ModelUsed ?? string.Empty;
@@ -106,32 +127,56 @@ public partial class FileDetailViewModel : ViewModelBase
         {
             HasOverride = false;
             OverrideCategory = OverrideTarget = string.Empty;
-            SelectedCategory = file.Classification?.Category ?? FileCategory.Unknown;
+            SelectedCategory = file.Classification is { } c
+                ? SensitiveOutputGuard.ApplyReviewRule(c.Category, markers)
+                : FileCategory.Unknown;
             EditTarget = string.Empty;
         }
 
         UpdateReviewStatus(file.Status);
-        await LoadPreviewAsync(file, ct);
+
+        if (_revealedFileId != file.Id) _revealedFileId = 0;
+        if (accessData)
+        {
+            ClosePreview(BrowserDisplay.AccessDataHint + " Die Datei im Standardprogramm öffnen, um sie anzusehen.");
+        }
+        else if (markers != SensitiveMarker.None && _revealedFileId != file.Id)
+        {
+            ClosePreview(string.Empty);
+            IsPreviewLocked = true;
+        }
+        else
+        {
+            IsPreviewLocked = false;
+            await LoadPreviewAsync(file, ct);
+        }
     }
 
     public void Clear()
     {
         _fileNodeId = 0;
-        ImagePreview?.Dispose();
+        _file = null;
+        _revealedFileId = 0;
+        SensitiveText = string.Empty;
+        ClosePreview(string.Empty);
         Name = FullPath = Extension = FileType = SizeText = LastModified = string.Empty;
         Category = Importance = Confidence = Summary = SuggestedTarget = ModelUsed = string.Empty;
         OverrideCategory = OverrideTarget = string.Empty;
         EditTarget = string.Empty;
         SelectedCategory = FileCategory.Unknown;
-        ImagePreview = null;
-        TextPreview = PreviewMessage = string.Empty;
         HasClassification = HasOverride = false;
         ReviewStatusText = string.Empty;
         ReviewStatusColor = "#888888";
+    }
 
-        OnPropertyChanged(nameof(HasImagePreview));
-        OnPropertyChanged(nameof(HasTextPreview));
-        OnPropertyChanged(nameof(HasPreviewMessage));
+    /// <summary>Shows the preview of a sensitive file, for this one file until another is selected.</summary>
+    [RelayCommand(CanExecute = nameof(IsPreviewLocked))]
+    private async Task ShowPreviewAsync()
+    {
+        if (_file is not { } file) return;
+        _revealedFileId = file.Id;
+        IsPreviewLocked = false;
+        await LoadPreviewAsync(file, CancellationToken.None);
     }
 
     [RelayCommand]
@@ -171,17 +216,36 @@ public partial class FileDetailViewModel : ViewModelBase
 
     private async Task LoadPreviewAsync(FileNode file, CancellationToken ct)
     {
-        ImagePreview?.Dispose();
-        ImagePreview = null;
-        TextPreview = string.Empty;
-        PreviewMessage = string.Empty;
+        ClosePreview(string.Empty);
+        var version = _previewVersion;
 
         var preview = await _previewService.BuildAsync(file, ct);
+        if (version != _previewVersion)
+        {
+            preview.Dispose(); // another file was selected meanwhile
+            return;
+        }
         // One picture here: for a video the first of its filmstrip (the plan view shows all of them).
         ImagePreview = preview.TakeStill();
         TextPreview = preview.TextPreview;
         PreviewMessage = preview.Message;
+        PreviewChanged();
+    }
 
+    /// <summary>Removes the preview, and what is still being read for it; <paramref name="message"/> stands in its place.</summary>
+    private void ClosePreview(string message)
+    {
+        _previewVersion++;
+        ImagePreview?.Dispose();
+        ImagePreview = null;
+        TextPreview = string.Empty;
+        PreviewMessage = message;
+        IsPreviewLocked = false;
+        PreviewChanged();
+    }
+
+    private void PreviewChanged()
+    {
         OnPropertyChanged(nameof(HasImagePreview));
         OnPropertyChanged(nameof(HasTextPreview));
         OnPropertyChanged(nameof(HasPreviewMessage));

@@ -109,6 +109,7 @@ public class ScanJobRepository : IScanJobRepository
             DELETE FROM result_checks       WHERE file_node_id IN (SELECT id FROM file_nodes WHERE job_id = @id);
             DELETE FROM ai_directory_results WHERE directory_node_id IN (SELECT id FROM directory_nodes WHERE job_id = @id);
             DELETE FROM directory_samples   WHERE directory_node_id IN (SELECT id FROM directory_nodes WHERE job_id = @id);
+            DELETE FROM directory_overrides WHERE directory_node_id IN (SELECT id FROM directory_nodes WHERE job_id = @id);
             DELETE FROM directory_verdicts  WHERE directory_node_id IN (SELECT id FROM directory_nodes WHERE job_id = @id);
             UPDATE eval_cases SET job_id = NULL, file_node_id = NULL WHERE job_id = @id;
             UPDATE eval_cases SET file_node_id = NULL WHERE file_node_id IN (SELECT id FROM file_nodes WHERE job_id = @id);

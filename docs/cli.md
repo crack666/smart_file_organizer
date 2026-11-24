@@ -985,7 +985,8 @@ treated the folder as it did. A link that was not followed has status `link`, `l
 `link_target`, and no files; a link a `follow_link` rule entered keeps `link_kind` and `link_target` with its
 normal status. A folder that could not be read has status `error` and `error_cause` (never `scanned` with 0
 files). `verdict` is a
-verdict code, `error` or `null`; `verdict_source` tells whether a rule or the model decided.
+verdict code, `error` or `null`; `verdict_source` tells whether a rule or the model decided, or `human` when a
+person set the verdict in the GUI (it wins over both; since 24.11.2026).
 `size_bytes`, `files`, `sensitive_files` and `sensitive_dirs` cover the subtree, `direct_files`
 the directory itself. `sensitive` and `sensitive_rule` are the markers of the folder itself
 (a skipped folder such as `.ssh`). `summary` is the Phase 3 summary, `null` until that phase ran.

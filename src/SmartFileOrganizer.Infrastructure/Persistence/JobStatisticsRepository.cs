@@ -17,7 +17,7 @@ public class JobStatisticsRepository : IJobStatisticsRepository
         await conn.OpenAsync(ct);
 
         // The AI-relevant filter mirrors DirectoryPreAssessmentService and DirectorySummaryService.
-        // Pre-assessed: a pre-assessment row, or a verdict without error. A folder inside a unit gets its
+        // Pre-assessed: a pre-assessment row, or a verdict without error (or one a person set). A folder inside a unit gets its
         // verdict from the unit and no row of its own, and is judged all the same.
         var dirs = await conn.QuerySingleAsync<DirectoryCounts>(
             """
@@ -28,8 +28,9 @@ public class JobStatisticsRepository : IJobStatisticsRepository
                     WHERE n.job_id = @jobId
                       AND (EXISTS (SELECT 1 FROM ai_directory_results r WHERE r.directory_node_id = n.id AND r.phase = 'pre_assessment')
                            OR (n.dir_status <> @skip AND n.name <> '' AND substr(n.name, 1, 1) <> '.'
-                               AND EXISTS (SELECT 1 FROM directory_verdicts v
-                                           WHERE v.directory_node_id = n.id AND v.verdict IS NOT NULL AND v.error IS NULL)))) AS pre_assessed,
+                               AND (EXISTS (SELECT 1 FROM directory_verdicts v
+                                            WHERE v.directory_node_id = n.id AND v.verdict IS NOT NULL AND v.error IS NULL)
+                                    OR EXISTS (SELECT 1 FROM directory_overrides o WHERE o.directory_node_id = n.id))))) AS pre_assessed,
                 (SELECT COUNT(*) FROM ai_directory_results r JOIN directory_nodes n ON n.id = r.directory_node_id
                     WHERE n.job_id = @jobId AND r.phase = 'pre_assessment' AND r.error IS NOT NULL) AS pre_assessment_errors,
                 (SELECT COUNT(*) FROM ai_directory_results r JOIN directory_nodes n ON n.id = r.directory_node_id
@@ -44,13 +45,15 @@ public class JobStatisticsRepository : IJobStatisticsRepository
                                THEN NOT EXISTS (SELECT 1 FROM file_nodes f WHERE f.job_id = @jobId AND f.parent_path = n.full_path)
                                ELSE EXISTS (SELECT 1 FROM directory_verdicts v
                                             WHERE v.directory_node_id = n.id AND v.verdict IS NOT NULL AND v.error IS NULL)
+                                    OR EXISTS (SELECT 1 FROM directory_overrides o WHERE o.directory_node_id = n.id)
                           END) AS summaries_not_needed,
                 (SELECT COUNT(*) FROM directory_nodes n
                     WHERE n.job_id = @jobId AND n.analysis_skip IS NOT NULL
                       AND n.dir_status <> @skip AND n.name <> '' AND substr(n.name, 1, 1) <> '.'
                       AND NOT EXISTS (SELECT 1 FROM ai_directory_results r WHERE r.directory_node_id = n.id AND r.phase = 'pre_assessment')
                       AND NOT EXISTS (SELECT 1 FROM directory_verdicts v
-                                      WHERE v.directory_node_id = n.id AND v.verdict IS NOT NULL AND v.error IS NULL)) AS pre_assessment_backed_up,
+                                      WHERE v.directory_node_id = n.id AND v.verdict IS NOT NULL AND v.error IS NULL)
+                      AND NOT EXISTS (SELECT 1 FROM directory_overrides o WHERE o.directory_node_id = n.id)) AS pre_assessment_backed_up,
                 (SELECT COUNT(*) FROM directory_nodes n
                     WHERE n.job_id = @jobId AND n.analysis_skip IS NOT NULL
                       AND n.dir_status <> @skip AND n.name <> '' AND substr(n.name, 1, 1) <> '.'
@@ -111,6 +114,7 @@ public class JobStatisticsRepository : IJobStatisticsRepository
                     SELECT 'directory_verdict', n.full_path, v.error, v.judged_at
                     FROM directory_verdicts v JOIN directory_nodes n ON n.id = v.directory_node_id
                     WHERE n.job_id = @jobId AND v.verdict IS NULL AND v.error IS NOT NULL
+                      AND NOT EXISTS (SELECT 1 FROM directory_overrides o WHERE o.directory_node_id = n.id)
                       AND NOT EXISTS (SELECT 1 FROM ai_directory_results r
                                       WHERE r.directory_node_id = n.id AND r.phase = 'pre_assessment' AND r.error IS NOT NULL)
                 )

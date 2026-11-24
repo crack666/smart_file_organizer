@@ -183,6 +183,10 @@
         {
           "const": "model",
           "description": "The model decided, or was asked and failed."
+        },
+        {
+          "const": "human",
+          "description": "A person set the verdict by hand; it wins over rule and model. Since 1.2."
         }
       ]
     },

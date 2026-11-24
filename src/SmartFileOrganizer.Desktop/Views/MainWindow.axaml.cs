@@ -32,6 +32,18 @@ public partial class MainWindow : Window
             return result.Count > 0 ? result[0].TryGetLocalPath() : null;
         };
 
+        vm.PickSaveFileDialog = async suggestedName =>
+        {
+            var file = await StorageProvider.SaveFilePickerAsync(new FilePickerSaveOptions
+            {
+                Title = "Dateiliste als CSV speichern",
+                SuggestedFileName = suggestedName,
+                DefaultExtension = "csv",
+                FileTypeChoices = [new FilePickerFileType("CSV") { Patterns = ["*.csv"] }]
+            });
+            return file?.TryGetLocalPath();
+        };
+
         vm.OpenPromptSettingsDialog = async dialogVm =>
         {
             var dialog = new AiPromptSettingsWindow { DataContext = dialogVm };

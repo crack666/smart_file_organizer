@@ -115,6 +115,44 @@ public sealed class PlanTestbed : IDisposable
         try { FileSystemLinks.DeleteTree(Root); } catch (IOException) { } catch (UnauthorizedAccessException) { }
     }
 
+    /// <summary>Scans and analyses the source with the stand-in model (<c>sfo eval --stub</c>): an analysed job, no plan.</summary>
+    public async Task<long> AnalyzeAsync()
+    {
+        JobId = (await OkAsync("eval", Corpus, "--stub", Path.Combine(Corpus, EvalTruth.FileName))).GetProperty("job_id").GetInt64();
+        return JobId;
+    }
+
+    /// <summary>
+    /// Gives the analysed job what a stand-in model never answers: a shaky result (the shopping list, 40 %), a temporary
+    /// file (the second photo) and a finance marker (the invoice).
+    /// </summary>
+    public Task MarkExamplesAsync() => SqlAsync($"""
+        UPDATE ai_results SET confidence = 0.4
+         WHERE file_node_id = (SELECT id FROM file_nodes WHERE job_id = {JobId} AND name = 'Einkaufsliste.txt');
+        UPDATE ai_results SET keep_hint = 'temporary'
+         WHERE file_node_id = (SELECT id FROM file_nodes WHERE job_id = {JobId} AND name = 'IMG_20230812_143512.jpg');
+        UPDATE ai_results SET sensitive_markers = 'finance'
+         WHERE file_node_id = (SELECT id FROM file_nodes WHERE job_id = {JobId} AND name = 'Rechnung_Strom.pdf');
+        """);
+
+    public async Task SqlAsync(string sql)
+    {
+        await using var conn = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={DatabasePath}");
+        await conn.OpenAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        await cmd.ExecuteNonQueryAsync();
+    }
+
+    public async Task<long> ScalarAsync(string sql)
+    {
+        await using var conn = new Microsoft.Data.Sqlite.SqliteConnection($"Data Source={DatabasePath}");
+        await conn.OpenAsync();
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        return Convert.ToInt64(await cmd.ExecuteScalarAsync());
+    }
+
     /// <summary>Scans, compares, decides and accepts every finding, then lets an agent create and confirm the plan.</summary>
     public async Task<long> CreatePlanAsync(bool agentApproves = true)
     {

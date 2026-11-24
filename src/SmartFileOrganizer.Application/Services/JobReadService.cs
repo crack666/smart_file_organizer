@@ -115,6 +115,18 @@ public class JobReadService
         return new ReadPage<DirectoryItem>(all.Count, limit, offset, page);
     }
 
+    /// <summary>
+    /// Every directory of a job by full path, for a view of the whole tree (GUI): subtree sizes and counts, verdict and
+    /// marked files, with the texts as the disclosure shows them. One pass over the files of the job.
+    /// </summary>
+    public async Task<IReadOnlyDictionary<string, DirectoryItem>> GetDirectoryItemsAsync(long jobId, SensitiveOutputOptions? output = null,
+        CancellationToken ct = default)
+    {
+        var job = await RequireJobAsync(jobId, ct);
+        var index = await BuildIndexAsync(job.Id, visit: null, ct);
+        return index.Entries.ToDictionary(e => e.Row.FullPath, e => ToItem(e, index, protect: true, output ?? _output), StringComparer.Ordinal);
+    }
+
     public async Task<ReadPage<FileItem>> ListFilesAsync(FileListQuery query, CancellationToken ct = default)
     {
         var job = await RequireJobAsync(query.JobId, ct);

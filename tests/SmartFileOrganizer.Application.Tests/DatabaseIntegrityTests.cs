@@ -242,6 +242,7 @@ public class DatabaseIntegrityTests : IDisposable
             INSERT INTO ai_directory_results (directory_node_id, phase, analyzed_at) VALUES (@dir, 'summary', @T);
             INSERT INTO directory_verdicts (directory_node_id, verdict, source, unit_directory_node_id, profile_json, judged_at)
                 VALUES (@dir, 'unit', 'rule', @dir, '{}', @T);
+            INSERT INTO directory_overrides (directory_node_id, verdict, overridden_at) VALUES (@dir, 'mixed', @T);
             INSERT INTO directory_samples (directory_node_id, seed, state, eligible_count, members_json, max_deviation_share, drawn_at)
                 VALUES (@dir, 's', 'open', 1, '[]', 0.5, @T);
             INSERT INTO comparison_files (comparison_id, file_node_id, state, match_file_node_id) VALUES (@comparison, @file, NULL, @file);

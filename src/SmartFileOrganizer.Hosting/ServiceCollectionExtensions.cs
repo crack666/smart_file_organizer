@@ -79,6 +79,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IDirectoryClassificationRepository, DirectoryClassificationRepository>();
         services.AddSingleton<IJobStatisticsRepository, JobStatisticsRepository>();
         services.AddSingleton<IDirectoryVerdictRepository, DirectoryVerdictRepository>();
+        services.AddSingleton<IDirectoryOverrideRepository, DirectoryOverrideRepository>();
         services.AddSingleton<IJobReadRepository, JobReadRepository>();
         services.AddSingleton<IContentComparisonRepository, ContentComparisonRepository>();
         services.AddSingleton<IDirectorySampleRepository, DirectorySampleRepository>();
@@ -214,6 +215,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<BackedUpSkipService>();
         services.AddSingleton<AiClassificationCoordinator>();
         services.AddSingleton<ReviewService>();
+        services.AddSingleton<DirectoryReviewService>();
         services.AddSingleton<EvalCaseService>();
         services.AddSingleton<EvalRunService>();
         services.AddSingleton<CorpusEvaluator>();

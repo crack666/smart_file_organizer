@@ -9,7 +9,8 @@ namespace SmartFileOrganizer.Infrastructure.Persistence;
 
 /// <summary>
 /// Stores directory verdicts in <c>directory_verdicts</c>. Enum values are written as their fixed
-/// codes (<see cref="VerdictCodes"/>), the profile as snake_case JSON.
+/// codes (<see cref="VerdictCodes"/>), the profile as snake_case JSON. Reading puts the correction of a person
+/// (<c>directory_overrides</c>) over the stored verdict; writing never touches the correction.
 /// </summary>
 public class DirectoryVerdictRepository : IDirectoryVerdictRepository
 {
@@ -25,9 +26,13 @@ public class DirectoryVerdictRepository : IDirectoryVerdictRepository
         SELECT dv.id, dv.directory_node_id, dv.verdict, dv.source, dv.rule, dv.purpose, dv.retention,
                dv.reason, dv.unit_directory_node_id, dv.profile_json, dv.model_used, dv.raw_response,
                dv.judged_at, dv.error, dv.escalated_from, dv.escalation_reason,
-               dn.full_path AS directory_full_path, dn.relative_path AS directory_relative_path
-        FROM directory_verdicts dv
-        JOIN directory_nodes dn ON dn.id = dv.directory_node_id
+               dn.id AS node_id, dn.full_path AS directory_full_path, dn.relative_path AS directory_relative_path,
+               dov.verdict AS override_verdict, dov.retention AS override_retention, dov.note AS override_note,
+               dov.overridden_at AS override_at
+        FROM directory_nodes dn
+        LEFT JOIN directory_verdicts dv ON dv.directory_node_id = dn.id
+        LEFT JOIN directory_overrides dov ON dov.directory_node_id = dn.id
+        WHERE (dv.id IS NOT NULL OR dov.id IS NOT NULL)
         """;
 
     private readonly DatabaseContext _db;
@@ -76,7 +81,7 @@ public class DirectoryVerdictRepository : IDirectoryVerdictRepository
         await using var conn = _db.CreateConnection();
         await conn.OpenAsync(ct);
         var row = await conn.QuerySingleOrDefaultAsync<Row>(
-            SelectColumns + " WHERE dv.directory_node_id = @directoryNodeId", new { directoryNodeId });
+            SelectColumns + " AND dn.id = @directoryNodeId", new { directoryNodeId });
         return row is null ? null : FromRow(row);
     }
 
@@ -85,7 +90,7 @@ public class DirectoryVerdictRepository : IDirectoryVerdictRepository
         await using var conn = _db.CreateConnection();
         await conn.OpenAsync(ct);
         var row = await conn.QuerySingleOrDefaultAsync<Row>(
-            SelectColumns + " WHERE dn.job_id = @jobId AND dn.full_path = @fullPath", new { jobId, fullPath });
+            SelectColumns + " AND dn.job_id = @jobId AND dn.full_path = @fullPath", new { jobId, fullPath });
         return row is null ? null : FromRow(row);
     }
 
@@ -94,7 +99,7 @@ public class DirectoryVerdictRepository : IDirectoryVerdictRepository
         await using var conn = _db.CreateConnection();
         await conn.OpenAsync(ct);
         var rows = await conn.QueryAsync<Row>(
-            SelectColumns + " WHERE dn.job_id = @jobId ORDER BY dn.full_path", new { jobId });
+            SelectColumns + " AND dn.job_id = @jobId ORDER BY dn.full_path", new { jobId });
         return rows.Select(FromRow).ToList();
     }
 
@@ -117,9 +122,44 @@ public class DirectoryVerdictRepository : IDirectoryVerdictRepository
         EscalationReason = v.EscalationReason
     };
 
-    private static DirectoryVerdict FromRow(Row r) => new()
+    /// <summary>The verdict that counts: the stored one, or the correction of a person over it.</summary>
+    private static DirectoryVerdict FromRow(Row r)
     {
-        Id = r.Id,
+        var stored = r.Id is null ? null : Stored(r);
+        if (VerdictCodes.ParseNullable<DirectoryVerdictKind>(r.OverrideVerdict) is not { } verdict)
+            return stored!;
+
+        var correction = new DirectoryOverride
+        {
+            DirectoryNodeId = r.NodeId,
+            Verdict = verdict,
+            Retention = VerdictCodes.ParseNullable<RetentionValue>(r.OverrideRetention),
+            Note = r.OverrideNote,
+            OverriddenAt = r.OverrideAt ?? default
+        };
+        return new DirectoryVerdict
+        {
+            Id = stored?.Id ?? 0,
+            DirectoryNodeId = r.NodeId,
+            Verdict = verdict,
+            Source = VerdictSource.Human,
+            Purpose = stored?.Purpose,
+            Retention = correction.Retention ?? stored?.Retention,
+            // The stored reason argues for the verdict that no longer counts; see Replaced.
+            Reason = correction.Note,
+            UnitDirectoryNodeId = verdict == DirectoryVerdictKind.Unit ? r.NodeId : null,
+            Profile = stored?.Profile ?? new DirectoryProfile(),
+            JudgedAt = correction.OverriddenAt,
+            DirectoryFullPath = r.DirectoryFullPath,
+            DirectoryRelativePath = r.DirectoryRelativePath,
+            Override = correction,
+            Replaced = stored
+        };
+    }
+
+    private static DirectoryVerdict Stored(Row r) => new()
+    {
+        Id = r.Id ?? 0,
         DirectoryNodeId = r.DirectoryNodeId,
         Verdict = VerdictCodes.ParseNullable<DirectoryVerdictKind>(r.Verdict),
         Source = VerdictCodes.ParseNullable<VerdictSource>(r.Source) ?? VerdictSource.Model,
@@ -144,7 +184,8 @@ public class DirectoryVerdictRepository : IDirectoryVerdictRepository
     /// <summary>Database shape: codes as strings, profile as JSON.</summary>
     private sealed class Row
     {
-        public long Id { get; set; }
+        public long? Id { get; set; }
+        public long NodeId { get; set; }
         public long DirectoryNodeId { get; set; }
         public string? Verdict { get; set; }
         public string Source { get; set; } = string.Empty;
@@ -162,5 +203,9 @@ public class DirectoryVerdictRepository : IDirectoryVerdictRepository
         public string? EscalationReason { get; set; }
         public string? DirectoryFullPath { get; set; }
         public string? DirectoryRelativePath { get; set; }
+        public string? OverrideVerdict { get; set; }
+        public string? OverrideRetention { get; set; }
+        public string? OverrideNote { get; set; }
+        public DateTime? OverrideAt { get; set; }
     }
 }

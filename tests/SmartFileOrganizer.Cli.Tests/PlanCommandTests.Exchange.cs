@@ -21,7 +21,7 @@ public partial class PlanCommandTests
 
         var result = await OkAsync("export", job, "--format", "jsonl", "--out", folder);
 
-        Assert.Equal("1.1", result.GetProperty("format_version").GetString());
+        Assert.Equal("1.2", result.GetProperty("format_version").GetString());
         Assert.Equal(["job.json", "directories.jsonl", "files.jsonl", "findings.jsonl", "plan.jsonl"],
             result.GetProperty("files").EnumerateArray().Select(f => f.GetString()));
 
