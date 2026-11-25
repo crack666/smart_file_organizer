@@ -466,6 +466,14 @@ public sealed class FindingService
                 .Concat(bundles.Where(FindingRules.IsProgramFolder).Select(x => x.RootPath).OfType<string>().Select(p => Path.GetDirectoryName(p) ?? p)),
             StringComparer.Ordinal);
 
+        var systemPlaces = new Dictionary<long, bool>();
+        bool SystemPlaceOf(DirectoryReadRow d)
+        {
+            if (!systemPlaces.TryGetValue(d.Id, out var known))
+                systemPlaces[d.Id] = known = FilePlace.IsSystemPlace(d, patterns);
+            return known;
+        }
+
         // ---- every file: where it lies, what it is worth, whether it is marked
         var facts = new List<FileFacts>(rows.Count);
         var values = new List<FileValueRow>(rows.Count);
@@ -488,7 +496,10 @@ public sealed class FindingService
             var noiseByDir = !noiseByBundle && (!keptByBundle || besidePrograms && top?.Kind != BundleKind.Folder)
                              && FindingRules.DirectoryNoise(dir) is not null;
             captures.TryGetValue(f.Id, out var capture);
-            var place = new FilePlace(top, part, dir, capture, noiseByBundle, noiseByDir);
+            var place = new FilePlace(top, part, dir, capture, noiseByBundle, noiseByDir)
+            {
+                SystemPlace = dir is not null && SystemPlaceOf(dir)
+            };
 
             var whole = WholeOf(f.ParentPath);
             var fileFacts = factsByFile.TryGetValue(f.Id, out var stored) ? stored : [];

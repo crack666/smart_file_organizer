@@ -30,11 +30,16 @@ public readonly record struct FileValue(FileWorth Worth, ResultCertainty Certain
 public sealed record FilePlace(Bundle? Bundle, Bundle? Part, DirectoryReadRow? Directory, CaptureInfo? Capture, bool NoiseByBundle, bool NoiseByDirectory)
 {
     /// <summary>
-    /// Whether the folder is a place where programs or the operating system put their own content (verdict rule
-    /// <c>system-place</c>: account pictures, samples of applications, packages)
-    /// (https://github.com/crack666/smart_file_organizer/issues/124).
+    /// Whether the folder is a place where only programs or the operating system put content (verdict rule
+    /// <c>system-place</c>: account pictures, samples of applications, packages; not the public desktop, which people
+    /// use too) (https://github.com/crack666/smart_file_organizer/issues/124).
     /// </summary>
-    public bool SystemPlace => Directory?.VerdictRule == Services.DirectoryVerdictRules.SystemPlace;
+    public bool SystemPlace { get; init; }
+
+    /// <summary>The value of <see cref="SystemPlace"/> for a folder, from its verdict and the patterns.</summary>
+    public static bool IsSystemPlace(DirectoryReadRow? dir, BundlePatterns patterns) =>
+        dir?.VerdictRule == Services.DirectoryVerdictRules.SystemPlace
+        && patterns.SystemPlaceOf(BundlePatterns.SplitPath(dir.FullPath)) is { SharedWithPeople: false };
 
     /// <summary>Noise or a system place: where a file lies or what type it has is no reason to keep it there.</summary>
     public bool WithoutOwnContent => NoiseByBundle || NoiseByDirectory || SystemPlace;
