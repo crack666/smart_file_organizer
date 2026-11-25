@@ -1,3 +1,4 @@
+using System.Text;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace SmartFileOrganizer.Cli;
@@ -17,5 +18,18 @@ public sealed class CliHost
     /// <summary>Directory with the shipped <c>appsettings.json</c>; null means the application base directory.</summary>
     public string? AppSettingsDirectory { get; init; }
 
-    public static CliHost FromConsole() => new() { Out = Console.Out, Error = Console.Error };
+    /// <summary>
+    /// The streams of the process. A redirected stream is UTF-8 without BOM: the console encoding is the OEM code page
+    /// on Windows and would replace every character outside it, paths of the JSON contract included
+    /// (https://github.com/crack666/smart_file_organizer/issues/127). An interactive console keeps its own encoding.
+    /// </summary>
+    public static CliHost FromConsole() => new()
+    {
+        Out = Console.IsOutputRedirected ? Utf8(Console.OpenStandardOutput()) : Console.Out,
+        Error = Console.IsErrorRedirected ? Utf8(Console.OpenStandardError()) : Console.Error
+    };
+
+    /// <summary>Like the console's own writers: flushed on every write and safe for the Ctrl+C thread.</summary>
+    private static TextWriter Utf8(Stream stream) =>
+        TextWriter.Synchronized(new StreamWriter(stream, new UTF8Encoding(encoderShouldEmitUTF8Identifier: false)) { AutoFlush = true });
 }
