@@ -176,8 +176,10 @@ public static partial class LibraryMatcher
     /// is the content (https://github.com/crack666/smart_file_organizer/issues/56): a candidate whose content
     /// contradicts the unit is dropped, even when the period fits; without fitting content (or the same files already
     /// at the target) a proposal is at most <c>uncertain</c>. <paramref name="content"/> null means not checked.
+    /// With <paramref name="margin"/> false the caller applies the margin itself, over several libraries (<see cref="Rank"/>).
     /// </summary>
-    public static MatchResult Match(LibraryMap map, MatchUnit unit, LibraryMatchOptions o, int limit, LibraryWords words, ContentCheck? content = null)
+    public static MatchResult Match(
+        LibraryMap map, MatchUnit unit, LibraryMatchOptions o, int limit, LibraryWords words, ContentCheck? content = null, bool margin = true)
     {
         content ??= ContentCheck.NoModel;
         var (scored, considered) = Scored(map, unit, o, words);
@@ -199,15 +201,8 @@ public static partial class LibraryMatcher
             .ThenBy(c => c.Target.RelativePath, StringComparer.Ordinal)
             .ToList();
 
-        if (fitting.Count >= 2 && fitting[0].Score - fitting[1].Score < o.Margin)
-        {
-            var best = fitting[0];
-            fitting[0] = best with
-            {
-                Certainty = Lower(best.Certainty),
-                Reason = best.Reason.TrimEnd('.') + $"; {fitting[1].Target.RelativePath} fits almost as well."
-            };
-        }
+        if (margin && fitting.Count >= 2)
+            fitting[0] = Margin(fitting[0], fitting[1], o);
 
         var top = fitting.Take(limit).ToList();
         NewFolderProposal? newFolder = null;
@@ -224,6 +219,55 @@ public static partial class LibraryMatcher
         }
         return new MatchResult(top, considered, newFolder, rejected, content, unconfirmed, noTarget);
     }
+
+    /// <summary>
+    /// The best place, one level less certain when the runner-up scores within <c>Margin</c> of it: two places fit about
+    /// equally well, and a person decides. <paramref name="runnerUpLibrary"/> names the library of a runner-up that lies in
+    /// another one than the best (https://github.com/crack666/smart_file_organizer/issues/71).
+    /// </summary>
+    private static MatchCandidate Margin(MatchCandidate best, MatchCandidate runnerUp, LibraryMatchOptions o, long? runnerUpLibrary = null)
+    {
+        if (best.Score - runnerUp.Score >= o.Margin) return best;
+        var place = runnerUpLibrary is not { } id ? runnerUp.Target.RelativePath
+            : runnerUp.Target.Depth == 0 ? $"the top of library job {id}"
+            : $"{runnerUp.Target.RelativePath} in library job {id}";
+        return best with
+        {
+            Certainty = Lower(best.Certainty),
+            Reason = best.Reason.TrimEnd('.') + $"; {place} fits almost as well."
+        };
+    }
+
+    /// <summary>
+    /// The places of several libraries as one ranking: by score, on a tie the library named first, and the margin between
+    /// the best and the next place whichever library that lies in. The same folder seen by two libraries (one root inside
+    /// the other) is no second place. The candidates of each library come ranked, from <see cref="Match"/> without its own
+    /// margin.
+    /// </summary>
+    public static IReadOnlyList<(MatchCandidate Candidate, T Library)> Rank<T>(
+        IEnumerable<(T Library, long LibraryJobId, IReadOnlyList<MatchCandidate> Candidates)> libraries, LibraryMatchOptions o)
+    {
+        var ranked = libraries
+            .SelectMany((l, order) => l.Candidates.Select(c => (Candidate: c, l.Library, l.LibraryJobId, Order: order)))
+            .OrderByDescending(x => x.Candidate.Score).ThenBy(x => x.Order)
+            .ToList();
+        if (ranked.Count >= 2)
+        {
+            var best = ranked[0];
+            var next = ranked.Skip(1).FirstOrDefault(x => !SamePlace(x.Candidate, best.Candidate));
+            if (next.Candidate is not null)
+                ranked[0] = best with
+                {
+                    Candidate = Margin(best.Candidate, next.Candidate, o, next.LibraryJobId == best.LibraryJobId ? null : next.LibraryJobId)
+                };
+        }
+        return ranked.Select(x => (x.Candidate, x.Library)).ToList();
+    }
+
+    private static bool SamePlace(MatchCandidate a, MatchCandidate b) =>
+        a.Placement == b.Placement
+        && string.Equals(Path.TrimEndingDirectorySeparator(a.Target.FullPath), Path.TrimEndingDirectorySeparator(b.Target.FullPath),
+            StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Content confirms an existing folder: the same files already lie there, or the content check says it fits. A named
