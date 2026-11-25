@@ -949,9 +949,22 @@ Targets only ever lie in a root scanned with the role `library`
 | `known` | At least one library is known; every target lies inside one of its roots. |
 | `no_library` | No library is known: no target path is proposed, never a folder of the user profile or the system drive instead. |
 
+### Library root of a target structure (`TargetBinding`)
+
+Which library root the targets of `sfo decide --targets` lie in (`targets.storage.status`;
+https://github.com/crack666/smart_file_organizer/issues/71).
+
+| Code | Meaning |
+|---|---|
+| `bound` | The targets lie in the root of one library: that of the structure's `root`, the named one, or the only one known. |
+| `no_library` | The structure names no root and no library is known: targets are relative, no full path. |
+| `several_libraries` | The structure names no root and several libraries are known: targets are relative until one is named. |
+| `outside_library` | The `root` of the structure lies in no library: no target is proposed. |
+
 ### Room at a target root (`TargetSpace`)
 
-`space` per library root in `sfo findings --summary` (`storage.roots`) and `sfo library match` (`space`).
+`space` per library root in `sfo findings --summary` (`storage.roots`), `sfo library match` (`space`) and
+`sfo decide --targets` (`targets.storage.space`).
 
 | Code | Meaning |
 |---|---|

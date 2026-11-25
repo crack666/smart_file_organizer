@@ -198,6 +198,72 @@ public class LibraryMatchCommandTests : IDisposable
         Assert.Equal(JsonValueKind.Null, root1.GetProperty("free_bytes").ValueKind);
     }
 
+    /// <summary>
+    /// The margin counts over all libraries (https://github.com/crack666/smart_file_organizer/issues/71): a camping trip that
+    /// both libraries hold a part of fits either library alone for certain, and neither clearly once both are asked. Until
+    /// then each library was judged on its own, and the first one named won as certain without a word.
+    /// </summary>
+    [Fact]
+    public async Task Match_OverTwoLibraries_AFolderAlmostAsGoodInTheOther_LowersTheCertainty()
+    {
+        const string trip = "Zelten am See 2019";
+        var firstRoot = Path.Combine(_dir, "ablage-eins");
+        Photos(firstRoot, $"Fotos/{trip}", new DateTime(2019, 8, 10, 18, 0, 0), 3, "first");
+        Photos(firstRoot, "Fotos/Grillen 2016", new DateTime(2016, 7, 16, 18, 0, 0), 3, "first");
+        var secondRoot = Path.Combine(_dir, "ablage-zwei");
+        Photos(secondRoot, $"Bilder/{trip}", new DateTime(2019, 8, 10, 20, 0, 0), 3, "second");
+        Photos(secondRoot, "Bilder/Ostern 2018", new DateTime(2018, 4, 1, 10, 0, 0), 3, "second");
+        // Of the five photos of the source, two lie in each of them already.
+        var photos = Directory.GetFiles(Path.Combine(_source, trip)).Order(StringComparer.Ordinal).ToList();
+        foreach (var file in photos.Take(2))
+            File.Copy(file, Path.Combine(firstRoot, "Fotos", trip, Path.GetFileName(file)));
+        foreach (var file in photos.Skip(3))
+            File.Copy(file, Path.Combine(secondRoot, "Bilder", trip, Path.GetFileName(file)));
+        var source = await ScanAsync(_source, "source");
+        var first = await ScanAsync(firstRoot, "library");
+        var secondId = await ScanAsync(secondRoot, "library");
+        await OkAsync("compare", source.ToString(), "--against", first.ToString(), "--against", secondId.ToString());
+
+        foreach (var (library, path) in new[] { (first, $"Fotos/{trip}"), (secondId, $"Bilder/{trip}") })
+        {
+            var alone = Candidates(await OkAsync("library", "match", source.ToString(), trip, "--no-model", "--against", library.ToString()))[0];
+            Assert.Equal(path, Str(alone, "target_relative"));
+            Assert.Equal("certain", Str(alone, "certainty"));
+            Assert.DoesNotContain("almost as well", Str(alone, "reason"));
+        }
+
+        foreach (var limit in new[] { "3", "1" })
+        {
+            var both = Candidates(await OkAsync("library", "match", source.ToString(), trip, "--no-model", "--limit", limit))[0];
+            Assert.Equal(first, both.GetProperty("library_job_id").GetInt64());
+            Assert.Equal("likely", Str(both, "certainty"));
+            Assert.Contains($"Bilder/{trip} in library job {secondId} fits almost as well", Str(both, "reason"));
+        }
+    }
+
+    /// <summary>One library root inside another: the same folder, seen twice, is no second place.</summary>
+    [Fact]
+    public async Task Match_OverNestedLibraries_TheSameFolderTwice_IsNoRunnerUp()
+    {
+        const string trip = "Zelten am See 2019";
+        var root = Path.Combine(_dir, "ablage-eins");
+        Photos(root, $"Fotos/{trip}", new DateTime(2019, 8, 10, 18, 0, 0), 3, "first");
+        Photos(root, "Fotos/Grillen 2016", new DateTime(2016, 7, 16, 18, 0, 0), 3, "first");
+        foreach (var file in Directory.GetFiles(Path.Combine(_source, trip)).Take(2))
+            File.Copy(file, Path.Combine(root, "Fotos", trip, Path.GetFileName(file)));
+        var source = await ScanAsync(_source, "source");
+        var outer = await ScanAsync(root, "library");
+        var inner = await ScanAsync(Path.Combine(root, "Fotos"), "library");
+        await OkAsync("compare", source.ToString(), "--against", outer.ToString(), "--against", inner.ToString());
+
+        var candidates = Candidates(await OkAsync("library", "match", source.ToString(), trip, "--no-model"));
+        var best = candidates[0];
+        Assert.Equal([outer, inner], candidates.Where(c => Str(c, "destination") == Str(best, "destination"))
+            .Select(c => c.GetProperty("library_job_id").GetInt64()).Order());
+        Assert.Equal("certain", Str(best, "certainty"));
+        Assert.DoesNotContain("almost as well", Str(best, "reason"));
+    }
+
     private static List<JsonElement> Candidates(JsonElement result) => result.GetProperty("candidates").EnumerateArray().ToList();
 
     private static string Str(JsonElement e, string name) => e.GetProperty(name).GetString()!;

@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using SmartFileOrganizer.Application.Decisions;
 using SmartFileOrganizer.Application.Findings;
 using SmartFileOrganizer.Application.Library;
+using SmartFileOrganizer.Application.Plans;
 using SmartFileOrganizer.Application.Services;
 using SmartFileOrganizer.Cli.Contract;
 using SmartFileOrganizer.Domain.Enums;
@@ -23,10 +24,23 @@ public static class DecideCommand
         public static InputView From(DecisionInput i) => new(i.Key, i.Value, i.Source);
     }
 
-    public sealed record TargetView(string Id, string Path, string Rule, IReadOnlyList<InputView> Basis, IReadOnlyList<string> Unresolved)
+    public sealed record TargetView(
+        string Id, string Path, string Rule, IReadOnlyList<InputView> Basis, IReadOnlyList<string> Unresolved, long? LibraryJobId, string? FullPath)
     {
-        public static TargetView? From(TargetProposal? t) =>
-            t is null ? null : new TargetView(t.TargetId, t.Path, t.Rule, t.Basis.Select(InputView.From).ToList(), t.Unresolved);
+        public static TargetView? From(TargetProposal? t, TargetRoot? root) =>
+            t is null ? null : new TargetView(t.TargetId, t.Path, t.Rule, t.Basis.Select(InputView.From).ToList(), t.Unresolved,
+                root?.Library?.Id, root?.Library is { } library ? PlanChecks.Join(library.RootPath, t.Path) : null);
+    }
+
+    /// <summary>The library root the targets lie in, and the room there (https://github.com/crack666/smart_file_organizer/issues/71).</summary>
+    public sealed record TargetStorageView(
+        string Status, string? Message, long? LibraryJobId, string? RootPath, string? Under,
+        long? FreeBytes, long NeededFiles, long NeededBytes, string? Space, string? Warning)
+    {
+        public static TargetStorageView? From(TargetRoot? root, TargetRoom? room) => root is null || room is null
+            ? null
+            : new TargetStorageView(root.Status.ToCode(), root.Message, root.Library?.Id, root.Library?.RootPath,
+                root.Library is null ? null : root.Under, room.FreeBytes, room.Files, room.NeededBytes, room.Space?.ToCode(), room.Warning(root));
     }
 
     public sealed record DecisionView(
@@ -40,7 +54,7 @@ public static class DecideCommand
         string? PreviousTarget,
         bool Changed);
 
-    public sealed record TargetTotals(string? Structure, long Proposed, long Unresolved, long KeptWithoutTarget);
+    public sealed record TargetTotals(string? Structure, long Proposed, long Unresolved, long KeptWithoutTarget, TargetStorageView? Storage);
 
     public sealed record Result(
         long JobId,
@@ -66,6 +80,11 @@ public static class DecideCommand
             Description = "Target structure file (sfo library propose --out, edited by hand): kept files get a target from it. Without it, worth only.",
             HelpName = "file"
         };
+        var library = new Option<long?>("--library")
+        {
+            Description = "Library job whose root the targets lie in. Default: the library the root of the structure lies in, else the only library of the newest compare.",
+            HelpName = "job"
+        };
         var changed = new Option<bool>("--changed")
         {
             Description = "List only the files whose worth or target changed against the decisions stored before."
@@ -74,7 +93,7 @@ public static class DecideCommand
         var command = new Command("decide",
             "Decide worth and target of every file anew from the stored facts and results, by rule. No model call; run it again after changing the target structure.")
         {
-            job, targets, changed
+            job, targets, library, changed
         };
         foreach (var option in read.Paging)
             command.Options.Add(option);
@@ -100,12 +119,19 @@ public static class DecideCommand
                 }
             }
 
+            if (p.GetValue(library) is not null && structure is null)
+                throw new CliFailureException(ExitCodes.Usage, ErrorCodes.Usage, "--library needs --targets: it names the library the target structure lies in.");
+
             var services = await ctx.GetServicesAsync(ct);
             var service = services.GetRequiredService<DecisionService>();
             DecisionRun run;
             try
             {
-                run = await service.DecideAsync(jobId, new DecideOptions { Targets = structure }, ct);
+                run = await service.DecideAsync(jobId, new DecideOptions { Targets = structure, Library = p.GetValue(library) }, ct);
+            }
+            catch (TargetRootException ex)
+            {
+                throw new CliFailureException(ExitCodes.Failure, ErrorCodes.LibraryInvalid, ex.Message);
             }
             catch (JobReadException ex)
             {
@@ -135,7 +161,7 @@ public static class DecideCommand
                 var file = run.Files[d.FileNodeId];
                 run.Previous.TryGetValue(d.FileNodeId, out var before);
                 return new DecisionView(d.FileNodeId, FindingRules.Rel(file.RelativePath), d.Worth?.ToCode(), d.Certainty.ToCode(), d.Rule,
-                    d.Basis.Select(InputView.From).ToList(), TargetView.From(d.Target), before?.Target?.Path, changedIds.Contains(d.FileNodeId));
+                    d.Basis.Select(InputView.From).ToList(), TargetView.From(d.Target, run.TargetRoot), before?.Target?.Path, changedIds.Contains(d.FileNodeId));
             })
             .Where(v => !onlyChanged || v.Changed)
             .OrderBy(v => v.RelativePath, StringComparer.Ordinal)
@@ -154,7 +180,8 @@ public static class DecideCommand
         var totals = new TargetTotals(structurePath,
             kept.Count(d => d.Target is not null),
             kept.Count(d => d.Target is { Unresolved.Count: > 0 }),
-            kept.Count(d => d.Target is null));
+            kept.Count(d => d.Target is null),
+            TargetStorageView.From(run.TargetRoot, run.Room));
         var listed = run.Findings.Findings.Where(f => f.State is FindingState.Open or FindingState.Accepted).ToList();
         var findings = FindingRules.KindOrder.ToDictionary(k => k.ToCode(), k => (long)listed.Count(f => f.Kind == k));
         var previousAt = run.Previous.Count > 0 ? run.Previous.Values.Max(d => d.DecidedAt) : (DateTime?)null;
@@ -170,6 +197,14 @@ public static class DecideCommand
         sb.AppendLine(r.Targets.Structure is null
             ? "  no target structure (--targets): worth only"
             : $"  targets from {r.Targets.Structure}: {r.Targets.Proposed} proposed ({r.Targets.Unresolved} with an open placeholder), {r.Targets.KeptWithoutTarget} kept without target");
+        if (r.Targets.Storage is { } s)
+        {
+            sb.AppendLine(s.LibraryJobId is { } id
+                ? $"  in library job {id} ({s.RootPath}{(s.Under is { Length: > 0 } u ? $", below {u}" : string.Empty)}): "
+                  + $"{s.NeededFiles} files, {FindingRules.Size(s.NeededBytes)} needed, {(s.FreeBytes is { } free ? FindingRules.Size(free) + " free" : "free space unknown")}"
+                : $"  {s.Message}");
+            if (s.Warning is { } warning) sb.AppendLine("  " + warning);
+        }
         sb.AppendLine("  findings: " + string.Join(", ", r.Findings.Select(f => $"{f.Key} {f.Value}")));
         foreach (var d in r.Items)
         {

@@ -1945,6 +1945,7 @@ or changed rules this is all that has to run; the description of stage 1 stays a
 | Option | Meaning |
 |---|---|
 | `--targets <file>` | Target structure (`sfo library propose --out`, edited by hand; format in [library-review.md](library-review.md#target-structure-file-library-propose---out-file)): kept files get a target from it. Without it, worth only. |
+| `--library <job>` | Library job whose root the targets lie in (needs `--targets`). Default: the library the `root` of the structure lies in; without a `root`, the only library of the newest `sfo compare`, else the only library there is. |
 | `--changed` | List only files whose worth, certainty or target changed against the decisions stored before. |
 | `--limit`, `--offset` | Paging of `items`, as in every list. |
 
@@ -1953,7 +1954,9 @@ or changed rules this is all that has to run; the description of stage 1 stays a
   "job_id": 1, "decided_at": "2026-11-13T10:00:00Z", "previous_decided_at": "2026-11-13T09:00:00Z",
   "files": 5, "by_worth": { "keep": 5, "disposable": 0, "none": 0 },
   "by_certainty": { "certain": 0, "likely": 5, "uncertain": 0, "review": 0 },
-  "targets": { "structure": "/path/targets.json", "proposed": 4, "unresolved": 1, "kept_without_target": 1 },
+  "targets": { "structure": "/path/targets.json", "proposed": 4, "unresolved": 1, "kept_without_target": 1,
+               "storage": { "status": "bound", "message": null, "library_job_id": 2, "root_path": "/nas/ablage", "under": "",
+                            "free_bytes": 812000000000, "needed_files": 3, "needed_bytes": 182034, "space": "enough", "warning": null } },
   "changed": 4, "findings": { "not_backed_up": 0, "in_noise": 0, "sensitive": 1, "misplaced": 0, "duplicate": 0 },
   "total": 5, "limit": 200, "offset": 0, "next_offset": null,
   "items": [
@@ -1964,7 +1967,7 @@ or changed rules this is all that has to run; the description of stage 1 stays a
                   "basis": [ { "key": "file_type", "value": "document", "source": "scan" },
                              { "key": "issuer", "value": "Stadtwerke", "source": "model" },
                              { "key": "year", "value": "2019", "source": "model" } ],
-                  "unresolved": [] },
+                  "unresolved": [], "library_job_id": 2, "full_path": "/nas/ablage/Archiv/Papiere/Stadtwerke/2019" },
       "previous_target": "Documents/invoice/2019", "changed": true }
   ]
 }
@@ -1975,12 +1978,25 @@ or changed rules this is all that has to run; the description of stage 1 stays a
 - A target is proposed for kept files only: the first target whose `holds` names the file type, its `pattern` filled
   from the facts. A placeholder no fact fills (`unresolved`) leaves the folder level of the pattern out. `basis` names
   the file type and one input per filled placeholder.
+- `targets.storage` (since 25.11.2026, [#71](https://github.com/crack666/smart_file_organizer/issues/71); until then the
+  targets were relative only and no room was checked; `null` without `--targets`) says which library root the targets
+  lie in and what they need there. `status` is a [target binding](glossary.md#library-root-of-a-target-structure-targetbinding).
+  `bound`: `library_job_id`, `root_path` and `under` (the folder of the structure's `root` below the library root, empty
+  for the root itself) are set, `target.path` is relative to the library root and `target.full_path` names the place.
+  `no_library`, `several_libraries`: the targets stay relative (`full_path` `null`), `message` says what to do.
+  `outside_library`: the `root` of the structure lies in no library, so no target is proposed: targets lie only in the
+  permanent storage. A library chosen by `root` or `--library` is stored with the decision, and `sfo plan create` uses it;
+  the only library there is is not, since a second one makes the choice open again.
+- `needed_files`, `needed_bytes`: the files with a target that no library of the newest compare holds yet. `space` is
+  `enough`, `not_enough` (then `warning` says so) or `unknown` ([glossary](glossary.md#room-at-a-target-root-targetspace)).
 - A marked file rests on its marker alone (`rule` `sensitive`, `basis` key `sensitive` with the marker and the rule
   ids), is kept and gets no target; its description is never stored.
 - `previous_target` and `changed` compare with the decisions stored before this run.
 
 Errors: `job_not_found` (1), `wrong_role` (1, a library), `path_not_found` (1, the target file), `targets_invalid` (1,
-the target file is not a valid target structure), `settings_invalid` (1, a `Findings` value), `usage` (2).
+the target file is not a valid target structure), `library_invalid` (1, `--library` is no completed library job, or the
+`root` of the structure does not lie in it), `settings_invalid` (1, a `Findings` value), `usage` (2, also `--library`
+without `--targets`).
 
 ### `sfo facts refresh <job>`
 
@@ -2133,7 +2149,7 @@ Settings, section `Plan` of the settings file:
 | Option | Meaning |
 |---|---|
 | `--against <job>` | Library job whose stored comparison counts, as in `sfo findings`; repeatable. Default: the libraries of the newest `sfo compare`. They are the libraries of the plan. |
-| `--library <job>` | Library whose root the targets of `sfo decide --targets` (relative paths) go under. Default: the only library, when there is exactly one; with several and none named, such targets are not used and the action is `leave` with a note. |
+| `--library <job>` | Library whose root the targets of `sfo decide --targets` (relative paths) go under. Default: the library chosen at `sfo decide` (by the `root` of the structure or `--library`; its later scan with the same root counts), else the only library, when there is exactly one; with several and none named, such targets are not used and the action is `leave` with a note. |
 
 How actions arise from accepted findings:
 
@@ -2142,7 +2158,7 @@ How actions arise from accepted findings:
   already carries that name, from `sfo findings targets`, is taken as it is). The topmost such folder wins.
 - Everything else of a finding to move is one action per worth-keeping file; the rest of a `mixed` folder stays.
 - The target is the place the finding proposes in a library (from [`sfo findings targets`](#sfo-findings-targets-job),
-  or for `misplaced` from the rules), else the target of `sfo decide` below the root of the `--library`. Without one:
+  or for `misplaced` from the rules), else the target of `sfo decide` below the root of its library (`--library`). Without one:
   `leave`. The checks below apply to every target alike.
 - `sensitive`: one `leave` per file (`sensitive`, `single_decision` true). `duplicate`: `delete_source` for each copy
   outside the kept folder whose content a library holds (the target is the place in the library); else one `leave`.

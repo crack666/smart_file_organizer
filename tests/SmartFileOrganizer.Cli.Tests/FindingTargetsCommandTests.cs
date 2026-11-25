@@ -282,6 +282,36 @@ public partial class FindingTargetsCommandTests : IDisposable
         });
     }
 
+    /// <summary>
+    /// A misplaced finding gets its content check from the match as well (https://github.com/crack666/smart_file_organizer/issues/71,
+    /// rest of Issue 56): before it no place, after it the checked place, without the note that nothing was compared.
+    /// </summary>
+    [Fact]
+    public async Task AMisplacedFinding_CarriesTheContentCheckOfTheMatch()
+    {
+        for (var i = 1; i <= 5; i++)
+            Write(_source, $"Rechnungen 2023/2023-{i:00}_Rechnung.pdf", $"invoice {i}", new DateTime(2023, i, 3));
+        Write(_source, "Rechnungen 2023/IMG_20150208_160000.jpg", "ski among invoices", new DateTime(2015, 2, 8, 16, 0, 0));
+        var (library, source) = await PrepareAsync();
+        var job = source.ToString();
+
+        async Task<JsonElement> MisplacedAsync() =>
+            (await OkAsync("findings", job, "--kind", "misplaced")).GetProperty("items").EnumerateArray().Single();
+        var before = await MisplacedAsync();
+        Assert.Equal("uncertain", Str(before, "certainty"));
+        Assert.Equal("not_matched", Str(before, "target_status"));
+
+        var (configure, _, _) = WithModel();
+        await OkAsync(configure, "findings", "targets", job, "--local-model");
+
+        var after = await MisplacedAsync();
+        var target = after.GetProperty("target");
+        Assert.Equal("Fotos/Skifahrt 2015", Str(target, "relative_path"));
+        Assert.Equal(library, target.GetProperty("library_job_id").GetInt64());
+        Assert.Equal("fits", Str(target, "content_check"));
+        Assert.DoesNotContain(after.GetProperty("notes").EnumerateArray(), n => n.GetString()!.Contains("was not compared", StringComparison.Ordinal));
+    }
+
     /// <summary>A second run on unchanged facts asks the model nothing: every finding keeps its stored match.</summary>
     [Fact]
     public async Task ASecondRunOnUnchangedFacts_CallsNoModel()

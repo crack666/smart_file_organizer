@@ -27,9 +27,9 @@ public class FileDecisionRepository : IFileDecisionRepository
             await conn.ExecuteAsync(new CommandDefinition(
                 """
                 INSERT INTO file_decisions (file_node_id, job_id, worth, certainty, rule, basis,
-                    target_id, target_path, target_rule, target_basis, target_unresolved, decided_at)
+                    target_id, target_path, target_rule, target_basis, target_unresolved, target_library_job_id, decided_at)
                 VALUES (@FileNodeId, @JobId, @Worth, @Certainty, @Rule, @Basis,
-                    @TargetId, @TargetPath, @TargetRule, @TargetBasis, @TargetUnresolved, @DecidedAt)
+                    @TargetId, @TargetPath, @TargetRule, @TargetBasis, @TargetUnresolved, @TargetLibraryJobId, @DecidedAt)
                 """,
                 decisions.Select(d => new
                 {
@@ -44,6 +44,7 @@ public class FileDecisionRepository : IFileDecisionRepository
                     TargetRule = d.Target?.Rule,
                     TargetBasis = d.Target is { } t ? JsonSerializer.Serialize(t.Basis, Json) : null,
                     TargetUnresolved = d.Target is { Unresolved.Count: > 0 } u ? string.Join(",", u.Unresolved) : null,
+                    TargetLibraryJobId = d.Target?.LibraryJobId,
                     DecidedAt = d.DecidedAt.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture)
                 }).ToList(),
                 tx, cancellationToken: ct));
@@ -60,7 +61,7 @@ public class FileDecisionRepository : IFileDecisionRepository
             SELECT d.file_node_id AS FileNodeId, d.job_id AS JobId, d.worth AS Worth, d.certainty AS Certainty,
                    d.rule AS Rule, d.basis AS Basis, d.target_id AS TargetId, d.target_path AS TargetPath,
                    d.target_rule AS TargetRule, d.target_basis AS TargetBasis, d.target_unresolved AS TargetUnresolved,
-                   d.decided_at AS DecidedAt
+                   d.target_library_job_id AS TargetLibraryJobId, d.decided_at AS DecidedAt
             FROM file_decisions d WHERE d.job_id = @jobId
             """, new { jobId }, cancellationToken: ct));
 
@@ -76,7 +77,7 @@ public class FileDecisionRepository : IFileDecisionRepository
                 ? null
                 : new TargetProposal(r.TargetId, r.TargetPath, r.TargetRule ?? string.Empty,
                     r.TargetBasis is null ? [] : JsonSerializer.Deserialize<List<DecisionInput>>(r.TargetBasis, Json) ?? [],
-                    string.IsNullOrEmpty(r.TargetUnresolved) ? [] : r.TargetUnresolved.Split(',')),
+                    string.IsNullOrEmpty(r.TargetUnresolved) ? [] : r.TargetUnresolved.Split(','), r.TargetLibraryJobId),
             DecidedAt = DateTime.Parse(r.DecidedAt, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind)
         });
     }
@@ -94,6 +95,7 @@ public class FileDecisionRepository : IFileDecisionRepository
         public string? TargetRule { get; set; }
         public string? TargetBasis { get; set; }
         public string? TargetUnresolved { get; set; }
+        public long? TargetLibraryJobId { get; set; }
         public string DecidedAt { get; set; } = string.Empty;
     }
 }

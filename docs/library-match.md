@@ -124,7 +124,7 @@ new folder there would be a guess as well: the answer is `no_target` with that r
 at all. With several libraries the new folder goes into the one with the highest share of the kind.
 
 When the runner-up scores within `Margin` of the best, the best drops one level: two places
-fit about equally well and a person decides. Candidates below `MinScore` are dropped.
+fit about equally well and a person decides. The runner-up may lie in another library. Candidates below `MinScore` are dropped.
 
 Every proposal carries `reason`, one sentence a person can check, built from the agreeing
 signals, plus the full `signals` list. A checked candidate names both descriptions
@@ -274,8 +274,12 @@ The candidates of all libraries are listed by score; on a tie the library named 
 proposal carries `library_job_id`, and its `destination` lies inside that library's root. Only
 when no library has a fitting folder is a new folder proposed: the one of the library whose
 proposal is most certain (first named on a tie), named by the model in that library's style if
-the rules cannot complete the name. The `Margin` rule is applied within each library, not across
-them.
+the rules cannot complete the name. The `Margin` rule counts over all libraries: the best place drops
+one level when the next best lies within it, whichever library that is in, and the reason names the
+folder and its library (`... in library job 9 fits almost as well`). The same folder seen by two
+libraries, one root inside the other, is no second place. The places of `misplaced` findings follow the
+same rule. (Until 25.11.2026 the margin was applied within each library only, so two folders of two
+libraries that fit equally well were both `certain`; Issue 71.)
 
 ## For every finding: `sfo findings targets`
 

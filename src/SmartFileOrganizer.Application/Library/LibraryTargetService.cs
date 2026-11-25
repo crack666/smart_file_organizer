@@ -316,7 +316,8 @@ public sealed partial class LibraryTargetService
         var unitDescription = await DescribeUnitAsync(source, files, ct);
         var modelReady = new Lazy<Task<bool>>(() => _ollama is null ? Task.FromResult(true) : _ollama.IsAvailableAsync(ct));
 
-        // Each library on its own; the best places of all of them by score, the first library named on a tie.
+        // Each library on its own; the best places of all of them by score, the first library named on a tie. The margin
+        // counts over all of them (Issue 71), so each library gives at least its two best places and no margin of its own.
         var limit = Math.Clamp(query.Limit ?? _options.MaxCandidates, 1, 50);
         var matched = new List<(ScanJob Library, LibraryMap Map, LibraryPatternsInfo Patterns, MatchResult Result)>();
         foreach (var library in libraries)
@@ -324,7 +325,8 @@ public sealed partial class LibraryTargetService
             var (_, map) = await LoadMapAsync(library.Id, query.Words, ct);
             var patternsOf = await PatternsAsync(library, map, reset: false, ct);
             var check = await CheckContentAsync(source, library, map, unit, unitDescription, query, modelReady, ct);
-            matched.Add((library, map, patternsOf, LibraryMatcher.Match(map, unit, _options, limit, query.Words, check)));
+            matched.Add((library, map, patternsOf,
+                LibraryMatcher.Match(map, unit, _options, Math.Max(limit, 2), query.Words, check, margin: false)));
         }
         var content = matched.Select(m => m.Result.Content).FirstOrDefault(c => c?.Status == ContentCheckStatus.Checked)
                       ?? matched.Select(m => m.Result.Content).FirstOrDefault()
@@ -333,9 +335,7 @@ public sealed partial class LibraryTargetService
         if (content.Status is not (ContentCheckStatus.Checked or ContentCheckStatus.NoCandidates))
             notes.Add($"The content was not checked ({ContentNote(content)}); without the same files at the target no existing folder is proposed.");
 
-        var ranked = matched
-            .SelectMany((m, order) => m.Result.Candidates.Select(c => (Candidate: c, m.Library, Order: order)))
-            .OrderByDescending(x => x.Candidate.Score).ThenBy(x => x.Order)
+        var ranked = LibraryMatcher.Rank(matched.Select(m => (m.Library, m.Library.Id, m.Result.Candidates)), _options)
             .Take(limit)
             .ToList();
         var unconfirmed = matched
@@ -733,20 +733,22 @@ public sealed partial class LibraryTargetService
     public async Task<IReadOnlyList<(MatchCandidate Candidate, ScanJob Library)?>> BestPlacesAsync(
         long sourceJobId, IReadOnlyList<long> libraryJobIds, IReadOnlyList<IReadOnlyList<FileNode>> groups, CancellationToken ct = default)
     {
-        var best = new (MatchCandidate Candidate, ScanJob Library)?[groups.Count];
+        var perLibrary = new List<(ScanJob Library, IReadOnlyList<IReadOnlyList<MatchCandidate>> Places)>();
         foreach (var libraryJobId in libraryJobIds.Distinct())
+            perLibrary.Add(await BestPlacesInAsync(sourceJobId, libraryJobId, groups, ct));
+
+        var best = new (MatchCandidate Candidate, ScanJob Library)?[groups.Count];
+        for (var i = 0; i < groups.Count; i++)
         {
-            var (library, places) = await BestPlacesInAsync(sourceJobId, libraryJobId, groups, ct);
-            for (var i = 0; i < places.Count; i++)
-            {
-                if (places[i] is { } candidate && (best[i] is not { } current || candidate.Score > current.Candidate.Score))
-                    best[i] = (candidate, library);
-            }
+            var group = i;
+            var ranked = LibraryMatcher.Rank(perLibrary.Select(l => (l.Library, l.Library.Id, l.Places[group])), _options);
+            if (ranked.Count > 0) best[i] = ranked[0];
         }
         return best;
     }
 
-    private async Task<(ScanJob Library, IReadOnlyList<MatchCandidate?> Places)> BestPlacesInAsync(
+    /// <summary>Per group the two best places of one library, without the margin: that counts over all libraries.</summary>
+    private async Task<(ScanJob Library, IReadOnlyList<IReadOnlyList<MatchCandidate>> Places)> BestPlacesInAsync(
         long sourceJobId, long libraryJobId, IReadOnlyList<IReadOnlyList<FileNode>> groups, CancellationToken ct)
     {
         ValidateOptions();
@@ -762,13 +764,13 @@ public sealed partial class LibraryTargetService
         var captures = await _captures.GetAsync(source.Id, ct);
         var (_, map) = await LoadMapAsync(library.Id, words, ct);
 
-        var result = new List<MatchCandidate?>(groups.Count);
+        var result = new List<IReadOnlyList<MatchCandidate>>(groups.Count);
         foreach (var files in groups)
         {
             ct.ThrowIfCancellationRequested();
             var first = files.Count > 0 ? files[0].FullPath : source.RootPath;
             var unit = BuildUnit(source, files, new UnitBase(MatchUnitKind.File, first, null, null), captures, rows, words).Unit;
-            result.Add(LibraryMatcher.Match(map, unit, _options, 1, words).Candidates.FirstOrDefault());
+            result.Add(LibraryMatcher.Match(map, unit, _options, 2, words, margin: false).Candidates);
         }
         return (library, result);
     }

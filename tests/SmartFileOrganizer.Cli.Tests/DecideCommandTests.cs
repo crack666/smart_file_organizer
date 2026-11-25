@@ -202,7 +202,151 @@ public class DecideCommandTests : IDisposable
         Assert.Equal(ErrorCodes.JobNotFound, missing.Json().GetProperty("error").GetProperty("code").GetString());
     }
 
+    // ── the library root of the targets (Issue 71) ───────────────────────
+
+    private const string PhotosAndDocuments = """
+        [ { "id": "photos", "path": "Photos", "pattern": null, "holds": ["image"] },
+          { "id": "documents", "path": "Documents", "pattern": null, "holds": ["document"] } ]
+        """;
+
+    /// <summary>
+    /// The targets lie in a library: that of the structure's root, the named one, or the only one known. With several and
+    /// none named they stay relative; a root outside every library gives no target at all.
+    /// </summary>
+    [Fact]
+    public async Task Targets_LieInALibraryRoot_OrSayWhyNot()
+    {
+        var job = await ScanAndAnalyzeAsync();
+        var free = WriteTargets("free.json", PhotosAndDocuments);
+
+        var none = await DecideAsync(job, free);
+        Assert.Equal("no_library", Storage(none).GetProperty("status").GetString());
+        Assert.Equal(JsonValueKind.Null, Storage(none).GetProperty("space").ValueKind);
+        Assert.Equal("Documents", Target(none, "rechnungen/strom.txt"));
+        Assert.Equal(JsonValueKind.Null, Full(none, "rechnungen/strom.txt").ValueKind);
+
+        var firstRoot = Directory.CreateDirectory(Path.Combine(_dir, "ablage")).FullName;
+        File.WriteAllText(Path.Combine(firstRoot, "readme.txt"), "first");
+        var first = await ScanLibraryAsync(firstRoot);
+        var only = await DecideAsync(job, free);
+        Assert.Equal("bound", Storage(only).GetProperty("status").GetString());
+        Assert.Equal(first, Storage(only).GetProperty("library_job_id").GetInt64());
+        Assert.Equal(Path.Combine(firstRoot, "Documents"), Full(only, "rechnungen/strom.txt").GetString());
+        // Nobody chose that library, it is only the one there is: it is not stored with the decision.
+        Assert.False(Item(only, "rechnungen/strom.txt").GetProperty("changed").GetBoolean());
+        Assert.Equal(0, StoredLibrary());
+
+        var secondRoot = Directory.CreateDirectory(Path.Combine(_dir, "ablage-zwei")).FullName;
+        File.WriteAllText(Path.Combine(secondRoot, "readme.txt"), "second");
+        var second = await ScanLibraryAsync(secondRoot);
+        var several = await DecideAsync(job, free);
+        Assert.Equal("several_libraries", Storage(several).GetProperty("status").GetString());
+        Assert.Contains("--library", Storage(several).GetProperty("message").GetString());
+        Assert.Equal(JsonValueKind.Null, Full(several, "rechnungen/strom.txt").ValueKind);
+
+        var named = await DecideAsync(job, free, "--library", second.ToString());
+        Assert.Equal(Path.Combine(secondRoot, "Documents"), Full(named, "rechnungen/strom.txt").GetString());
+        Assert.True(Item(named, "rechnungen/strom.txt").GetProperty("changed").GetBoolean());
+
+        // The root of the structure below a library: the path is relative to the library, the plan needs nothing else.
+        var below = await DecideAsync(job, WriteTargets("below.json", PhotosAndDocuments, Path.Combine(secondRoot, "Neu")));
+        Assert.Equal(second, Storage(below).GetProperty("library_job_id").GetInt64());
+        Assert.Equal("Neu", Storage(below).GetProperty("under").GetString());
+        Assert.Equal("Neu/Documents", Target(below, "rechnungen/strom.txt"));
+        Assert.Equal(Path.Combine(secondRoot, "Neu", "Documents"), Full(below, "rechnungen/strom.txt").GetString());
+
+        // Chosen: stored with its library.
+        Assert.Equal(second, StoredLibrary());
+
+        var outside = await DecideAsync(job, WriteTargets("outside.json", PhotosAndDocuments, Path.Combine(_dir, "elsewhere")));
+        Assert.Equal("outside_library", Storage(outside).GetProperty("status").GetString());
+        Assert.Equal(0, outside.GetProperty("targets").GetProperty("proposed").GetInt64());
+        Assert.Equal(5, outside.GetProperty("by_worth").GetProperty("keep").GetInt64());
+        Assert.All(outside.GetProperty("items").EnumerateArray(), i => Assert.Equal(JsonValueKind.Null, i.GetProperty("target").ValueKind));
+
+        // A root in one library and another one named, a job that is no library, and --library without a structure.
+        foreach (var (args, exit, code) in new[]
+                 {
+                     (new[] { "--targets", Path.Combine(_dir, "below.json"), "--library", first.ToString() }, ExitCodes.Failure, ErrorCodes.LibraryInvalid),
+                     (new[] { "--targets", free, "--library", job.ToString() }, ExitCodes.Failure, ErrorCodes.LibraryInvalid),
+                     (new[] { "--library", first.ToString() }, ExitCodes.Usage, ErrorCodes.Usage)
+                 })
+        {
+            var refused = await SfoAsync(["decide", job.ToString(), .. args, "--json"]);
+            Assert.Equal(exit, refused.ExitCode);
+            Assert.Equal(code, refused.Json().GetProperty("error").GetProperty("code").GetString());
+        }
+    }
+
+    /// <summary>Room at the library root: what the targets need there, without what a library holds already; a warning when it is too little.</summary>
+    [Fact]
+    public async Task Targets_WeighTheRoomAtTheLibraryRoot()
+    {
+        var job = await ScanAndAnalyzeAsync();
+        var root = Directory.CreateDirectory(Path.Combine(_dir, "ablage", "alt")).Parent!.FullName;
+        File.Copy(Path.Combine(_source, "rechnungen", "strom.txt"), Path.Combine(root, "alt", "strom.txt"));
+        var library = await ScanLibraryAsync(root);
+        var targets = WriteTargets("a.json", PhotosAndDocuments);
+        long Size(string rel) => new FileInfo(Path.Combine(_source, rel.Replace('/', Path.DirectorySeparatorChar))).Length;
+        // The bank statement is marked and has no target.
+        string[] placed = ["urlaub/IMG_0001.png", "vertraege/miete.txt", "notizen/einkauf.txt"];
+        var withoutInvoice = placed.Sum(Size);
+
+        // Not compared yet: every placed file counts.
+        _probe = new FixedProbe(withoutInvoice);
+        var before = Storage(await DecideAsync(job, targets));
+        Assert.Equal(4, before.GetProperty("needed_files").GetInt64());
+        Assert.Equal(withoutInvoice + Size("rechnungen/strom.txt"), before.GetProperty("needed_bytes").GetInt64());
+        Assert.Equal("not_enough", before.GetProperty("space").GetString());
+        Assert.Contains($"Library job {library}", before.GetProperty("warning").GetString());
+
+        // The library holds the invoice: it needs no room there.
+        Assert.Equal(0, (await SfoAsync("compare", job.ToString(), "--against", library.ToString(), "--json")).ExitCode);
+        var after = Storage(await DecideAsync(job, targets));
+        Assert.Equal(3, after.GetProperty("needed_files").GetInt64());
+        Assert.Equal(withoutInvoice, after.GetProperty("needed_bytes").GetInt64());
+        Assert.Equal(withoutInvoice, after.GetProperty("free_bytes").GetInt64());
+        Assert.Equal("enough", after.GetProperty("space").GetString());
+        Assert.Equal(JsonValueKind.Null, after.GetProperty("warning").ValueKind);
+
+        _probe = new FixedProbe(null);
+        var unknown = Storage(await DecideAsync(job, targets));
+        Assert.Equal("unknown", unknown.GetProperty("space").GetString());
+        Assert.Equal(JsonValueKind.Null, unknown.GetProperty("free_bytes").ValueKind);
+
+        var text = await SfoAsync("decide", job.ToString(), "--targets", targets);
+        Assert.Contains($"in library job {library}", text.Stdout);
+        Assert.Contains("free space unknown", text.Stdout);
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────
+
+    private FixedProbe? _probe;
+
+    private sealed class FixedProbe(long? free) : IFreeSpaceProbe
+    {
+        public long? AvailableBytes(string path) => free;
+    }
+
+    private async Task<long> ScanLibraryAsync(string path)
+    {
+        var scan = await SfoAsync("scan", path, "--role", "library", "--json");
+        Assert.True(scan.ExitCode == 0, scan.Stderr + scan.Stdout);
+        return scan.Json().GetProperty("result").GetProperty("job").GetProperty("id").GetInt64();
+    }
+
+    /// <summary>The library stored with the target of the invoice; 0 for none.</summary>
+    private long StoredLibrary()
+    {
+        using var conn = Open();
+        return conn.ExecuteScalar<long>(
+            "SELECT COALESCE(d.target_library_job_id, 0) FROM file_decisions d JOIN file_nodes f ON f.id = d.file_node_id WHERE f.name = 'strom.txt'");
+    }
+
+    private static JsonElement Storage(JsonElement result) => result.GetProperty("targets").GetProperty("storage");
+
+    private static JsonElement Full(JsonElement result, string relativePath) =>
+        Item(result, relativePath).GetProperty("target").GetProperty("full_path");
 
     private void Write(string relative, string text)
     {
@@ -211,11 +355,11 @@ public class DecideCommandTests : IDisposable
         File.WriteAllText(path, text);
     }
 
-    private string WriteTargets(string name, string targets)
+    private string WriteTargets(string name, string targets, string? root = null)
     {
         var path = Path.Combine(_dir, name);
         File.WriteAllText(path, $$"""
-            { "schema_version": 1, "kind": "sfo_target_structure", "root": null, "source_job": null,
+            { "schema_version": 1, "kind": "sfo_target_structure", "root": {{JsonSerializer.Serialize(root)}}, "source_job": null,
               "created_at": "2026-11-13T10:00:00Z", "origin": "rule", "model": null,
               "targets": {{targets.Replace("] }", "], \"reason\": null, \"examples\": [] }")}} }
             """);
@@ -232,9 +376,9 @@ public class DecideCommandTests : IDisposable
         return job;
     }
 
-    private async Task<JsonElement> DecideAsync(long job, string? targets)
+    private async Task<JsonElement> DecideAsync(long job, string? targets, params string[] options)
     {
-        string[] args = targets is null ? ["decide", job.ToString(), "--json"] : ["decide", job.ToString(), "--targets", targets, "--json"];
+        string[] args = targets is null ? ["decide", job.ToString(), "--json"] : ["decide", job.ToString(), "--targets", targets, .. options, "--json"];
         var run = await SfoAsync(args);
         Assert.True(run.ExitCode == 0, run.Stderr + run.Stdout);
         return run.Json().GetProperty("result");
@@ -276,7 +420,10 @@ public class DecideCommandTests : IDisposable
             Out = stdout,
             Error = stderr,
             ConfigureServices = services =>
-                services.AddHttpClient<IOllamaService, OllamaService>().ConfigurePrimaryHttpMessageHandler(() => _server)
+            {
+                services.AddHttpClient<IOllamaService, OllamaService>().ConfigurePrimaryHttpMessageHandler(() => _server);
+                if (_probe is { } probe) services.AddSingleton<IFreeSpaceProbe>(probe);
+            }
         };
         var exit = await SfoApp.RunAsync([.. args, "--db", _dbPath], host, CancellationToken.None);
         return new Run(exit, stdout.ToString(), stderr.ToString());

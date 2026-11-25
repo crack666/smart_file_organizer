@@ -205,6 +205,16 @@ public partial class PlanCommandTests : IDisposable
         var moved = bound.Single(a => Under(a, "Urlaub Kroatien 2021"));
         Assert.Equal("move", Str(moved, "kind"));
         Assert.Equal(Path.Combine(other, "Fotos", "Urlaub Kroatien 2021"), Str(moved, "target"));
+
+        // Chosen at sfo decide (Issue 71): the plan needs no --library, also after that library was scanned again.
+        await OkAsync("decide", job, "--targets", Path.Combine(_dir, "targets.json"), "--library", second.ToString());
+        var again = (await OkAsync("scan", other, "--role", "library")).GetProperty("job").GetProperty("id").GetInt64();
+        await OkAsync("compare", job, "--against", library.ToString(), "--against", again.ToString());
+        var chosen = (await ActionsAsync((await OkAsync("plan", "create", job)).GetProperty("plan_id").GetInt64().ToString()))
+            .Single(a => Under(a, "Urlaub Kroatien 2021"));
+        Assert.Equal("move", Str(chosen, "kind"));
+        Assert.Equal(Path.Combine(other, "Fotos", "Urlaub Kroatien 2021"), Str(chosen, "target"));
+        Assert.Equal(again, chosen.GetProperty("library_job_id").GetInt64());
     }
 
     [Fact]

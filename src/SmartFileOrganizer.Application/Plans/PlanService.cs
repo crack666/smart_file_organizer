@@ -36,8 +36,8 @@ public sealed record RefusedChange(long ActionId, IReadOnlyList<PlanProblem> Pro
 
 /// <summary>Options of <see cref="PlanService.CreateAsync"/>.</summary>
 /// <param name="Libraries">The library jobs whose comparisons count; empty for those of the newest <c>sfo compare</c>.</param>
-/// <param name="Bind">The library whose root the targets of <c>sfo decide --targets</c> are put in; null to take the only
-/// library when there is exactly one.</param>
+/// <param name="Bind">The library whose root the targets of <c>sfo decide --targets</c> are put in; null for the library
+/// the decision names, else the only library when there is exactly one.</param>
 public sealed record PlanCreateOptions(IReadOnlyList<long> Libraries, long? Bind = null);
 
 /// <summary>A change of one action; null leaves a field as it is.</summary>
@@ -139,6 +139,18 @@ public sealed class PlanService
         }
         var bind = options.Bind is { } b ? libraries.First(l => l.Id == b) : libraries.Count == 1 ? libraries[0] : null;
 
+        var decisions = await _decisions.GetByJobAsync(jobId, ct);
+        // A library scanned again is another job with the same root: a decision for the earlier one still holds.
+        var decidedIn = new Dictionary<long, ScanJob>();
+        foreach (var id in decisions.Values.Select(d => d.Target?.LibraryJobId).OfType<long>().Distinct())
+        {
+            var decided = await _jobs.GetByIdAsync(id, ct);
+            var library = libraries.FirstOrDefault(l => l.Id == id)
+                          ?? libraries.FirstOrDefault(l => decided is not null
+                              && string.Equals(PlanChecks.Normalize(l.RootPath), PlanChecks.Normalize(decided.RootPath), StringComparison.OrdinalIgnoreCase));
+            if (library is not null) decidedIn[id] = library;
+        }
+
         var now = _time.GetUtcNow().UtcDateTime;
         var accepted = report.Findings.Where(f => f.State == FindingState.Accepted).OrderBy(f => f.Rank).ToList();
         var inputs = new PlanInputs(
@@ -147,9 +159,11 @@ public sealed class PlanService
             values.ToDictionary(v => v.File.Id),
             await _read.GetDirectoriesAsync(jobId, ct),
             set?.Rows ?? new Dictionary<long, FileComparison>(),
-            await _decisions.GetByJobAsync(jobId, ct),
+            decisions,
             libraries,
-            bind);
+            bind,
+            options.Bind is not null,
+            decidedIn);
         var draft = PlanBuilder.Build(inputs, now);
 
         var ctx = await ContextAsync(job, libraries, set, ct);

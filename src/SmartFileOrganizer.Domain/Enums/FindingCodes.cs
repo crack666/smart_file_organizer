@@ -233,6 +233,25 @@ public enum StorageStatus
     [JsonStringEnumMemberName("no_library")] NoLibrary
 }
 
+/// <summary>
+/// Which library root the target structure of <c>sfo decide --targets</c> lies in
+/// (https://github.com/crack666/smart_file_organizer/issues/71). Only a bound structure gives full paths.
+/// </summary>
+public enum TargetBinding
+{
+    /// <summary>The targets lie in the root of one library, named in the output.</summary>
+    [JsonStringEnumMemberName("bound")] Bound,
+
+    /// <summary>The structure names no root and no library is known: targets are relative, no full path.</summary>
+    [JsonStringEnumMemberName("no_library")] NoLibrary,
+
+    /// <summary>The structure names no root and several libraries are known: targets are relative until one is named.</summary>
+    [JsonStringEnumMemberName("several_libraries")] SeveralLibraries,
+
+    /// <summary>The root of the structure lies in no library: no target is proposed.</summary>
+    [JsonStringEnumMemberName("outside_library")] OutsideLibrary
+}
+
 /// <summary>Whether a library root has room for what the proposals send there (https://github.com/crack666/smart_file_organizer/issues/74).</summary>
 public enum TargetSpace
 {

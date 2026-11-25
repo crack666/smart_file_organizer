@@ -15,17 +15,20 @@ public sealed record DecisionInput(string Key, string Value, string Source);
 /// always names the inputs it rests on; nothing is moved.
 /// </summary>
 /// <param name="TargetId">The id of the target in the target structure (<c>photos</c>).</param>
-/// <param name="Path">Relative to the root of the target structure, with <c>/</c>; the folder level of the pattern is
-/// left out when one of its placeholders has no fact.</param>
+/// <param name="Path">With <c>/</c>, relative to the root of <paramref name="LibraryJobId"/>, or while that is null to the root
+/// of the target structure; the folder level of the pattern is left out when one of its placeholders has no fact.</param>
 /// <param name="Rule">What chose the target: <c>target_structure</c> (the first target whose <c>holds</c> names the file type).</param>
 /// <param name="Basis">The inputs the target and every filled placeholder rest on.</param>
 /// <param name="Unresolved">Placeholders of the pattern no fact could fill (<c>occasion</c>).</param>
+/// <param name="LibraryJobId">The library a person chose for the targets, by the root of the structure or <c>--library</c>
+/// (https://github.com/crack666/smart_file_organizer/issues/71); null when none was chosen.</param>
 public sealed record TargetProposal(
     string TargetId,
     string Path,
     string Rule,
     IReadOnlyList<DecisionInput> Basis,
-    IReadOnlyList<string> Unresolved);
+    IReadOnlyList<string> Unresolved,
+    long? LibraryJobId = null);
 
 /// <summary>
 /// Stage 2 of a file (https://github.com/crack666/smart_file_organizer/issues/37): its worth and a target, computed by

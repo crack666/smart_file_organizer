@@ -11,8 +11,10 @@ namespace SmartFileOrganizer.Application.Plans;
 /// <param name="Comparison">The joined comparison with the libraries, by file id; empty without a library.</param>
 /// <param name="Decisions">The stored decisions of <c>sfo decide</c>, by file id.</param>
 /// <param name="Libraries">The libraries of the plan.</param>
-/// <param name="Bind">The library whose root the targets of <c>sfo decide --targets</c> (relative paths) are bound to; null
-/// when none is known, so such targets are not used.</param>
+/// <param name="Bind">The library whose root the targets of <c>sfo decide --targets</c> go under when the run bound them to
+/// none; null when none is known, so such targets are not used.</param>
+/// <param name="BindNamed">A person named <paramref name="Bind"/> (<c>--library</c>): it wins over the library of the decision.</param>
+/// <param name="DecidedIn">Per library job of a decision the library of this plan with the same root: itself, or its later scan.</param>
 public sealed record PlanInputs(
     ScanJob Job,
     IReadOnlyList<Finding> Accepted,
@@ -21,7 +23,9 @@ public sealed record PlanInputs(
     IReadOnlyDictionary<long, FileComparison> Comparison,
     IReadOnlyDictionary<long, FileDecision> Decisions,
     IReadOnlyList<ScanJob> Libraries,
-    ScanJob? Bind);
+    ScanJob? Bind,
+    bool BindNamed = false,
+    IReadOnlyDictionary<long, ScanJob>? DecidedIn = null);
 
 /// <summary>Actions built from the inputs, before the checks, and what was left out.</summary>
 public sealed record PlanDraft(IReadOnlyList<PlanAction> Actions, IReadOnlyList<string> Notes);
@@ -270,12 +274,20 @@ public static class PlanBuilder
         if (f.TargetDecidedBy == TargetDecidedBy.Controller)
             return (null, null, "The controller decided on no target for these files (sfo findings place); they stay.");
 
-        var paths = ids.Select(id => inputs.Decisions.TryGetValue(id, out var d) ? d.Target?.Path : null).Distinct(StringComparer.Ordinal).ToList();
-        if (paths.Count != 1 || paths[0] is not { } rel)
-            return (null, null, paths.Count > 1
+        var targets = ids.Select(id => inputs.Decisions.TryGetValue(id, out var d) && d.Target is { } t
+            ? (t.Path, t.LibraryJobId) : ((string Path, long? LibraryJobId)?)null).Distinct().ToList();
+        if (targets.Count != 1 || targets[0] is not var (rel, decided))
+            return (null, null, targets.Count > 1
                 ? "The files have different targets in sfo decide; set one with sfo plan set."
                 : "No target in a library: run sfo decide --targets, or set one with sfo plan set.");
-        if (inputs.Bind is not { } bind)
+        var bind = inputs.Bind;
+        if (decided is { } library && !inputs.BindNamed)
+        {
+            bind = inputs.DecidedIn?.GetValueOrDefault(library);
+            if (bind is null)
+                return (null, null, $"sfo decide proposes {rel} in library job {library}, which is none of the libraries of this plan: run sfo decide again, or name one with sfo plan create --library.");
+        }
+        if (bind is null)
             return (null, null, $"sfo decide proposes {rel}, but no library root to put it in: name one with sfo plan create --library.");
         return (PlanChecks.Join(bind.RootPath, rel, name), bind.Id, null);
     }
