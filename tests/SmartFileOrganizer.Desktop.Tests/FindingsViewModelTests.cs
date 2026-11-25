@@ -463,6 +463,7 @@ public sealed class FindingsViewModelTests : IDisposable
         // A library has no findings to decide: its folders open.
         main.JobBar.Selected = library;
         await Until(() => main.IsBrowserVisible && main.FolderTree.Roots.SelectMany(r => r.Children).Any(c => c.DisplayName == "Fotos"));
+        await Until(() => !main.OpenRecentScanCommand.IsRunning);
         Assert.False(main.ShowFindingsCommand.CanExecute(null));
         Assert.Empty(main.Findings.Rows);
         Assert.False(main.IsSidebarVisible);
@@ -472,6 +473,8 @@ public sealed class FindingsViewModelTests : IDisposable
         main.JobBar.Selected = main.JobBar.Items.Single(i => i.Job.Id == _bed.JobId);
         await Until(() => main.IsFindingsVisible && main.Findings.Rows.Count > 0 && !main.Findings.IsLoading);
         Assert.True(main.JobBar.Items.Single(i => i.Job.Id == _bed.JobId).IsActive);
+        // The folder tree still reads after the findings are there; Dispose takes its database away.
+        await Until(() => !main.OpenRecentScanCommand.IsRunning);
     }
 
     [AvaloniaFact]
