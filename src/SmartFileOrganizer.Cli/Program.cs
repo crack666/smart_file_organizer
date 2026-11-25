@@ -6,6 +6,7 @@ using SmartFileOrganizer.Cli;
 CultureInfo.DefaultThreadCurrentUICulture = CultureInfo.InvariantCulture;
 CultureInfo.CurrentUICulture = CultureInfo.InvariantCulture;
 
+var host = CliHost.FromConsole();
 using var cts = new CancellationTokenSource();
 
 // First Ctrl+C: cancel cleanly (the handler saves state, exit code 130). Second Ctrl+C: terminate.
@@ -14,8 +15,8 @@ Console.CancelKeyPress += (_, e) =>
     if (cts.IsCancellationRequested)
         return;
     e.Cancel = true;
-    Console.Error.WriteLine("Cancelling… (press Ctrl+C again to terminate immediately)");
+    host.Error.WriteLine("Cancelling… (press Ctrl+C again to terminate immediately)");
     cts.Cancel();
 };
 
-return await SfoApp.RunAsync(args, CliHost.FromConsole(), cts.Token);
+return await SfoApp.RunAsync(args, host, cts.Token);

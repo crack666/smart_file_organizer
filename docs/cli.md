@@ -2443,6 +2443,19 @@ Applies to every command, including the ones added later.
 **stdout.** With `--json`, exactly one JSON document, also on failure and on a wrong
 invocation. Without `--json`, human-readable text that may change at any time.
 
+**Encoding.** Redirected to a file or a pipe, stdout and stderr are UTF-8 without BOM on every system, with and
+without `--json` (since 25.11.2026, [#127](https://github.com/crack666/smart_file_organizer/issues/127); until then
+they had the console encoding, on Windows the OEM code page, for example 850, and every character outside it became
+`?`). In an interactive console they keep the encoding of that console. A Windows shell decodes what it reads
+through a pipe with the console encoding, so set that to UTF-8 once per session before piping paths in PowerShell:
+
+```powershell
+[Console]::OutputEncoding = [Text.UTF8Encoding]::new()
+$files = sfo files 7 --json | ConvertFrom-Json
+```
+
+In `cmd`, `chcp 65001` does the same before `| more` or `| findstr`. Bash needs nothing.
+
 **Envelope.**
 
 | Field | Meaning |
