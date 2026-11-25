@@ -248,5 +248,23 @@ public class PlanChecksTests
         var library = new ScanJob { Id = 2, RootPath = Library, Role = ScanRole.Library };
         var bound = PlanBuilder.Build(new PlanInputs(job, [finding], files, [rootDir, dir], comparison, decisions, [library], library), DateTime.UtcNow);
         Assert.Equal(L("Fotos", "b.jpg"), Assert.Single(bound.Actions).TargetPath);
+
+        // Decided for a library (Issue 71): its root is taken, also with several libraries in the plan, but not a root that
+        // is none of them; a library a person names wins.
+        var second = new ScanJob { Id = 3, RootPath = Library + "-two", Role = ScanRole.Library };
+        decisions[2] = new FileDecision
+        {
+            JobId = 1, FileNodeId = 2, Worth = RetentionValue.Keep, Target = new TargetProposal("photos", "Fotos", "target_structure", [], [], LibraryJobId: 3)
+        };
+        var known = new Dictionary<long, ScanJob> { [3] = second };
+        var inputs = new PlanInputs(job, [finding], files, [rootDir, dir], comparison, decisions, [library, second], null, false, known);
+        var decided = Assert.Single(PlanBuilder.Build(inputs, DateTime.UtcNow).Actions);
+        Assert.Equal(Path.Combine(second.RootPath, "Fotos", "b.jpg"), decided.TargetPath);
+        Assert.Equal(3, decided.LibraryJobId);
+        var elsewhere = Assert.Single(PlanBuilder.Build(inputs with { Libraries = [library], Bind = library, DecidedIn = null }, DateTime.UtcNow).Actions);
+        Assert.Equal(PlanActionKind.Leave, elsewhere.Kind);
+        Assert.Contains("library job 3", elsewhere.Note);
+        var named = Assert.Single(PlanBuilder.Build(inputs with { Bind = library, BindNamed = true }, DateTime.UtcNow).Actions);
+        Assert.Equal(L("Fotos", "b.jpg"), named.TargetPath);
     }
 }

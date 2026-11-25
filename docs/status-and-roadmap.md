@@ -405,6 +405,10 @@ fields well, and what they cost in answer tokens, is not measured._
 - `sfo decide <job> [--targets <file>]` computes worth and target of every file by rule from the stored facts and
   results, without a model call, and stores them (`file_decisions`); every decision and target names its inputs.
   Rules: [architecture.md, Decision flow](architecture.md#decision-flow).
+- Since 25.11.2026 ([#71](https://github.com/crack666/smart_file_organizer/issues/71), schema step 36) the targets lie in a
+  library root (`root` of the structure, `--library`, or the only library known), with full path, needed and free space;
+  a root outside every library gives no target. Checked in-process by `DecideCommandTests`, `PlanCommandTests` and
+  `PlanChecksTests`; not on a real library. (Until then: relative paths only, bound at `sfo plan create`, no room checked.)
 - Importance and keep hint are still asked in the analysis; a model call over facts for what no rule can judge is
   not built; the content check of target folders is https://github.com/crack666/smart_file_organizer/issues/56.
 

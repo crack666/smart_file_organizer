@@ -171,7 +171,7 @@ counted in `advice.dropped`. Answers are stored per job, task, model and facts
 
 | Field | Meaning |
 |---|---|
-| `root` | Absolute folder the targets go under; `null` until the person fills it in (`--root`) |
+| `root` | Absolute folder the targets go under; `null` until the person fills it in (`--root`). `sfo decide` takes it only inside a library root (`--role library`); outside every library it proposes no target |
 | `origin` | `rule` (built from the tree's types) or `model` |
 | `targets[].id` | `[a-z0-9_-]+`, unique |
 | `targets[].path` | Relative, `/`-separated, no `.` or `..` |

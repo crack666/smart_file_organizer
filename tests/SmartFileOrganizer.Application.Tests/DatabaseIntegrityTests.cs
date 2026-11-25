@@ -123,7 +123,14 @@ public class DatabaseIntegrityTests : IDisposable
             INSERT INTO content_corrections (content_hash, size, category, corrected_at) VALUES ('h', 1, 2, @T);
             """, new { T });
 
+        // A decision of the other job whose target lies in this one, as a library: it loses the target, not the worth.
+        await conn.ExecuteAsync(
+            "UPDATE file_decisions SET target_id = 't', target_path = 'p', target_library_job_id = @a WHERE job_id = @b",
+            new { a = a.Job, b = b.Job });
+
         await new ScanJobRepository(db).DeleteAsync(a.Job);
+        Assert.Equal(1, await conn.ExecuteScalarAsync<long>(
+            "SELECT COUNT(*) FROM file_decisions WHERE job_id = @b AND worth = 'keep' AND target_id IS NULL AND target_path IS NULL", new { b = b.Job }));
 
         // The content store keeps its rows: they belong to content, not to the job.
         Assert.Equal(1, await conn.ExecuteScalarAsync<long>("SELECT COUNT(*) FROM content_assessments"));
