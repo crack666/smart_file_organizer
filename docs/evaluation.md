@@ -299,7 +299,9 @@ asked about what a rule should decide, or missed what mattered most:
 | `Profile alter PC/max/Documents/20190312.zip` | no category (`archive` or `personal_document`) | `finance` | Bank and card statements packed under a number; only the entry names tell. |
 
 `findings.json` expects one more finding since then: `sensitive` `finance` at `Profile alter PC/max/Documents` (the
-zip). The system places, the folder with one file and the shortcuts give no finding. Measured 13.11.2026 with the
+zip). The system places, the folder with one file and the shortcuts give no finding (until 25.11.2026 that held only without a
+library, which is how `sfo eval` measures `finding`: against a library the account pictures, samples and tutorials were
+`not_backed_up`, `uncertain`; https://github.com/crack666/smart_file_organizer/issues/124). Measured 13.11.2026 with the
 perfect stub on master `0221c30` plus this change: `finding` 21/21, 0 superfluous (before: 20/20, 1 superfluous).
 
 The files of the system places have no category, like other noise. A folder linked by a junction and a folder the

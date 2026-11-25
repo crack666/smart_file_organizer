@@ -62,6 +62,25 @@ public class FindingRulesTests
         Assert.Equal(FileWorth.None, FindingRules.ValueOf(File("Screenshot_20190704_120000.png", FileType.Image), Noise).Worth);
     }
 
+    /// <summary>
+    /// A folder of the operating system or of a program (verdict rule <c>system-place</c>) is no reason to keep a file
+    /// (https://github.com/crack666/smart_file_organizer/issues/124); a person's photo or paper there still counts.
+    /// Other <c>system</c> verdicts are not affected.
+    /// </summary>
+    [Fact]
+    public void Value_InSystemPlace_WithoutResult_OnlyCameraPhotosAndPersonalDocuments()
+    {
+        FilePlace At(string? rule) => new(null, null,
+            new DirectoryReadRow { Verdict = "system", VerdictSource = "rule", VerdictRule = rule, Retention = "review" }, null, false, false);
+        var picture = File("{0A1B2C3D-4E5F-6071-8293-A4B5C6D7E8F9}-Image1080.jpg", FileType.Image);
+        Assert.Equal(FileValue.None, FindingRules.ValueOf(picture, At("system-place")));
+        Assert.Equal(FileValue.None, FindingRules.ValueOf(File("Lektion_01.mp4", FileType.Video), At("system-place")));
+        Assert.Equal(new FileValue(FileWorth.Keep, ResultCertainty.Uncertain, "name"),
+            FindingRules.ValueOf(File("IMG_20190704_120000.jpg", FileType.Image), At("system-place")));
+        Assert.Equal(FileWorth.Keep, FindingRules.ValueOf(File("Bewerbung.docx", FileType.Document), At("system-place")).Worth);
+        Assert.Equal(FileWorth.Keep, FindingRules.ValueOf(picture, At("hidden")).Worth);
+    }
+
     [Theory]
     [InlineData("header:private-key", null, ResultCertainty.Certain)]
     [InlineData("name:id_rsa;model", null, ResultCertainty.Certain)]
