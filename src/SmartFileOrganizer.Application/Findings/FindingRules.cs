@@ -27,7 +27,23 @@ public readonly record struct FileValue(FileWorth Worth, ResultCertainty Certain
 }
 
 /// <summary>Where a file lies, as far as the findings care: the bundle around it and the verdict of its folder.</summary>
-public sealed record FilePlace(Bundle? Bundle, Bundle? Part, DirectoryReadRow? Directory, CaptureInfo? Capture, bool NoiseByBundle, bool NoiseByDirectory);
+public sealed record FilePlace(Bundle? Bundle, Bundle? Part, DirectoryReadRow? Directory, CaptureInfo? Capture, bool NoiseByBundle, bool NoiseByDirectory)
+{
+    /// <summary>
+    /// Whether the folder is a place where only programs or the operating system put content (verdict rule
+    /// <c>system-place</c>: account pictures, samples of applications, packages; not the public desktop, which people
+    /// use too) (https://github.com/crack666/smart_file_organizer/issues/124).
+    /// </summary>
+    public bool SystemPlace { get; init; }
+
+    /// <summary>The value of <see cref="SystemPlace"/> for a folder, from its verdict and the patterns.</summary>
+    public static bool IsSystemPlace(DirectoryReadRow? dir, BundlePatterns patterns) =>
+        dir?.VerdictRule == Services.DirectoryVerdictRules.SystemPlace
+        && patterns.SystemPlaceOf(BundlePatterns.SplitPath(dir.FullPath)) is { SharedWithPeople: false };
+
+    /// <summary>Noise or a system place: where a file lies or what type it has is no reason to keep it there.</summary>
+    public bool WithoutOwnContent => NoiseByBundle || NoiseByDirectory || SystemPlace;
+}
 
 /// <summary>A file with its place, its worth as the findings use it, and its stored facts (input of <c>sfo decide</c>).</summary>
 public sealed record FileValueRow(FileNode File, FilePlace Place, FileValue Value, IReadOnlyList<FileFact> Facts);
@@ -111,7 +127,7 @@ public static class FindingRules
             // "Look at it" is no sign of worth. It counts (as review) only for the kinds a person keeps, and never
             // among noise: there a database or cache file the rules sent to review would fill the list.
             if (c.Category is FileCategory.ReviewNeeded or FileCategory.Unknown)
-                return place.NoiseByBundle || place.NoiseByDirectory
+                return place.WithoutOwnContent
                        || file.FileType is not (FileType.Image or FileType.Video or FileType.Document or FileType.Audio)
                     ? FileValue.None
                     : new FileValue(FileWorth.Keep, ResultCertainty.Review, basis);
@@ -139,8 +155,8 @@ public static class FindingRules
 
         var media = file.FileType is FileType.Image or FileType.Video;
 
-        // Among noise only what is clearly personal counts, and never above uncertain.
-        if (place.NoiseByBundle || place.NoiseByDirectory)
+        // Among noise and in a system place only what is clearly personal counts, and never above uncertain.
+        if (place.WithoutOwnContent)
             return IsCameraFile(file, place.Capture) || IsPersonalDocument(file)
                 ? new FileValue(FileWorth.Keep, ResultCertainty.Uncertain, "name")
                 : FileValue.None;

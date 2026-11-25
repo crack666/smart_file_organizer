@@ -32,7 +32,7 @@ public static class DecisionRules
     /// the result of the analysis, folder verdict, bundle, file type); then the facts may keep a file those rules give
     /// up: a paper about the person (<c>document_kind</c> contract, statement, tax, payslip, certificate, insurance,
     /// medical, official), a picture with people or of an occasion (<c>people</c>, <c>occasion</c>), not a screenshot.
-    /// Such a keep is <c>likely</c>, and <c>uncertain</c> where it contradicts the result (disposable) or lies among noise.
+    /// Such a keep is <c>likely</c>, and <c>uncertain</c> where it contradicts the result (disposable) or lies among noise or in a system place.
     /// A person's override always stands.
     /// </summary>
     public static FileValue ValueOf(FileNode file, FilePlace place, IReadOnlyList<FileFact> facts)
@@ -40,7 +40,7 @@ public static class DecisionRules
         var value = FindingRules.ValueOf(file, place);
         if (value.Basis == "human" || value.Worth == FileWorth.Keep || facts.Count == 0) return value;
         if (KeepingFact(file, facts) is null) return value;
-        var unsure = value.Worth == FileWorth.Disposable || place.NoiseByBundle || place.NoiseByDirectory;
+        var unsure = value.Worth == FileWorth.Disposable || place.WithoutOwnContent;
         return new FileValue(FileWorth.Keep, unsure ? ResultCertainty.Uncertain : ResultCertainty.Likely, "facts");
     }
 

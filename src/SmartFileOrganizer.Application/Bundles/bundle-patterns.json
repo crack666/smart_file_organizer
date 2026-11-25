@@ -193,8 +193,9 @@
     },
     // Pictures Windows keeps for the user accounts.
     { "rule": "account-pictures", "paths": ["AccountPictures", "User Account Pictures"] },
-    // Shortcuts installers put on the desktop of all users.
-    { "rule": "public-desktop", "paths": ["Public/Desktop", "All Users/Desktop"] },
+    // Shortcuts installers put on the desktop of all users. A person may put own files there, so a file without a
+    // result still counts by its type in the findings (shared_with_people); in the other places it does not.
+    { "rule": "public-desktop", "shared_with_people": true, "paths": ["Public/Desktop", "All Users/Desktop"] },
     // Packages of package managers (scoop in the profile, chocolatey, winget).
     {
       "rule": "package-manager",

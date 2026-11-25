@@ -24,6 +24,9 @@ public class FindingsProfileTests : IDisposable
 
     private const string Profile = "Profil/max";
 
+    /// <summary>An invented security identifier of an account.</summary>
+    private const string Sid = "S-1-5-21-1111111111-2222222222-3333333333-1001";
+
     public FindingsProfileTests(ITestOutputHelper output)
     {
         _output = output;
@@ -77,6 +80,14 @@ public class FindingsProfileTests : IDisposable
         Folder($"{Profile}/Documents", "uniform");
         for (var i = 0; i < 3; i++)
             Write($"{Profile}/Documents/Brief_{i}.docx", "letter", $"PK letter {i}");
+
+        // The account pictures of Windows as the first real run had them: in the profile of all users, one folder per
+        // account (SID), one picture per size (https://github.com/crack666/smart_file_organizer/issues/124).
+        Folder("Profil/Public", "system");
+        Folder("Profil/Public/AccountPictures", "system");
+        Folder($"Profil/Public/AccountPictures/{Sid}", "system");
+        foreach (var size in new[] { 32, 40, 48, 64, 96, 192, 208, 240, 424, 448, 1080 })
+            Write($"Profil/Public/AccountPictures/{Sid}/{{0A1B2C3D-4E5F-6071-8293-A4B5C6D7E8F9}}-Image{size}.jpg", null, $"account picture {size}");
 
         // Two copies of the same holiday photos outside every program: one duplicate finding of files.
         Folder("Fotos alt", "uniform");
@@ -161,6 +172,22 @@ public class FindingsProfileTests : IDisposable
         Assert.Equal(12, photos.GetProperty("duplicates").GetProperty("redundant_files").GetInt64());
         Assert.Equal("delete_source", photos.GetProperty("action").GetProperty("kind").GetString());
         Assert.Equal("Fotos alt", Str(photos.GetProperty("duplicates"), "keep"));
+    }
+
+    /// <summary>
+    /// The account pictures of Windows are judged by rule and give no finding, also against a library that does not
+    /// hold them (https://github.com/crack666/smart_file_organizer/issues/124).
+    /// </summary>
+    [Fact]
+    public async Task AccountPicturesOfWindows_GiveNoFinding_AgainstALibrary()
+    {
+        var (job, items) = await FindingsAsync(withLibrary: true);
+        Assert.DoesNotContain(items, f => Str(f, "relative_path")!.Contains("Public", StringComparison.Ordinal));
+        Assert.DoesNotContain(items, f => Strings(f, "examples").Any(e => e.Contains("AccountPictures", StringComparison.Ordinal)));
+
+        var files = (await OkAsync("files", job, "--dir", "Profil/Public/AccountPictures", "--recursive")).GetProperty("items").EnumerateArray().ToList();
+        Assert.Equal(11, files.Count);
+        Assert.All(files, f => Assert.Equal("skipped", Str(f, "status")));
     }
 
     /// <summary>Finding 2 without a library: nothing is removed.</summary>

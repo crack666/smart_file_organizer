@@ -283,7 +283,9 @@ installer and system file are disposable. `review_needed` or `unknown` counts as
 pictures, videos, documents and audio and never among noise: "look at it" is no sign of worth (a trial on a
 generated user profile had a hundred database files the rules sent to review fill a finding). Inside a folder judged `unit` only a judgement of the file itself (person, agent, model, rule, confirmed sample)
 counts: where it lies is no reason to keep the sounds of a program on a desktop. Without a result
-programs and fonts are disposable; among noise only camera photos and personal documents (office files and PDFs
+programs and fonts are disposable; among noise and in a system place (verdict rule `system-place`: account pictures of
+Windows, samples of applications, packages; not the public desktop, which people use too; since 25.11.2026, https://github.com/crack666/smart_file_organizer/issues/124,
+before that they counted by their file type) only camera photos and personal documents (office files and PDFs
 not named readme, license, manual and the like) count, as `uncertain`; elsewhere folder retention, then the
 bundle decide, never above `likely`.
 

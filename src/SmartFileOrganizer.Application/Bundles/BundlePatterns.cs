@@ -46,7 +46,7 @@ public sealed class BundlePatterns
             .ToList();
         NoisePaths = (file.NoisePaths ?? []).Select(SplitPath).ToList();
         SystemPlaces = (file.SystemPlaces ?? [])
-            .SelectMany(p => p.Paths!.Select(path => (SplitPath(path), p.Rule!.Trim(), path)))
+            .SelectMany(p => p.Paths!.Select(path => (SplitPath(path), p.Rule!.Trim(), path, p.SharedWithPeople)))
             .ToList();
         GenericNames = new HashSet<string>((file.GenericFolderNames ?? []).Select(n => n.Trim()), StringComparer.OrdinalIgnoreCase);
         GenericRegexes = (file.GenericFolderRegexes ?? []).Select(r => new Regex(r, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)).ToList();
@@ -66,8 +66,9 @@ public sealed class BundlePatterns
     public IReadOnlyList<(string[] Segments, DumpPart Part)> KeepParts { get; }
     public IReadOnlyList<string[]> NoisePaths { get; }
 
-    /// <summary>Entries of <c>system_places</c>: the path split into folder names, the rule name, the path as written.</summary>
-    public IReadOnlyList<(string[] Run, string Rule, string Path)> SystemPlaces { get; }
+    /// <summary>Entries of <c>system_places</c>: the path split into folder names, the rule name, the path as written, and
+    /// whether people put files of their own there too.</summary>
+    public IReadOnlyList<(string[] Run, string Rule, string Path, bool SharedWithPeople)> SystemPlaces { get; }
     public IReadOnlySet<string> GenericNames { get; }
     public IReadOnlyList<Regex> GenericRegexes { get; }
 
@@ -179,12 +180,12 @@ public sealed class BundlePatterns
     /// </summary>
     public SystemPlace? SystemPlaceOf(IReadOnlyList<string> segments)
     {
-        foreach (var (run, rule, path) in SystemPlaces)
+        foreach (var (run, rule, path, shared) in SystemPlaces)
         {
             for (var end = run.Length; end <= segments.Count; end++)
             {
                 if (RunEndsAt(segments, run, end))
-                    return new SystemPlace(rule, path);
+                    return new SystemPlace(rule, path, shared);
             }
         }
         return null;
@@ -349,6 +350,7 @@ public sealed class BundlePatterns
     {
         public string? Rule { get; set; }
         public List<string>? Paths { get; set; }
+        public bool SharedWithPeople { get; set; }
     }
 }
 
@@ -356,9 +358,10 @@ public sealed class BundlePatterns
 /// A directory at or below a <c>system_places</c> path: content of programs or of the operating system in a place
 /// a person also uses (learning material of an application in the public documents, account pictures, shortcuts
 /// on the public desktop, package manager folders). <see cref="Rule"/> is the name of the entry, <see cref="Path"/>
-/// the path that matched, as written in the file.
+/// the path that matched, as written in the file. <see cref="SharedWithPeople"/>: people put files of their own there
+/// too (the public desktop), so a file there may still be worth keeping by its type.
 /// </summary>
-public sealed record SystemPlace(string Rule, string Path);
+public sealed record SystemPlace(string Rule, string Path, bool SharedWithPeople = false);
 
 /// <summary>One way of recognising a dump from the names directly inside a directory.</summary>
 /// <summary>A directory recognised as a dump by <see cref="BundlePatterns.Recognise"/>.</summary>
