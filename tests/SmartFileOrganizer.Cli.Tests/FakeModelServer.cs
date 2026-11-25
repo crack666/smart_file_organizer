@@ -49,10 +49,12 @@ public sealed class FakeModelServer : HttpMessageHandler
     /// <summary>Seconds sent in <c>Retry-After</c> with <see cref="FakeServerMode.Busy"/>.</summary>
     public int RetryAfterSeconds { get; set; } = 1;
 
-    /// <summary>1: each request waits for the previous one. Anything else: requests overlap.</summary>
+    /// <summary>1: each chat call waits for the previous one. Anything else: calls overlap. The model list never waits,
+    /// as on a real server (https://github.com/crack666/smart_file_organizer/issues/126).</summary>
     public int MaxConcurrent { get; set; } = int.MaxValue;
 
-    /// <summary>Pause before each answer, so a parallelism measurement can tell a queue from overlap.</summary>
+    /// <summary>Pause before each answer to a chat call, so a parallelism measurement can tell a queue from overlap.
+    /// Not before the model list: that request has a short time limit of its own (<c>ModelServer.ProbeTimeoutSeconds</c>).</summary>
     public TimeSpan AnswerDelay { get; set; }
 
     /// <summary>Paths of the requests, in arrival order.</summary>
@@ -91,12 +93,13 @@ public sealed class FakeModelServer : HttpMessageHandler
         var answer = Script?.Invoke(probe) ?? Mode;
         lock (_sync) _log.Add(probe with { Answer = answer });
 
-        var limited = MaxConcurrent == 1;
+        var chat = kind != "tags";
+        var limited = chat && MaxConcurrent == 1;
         if (limited)
             await _oneAtATime.WaitAsync(ct);
         try
         {
-            if (AnswerDelay > TimeSpan.Zero)
+            if (chat && AnswerDelay > TimeSpan.Zero)
                 await Task.Delay(AnswerDelay, ct);
 
         switch (answer)
